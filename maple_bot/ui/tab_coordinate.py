@@ -122,6 +122,96 @@ class _ZoneEditDialog(QDialog):
         }
 
 
+class _RopeEditDialog(QDialog):
+    """밧줄 속성을 편집하는 다이얼로그."""
+
+    def __init__(self, rope: RopePoint, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"밧줄 편집 — {rope.name}")
+        self.setMinimumWidth(340)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(8)
+
+        # 이름
+        row_name = QHBoxLayout()
+        row_name.addWidget(QLabel("이름"))
+        self.edit_name = QLineEdit(rope.name)
+        self.edit_name.setFixedWidth(100)
+        row_name.addWidget(self.edit_name)
+        row_name.addStretch()
+        lay.addLayout(row_name)
+
+        # X 좌표 (읽기 전용 표시)
+        row_x = QHBoxLayout()
+        row_x.addWidget(QLabel(f"X 좌표  {rope.x}  (변경하려면 재추가)"))
+        row_x.addStretch()
+        lay.addLayout(row_x)
+
+        # 점프 방향
+        row_ap = QHBoxLayout()
+        row_ap.addWidget(QLabel("점프 방향"))
+        self._approach_grp = QButtonGroup(self)
+        self.rb_left  = QRadioButton("왼쪽")
+        self.rb_both  = QRadioButton("양쪽")
+        self.rb_right = QRadioButton("오른쪽")
+        for rb in [self.rb_left, self.rb_both, self.rb_right]:
+            self._approach_grp.addButton(rb)
+            row_ap.addWidget(rb)
+        # 현재 값 선택
+        {"left": self.rb_left, "right": self.rb_right}.get(rope.approach, self.rb_both).setChecked(True)
+        row_ap.addStretch()
+        lay.addLayout(row_ap)
+
+        # 점프 오프셋
+        row_off = QHBoxLayout()
+        row_off.addWidget(QLabel("점프 오프셋"))
+        self.spin_offset = QSpinBox()
+        self.spin_offset.setRange(1, 50)
+        self.spin_offset.setValue(rope.jump_offset)
+        self.spin_offset.setSuffix(" px")
+        self.spin_offset.setFixedWidth(75)
+        row_off.addWidget(self.spin_offset)
+        row_off.addStretch()
+        lay.addLayout(row_off)
+
+        # 오르기 시간
+        row_cs = QHBoxLayout()
+        row_cs.addWidget(QLabel("오르기 시간"))
+        self.dspin_climb = QDoubleSpinBox()
+        self.dspin_climb.setRange(0.3, 30.0)
+        self.dspin_climb.setSingleStep(0.1)
+        self.dspin_climb.setDecimals(1)
+        self.dspin_climb.setValue(rope.climb_sec)
+        self.dspin_climb.setSuffix(" 초")
+        self.dspin_climb.setFixedWidth(85)
+        self.dspin_climb.setToolTip("밧줄을 완전히 오르는 데 걸리는 시간")
+        row_cs.addWidget(self.dspin_climb)
+        row_cs.addStretch()
+        lay.addLayout(row_cs)
+
+        # 확인 / 취소
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def get_rope_data(self) -> dict:
+        """편집된 값을 dict로 반환한다."""
+        if self.rb_left.isChecked():   approach = "left"
+        elif self.rb_right.isChecked(): approach = "right"
+        else:                           approach = "both"
+        return {
+            "name":        self.edit_name.text().strip() or "밧줄",
+            "approach":    approach,
+            "jump_offset": self.spin_offset.value(),
+            "climb_sec":   self.dspin_climb.value(),
+        }
+
+
 class _ColorPickerOverlay(QWidget):
     """전화면 투명 오버레이 — 클릭한 픽셀 RGB를 반환하는 스포이드."""
     color_picked = pyqtSignal(int, int, int)
@@ -482,6 +572,7 @@ class TabCoordinate(QWidget):
         layout.addWidget(btn_add_rope)
 
         self.rope_list = QListWidget(); self.rope_list.setMaximumHeight(90)
+        self.rope_list.itemDoubleClicked.connect(self._edit_rope)
         layout.addWidget(self.rope_list)
 
         rope_btn_row = QHBoxLayout()
@@ -792,6 +883,26 @@ class TabCoordinate(QWidget):
         )
         self._ropes.append(rope)
         self.rope_list.addItem(rope.label())
+
+    def _edit_rope(self, item) -> None:
+        """밧줄 아이템 더블클릭 시 편집 다이얼로그를 연다."""
+        row = self.rope_list.row(item)
+        if row < 0 or row >= len(self._ropes):
+            return
+        rope = self._ropes[row]
+        dlg = _RopeEditDialog(rope, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        data = dlg.get_rope_data()
+        updated = RopePoint(
+            name=data["name"],
+            x=rope.x,                      # X 좌표는 변경 불가 — 기존 값 유지
+            approach=data["approach"],
+            jump_offset=data["jump_offset"],
+            climb_sec=data["climb_sec"],
+        )
+        self._ropes[row] = updated
+        self.rope_list.item(row).setText(updated.label())
 
     def _delete_rope(self) -> None:
         row = self.rope_list.currentRow()
