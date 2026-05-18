@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
     QLabel, QSpinBox, QPushButton, QListWidget,
     QLineEdit, QFileDialog, QComboBox, QRadioButton,
     QButtonGroup, QScrollArea, QMessageBox, QCheckBox,
+    QDialog, QDialogButtonBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor
@@ -13,6 +14,108 @@ from core.minimap_reader import MinimapConfig, Zone, RopePoint, MinimapReader
 from core.screen_reader import ScreenReader
 from ui.region_selector import RegionSelector
 from ui.widgets import HotkeyCapture
+
+
+class _ZoneEditDialog(QDialog):
+    """구역 속성을 편집하는 다이얼로그."""
+
+    def __init__(self, zone: Zone, pattern_presets: list[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"구역 편집 — {zone.name}")
+        self.setMinimumWidth(380)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(8)
+
+        # 이름
+        row_name = QHBoxLayout()
+        row_name.addWidget(QLabel("이름"))
+        self.edit_name = QLineEdit(zone.name)
+        self.edit_name.setFixedWidth(100)
+        row_name.addWidget(self.edit_name)
+        row_name.addStretch()
+        lay.addLayout(row_name)
+
+        # X 범위
+        row_x = QHBoxLayout()
+        row_x.addWidget(QLabel("X 범위"))
+        self.spin_lx = QSpinBox(); self.spin_lx.setRange(0, 9999); self.spin_lx.setValue(zone.left_x); self.spin_lx.setPrefix("왼쪽 ")
+        self.spin_rx = QSpinBox(); self.spin_rx.setRange(0, 9999); self.spin_rx.setValue(zone.right_x); self.spin_rx.setPrefix("오른쪽 ")
+        for w in [self.spin_lx, self.spin_rx]:
+            w.setFixedWidth(105); row_x.addWidget(w)
+        row_x.addStretch()
+        lay.addLayout(row_x)
+
+        # Y 범위
+        row_y = QHBoxLayout()
+        row_y.addWidget(QLabel("Y 범위"))
+        self.spin_ymin = QSpinBox(); self.spin_ymin.setRange(0, 9999); self.spin_ymin.setValue(zone.y_min); self.spin_ymin.setPrefix("최소 ")
+        self.spin_ymax = QSpinBox(); self.spin_ymax.setRange(0, 9999); self.spin_ymax.setValue(zone.y_max); self.spin_ymax.setPrefix("최대 ")
+        for w in [self.spin_ymin, self.spin_ymax]:
+            w.setFixedWidth(100); row_y.addWidget(w)
+        row_y.addStretch()
+        lay.addLayout(row_y)
+
+        # 왕복 횟수
+        row_sw = QHBoxLayout()
+        row_sw.addWidget(QLabel("왕복 횟수"))
+        self.spin_sweeps = QSpinBox(); self.spin_sweeps.setRange(0, 99); self.spin_sweeps.setValue(zone.sweeps)
+        self.spin_sweeps.setToolTip("0 = 무제한")
+        self.spin_sweeps.setFixedWidth(60)
+        row_sw.addWidget(self.spin_sweeps)
+        row_sw.addWidget(QLabel("회  (0=무제한)"))
+        row_sw.addStretch()
+        lay.addLayout(row_sw)
+
+        # 랜덤 전환 여유
+        row_mg = QHBoxLayout()
+        row_mg.addWidget(QLabel("랜덤 전환 여유"))
+        self.spin_mg_min = QSpinBox(); self.spin_mg_min.setRange(0, 200); self.spin_mg_min.setValue(zone.random_margin_min); self.spin_mg_min.setPrefix("최소 "); self.spin_mg_min.setSuffix("px"); self.spin_mg_min.setFixedWidth(90)
+        self.spin_mg_max = QSpinBox(); self.spin_mg_max.setRange(0, 200); self.spin_mg_max.setValue(zone.random_margin_max); self.spin_mg_max.setPrefix("최대 "); self.spin_mg_max.setSuffix("px"); self.spin_mg_max.setFixedWidth(90)
+        row_mg.addWidget(self.spin_mg_min)
+        row_mg.addWidget(self.spin_mg_max)
+        row_mg.addStretch()
+        lay.addLayout(row_mg)
+
+        # 공격 패턴
+        row_pat = QHBoxLayout()
+        row_pat.addWidget(QLabel("공격 패턴"))
+        self.cmb_pattern = QComboBox()
+        self.cmb_pattern.setMinimumWidth(130)
+        self.cmb_pattern.addItem("(기본)")
+        for p in sorted(pattern_presets):
+            self.cmb_pattern.addItem(p)
+        # 현재 값 선택
+        cur = zone.key_pattern or "(기본)"
+        idx = self.cmb_pattern.findText(cur)
+        self.cmb_pattern.setCurrentIndex(idx if idx >= 0 else 0)
+        row_pat.addWidget(self.cmb_pattern)
+        row_pat.addStretch()
+        lay.addLayout(row_pat)
+
+        # 확인 / 취소
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        lay.addWidget(btns)
+
+    def get_zone_data(self) -> dict:
+        """편집된 값을 dict로 반환한다."""
+        pat = self.cmb_pattern.currentText()
+        return {
+            "name":               self.edit_name.text().strip() or "구역",
+            "left_x":             self.spin_lx.value(),
+            "right_x":            self.spin_rx.value(),
+            "y_min":              self.spin_ymin.value(),
+            "y_max":              self.spin_ymax.value(),
+            "sweeps":             self.spin_sweeps.value(),
+            "random_margin_min":  self.spin_mg_min.value(),
+            "random_margin_max":  self.spin_mg_max.value(),
+            "key_pattern":        "" if pat == "(기본)" else pat,
+        }
 
 
 class _ColorPickerOverlay(QWidget):
@@ -284,6 +387,7 @@ class TabCoordinate(QWidget):
         layout.addWidget(btn_add)
 
         self.zone_list = QListWidget(); self.zone_list.setMaximumHeight(100)
+        self.zone_list.itemDoubleClicked.connect(self._edit_zone)
         layout.addWidget(self.zone_list)
 
         zone_btn_row = QHBoxLayout()
@@ -607,6 +711,33 @@ class TabCoordinate(QWidget):
         if row < 0: return
         self.zone_list.takeItem(row)
         del self._zones[row]
+
+    def _edit_zone(self, item) -> None:
+        """구역 아이템 더블클릭 시 편집 다이얼로그를 연다."""
+        row = self.zone_list.row(item)
+        if row < 0 or row >= len(self._zones):
+            return
+        zone = self._zones[row]
+        presets = list((self.config.get("key_patterns", "presets") or {}).keys())
+        dlg = _ZoneEditDialog(zone, presets, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        data = dlg.get_zone_data()
+        # rope_x 는 기존 값 유지 (편집 다이얼로그 범위 밖)
+        updated = Zone(
+            name=data["name"],
+            left_x=data["left_x"],
+            right_x=data["right_x"],
+            y_min=data["y_min"],
+            y_max=data["y_max"],
+            rope_x=zone.rope_x,
+            random_margin_min=data["random_margin_min"],
+            random_margin_max=data["random_margin_max"],
+            sweeps=data["sweeps"],
+            key_pattern=data["key_pattern"],
+        )
+        self._zones[row] = updated
+        self.zone_list.item(row).setText(updated.label())
 
     # ── 밧줄 버튼 ─────────────────────────────────────────────────────
     def _set_rope_from_pos(self) -> None:
