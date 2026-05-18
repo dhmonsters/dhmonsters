@@ -387,16 +387,21 @@ class BotLoop:
                                 # Y 좌표로 실제 도착 여부 확인
                                 target_zone = fh_zones[fh_next_idx]
                                 src_zone    = fh_zones[fh_idx]
-                                Y_TOL = 15   # 허용 오차 (px) — 타이트하게 유지해야 인접 층 오인식 방지
+                                Y_TOL = 12   # 허용 오차 (px)
                                 arrived = False
                                 if pos is not None:
                                     cy = pos[1]
-                                    in_target   = (target_zone.y_min - Y_TOL <= cy <= target_zone.y_max + Y_TOL)
+                                    # 내려가기(Y 증가): 목표보다 더 아래로 떨어지면 오인식 방지
+                                    # 올라가기(Y 감소): 목표보다 더 위로 올라가면 오인식 방지
+                                    if fh_next_dir < 0:
+                                        in_target = (target_zone.y_min - Y_TOL <= cy <= target_zone.y_max)
+                                    else:
+                                        in_target = (target_zone.y_min <= cy <= target_zone.y_max + Y_TOL)
                                     left_source = not (src_zone.y_min - 5 <= cy <= src_zone.y_max + 5)
                                     arrived = in_target and left_source
                                     self._status(
                                         f"[층별] Y={cy} 확인 "
-                                        f"목표 {target_zone.y_min - Y_TOL}~{target_zone.y_max + Y_TOL} "
+                                        f"목표 {target_zone.y_min}~{target_zone.y_max} "
                                         f"출발층 이탈={'✓' if left_source else '✗'} "
                                         f"→ {'✓ 도착' if arrived else '✗ 실패'}"
                                     )
@@ -409,12 +414,32 @@ class BotLoop:
                                     self._status(f"[층별] {fh_zones[fh_idx].name} 사냥 시작")
                                     _apply_zone_pattern(fh_zones[fh_idx])  # 층 도착 시 패턴 교체
                                 else:
-                                    # 도착 실패 → 현재 층 유지 후 밧줄 재시도
-                                    self._map_navigator.set_zones([fh_zones[fh_idx]])
-                                    fh_state = "to_rope"
-                                    self._status(
-                                        f"[층별] {target_zone.name} 도착 실패 → 재시도"
-                                    )
+                                    # 도착 실패 → 실제 Y 위치로 현재 층 재판별
+                                    if pos is not None:
+                                        actual_zone = _zone_by_y(pos[1])
+                                        actual_idx  = fh_zones.index(actual_zone)
+                                    else:
+                                        actual_idx  = fh_idx
+                                    if actual_idx != fh_idx:
+                                        # 낙사/피격으로 다른 층에 있음 → 실제 층 순찰 복귀
+                                        fh_idx         = actual_idx
+                                        fh_state       = "patrol"
+                                        fh_arrive_time = time.time()
+                                        fh_half_count  = 0
+                                        fh_last_side   = ""
+                                        fh_route_idx   = 0
+                                        self._map_navigator.set_zones([fh_zones[fh_idx]])
+                                        self._status(
+                                            f"[층별] 낙사/이탈 감지 → '{fh_zones[fh_idx].name}' 복귀"
+                                        )
+                                        _apply_zone_pattern(fh_zones[fh_idx])
+                                    else:
+                                        # 같은 층에서 밧줄 재시도
+                                        self._map_navigator.set_zones([fh_zones[fh_idx]])
+                                        fh_state = "to_rope"
+                                        self._status(
+                                            f"[층별] {target_zone.name} 도착 실패 → 재시도"
+                                        )
 
                         else:  # patrol
                             # ── Y 좌표로 낙사/피격 복귀 감지 ────────────
