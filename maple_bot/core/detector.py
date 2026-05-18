@@ -65,7 +65,8 @@ class Detector:
         y = coord.get("y")
         width = coord.get("width")
 
-        if not all([x, y, width]):
+        # x=0이나 y=0은 유효한 좌표일 수 있으므로 None 또는 width=0만 미설정으로 판단
+        if x is None or y is None or not width:
             return 1.0
 
         x, y, width = int(x), int(y), int(width)
