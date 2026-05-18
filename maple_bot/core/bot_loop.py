@@ -350,17 +350,18 @@ class BotLoop:
                                 self._map_navigator.release_direction()
                                 # Y 좌표로 실제 도착 여부 확인
                                 target_zone = fh_zones[fh_next_idx]
-                                Y_TOL = 30   # 허용 오차 (px)
+                                src_zone    = fh_zones[fh_idx]
+                                Y_TOL = 15   # 허용 오차 (px) — 타이트하게 유지해야 인접 층 오인식 방지
                                 arrived = False
                                 if pos is not None:
                                     cy = pos[1]
-                                    arrived = (target_zone.y_min - Y_TOL
-                                               <= cy <=
-                                               target_zone.y_max + Y_TOL)
+                                    in_target   = (target_zone.y_min - Y_TOL <= cy <= target_zone.y_max + Y_TOL)
+                                    left_source = not (src_zone.y_min - 5 <= cy <= src_zone.y_max + 5)
+                                    arrived = in_target and left_source
                                     self._status(
                                         f"[층별] Y={cy} 확인 "
-                                        f"(허용 {target_zone.y_min - Y_TOL}"
-                                        f"~{target_zone.y_max + Y_TOL}) "
+                                        f"목표 {target_zone.y_min - Y_TOL}~{target_zone.y_max + Y_TOL} "
+                                        f"출발층 이탈={'✓' if left_source else '✗'} "
                                         f"→ {'✓ 도착' if arrived else '✗ 실패'}"
                                     )
                                 if arrived:
