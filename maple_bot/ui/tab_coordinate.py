@@ -2,7 +2,7 @@
 from __future__ import annotations
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QLabel, QSpinBox, QPushButton, QListWidget,
+    QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QListWidget,
     QLineEdit, QFileDialog, QComboBox, QRadioButton,
     QButtonGroup, QScrollArea, QMessageBox, QCheckBox,
     QDialog, QDialogButtonBox,
@@ -60,11 +60,15 @@ class _ZoneEditDialog(QDialog):
         # 왕복 횟수
         row_sw = QHBoxLayout()
         row_sw.addWidget(QLabel("왕복 횟수"))
-        self.spin_sweeps = QSpinBox(); self.spin_sweeps.setRange(0, 99); self.spin_sweeps.setValue(zone.sweeps)
-        self.spin_sweeps.setToolTip("0 = 무제한")
-        self.spin_sweeps.setFixedWidth(60)
+        self.spin_sweeps = QDoubleSpinBox()
+        self.spin_sweeps.setRange(0, 99)
+        self.spin_sweeps.setSingleStep(0.5)
+        self.spin_sweeps.setDecimals(1)
+        self.spin_sweeps.setValue(float(zone.sweeps))
+        self.spin_sweeps.setToolTip("0 = 무제한, 0.5 단위 가능")
+        self.spin_sweeps.setFixedWidth(70)
         row_sw.addWidget(self.spin_sweeps)
-        row_sw.addWidget(QLabel("회  (0=무제한)"))
+        row_sw.addWidget(QLabel("회  (0=무제한, 0.5 단위)"))
         row_sw.addStretch()
         lay.addLayout(row_sw)
 
@@ -111,7 +115,7 @@ class _ZoneEditDialog(QDialog):
             "right_x":            self.spin_rx.value(),
             "y_min":              self.spin_ymin.value(),
             "y_max":              self.spin_ymax.value(),
-            "sweeps":             self.spin_sweeps.value(),
+            "sweeps":             float(self.spin_sweeps.value()),
             "random_margin_min":  self.spin_mg_min.value(),
             "random_margin_max":  self.spin_mg_max.value(),
             "key_pattern":        "" if pat == "(기본)" else pat,
@@ -333,11 +337,13 @@ class TabCoordinate(QWidget):
         opt.addWidget(self.edit_zone_name)
         opt.addSpacing(8)
         opt.addWidget(QLabel("왕복"))
-        self.spin_zone_sweeps = QSpinBox()
+        self.spin_zone_sweeps = QDoubleSpinBox()
         self.spin_zone_sweeps.setRange(0, 99)
-        self.spin_zone_sweeps.setValue(2)
-        self.spin_zone_sweeps.setFixedWidth(55)
-        self.spin_zone_sweeps.setToolTip("층별 사냥 시 이 층에서 왕복할 횟수 (0 = 무제한)")
+        self.spin_zone_sweeps.setSingleStep(0.5)
+        self.spin_zone_sweeps.setDecimals(1)
+        self.spin_zone_sweeps.setValue(2.0)
+        self.spin_zone_sweeps.setFixedWidth(65)
+        self.spin_zone_sweeps.setToolTip("층별 사냥 시 이 층에서 왕복할 횟수 (0 = 무제한, 0.5 단위)")
         opt.addWidget(self.spin_zone_sweeps)
         opt.addWidget(QLabel("회"))
         opt.addStretch()
@@ -454,6 +460,22 @@ class TabCoordinate(QWidget):
         opt_row.addWidget(self.spin_rope_offset)
         opt_row.addStretch()
         layout.addLayout(opt_row)
+
+        # 오르기 시간 설정
+        climb_row = QHBoxLayout()
+        climb_row.addWidget(QLabel("오르기 시간"))
+        self.dspin_climb_sec = QDoubleSpinBox()
+        self.dspin_climb_sec.setRange(0.3, 30.0)
+        self.dspin_climb_sec.setSingleStep(0.1)
+        self.dspin_climb_sec.setDecimals(1)
+        self.dspin_climb_sec.setValue(2.5)
+        self.dspin_climb_sec.setSuffix(" 초")
+        self.dspin_climb_sec.setFixedWidth(85)
+        self.dspin_climb_sec.setToolTip("밧줄을 완전히 오르는 데 걸리는 시간 (맵마다 다름)")
+        climb_row.addWidget(self.dspin_climb_sec)
+        climb_row.addWidget(QLabel("(밧줄 길이에 맞게 조정)"))
+        climb_row.addStretch()
+        layout.addLayout(climb_row)
 
         btn_add_rope = QPushButton("+ 밧줄 추가")
         btn_add_rope.clicked.connect(self._add_rope)
@@ -700,7 +722,7 @@ class TabCoordinate(QWidget):
             y_min=self.spin_ymin.value(), y_max=self.spin_ymax.value(),
             random_margin_min=self.spin_margin_min.value(),
             random_margin_max=self.spin_margin_max.value(),
-            sweeps=self.spin_zone_sweeps.value(),
+            sweeps=float(self.spin_zone_sweeps.value()),
             key_pattern=key_pattern,
         )
         self._zones.append(zone)
@@ -766,6 +788,7 @@ class TabCoordinate(QWidget):
             x=self._pending_rope_x,
             approach=self._approach_str(),
             jump_offset=self.spin_rope_offset.value(),
+            climb_sec=self.dspin_climb_sec.value(),
         )
         self._ropes.append(rope)
         self.rope_list.addItem(rope.label())

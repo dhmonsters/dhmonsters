@@ -223,7 +223,9 @@ class BotLoop:
         fh_next_idx:    int   = 0        # 전환 후 목적 층 인덱스
         fh_next_dir:    int   = 1        # 전환 시 이동 방향 (+1=위, -1=아래)
         fh_climb_start: float = 0.0      # 오르기/내려가기 시작 시각
+        fh_climb_sec:   float = 2.5      # 현재 밧줄의 오르기 시간 (밧줄별 설정)
         fh_arrive_time: float = 0.0      # 도착 확인 시각 (Y 감지 쿨다운 기준)
+        FH_DESCEND_SEC  = 0.3            # 내려가기 완료 후 대기 시간 (초)
         fh_route:       list  = []       # 커스텀 루트 [{to_zone, rope}, ...]
         fh_route_idx:   int   = 0        # 현재 루트 단계
         fh_route_mode:  bool  = False    # True=커스텀 루트, False=자동 왕복
@@ -342,7 +344,8 @@ class BotLoop:
                                 # UP만 유지 — 방향키를 누르면 옆으로 이동해 밧줄을 놓침
                                 self._input.key_down("up")
                             elapsed = time.time() - fh_climb_start
-                            if elapsed >= FH_CLIMB_SEC:
+                            wait_sec = fh_climb_sec if fh_next_dir > 0 else FH_DESCEND_SEC
+                            if elapsed >= wait_sec:
                                 self._input.key_up("up")
                                 self._map_navigator.release_direction()
                                 # Y 좌표로 실제 도착 여부 확인
@@ -429,7 +432,7 @@ class BotLoop:
                                 if side and side != fh_last_side:
                                     fh_last_side   = side
                                     fh_half_count += 1
-                                    target     = zone.sweeps * 2 if zone.sweeps > 0 else 0
+                                    target     = int(zone.sweeps * 2) if zone.sweeps > 0 else 0
                                     target_str = str(target) if target else "∞"
                                     self._status(
                                         f"[층별] {zone.name} 경계({side}) "
@@ -450,9 +453,10 @@ class BotLoop:
                                                 (r for r in ropes if r.name == rp_name), None
                                             )
                                             if to_zone and rp:
-                                                fh_rope_x   = rp.x
-                                                fh_next_idx = fh_zones.index(to_zone)
-                                                fh_next_dir = (
+                                                fh_rope_x    = rp.x
+                                                fh_climb_sec = rp.climb_sec
+                                                fh_next_idx  = fh_zones.index(to_zone)
+                                                fh_next_dir  = (
                                                     1 if to_zone.y_min < zone.y_min else -1
                                                 )
                                                 fh_state      = "to_rope"
@@ -483,12 +487,18 @@ class BotLoop:
                                             if 0 <= next_idx < n and next_idx != fh_idx:
                                                 if zone.rope_x >= 0:
                                                     fh_rope_x = zone.rope_x
+                                                    # zone.rope_x는 rope 이름 없이 저장된 X — 매칭 시도
+                                                    matched_r = next(
+                                                        (r for r in ropes if r.x == zone.rope_x), None
+                                                    )
+                                                    fh_climb_sec = matched_r.climb_sec if matched_r else 2.5
                                                 elif ropes:
-                                                    fh_rope_x = ropes[
-                                                        min(fh_idx, len(ropes) - 1)
-                                                    ].x
+                                                    rp_auto = ropes[min(fh_idx, len(ropes) - 1)]
+                                                    fh_rope_x    = rp_auto.x
+                                                    fh_climb_sec = rp_auto.climb_sec
                                                 else:
-                                                    fh_rope_x = zone.right_x
+                                                    fh_rope_x    = zone.right_x
+                                                    fh_climb_sec = 2.5
                                                 fh_next_idx = next_idx
                                                 fh_next_dir = fh_dir
                                                 fh_state    = "to_rope"

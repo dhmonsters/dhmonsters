@@ -30,10 +30,12 @@ class RopePoint:
     x: int = 0                  # 미니맵 기준 X 좌표
     approach: str = "both"      # "left" | "right" | "both"
     jump_offset: int = 15       # 밧줄에서 몇 픽셀 옆에서 점프할지
+    climb_sec: float = 2.5      # 밧줄 오르는 데 걸리는 시간 (초)
 
     def to_dict(self) -> dict:
         return {"name": self.name, "x": self.x,
-                "approach": self.approach, "jump_offset": self.jump_offset}
+                "approach": self.approach, "jump_offset": self.jump_offset,
+                "climb_sec": self.climb_sec}
 
     @classmethod
     def from_dict(cls, d: dict) -> "RopePoint":
@@ -42,11 +44,12 @@ class RopePoint:
             x=int(d.get("x", 0)),
             approach=d.get("approach", "both"),
             jump_offset=int(d.get("jump_offset", 15)),
+            climb_sec=float(d.get("climb_sec", 2.5)),
         )
 
     def label(self) -> str:
         approach_kor = {"left": "왼쪽", "right": "오른쪽", "both": "양쪽"}.get(self.approach, self.approach)
-        return f"{self.name}  X={self.x}  접근={approach_kor}  점프거리={self.jump_offset}px"
+        return f"{self.name}  X={self.x}  접근={approach_kor}  점프거리={self.jump_offset}px  오르기={self.climb_sec}s"
 
 
 @dataclass
@@ -60,7 +63,7 @@ class Zone:
     rope_x: int = -1           # 로프/사다리 X 좌표 (-1 = 없음)
     random_margin_min: int = 0  # 경계 전환 랜덤 여유 최솟값 (px)
     random_margin_max: int = 0  # 경계 전환 랜덤 여유 최댓값 (px)
-    sweeps: int = 2             # 층별 사냥 시 왕복 횟수 (0 = 무제한)
+    sweeps: float = 2.0         # 층별 사냥 시 왕복 횟수 (0 = 무제한, 0.5 단위 가능)
     key_pattern: str = ""       # 층별 공격 패턴 프리셋 이름 (빈 문자열 = 기본 패턴 유지)
 
     def to_dict(self) -> dict:
@@ -73,7 +76,7 @@ class Zone:
             "rope_x": self.rope_x,
             "random_margin_min": self.random_margin_min,
             "random_margin_max": self.random_margin_max,
-            "sweeps": self.sweeps,
+            "sweeps": float(self.sweeps),
             "key_pattern": self.key_pattern,
         }
 
@@ -88,7 +91,7 @@ class Zone:
             rope_x=int(d.get("rope_x", -1)),
             random_margin_min=int(d.get("random_margin_min", 0)),
             random_margin_max=int(d.get("random_margin_max", 0)),
-            sweeps=int(d.get("sweeps", 2)),
+            sweeps=float(d.get("sweeps", 2.0)),
             key_pattern=d.get("key_pattern", ""),
         )
 
