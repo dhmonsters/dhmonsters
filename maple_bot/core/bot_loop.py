@@ -225,7 +225,9 @@ class BotLoop:
         fh_climb_start: float = 0.0      # 오르기/내려가기 시작 시각
         fh_climb_sec:   float = 2.5      # 현재 밧줄의 오르기 시간 (밧줄별 설정)
         fh_arrive_time: float = 0.0      # 도착 확인 시각 (Y 감지 쿨다운 기준)
+        fh_rope_escape_time: float = 0.0 # 밧줄 탈출 마지막 시각 (스팸 방지)
         FH_DESCEND_SEC  = 0.3            # 내려가기 완료 후 대기 시간 (초)
+        FH_ROPE_ESCAPE_INTERVAL = 0.5    # 밧줄 탈출 시도 최소 간격 (초)
         fh_route:       list  = []       # 커스텀 루트 [{to_zone, rope}, ...]
         fh_route_idx:   int   = 0        # 현재 루트 단계
         fh_route_mode:  bool  = False    # True=커스텀 루트, False=자동 왕복
@@ -315,6 +317,23 @@ class BotLoop:
                             # ── 밧줄로 이동 중 ─────────────────────────
                             if pos is not None:
                                 cx = pos[0]
+                                # 내려가는 중 목표 외 밧줄에 걸린 경우 먼저 탈출
+                                if (fh_next_dir < 0
+                                        and time.time() - fh_rope_escape_time >= FH_ROPE_ESCAPE_INTERVAL):
+                                    _jk = self._minimap_reader.config.jump_key or "alt"
+                                    for _rp in self._map_navigator.ropes:
+                                        if _rp.x != fh_rope_x and abs(cx - _rp.x) <= 3:
+                                            _esc = _rp.approach if _rp.approach in ("left", "right") else "left"
+                                            self._map_navigator.release_direction()
+                                            self._input.key_down(_esc)
+                                            self._input.press_key(_jk, hold_sec=0.12)
+                                            self._input.key_up(_esc)
+                                            fh_rope_escape_time = time.time()
+                                            self._status(
+                                                f"[층별] 비대상 밧줄 X={_rp.x} 감지 "
+                                                f"→ {_esc}+점프 탈출"
+                                            )
+                                            break
                                 if abs(cx - fh_rope_x) <= FH_ROPE_EDGE:
                                     # 밧줄 도달 → 점프/내려가기 실행
                                     jump_key = self._minimap_reader.config.jump_key or "alt"
@@ -343,6 +362,23 @@ class BotLoop:
                             if fh_next_dir > 0:
                                 # UP만 유지 — 방향키를 누르면 옆으로 이동해 밧줄을 놓침
                                 self._input.key_down("up")
+                            elif (pos is not None
+                                    and time.time() - fh_rope_escape_time >= FH_ROPE_ESCAPE_INTERVAL):
+                                # 내려가는 중 밧줄에 걸린 경우 탈출 시도
+                                _jk = self._minimap_reader.config.jump_key or "alt"
+                                for _rp in self._map_navigator.ropes:
+                                    if abs(pos[0] - _rp.x) <= 3:
+                                        _esc = _rp.approach if _rp.approach in ("left", "right") else "left"
+                                        self._map_navigator.release_direction()
+                                        self._input.key_down(_esc)
+                                        self._input.press_key(_jk, hold_sec=0.12)
+                                        self._input.key_up(_esc)
+                                        fh_rope_escape_time = time.time()
+                                        self._status(
+                                            f"[층별] 하강 중 밧줄 X={_rp.x} 감지 "
+                                            f"→ {_esc}+점프 탈출"
+                                        )
+                                        break
                             elapsed = time.time() - fh_climb_start
                             wait_sec = fh_climb_sec if fh_next_dir > 0 else FH_DESCEND_SEC
                             if elapsed >= wait_sec:
