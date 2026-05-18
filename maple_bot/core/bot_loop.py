@@ -317,23 +317,6 @@ class BotLoop:
                             # ── 밧줄로 이동 중 ─────────────────────────
                             if pos is not None:
                                 cx = pos[0]
-                                # 내려가는 중 목표 외 밧줄에 걸린 경우 먼저 탈출
-                                if (fh_next_dir < 0
-                                        and time.time() - fh_rope_escape_time >= FH_ROPE_ESCAPE_INTERVAL):
-                                    _jk = self._minimap_reader.config.jump_key or "alt"
-                                    for _rp in self._map_navigator.ropes:
-                                        if _rp.x != fh_rope_x and abs(cx - _rp.x) <= 3:
-                                            _esc = _rp.approach if _rp.approach in ("left", "right") else "left"
-                                            self._map_navigator.release_direction()
-                                            self._input.key_down(_esc)
-                                            self._input.press_key(_jk, hold_sec=0.12)
-                                            self._input.key_up(_esc)
-                                            fh_rope_escape_time = time.time()
-                                            self._status(
-                                                f"[층별] 비대상 밧줄 X={_rp.x} 감지 "
-                                                f"→ {_esc}+점프 탈출"
-                                            )
-                                            break
                                 if abs(cx - fh_rope_x) <= FH_ROPE_EDGE:
                                     # 밧줄 도달 → 점프/내려가기 실행
                                     jump_key = self._minimap_reader.config.jump_key or "alt"
@@ -593,8 +576,9 @@ class BotLoop:
     def _potion_loop(self) -> None:
         """포션 · 펫먹이 · 버프를 주기적으로 처리하는 전용 스레드."""
         logger.info("포션 루프 시작")
-        last_pet  = time.time()    # 시작 시점을 기준으로 인터벌 측정 (즉시 급여 방지)
+        last_pet  = 0.0   # 0으로 초기화 → 봇 시작 즉시 첫 급여 (인터벌 경과로 간주)
         last_buffs: dict[tuple, float] = {}  # {("normal"|"toggle", idx): timestamp}
+        pet_logged = False  # 펫먹이 설정 알림 출력 여부
 
         while not self._stop_event.is_set():
             now = time.time()
@@ -608,14 +592,31 @@ class BotLoop:
                     pet = self._config.get("recovery", "pet_food") or {}
                     if pet.get("enabled") and pet.get("key", "").strip():
                         interval_sec = float(pet.get("interval_min", 20)) * 60
+                        key   = pet["key"].strip()
+                        count = max(1, int(pet.get("pet_count", 1)))
+                        # 최초 1회: 설정 확인 로그 (다음 급여까지 남은 시간 표시)
+                        if not pet_logged:
+                            remaining = max(0.0, interval_sec - (now - last_pet))
+                            if remaining < 1:
+                                self._status(
+                                    f"🐾 펫먹이 설정됨 — 키=[{key}] {count}마리 "
+                                    f"{int(interval_sec//60)}분 간격 (즉시 첫 급여)"
+                                )
+                            else:
+                                self._status(
+                                    f"🐾 펫먹이 설정됨 — 키=[{key}] {count}마리 "
+                                    f"{int(interval_sec//60)}분 간격 "
+                                    f"(첫 급여까지 {remaining/60:.0f}분)"
+                                )
+                            pet_logged = True
                         if now - last_pet >= interval_sec:
-                            count = max(1, int(pet.get("pet_count", 1)))
-                            key   = pet["key"].strip()
                             for _ in range(count):
                                 self._input.press_key(key)
                                 time.sleep(0.15)
-                            self._status(f"🐾 펫먹이 급여 ({count}마리)")
+                            self._status(f"🐾 펫먹이 급여 완료 — [{key}] {count}마리")
                             last_pet = now
+                    elif pet_logged:
+                        pet_logged = False  # 설정이 비활성화되면 다음 활성화 시 재출력
 
                 # ── 버프 (동적 목록) ──────────────────────────────────
                 for btype, cfg_key, label in [
