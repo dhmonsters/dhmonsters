@@ -36,14 +36,17 @@ class TabHunt(QWidget):
     # ══════════════════════════════════════════════════════════════════
     def _build_key_header(self):
         group = QGroupBox("패턴 관리")
-        row = QHBoxLayout(group)
+        vlay = QVBoxLayout(group)
+        vlay.setSpacing(6)
 
-        row.addWidget(QLabel("패턴 이름"))
+        # ── 행1: 편집 중인 패턴 이름 + 딜레이 + 저장 ────────────────
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("패턴 이름"))
         self.key_name = QLineEdit("기본 패턴")
         self.key_name.setMaximumWidth(160)
-        row.addWidget(self.key_name)
+        row1.addWidget(self.key_name)
 
-        row.addWidget(QLabel("스텝 간 딜레이"))
+        row1.addWidget(QLabel("스텝 간 딜레이"))
         self.key_between_min = QDoubleSpinBox()
         self.key_between_min.setRange(0.0, 10.0)
         self.key_between_min.setSingleStep(0.05)
@@ -54,22 +57,40 @@ class TabHunt(QWidget):
         self.key_between_max.setSingleStep(0.05)
         self.key_between_max.setValue(0.20)
         self.key_between_max.setFixedWidth(65)
-        row.addWidget(self.key_between_min)
-        row.addWidget(QLabel("~"))
-        row.addWidget(self.key_between_max)
-        row.addWidget(QLabel("초"))
+        row1.addWidget(self.key_between_min)
+        row1.addWidget(QLabel("~"))
+        row1.addWidget(self.key_between_max)
+        row1.addWidget(QLabel("초"))
 
-        btn_save = QPushButton("저장")
-        btn_load = QPushButton("불러오기")
-        btn_preset = QPushButton("프리셋으로 저장")
-        btn_preset.setToolTip("이 패턴을 이름으로 저장합니다. 좌표 탭 구역별 패턴 선택에 사용됩니다.")
+        btn_save = QPushButton("저장 (기본)")
+        btn_save.setToolTip("이 패턴을 기본 패턴으로 저장합니다.")
         btn_save.clicked.connect(self._key_save)
-        btn_load.clicked.connect(self._key_load)
+        btn_preset = QPushButton("프리셋으로 저장")
+        btn_preset.setToolTip("이름으로 저장합니다. 구역별 패턴 선택에서 불러올 수 있습니다.")
         btn_preset.clicked.connect(self._key_save_preset)
-        row.addWidget(btn_save)
-        row.addWidget(btn_load)
-        row.addWidget(btn_preset)
-        row.addStretch()
+        row1.addWidget(btn_save)
+        row1.addWidget(btn_preset)
+        row1.addStretch()
+        vlay.addLayout(row1)
+
+        # ── 행2: 저장된 프리셋 목록 불러오기 ────────────────────────
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("저장된 패턴"))
+        self.cmb_preset = QComboBox()
+        self.cmb_preset.setMinimumWidth(150)
+        row2.addWidget(self.cmb_preset)
+        btn_load_preset = QPushButton("불러오기")
+        btn_load_preset.setFixedWidth(70)
+        btn_load_preset.clicked.connect(self._key_load_preset)
+        btn_del_preset = QPushButton("삭제")
+        btn_del_preset.setFixedWidth(50)
+        btn_del_preset.clicked.connect(self._key_del_preset)
+        row2.addWidget(btn_load_preset)
+        row2.addWidget(btn_del_preset)
+        row2.addStretch()
+        vlay.addLayout(row2)
+
+        self._refresh_preset_combo()
         return group
 
     def _build_key_list(self):
@@ -417,12 +438,54 @@ class TabHunt(QWidget):
         presets[self._key_pattern.name] = self._key_pattern.to_dict()
         self.config.set("key_patterns", "presets", presets)
         self.config.save()
+        self._refresh_preset_combo(self._key_pattern.name)
+
+    def _refresh_preset_combo(self, select_name: str = "") -> None:
+        """저장된 프리셋 목록을 콤보박스에 채운다."""
+        self.cmb_preset.clear()
+        presets = self.config.get("key_patterns", "presets") or {}
+        for name in sorted(presets.keys()):
+            self.cmb_preset.addItem(name)
+        if select_name:
+            idx = self.cmb_preset.findText(select_name)
+            if idx >= 0:
+                self.cmb_preset.setCurrentIndex(idx)
+
+    def _key_load_preset(self) -> None:
+        """선택한 프리셋을 에디터에 로드한다."""
+        name = self.cmb_preset.currentText()
+        if not name:
+            return
+        presets = self.config.get("key_patterns", "presets") or {}
+        raw = presets.get(name)
+        if not raw:
+            return
+        try:
+            self._key_pattern = KeyPattern.from_dict(raw)
+            self.key_name.setText(self._key_pattern.name)
+            self.key_between_min.setValue(self._key_pattern.between_min)
+            self.key_between_max.setValue(self._key_pattern.between_max)
+            self._key_refresh()
+        except Exception:
+            pass
+
+    def _key_del_preset(self) -> None:
+        """선택한 프리셋을 삭제한다."""
+        name = self.cmb_preset.currentText()
+        if not name:
+            return
         from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.information(
-            self, "저장 완료",
-            f"패턴 '{self._key_pattern.name}' 이(가) 프리셋으로 저장되었습니다.\n"
-            "좌표 탭 → 구역 추가 시 공격 패턴 드롭다운에서 선택할 수 있습니다."
+        reply = QMessageBox.question(
+            self, "삭제 확인", f"'{name}' 패턴을 삭제할까요?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        presets = self.config.get("key_patterns", "presets") or {}
+        presets.pop(name, None)
+        self.config.set("key_patterns", "presets", presets)
+        self.config.save()
+        self._refresh_preset_combo()
 
     def _key_load(self) -> None:
         self.load_from_config()
@@ -443,3 +506,4 @@ class TabHunt(QWidget):
                 self._key_refresh()
             except Exception:
                 pass
+        self._refresh_preset_combo()
