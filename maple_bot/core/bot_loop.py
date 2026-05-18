@@ -365,9 +365,10 @@ class BotLoop:
                             elif (pos is not None
                                     and time.time() - fh_rope_escape_time >= FH_ROPE_ESCAPE_INTERVAL):
                                 # 내려가는 중 밧줄에 걸린 경우 탈출 시도
+                                # fh_rope_x 는 방금 뛰어내린 밧줄이므로 제외 (to_rope 상태에서 처리)
                                 _jk = self._minimap_reader.config.jump_key or "alt"
                                 for _rp in self._map_navigator.ropes:
-                                    if abs(pos[0] - _rp.x) <= 3:
+                                    if _rp.x != fh_rope_x and abs(pos[0] - _rp.x) <= 3:
                                         _esc = _rp.approach if _rp.approach in ("left", "right") else "left"
                                         self._map_navigator.release_direction()
                                         self._input.key_down(_esc)
