@@ -36,12 +36,14 @@ class MainWindow(QMainWindow):
         self.tab_attack = TabAttack(self.config)
         self.tab_recovery = TabRecovery(self.config)
         self.tab_coordinate = TabCoordinate(self.config)
+        self.tab_position = TabPosition(self.config)
 
         # 단축키 매니저 연결 (탭 생성 후 load_from_config 실행된 뒤에 등록)
         self.tab_main.load_from_config()
         self.tab_main.set_hotkey_manager(self.hotkey_manager)
         self.tab_recovery.set_hotkey_manager(self.hotkey_manager)
         self.tab_coordinate.set_hotkey_manager(self.hotkey_manager)
+        self.tab_position.set_hotkey_manager(self.hotkey_manager)
         self.tab_settings1.set_hotkey_manager(self.hotkey_manager)
         # 거짓말탐지기 해제 단축키 등록
         solve_key = (self.config.get("settings1", "lie_detector") or {}).get("solve_hotkey", "")
@@ -57,7 +59,7 @@ class MainWindow(QMainWindow):
             (self.tab_hunt,           "사냥"),
             (self.tab_attack,         "공격"),
             (self.tab_recovery,       "회복"),
-            (TabPosition(self.config),"위치"),
+            (self.tab_position,       "위치"),
             (self.tab_coordinate,     "좌표"),
             (self.tab_settings1,      "설정1"),
             (self.tab_settings2,      "설정2"),

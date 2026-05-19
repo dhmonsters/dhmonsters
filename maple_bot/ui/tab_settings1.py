@@ -52,7 +52,6 @@ class TabSettings1(QWidget):
         layout.addWidget(self._build_lie_detector_group())
         layout.addWidget(self._build_user_detected_group())
         layout.addWidget(self._build_map_exit_group())
-        layout.addWidget(self._build_level_stop_group())
         layout.addWidget(self._build_stat_assign_group())
         layout.addStretch()
 
@@ -900,26 +899,6 @@ class TabSettings1(QWidget):
         self.config.save()
         QMessageBox.information(self, "저장 완료", "사냥터 이탈 감지 설정이 저장되었습니다.")
 
-    # ── 일정레벨 사냥 정지 설정 ───────────────────────────────────────
-    def _build_level_stop_group(self):
-        group = QGroupBox("일정레벨 사냥 정지 설정")
-        layout = QVBoxLayout(group)
-
-        self.chk_level_stop = QCheckBox("일정레벨 달성 후 사냥 정지")
-        layout.addWidget(self.chk_level_stop)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("캐릭터 레벨을"))
-        self.combo_level = QComboBox()
-        self.combo_level.addItems([str(i) for i in range(1, 201)])
-        self.combo_level.setFixedWidth(70)
-        row.addWidget(self.combo_level)
-        row.addWidget(QLabel("달성 후 자동사냥 작동을 정지합니다"))
-        row.addStretch()
-        layout.addLayout(row)
-
-        return group
-
     # ── 레벨업 스텟찍기 설정 ──────────────────────────────────────────
     def _build_stat_assign_group(self):
         group = QGroupBox("레벨업 스텟찍기 설정")
@@ -979,12 +958,6 @@ class TabSettings1(QWidget):
         for i, edit in enumerate(self.msg_edits):
             edit.setText(msgs[i] if i < len(msgs) else "")
 
-        ls = self.config.get("settings1", "level_stop") or {}
-        self.chk_level_stop.setChecked(ls.get("enabled", False))
-        target = ls.get("target_level", 50)
-        idx = max(0, min(target - 1, 199))
-        self.combo_level.setCurrentIndex(idx)
-
         sa = self.config.get("settings1", "stat_assign") or {}
         self.chk_stat_assign.setChecked(sa.get("enabled", False))
         for stat in ["STR", "INT", "DEX", "LUK"]:
@@ -1015,9 +988,6 @@ class TabSettings1(QWidget):
         self.config.set("settings1", "user_detected", "enabled",          self.chk_user_chat.isChecked())
         self.config.set("settings1", "user_detected", "interval_minutes", self.spin_interval.value())
         self.config.set("settings1", "user_detected", "messages",         [e.text() for e in self.msg_edits])
-
-        self.config.set("settings1", "level_stop", "enabled",      self.chk_level_stop.isChecked())
-        self.config.set("settings1", "level_stop", "target_level", self.combo_level.currentIndex() + 1)
 
         self.config.set("settings1", "stat_assign", "enabled", self.chk_stat_assign.isChecked())
         for stat, spin in self.stat_spins.items():
