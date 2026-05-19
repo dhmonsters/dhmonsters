@@ -57,38 +57,50 @@ def _get_easy():
 def _preprocess_slot(img: np.ndarray) -> list:
     """수량 숫자 영역 이미지를 OCR용으로 전처리한 버전 목록을 반환한다.
 
-    마플스토리 수량 숫자는 어두운 배경에 흰색 소형 폰트로 표시된다.
-    사용자가 숫자 부분만 드래그해서 잡은 작은 이미지(약 20×12px)를 가정한다.
-
-    시도 순서:
-    ① 6배 확대 + 이진화 (threshold 130) — 기본
-    ② 6배 확대 + OTSU 자동 이진화 — 배경이 다양한 경우
-    ③ 4배 확대 + 이진화 (threshold 160)
-    ④ 원본
+    마플스토리 수량 숫자: 어두운 배경 + 흰색 소형 폰트.
+    OCR 엔진은 '흰 배경 + 검은 글자'를 기대하므로 THRESH_BINARY_INV(반전)가 기본.
+    패딩(흰색)을 추가해 detection 모드에서 텍스트 박스를 더 잘 찾게 한다.
     """
     import cv2
-    h, w = img.shape[:2]
 
-    def _scale_thresh(src: np.ndarray, scale: int, thr: int) -> np.ndarray:
+    def _make(src: np.ndarray, scale: int, thr: int, invert: bool) -> np.ndarray:
         big = cv2.resize(src, (src.shape[1] * scale, src.shape[0] * scale),
                          interpolation=cv2.INTER_CUBIC)
         gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
-        _, t = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY)
-        return cv2.cvtColor(t, cv2.COLOR_GRAY2BGR)
+        flag = cv2.THRESH_BINARY_INV if invert else cv2.THRESH_BINARY
+        _, t = cv2.threshold(gray, thr, 255, flag)
+        pad = cv2.copyMakeBorder(t, 10, 10, 20, 20, cv2.BORDER_CONSTANT,
+                                  value=255 if invert else 0)
+        return cv2.cvtColor(pad, cv2.COLOR_GRAY2BGR)
 
-    def _scale_otsu(src: np.ndarray, scale: int) -> np.ndarray:
+    def _otsu(src: np.ndarray, scale: int, invert: bool) -> np.ndarray:
         big = cv2.resize(src, (src.shape[1] * scale, src.shape[0] * scale),
                          interpolation=cv2.INTER_CUBIC)
         gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
-        _, t = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        return cv2.cvtColor(t, cv2.COLOR_GRAY2BGR)
+        flag = (cv2.THRESH_BINARY_INV if invert else cv2.THRESH_BINARY) + cv2.THRESH_OTSU
+        _, t = cv2.threshold(gray, 0, 255, flag)
+        pad = cv2.copyMakeBorder(t, 10, 10, 20, 20, cv2.BORDER_CONSTANT,
+                                  value=255 if invert else 0)
+        return cv2.cvtColor(pad, cv2.COLOR_GRAY2BGR)
 
     return [
-        _scale_thresh(img, 6, 130),
-        _scale_otsu(img, 6),
-        _scale_thresh(img, 4, 160),
-        img,
+        _make(img, 6, 130, invert=True),   # ① 반전 6배 thr=130 (주력)
+        _otsu(img, 6, invert=True),         # ② 반전 6배 OTSU
+        _make(img, 4, 160, invert=True),   # ③ 반전 4배 thr=160
+        _make(img, 6, 130, invert=False),  # ④ 비반전 6배 (흰글자 on 검은배경)
+        _otsu(img, 6, invert=False),        # ⑤ 비반전 OTSU
+        img,                                # ⑥ 원본
     ]
+
+
+def save_debug_images(img: np.ndarray, folder: str = "debug_ocr") -> None:
+    """전처리 결과를 folder에 저장한다 (테스트/디버깅용)."""
+    import cv2, os
+    os.makedirs(folder, exist_ok=True)
+    cv2.imwrite(os.path.join(folder, "00_original.png"), img)
+    for i, processed in enumerate(_preprocess_slot(img)):
+        cv2.imwrite(os.path.join(folder, f"{i+1:02d}_preprocessed.png"), processed)
+    logger.info("디버그 이미지 저장: %s", folder)
 
 
 # ── 공개 API ─────────────────────────────────────────────────────────────

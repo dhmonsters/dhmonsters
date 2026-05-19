@@ -346,7 +346,7 @@ class TabRecovery(QWidget):
         self.lbl_mp_count_region.setStyleSheet("color: gray; font-size: 10px;")
 
     def _test_potion_count(self) -> None:
-        """포션 슬롯 영역을 OCR로 읽어 수량을 표시한다."""
+        """포션 슬롯 영역을 OCR로 읽어 수량을 표시한다. 실패 시 debug_ocr/ 폴더에 이미지 저장."""
         pc = self.config.get("recovery", "potion_count") or {}
         hp_r = pc.get("hp_region")
         mp_r = pc.get("mp_region")
@@ -355,27 +355,24 @@ class TabRecovery(QWidget):
         from PyQt6.QtWidgets import QApplication
         QApplication.processEvents()
 
-        def _read_count(region) -> str:
+        def _read_count(region, label: str) -> str:
             if not region or len(region) < 4:
                 return "미설정"
             x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
             try:
                 img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
-                from core.ocr_detector import read_number
+                from core.ocr_detector import read_number, save_debug_images
                 n = read_number(img)
                 if n is not None:
                     return f"{n}개"
-                # OCR 실패 시 픽셀 수도 함께 표시
-                import cv2
-                hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                mask = (hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 50)
-                px = int(mask.sum())
-                return f"읽기 실패 (픽셀 {px}px)"
+                # 실패 시 디버그 이미지 저장
+                save_debug_images(img, folder=f"debug_ocr_{label}")
+                return f"읽기 실패 → debug_ocr_{label}/ 저장됨"
             except Exception as e:
                 return f"오류: {e}"
 
-        hp_s = _read_count(hp_r)
-        mp_s = _read_count(mp_r)
+        hp_s = _read_count(hp_r, "hp")
+        mp_s = _read_count(mp_r, "mp")
         self.lbl_count_result.setText(f"HP: {hp_s}  MP: {mp_s}")
 
     # ── HP/MP 비율 테스트 ─────────────────────────────────────────────
