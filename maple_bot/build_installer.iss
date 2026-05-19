@@ -1,5 +1,5 @@
 #define AppName "DHMONSTERS"
-#define AppVersion "1.1.5"
+#define AppVersion "1.1.6"
 #define AppPublisher "dhmonsters"
 #define AppExeName "dhmonsters.exe"
 #define SourceDir "C:\Users\PC\Desktop\02_work\05_AI\.claude\worktrees\xenodochial-cray-ed5ae0\maple_bot\dist\dhmonsters"
