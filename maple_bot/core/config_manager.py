@@ -121,6 +121,14 @@ DEFAULT_CONFIG = {
         "item_slot":      None,         # [x, y, w, h] — 버릴 아이템 슬롯
         "basic_count":    5,            # 기본공격형 공격 횟수
     },
+    "town_scroll": {
+        "enabled":  False,
+        "key":      "9",                # 마을 귀환 주문서 사용 키
+        "hotkey":   "",                 # 단축키 (글로벌 핫키)
+    },
+    "hunting_return": {
+        "enabled":  False,
+    },
     "settings2": {
         "shutdown": {
             "on_death": False,
