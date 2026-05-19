@@ -618,9 +618,26 @@ class TabCoordinate(QWidget):
         note.setStyleSheet("color: gray; font-size: 10px;")
         route_lay.addWidget(note)
 
+        # 리스트 + 우측 ↑↓ 버튼
+        list_row = QHBoxLayout()
         self.lst_route = QListWidget()
-        self.lst_route.setMaximumHeight(110)
-        route_lay.addWidget(self.lst_route)
+        self.lst_route.setMaximumHeight(120)
+        list_row.addWidget(self.lst_route)
+
+        btn_col = QVBoxLayout()
+        btn_up   = QPushButton("↑")
+        btn_down = QPushButton("↓")
+        btn_up.setFixedSize(28, 32)
+        btn_down.setFixedSize(28, 32)
+        btn_up.setToolTip("선택 항목 위로")
+        btn_down.setToolTip("선택 항목 아래로")
+        btn_up.clicked.connect(self._route_step_up)
+        btn_down.clicked.connect(self._route_step_down)
+        btn_col.addWidget(btn_up)
+        btn_col.addWidget(btn_down)
+        btn_col.addStretch()
+        list_row.addLayout(btn_col)
+        route_lay.addLayout(list_row)
 
         add_row = QHBoxLayout()
         add_row.addWidget(QLabel("목적지"))
@@ -681,6 +698,22 @@ class TabCoordinate(QWidget):
         row = self.lst_route.currentRow()
         if row >= 0:
             self.lst_route.takeItem(row)
+
+    def _route_step_up(self) -> None:
+        row = self.lst_route.currentRow()
+        if row <= 0:
+            return
+        item = self.lst_route.takeItem(row)
+        self.lst_route.insertItem(row - 1, item)
+        self.lst_route.setCurrentRow(row - 1)
+
+    def _route_step_down(self) -> None:
+        row = self.lst_route.currentRow()
+        if row < 0 or row >= self.lst_route.count() - 1:
+            return
+        item = self.lst_route.takeItem(row)
+        self.lst_route.insertItem(row + 1, item)
+        self.lst_route.setCurrentRow(row + 1)
 
     def _save_floor_hunt(self) -> None:
         route_mode = self.rb_route.isChecked()

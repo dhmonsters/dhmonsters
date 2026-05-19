@@ -16,6 +16,22 @@ def _get_config_path() -> str:
 
 CONFIG_PATH = _get_config_path()
 
+
+def get_user_templates_dir() -> str:
+    """사용자가 생성하는 템플릿 파일 저장 디렉토리.
+
+    설치(frozen) 환경은 AppData\\MapleBot\\templates — Program Files는 쓰기 불가.
+    개발 환경은 상대경로 templates/ 그대로 사용.
+    """
+    if getattr(sys, "frozen", False):
+        appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+        d = os.path.join(appdata, "MapleBot", "templates")
+        os.makedirs(d, exist_ok=True)
+        return d
+    d = "templates"
+    os.makedirs(d, exist_ok=True)
+    return d
+
 DEFAULT_CONFIG = {
     "settings1": {
         "lie_detector": {
@@ -94,6 +110,16 @@ DEFAULT_CONFIG = {
         "name_region": None,    # [x, y, w, h] — 미니맵 맵 이름 텍스트 영역
         "threshold": 0.75,      # 이미지 유사도 임계값 (미만이면 다른 맵으로 판정)
         "grace_count": 3,       # 연속 N회 불일치 시 이탈 판정
+    },
+    "anti_mob": {
+        "enabled":        False,
+        "type":           "click",      # "click" | "item" | "basic"
+        "detect_region":  None,         # [x, y, w, h]
+        "target_x":       100,          # 미니맵 X 이동 목표
+        "click_keys":     "space,enter",# 쉼표 구분 키 시퀀스
+        "item_inv_tab":   None,         # [x, y, w, h] — 인벤토리 기타탭
+        "item_slot":      None,         # [x, y, w, h] — 버릴 아이템 슬롯
+        "basic_count":    5,            # 기본공격형 공격 횟수
     },
     "settings2": {
         "shutdown": {
