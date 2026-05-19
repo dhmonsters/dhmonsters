@@ -347,27 +347,31 @@ class TabRecovery(QWidget):
         self.lbl_mp_count_region.setStyleSheet("color: gray; font-size: 10px;")
 
     def _test_potion_count(self) -> None:
-        """포션 슬롯 영역의 채색 픽셀 수를 측정해 수량 유무를 판단한다.
-
-        채색 픽셀(HSV 채도>50 AND 명도>50) 수가 50 미만이면 수량 없음으로 판정.
-        포션이 있을 때 먼저 확인하면 기준 픽셀 수를 알 수 있습니다.
-        """
+        """포션 슬롯 영역을 OCR로 읽어 수량을 표시한다."""
         pc = self.config.get("recovery", "potion_count") or {}
         hp_r = pc.get("hp_region")
         mp_r = pc.get("mp_region")
+
+        self.lbl_count_result.setText("읽는 중...")
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
 
         def _read_count(region) -> str:
             if not region or len(region) < 4:
                 return "미설정"
             x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
             try:
-                import cv2
                 img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
+                from core.ocr_detector import read_number
+                n = read_number(img)
+                if n is not None:
+                    return f"{n}개"
+                # OCR 실패 시 픽셀 수도 함께 표시
+                import cv2
                 hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
                 mask = (hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 50)
                 px = int(mask.sum())
-                status = "있음" if px >= 50 else "없음(0)"
-                return f"{status} ({px}px)"
+                return f"읽기 실패 (픽셀 {px}px)"
             except Exception as e:
                 return f"오류: {e}"
 
