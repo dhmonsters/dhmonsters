@@ -282,7 +282,9 @@ class TabPosition(QWidget):
         self._anti_mob_basic_panel.setVisible(idx == 2)
 
     def _refresh_anti_mob_tpl_label(self) -> None:
-        count = len(glob.glob("templates/anti_mob_*.png"))
+        from core.config_manager import get_user_templates_dir
+        tpl_dir = get_user_templates_dir()
+        count = len(glob.glob(os.path.join(tpl_dir, "anti_mob_*.png")))
         if count:
             self.lbl_anti_mob_tpl.setText(f"✅ {count}개 등록됨")
             self.lbl_anti_mob_tpl.setStyleSheet("color: green;")
@@ -297,10 +299,11 @@ class TabPosition(QWidget):
         sel.show()
 
     def _save_anti_mob_template(self, x: int, y: int, w: int, h: int) -> None:
-        os.makedirs("templates", exist_ok=True)
-        existing = sorted(glob.glob("templates/anti_mob_*.png"))
+        from core.config_manager import get_user_templates_dir
+        tpl_dir = get_user_templates_dir()
+        existing = sorted(glob.glob(os.path.join(tpl_dir, "anti_mob_*.png")))
         next_num = len(existing) + 1
-        path = f"templates/anti_mob_{next_num}.png"
+        path = os.path.join(tpl_dir, f"anti_mob_{next_num}.png")
         with mss.mss() as sct:
             raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
             img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
@@ -309,7 +312,9 @@ class TabPosition(QWidget):
         QMessageBox.information(self, "완료", f"방지몹 템플릿 {next_num}번 저장 완료 ({w}×{h}px)")
 
     def _clear_anti_mob_templates(self) -> None:
-        files = glob.glob("templates/anti_mob_*.png")
+        from core.config_manager import get_user_templates_dir
+        tpl_dir = get_user_templates_dir()
+        files = glob.glob(os.path.join(tpl_dir, "anti_mob_*.png"))
         if not files:
             QMessageBox.information(self, "알림", "삭제할 템플릿이 없습니다.")
             return
