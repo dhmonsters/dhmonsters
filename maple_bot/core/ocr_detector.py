@@ -1,11 +1,59 @@
-# OCR 기반 화면 텍스트/숫자 감지 — rapidocr-onnxruntime 우선, easyocr 폴백
+# OCR 기반 화면 텍스트/숫자 감지 — easyocr(영어) 우선, rapidocr 폴백
 from __future__ import annotations
 import logging
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# ── rapidocr 엔진 (수량 숫자 읽기용 — onnxruntime 기반, 경량) ───────────
+# ── easyocr 엔진 (숫자 + 영어, 단일 자리 인식에 강함) ───────────────────
+_easy_en_reader = None
+_easy_en_error = False
+
+
+def _get_easy_en():
+    """easyocr 영어 모드 Reader를 최초 1회 초기화해서 반환한다."""
+    global _easy_en_reader, _easy_en_error
+    if _easy_en_reader is not None:
+        return _easy_en_reader
+    if _easy_en_error:
+        return None
+    try:
+        import easyocr
+        logger.info("easyocr 영어 모델 로드 중...")
+        _easy_en_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        logger.info("easyocr 로드 완료")
+        return _easy_en_reader
+    except Exception as exc:
+        logger.warning("easyocr 초기화 실패: %s", exc)
+        _easy_en_error = True
+        return None
+
+
+# ── easyocr 한국어 엔진 (텍스트 감지용) ─────────────────────────────────
+_easy_ko_reader = None
+_easy_ko_error = False
+
+
+def _get_easy_ko():
+    """easyocr 한국어 Reader를 최초 1회 초기화해서 반환한다."""
+    global _easy_ko_reader, _easy_ko_error
+    if _easy_ko_reader is not None:
+        return _easy_ko_reader
+    if _easy_ko_error:
+        return None
+    try:
+        import easyocr
+        logger.info("easyocr 한국어 모델 로드 중...")
+        _easy_ko_reader = easyocr.Reader(["ko"], gpu=False, verbose=False)
+        logger.info("easyocr 한국어 로드 완료")
+        return _easy_ko_reader
+    except Exception as exc:
+        logger.warning("easyocr 한국어 초기화 실패: %s", exc)
+        _easy_ko_error = True
+        return None
+
+
+# ── rapidocr 엔진 (폴백용) ───────────────────────────────────────────────
 _rapid_engine = None
 _rapid_error = False
 
@@ -28,127 +76,84 @@ def _get_rapid():
         return None
 
 
-# ── easyocr 엔진 (한국어 텍스트 감지용) ─────────────────────────────────
-_easy_reader = None
-_easy_error = False
+# ── 전처리 ───────────────────────────────────────────────────────────────
 
-
-def _get_easy():
-    """easyocr Reader를 최초 1회 초기화해서 반환한다."""
-    global _easy_reader, _easy_error
-    if _easy_reader is not None:
-        return _easy_reader
-    if _easy_error:
-        return None
-    try:
-        import easyocr
-        logger.info("easyocr 한국어 모델 로드 중...")
-        _easy_reader = easyocr.Reader(["ko"], gpu=False, verbose=False)
-        logger.info("easyocr 로드 완료")
-        return _easy_reader
-    except Exception as exc:
-        logger.warning("easyocr 초기화 실패: %s", exc)
-        _easy_error = True
-        return None
-
-
-# ── 공용 전처리 ──────────────────────────────────────────────────────────
-
-def _preprocess_slot(img: np.ndarray) -> list:
-    """수량 숫자 영역 이미지를 OCR용으로 전처리한 버전 목록을 반환한다.
-
-    마플스토리 수량 숫자: 어두운 배경 + 흰색 소형 폰트.
-    OCR 엔진은 '흰 배경 + 검은 글자'를 기대하므로 THRESH_BINARY_INV(반전)가 기본.
-    패딩(흰색)을 추가해 detection 모드에서 텍스트 박스를 더 잘 찾게 한다.
-    """
+def _scale_slot(img: np.ndarray) -> np.ndarray:
+    """슬롯 이미지를 4배 확대한다. easyocr은 원본 컬러 이미지가 가장 잘 동작한다."""
     import cv2
-
-    def _make(src: np.ndarray, scale: int, thr: int, invert: bool) -> np.ndarray:
-        big = cv2.resize(src, (src.shape[1] * scale, src.shape[0] * scale),
-                         interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
-        flag = cv2.THRESH_BINARY_INV if invert else cv2.THRESH_BINARY
-        _, t = cv2.threshold(gray, thr, 255, flag)
-        pad = cv2.copyMakeBorder(t, 10, 10, 20, 20, cv2.BORDER_CONSTANT,
-                                  value=255 if invert else 0)
-        return cv2.cvtColor(pad, cv2.COLOR_GRAY2BGR)
-
-    def _otsu(src: np.ndarray, scale: int, invert: bool) -> np.ndarray:
-        big = cv2.resize(src, (src.shape[1] * scale, src.shape[0] * scale),
-                         interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
-        flag = (cv2.THRESH_BINARY_INV if invert else cv2.THRESH_BINARY) + cv2.THRESH_OTSU
-        _, t = cv2.threshold(gray, 0, 255, flag)
-        pad = cv2.copyMakeBorder(t, 10, 10, 20, 20, cv2.BORDER_CONSTANT,
-                                  value=255 if invert else 0)
-        return cv2.cvtColor(pad, cv2.COLOR_GRAY2BGR)
-
-    return [
-        _make(img, 6, 130, invert=True),   # ① 반전 6배 thr=130 (주력)
-        _otsu(img, 6, invert=True),         # ② 반전 6배 OTSU
-        _make(img, 4, 160, invert=True),   # ③ 반전 4배 thr=160
-        _make(img, 6, 130, invert=False),  # ④ 비반전 6배 (흰글자 on 검은배경)
-        _otsu(img, 6, invert=False),        # ⑤ 비반전 OTSU
-        img,                                # ⑥ 원본
-    ]
+    h, w = img.shape[:2]
+    return cv2.resize(img, (w * 4, h * 4), interpolation=cv2.INTER_CUBIC)
 
 
 def save_debug_images(img: np.ndarray, folder: str = "debug_ocr") -> None:
-    """전처리 결과를 folder에 저장한다 (테스트/디버깅용)."""
+    """원본과 4배 확대 이미지를 folder에 저장한다 (테스트/디버깅용)."""
     import cv2, os
     os.makedirs(folder, exist_ok=True)
     cv2.imwrite(os.path.join(folder, "00_original.png"), img)
-    for i, processed in enumerate(_preprocess_slot(img)):
-        cv2.imwrite(os.path.join(folder, f"{i+1:02d}_preprocessed.png"), processed)
+    cv2.imwrite(os.path.join(folder, "01_scaled4x.png"), _scale_slot(img))
     logger.info("디버그 이미지 저장: %s", folder)
 
 
 # ── 공개 API ─────────────────────────────────────────────────────────────
 
-def read_number(scene: np.ndarray) -> int | None:
+def _bright_pixel_ratio(img: np.ndarray, threshold: int = 200) -> float:
+    """이미지에서 밝은 픽셀(흰색 글자) 비율을 반환한다."""
+    import cv2
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return float(np.count_nonzero(gray >= threshold)) / gray.size
+
+
+def read_number(scene: np.ndarray, zero_bright_threshold: float = 0.04) -> int | None:
     """퀵슬롯 이미지에서 아이템 수량 숫자를 읽어 정수로 반환한다.
 
-    우선순위: RapidOCR → easyocr → None(실패)
-    전처리(우하단 크롭 → 전체 확대 → 원본) 순으로 시도한다.
+    슬롯 전체 이미지(약 32×32px)를 4배 확대해서 easyocr(영어)로 인식.
+    OCR 실패 시: 밝은 픽셀 비율이 zero_bright_threshold 이하면 0 반환
+    (슬롯에 '0' 표시 또는 빈 슬롯 → 밝은 픽셀 극히 적음).
+    우선순위: easyocr(영어) → RapidOCR → 밝기 기반 0 감지 → None
     """
     import re
 
-    # 1순위: RapidOCR (경량, exe 포함 가능)
-    # detection ON → 작은 숫자 박스 찾기 실패 시 detection OFF로 재시도
+    scaled = _scale_slot(scene)
+
+    # 1순위: easyocr 영어 모드 (단일 자리 숫자에 강함)
+    reader = _get_easy_en()
+    if reader is not None:
+        try:
+            results = reader.readtext(scaled, detail=0, paragraph=False,
+                                       allowlist="0123456789")
+            text = "".join(results).strip()
+            m = re.search(r"\d+", text)
+            if m:
+                return int(m.group())
+        except Exception as exc:
+            logger.warning("easyocr 숫자 읽기 실패: %s", exc)
+
+    # 2순위: RapidOCR (easyocr 없을 때 폴백)
     engine = _get_rapid()
     if engine is not None:
         try:
-            for img in _preprocess_slot(scene):
-                # detection + recognition
-                result, _ = engine(img, use_det=True, use_cls=False, use_rec=True)
-                if result:
-                    text = "".join(r[1] for r in result if r and len(r) > 1)
-                    m = re.search(r"\d+", text)
-                    if m:
-                        return int(m.group())
-                # detection 없이 recognition만 (단독 소형 숫자 처리)
-                result2, _ = engine(img, use_det=False, use_cls=False, use_rec=True)
-                if result2:
-                    text2 = "".join(r[1] for r in result2 if r and len(r) > 1)
-                    m2 = re.search(r"\d+", text2)
-                    if m2:
-                        return int(m2.group())
-        except Exception as exc:
-            logger.warning("RapidOCR 숫자 읽기 실패: %s", exc)
-
-    # 2순위: easyocr (한국어 지원, torch 의존 — exe에서는 미포함)
-    reader = _get_easy()
-    if reader is not None:
-        try:
-            for img in _preprocess_slot(scene):
-                results = reader.readtext(img, detail=0, paragraph=False,
-                                          allowlist="0123456789")
-                text = "".join(results).strip()
+            result, _ = engine(scaled, use_det=True, use_cls=False, use_rec=True)
+            if result:
+                text = "".join(r[1] for r in result if r and len(r) > 1)
                 m = re.search(r"\d+", text)
                 if m:
                     return int(m.group())
+            result2, _ = engine(scaled, use_det=False, use_cls=False, use_rec=True)
+            if result2:
+                text2 = "".join(r[1] for r in result2 if r and len(r) > 1)
+                m2 = re.search(r"\d+", text2)
+                if m2:
+                    return int(m2.group())
         except Exception as exc:
-            logger.warning("easyocr 숫자 읽기 실패: %s", exc)
+            logger.warning("RapidOCR 숫자 읽기 실패: %s", exc)
+
+    # 3순위: 밝기 기반 0 감지 (OCR이 '0'이나 '1' 같은 단일 자리를 못 읽을 때)
+    # 슬롯에 숫자가 없거나 '0' 표시: 흰 픽셀이 극히 적음
+    ratio = _bright_pixel_ratio(scaled)
+    logger.debug("밝기 비율: %.3f (임계값: %.3f)", ratio, zero_bright_threshold)
+    if ratio <= zero_bright_threshold:
+        logger.info("밝기 기반 0 감지 (비율=%.3f)", ratio)
+        return 0
 
     return None
 
@@ -159,7 +164,7 @@ def find_text(scene: np.ndarray, keywords: list[str]) -> bool:
     scene: BGR numpy 배열 (ScreenReader.capture() 결과)
     keywords: 찾을 문자열 목록
     """
-    reader = _get_easy()
+    reader = _get_easy_ko()
     if reader is None:
         return False
     try:
@@ -173,5 +178,5 @@ def find_text(scene: np.ndarray, keywords: list[str]) -> bool:
 
 
 def is_available() -> bool:
-    """OCR 사용 가능 여부 (rapidocr 또는 easyocr 중 하나라도 있으면 True)."""
-    return _get_rapid() is not None or _get_easy() is not None
+    """OCR 사용 가능 여부 (easyocr 또는 rapidocr 중 하나라도 있으면 True)."""
+    return _get_easy_en() is not None or _get_rapid() is not None

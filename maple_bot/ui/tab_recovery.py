@@ -252,8 +252,8 @@ class TabRecovery(QWidget):
         layout = QVBoxLayout(group)
 
         note = QLabel(
-            "슬롯 전체가 아닌 숫자(수량)만 표시되는 부분을 드래그로 지정하세요.\n"
-            "예: 슬롯 우하단의 '150' 같은 숫자 텍스트 영역만 잡으면 인식률이 높아집니다.\n"
+            "퀵슬롯 아이템 칸 전체를 드래그로 지정하세요 (수량 숫자가 보이는 슬롯 1칸).\n"
+            "숫자 부분만 잡으면 인식 실패 — 슬롯 전체(약 32×32px)를 선택해야 합니다.\n"
             "마을 귀환 주문서(위치 탭)가 활성화되어야 귀환이 작동합니다."
         )
         note.setWordWrap(True)
@@ -272,7 +272,7 @@ class TabRecovery(QWidget):
         hp_row.addStretch()
         btn_hp_cnt = QPushButton("📍 드래그 설정")
         btn_hp_cnt.setFixedWidth(90)
-        btn_hp_cnt.setToolTip("슬롯 전체가 아닌 수량 숫자(예: '150')가 표시되는 부분만 드래그하세요.\n슬롯 우하단 모서리의 작은 숫자 영역만 잡으면 OCR 인식률이 높아집니다.")
+        btn_hp_cnt.setToolTip("퀵슬롯 칸 전체를 드래그하세요 (수량 숫자가 있는 슬롯 1칸 전체, 약 32×32px).")
         btn_hp_cnt.clicked.connect(self._select_hp_count_region)
         btn_hp_cnt_rst = QPushButton("✕")
         btn_hp_cnt_rst.setFixedWidth(24)
@@ -290,7 +290,7 @@ class TabRecovery(QWidget):
         mp_row.addStretch()
         btn_mp_cnt = QPushButton("📍 드래그 설정")
         btn_mp_cnt.setFixedWidth(90)
-        btn_mp_cnt.setToolTip("슬롯 전체가 아닌 수량 숫자(예: '200')가 표시되는 부분만 드래그하세요.\n슬롯 우하단 모서리의 작은 숫자 영역만 잡으면 OCR 인식률이 높아집니다.")
+        btn_mp_cnt.setToolTip("퀵슬롯 칸 전체를 드래그하세요 (수량 숫자가 있는 슬롯 1칸 전체, 약 32×32px).")
         btn_mp_cnt.clicked.connect(self._select_mp_count_region)
         btn_mp_cnt_rst = QPushButton("✕")
         btn_mp_cnt_rst.setFixedWidth(24)
@@ -361,13 +361,14 @@ class TabRecovery(QWidget):
             x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
             try:
                 img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
-                from core.ocr_detector import read_number, save_debug_images
+                from core.ocr_detector import read_number, save_debug_images, _bright_pixel_ratio, _scale_slot
+                ratio = _bright_pixel_ratio(_scale_slot(img))
                 n = read_number(img)
                 if n is not None:
-                    return f"{n}개"
-                # 실패 시 디버그 이미지 저장
+                    return f"{n}개 (밝기:{ratio:.3f})"
+                # OCR 실패 → 디버그 이미지 저장
                 save_debug_images(img, folder=f"debug_ocr_{label}")
-                return f"읽기 실패 → debug_ocr_{label}/ 저장됨"
+                return f"읽기 실패 (밝기:{ratio:.3f}) → debug_ocr_{label}/"
             except Exception as e:
                 return f"오류: {e}"
 
