@@ -1,8 +1,20 @@
 # 봇 설정을 JSON 파일로 저장/로드하는 ConfigManager
 import json
 import os
+import sys
 
-CONFIG_PATH = "config.json"
+
+def _get_config_path() -> str:
+    """설치(frozen) 환경은 AppData에 저장 — Program Files는 쓰기 불가."""
+    if getattr(sys, "frozen", False):
+        appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+        config_dir = os.path.join(appdata, "MapleBot")
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "config.json")
+    return "config.json"
+
+
+CONFIG_PATH = _get_config_path()
 
 DEFAULT_CONFIG = {
     "settings1": {
@@ -76,6 +88,13 @@ DEFAULT_CONFIG = {
             "cooldown_sec": 3.0,
         },
     },
+    "map_exit": {
+        "enabled": False,
+        "action": "stop",       # "stop" | "telegram" | "both"
+        "name_region": None,    # [x, y, w, h] — 미니맵 맵 이름 텍스트 영역
+        "threshold": 0.75,      # 이미지 유사도 임계값 (미만이면 다른 맵으로 판정)
+        "grace_count": 3,       # 연속 N회 불일치 시 이탈 판정
+    },
     "settings2": {
         "shutdown": {
             "on_death": False,
@@ -110,6 +129,16 @@ class ConfigManager:
         self.load()
 
     def load(self):
+        # 구버전 마이그레이션: exe 폴더 config.json → AppData (권한 문제 해결)
+        if getattr(sys, "frozen", False) and not os.path.exists(CONFIG_PATH):
+            old = "config.json"   # main.py의 os.chdir로 exe 폴더 = cwd
+            if os.path.exists(old):
+                try:
+                    import shutil
+                    shutil.copy2(old, CONFIG_PATH)
+                except Exception:
+                    pass
+
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 self._data = json.load(f)

@@ -1,4 +1,5 @@
 # 화면 인식 → 판단 → 입력을 반복하는 봇 메인 루프 (별도 스레드로 실행)
+import os
 import time
 import random
 import threading
@@ -34,6 +35,7 @@ class BotLoop:
     def __init__(self, config: ConfigManager, on_status: Callable[[str], None] | None = None):
         self._config = config
         self._on_status  = on_status or (lambda msg: None)
+        self._on_stop_cb: Callable[[], None] = lambda: None          # 내부 정지 시 UI 알림 콜백
         self._on_lie_log: Callable[[str], None] = lambda msg: None   # 거탐 상세 로그 콜백
         self._screen = ScreenReader()
         window_title = config.get("settings2", "game_window_title") or "MapleStory"
@@ -82,6 +84,10 @@ class BotLoop:
     def _game_window_title(self) -> str:
         """config에서 게임 창 제목을 읽는다. 미설정이면 'MapleStory' 반환."""
         return self._config.get("settings2", "game_window_title") or "MapleStory"
+
+    def set_on_stop(self, cb: Callable[[], None]) -> None:
+        """봇이 내부적으로 정지될 때 UI에 알리는 콜백을 등록한다 (예: 이탈 감지 자동 정지)."""
+        self._on_stop_cb = cb
 
     def set_lie_log(self, cb: Callable[[str], None]) -> None:
         """거짓말탐지기 상세 로그 콜백을 등록한다."""
@@ -263,7 +269,11 @@ class BotLoop:
                     pass
 
         if use_floor_hunt:
-            raw_zones = self._config.get("zones") or []
+            # 프리셋 우선, 없으면 레거시 키 사용 (_load_patterns와 동일 로직)
+            _fh_active  = self._config.get("hunt_grounds", "active") or ""
+            _fh_presets = self._config.get("hunt_grounds", "presets") or {}
+            _fh_preset  = _fh_presets.get(_fh_active) if _fh_active else None
+            raw_zones = _fh_preset.get("zones", []) if _fh_preset else (self._config.get("zones") or [])
             from core.minimap_reader import Zone as _Zone
             all_zones = [_Zone.from_dict(z) for z in raw_zones]
             fh_zones = sorted(all_zones, key=lambda z: z.name)
@@ -281,6 +291,7 @@ class BotLoop:
         last_safety = 0.0
         last_focus  = 0.0
         FOCUS_INTERVAL = 4.0
+        self._map_exit_fail = 0  # 사냥터 이탈 감지 연속 불일치 카운터
         try:
             while not self._stop_event.is_set():
                 try:
@@ -308,6 +319,8 @@ class BotLoop:
                             continue
                         self._check_user_on_map(screenshot)
                         self._check_level_up(screenshot)
+                        # 사냥터 이탈 감지 (미니맵 이름 이미지 비교 기반)
+                        self._check_map_exit()
 
                     # 층별 핑퐁 상태머신
                     if use_floor_hunt and fh_zones:
@@ -570,6 +583,11 @@ class BotLoop:
             self._map_navigator.release_direction()
             if self._floor_hunt_thread and self._floor_hunt_thread.is_alive():
                 self._floor_hunt_thread.join(timeout=3)
+            # 내부 정지(이탈 감지 등)인 경우 UI 상태 동기화
+            try:
+                self._on_stop_cb()
+            except Exception:
+                pass
         logger.info("봇 루프 종료")
 
     # ── 포션 전용 루프 (별도 스레드) ─────────────────────────────────
@@ -1079,6 +1097,63 @@ class BotLoop:
             for _ in range(cfg.get(stat, 0)):
                 logger.debug("스텟 배분: %s", stat)
         self._input.press_key("s")
+
+    def _check_map_exit(self) -> None:
+        """미니맵 이름 영역 이미지 비교로 사냥터 이탈을 감지한다.
+        저장된 기준 이미지(map_name_ref.png)와 현재 화면을 매 1초마다 비교.
+        연속 N회 유사도 < threshold 이면 이탈 판정."""
+        cfg = self._config.get("map_exit") or {}
+        if not cfg.get("enabled"):
+            return
+        name_region = cfg.get("name_region")
+        if not name_region or len(name_region) < 4:
+            return  # 기준 영역 미설정 → 동작 안 함
+        ref_path = "templates/map_name_ref.png"
+        if not os.path.exists(ref_path):
+            return  # 기준 이미지 없음 → 동작 안 함
+
+        x, y, w, h = name_region
+        current = self._screen.capture({"left": int(x), "top": int(y), "width": int(w), "height": int(h)})
+        score = self._screen.find_template_score(current, ref_path)
+
+        threshold = float(cfg.get("threshold", 0.75))
+        if score >= threshold:
+            self._map_exit_fail = 0   # 일치 → 카운터 초기화
+            return
+
+        self._map_exit_fail += 1
+        grace = int(cfg.get("grace_count", 3))
+        self._status(f"[이탈감지] 유사도={score:.2f} ({self._map_exit_fail}/{grace}회)")
+        if self._map_exit_fail < grace:
+            return
+
+        # 이탈 판정 (중복 실행 방지)
+        self._map_exit_fail = -9999
+        action = cfg.get("action", "stop")
+        self._status(f"⚠️ 사냥터 이탈 감지 (유사도={score:.2f}) — 맵이 바뀌었습니다")
+        if action in ("telegram", "both"):
+            self._send_map_exit_telegram()
+        if action in ("stop", "both"):
+            self._stop_event.set()
+
+    def _send_map_exit_telegram(self) -> None:
+        """사냥터 이탈 시 텔레그램 알림 발송 (기존 거탐 설정 공유)."""
+        ld = self._config.get("settings1", "lie_detector") or {}
+        token   = ld.get("tg_token", "")
+        chat_id = ld.get("tg_chat_id", "")
+        if not token or not chat_id:
+            return
+        prefix = ld.get("tg_prefix", "").strip()
+        msg = (f"{prefix} 사냥터 이탈 감지!" if prefix
+               else "⚠️ [MapleBot] 사냥터 이탈 감지!")
+        import threading as _t
+        def _send(_tok=token, _cid=chat_id, _m=msg):
+            try:
+                from ui.tab_settings1 import _send_telegram
+                _send_telegram(_tok, _cid, _m)
+            except Exception:
+                pass
+        _t.Thread(target=_send, daemon=True).start()
 
     def _status(self, msg: str) -> None:
         logger.info(msg)
