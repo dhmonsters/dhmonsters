@@ -1,4 +1,5 @@
 # 화면 인식 → 판단 → 입력을 반복하는 봇 메인 루프 (별도 스레드로 실행)
+import os
 import time
 import random
 import threading
@@ -34,6 +35,7 @@ class BotLoop:
     def __init__(self, config: ConfigManager, on_status: Callable[[str], None] | None = None):
         self._config = config
         self._on_status  = on_status or (lambda msg: None)
+        self._on_stop_cb: Callable[[], None] = lambda: None          # 내부 정지 시 UI 알림 콜백
         self._on_lie_log: Callable[[str], None] = lambda msg: None   # 거탐 상세 로그 콜백
         self._screen = ScreenReader()
         window_title = config.get("settings2", "game_window_title") or "MapleStory"
@@ -78,10 +80,15 @@ class BotLoop:
         self._enable_potion     = True
         self._enable_lie_notify = True   # 거탐 알림 (경보음 + 텔레그램)
         self._enable_lie_solve  = True   # 거탐 해제 (퍼즐 자동 풀기)
+        self._anti_mob_active   = False  # 방지몹 해제 중 재진입 방지
 
     def _game_window_title(self) -> str:
         """config에서 게임 창 제목을 읽는다. 미설정이면 'MapleStory' 반환."""
         return self._config.get("settings2", "game_window_title") or "MapleStory"
+
+    def set_on_stop(self, cb: Callable[[], None]) -> None:
+        """봇이 내부적으로 정지될 때 UI에 알리는 콜백을 등록한다 (예: 이탈 감지 자동 정지)."""
+        self._on_stop_cb = cb
 
     def set_lie_log(self, cb: Callable[[str], None]) -> None:
         """거짓말탐지기 상세 로그 콜백을 등록한다."""
@@ -263,7 +270,11 @@ class BotLoop:
                     pass
 
         if use_floor_hunt:
-            raw_zones = self._config.get("zones") or []
+            # 프리셋 우선, 없으면 레거시 키 사용 (_load_patterns와 동일 로직)
+            _fh_active  = self._config.get("hunt_grounds", "active") or ""
+            _fh_presets = self._config.get("hunt_grounds", "presets") or {}
+            _fh_preset  = _fh_presets.get(_fh_active) if _fh_active else None
+            raw_zones = _fh_preset.get("zones", []) if _fh_preset else (self._config.get("zones") or [])
             from core.minimap_reader import Zone as _Zone
             all_zones = [_Zone.from_dict(z) for z in raw_zones]
             fh_zones = sorted(all_zones, key=lambda z: z.name)
@@ -281,6 +292,7 @@ class BotLoop:
         last_safety = 0.0
         last_focus  = 0.0
         FOCUS_INTERVAL = 4.0
+        self._map_exit_fail = 0  # 사냥터 이탈 감지 연속 불일치 카운터
         try:
             while not self._stop_event.is_set():
                 try:
@@ -308,9 +320,26 @@ class BotLoop:
                             continue
                         self._check_user_on_map(screenshot)
                         self._check_level_up(screenshot)
+                        # 사냥터 이탈 감지 (미니맵 이름 이미지 비교 기반)
+                        self._check_map_exit()
+                        # 매크로방지몹 감지
+                        if not self._anti_mob_active:
+                            self._check_anti_mob(screenshot)
 
                     # 층별 핑퐁 상태머신
                     if use_floor_hunt and fh_zones:
+                        # Y 좌표로 현재 층을 판별하는 헬퍼 — 항상 먼저 정의
+                        def _zone_by_y(y: int):
+                            for z in fh_zones:
+                                if z.y_min <= y <= z.y_max:
+                                    return z
+                            return min(
+                                fh_zones,
+                                key=lambda z: min(
+                                    abs(y - z.y_min), abs(y - z.y_max)
+                                ),
+                            )
+
                         pos = self._minimap_reader.get_character_pos()
 
                         if fh_state == "to_rope":
@@ -368,6 +397,7 @@ class BotLoop:
                             if elapsed >= wait_sec:
                                 self._input.key_up("up")
                                 self._map_navigator.release_direction()
+
                                 # Y 좌표로 실제 도착 여부 확인
                                 target_zone = fh_zones[fh_next_idx]
                                 src_zone    = fh_zones[fh_idx]
@@ -426,46 +456,96 @@ class BotLoop:
                                         )
 
                         else:  # patrol
-                            # ── Y 좌표로 낙사/피격 복귀 감지 ────────────
-                            # X가 현재 구역 안이면 스킵 (Y 오인식 방지)
+                            # ── 낙사/피격 감지: X 또는 Y가 현재 구역 밖이면 복귀 ──
                             if pos is not None and (
                                 time.time() - fh_arrive_time >= FH_Y_COOLDOWN
                             ):
-                                cur_zone = fh_zones[fh_idx]
+                                cur_zone  = fh_zones[fh_idx]
                                 x_in_zone = (
                                     cur_zone.left_x - 5 <= pos[0] <= cur_zone.right_x + 5
                                 )
-                                if not x_in_zone:
+                                y_in_zone = (
+                                    cur_zone.y_min - 8 <= pos[1] <= cur_zone.y_max + 8
+                                )
+                                if not x_in_zone or not y_in_zone:
                                     cy_now = pos[1]
-
-                                    def _zone_by_y(y: int):
-                                        for z in fh_zones:
-                                            if z.y_min <= y <= z.y_max:
-                                                return z
-                                        return min(
-                                            fh_zones,
-                                            key=lambda z: min(
-                                                abs(y - z.y_min), abs(y - z.y_max)
-                                            ),
-                                        )
-
                                     actual_zone = _zone_by_y(cy_now)
                                     actual_idx  = fh_zones.index(actual_zone)
+                                    reason = ("X범위 이탈" if not x_in_zone else "낙사(Y 이탈)")
                                     if actual_idx != fh_idx:
                                         fh_idx        = actual_idx
                                         fh_half_count = 0
                                         fh_last_side  = ""
                                         fh_route_idx  = 0   # 루트도 초기화
+                                        fh_arrive_time = time.time()
                                         self._map_navigator.set_zones([fh_zones[fh_idx]])
                                         self._status(
-                                            f"[층별] X범위 이탈+Y={cy_now} → "
+                                            f"[층별] {reason} Y={cy_now} → "
                                             f"'{fh_zones[fh_idx].name}' 복귀"
                                         )
                                         _apply_zone_pattern(fh_zones[fh_idx])  # 복귀 층 패턴 교체
 
                             # ── 왕복 횟수 카운트 ──────────────────────
                             zone = fh_zones[fh_idx]
-                            if pos is not None:
+
+                            # sweeps=0: 통과 모드 — 도착 0.5초 후 즉시 밧줄로 이동 (순찰/공격 없음)
+                            _transit = zone.sweeps == 0
+                            if _transit and time.time() - fh_arrive_time >= 0.5:
+                                self._status(f"[층별] {zone.name} 통과 → 다음 층으로")
+                                ropes = self._map_navigator.ropes
+                                _transit_moved = False
+                                if fh_route_mode and fh_route:
+                                    step    = fh_route[fh_route_idx % len(fh_route)]
+                                    to_name = step.get("to_zone", "")
+                                    rp_name = step.get("rope", "")
+                                    to_zone = next((z for z in fh_zones if z.name == to_name), None)
+                                    rp      = next((r for r in ropes if r.name == rp_name), None)
+                                    if to_zone and rp:
+                                        fh_rope_x    = rp.x
+                                        fh_climb_sec = rp.climb_sec
+                                        fh_next_idx  = fh_zones.index(to_zone)
+                                        fh_next_dir  = 1 if to_zone.y_min < zone.y_min else -1
+                                        fh_state     = "to_rope"
+                                        fh_half_count = 0
+                                        fh_last_side  = ""
+                                        fh_route_idx += 1
+                                        self._map_navigator.release_direction()
+                                        _transit_moved = True
+                                if not _transit_moved:
+                                    n        = len(fh_zones)
+                                    # 통과 구역에서 낙사 복귀: 가장 가까운 사냥 구역(sweeps>0) 방향 강제
+                                    hunt_indices = [i for i, z in enumerate(fh_zones) if z.sweeps > 0]
+                                    if hunt_indices:
+                                        nearest_hunt = min(hunt_indices, key=lambda i: abs(i - fh_idx))
+                                        if nearest_hunt != fh_idx:
+                                            fh_dir = 1 if nearest_hunt > fh_idx else -1
+                                    next_idx = fh_idx + fh_dir
+                                    if next_idx >= n:
+                                        fh_dir   = -1
+                                        next_idx = fh_idx - 1
+                                    elif next_idx < 0:
+                                        fh_dir   = 1
+                                        next_idx = fh_idx + 1
+                                    if 0 <= next_idx < n and next_idx != fh_idx:
+                                        if zone.rope_x >= 0:
+                                            fh_rope_x    = zone.rope_x
+                                            matched_r    = next((r for r in ropes if r.x == zone.rope_x), None)
+                                            fh_climb_sec = matched_r.climb_sec if matched_r else 2.5
+                                        elif ropes:
+                                            rp_auto      = ropes[min(fh_idx, len(ropes) - 1)]
+                                            fh_rope_x    = rp_auto.x
+                                            fh_climb_sec = rp_auto.climb_sec
+                                        else:
+                                            fh_rope_x    = zone.right_x
+                                            fh_climb_sec = 2.5
+                                        fh_next_idx   = next_idx
+                                        fh_next_dir   = fh_dir
+                                        fh_state      = "to_rope"
+                                        fh_half_count = 0
+                                        fh_last_side  = ""
+                                        self._map_navigator.release_direction()
+
+                            if not _transit and pos is not None:
                                 cx = pos[0]
                                 EDGE = 4
                                 if cx <= zone.left_x + EDGE:
@@ -478,13 +558,12 @@ class BotLoop:
                                 if side and side != fh_last_side:
                                     fh_last_side   = side
                                     fh_half_count += 1
-                                    target     = int(zone.sweeps * 2) if zone.sweeps > 0 else 0
-                                    target_str = str(target) if target else "∞"
+                                    target     = int(zone.sweeps * 2)
                                     self._status(
                                         f"[층별] {zone.name} 경계({side}) "
-                                        f"{fh_half_count}/{target_str}회"
+                                        f"{fh_half_count}/{target}회"
                                     )
-                                    if target > 0 and fh_half_count >= target:
+                                    if fh_half_count >= target:
                                         ropes = self._map_navigator.ropes
 
                                         if fh_route_mode and fh_route:
@@ -521,19 +600,32 @@ class BotLoop:
                                                 )
                                         else:
                                             # ── 자동 왕복 ────────────────
-                                            n        = len(fh_zones)
-                                            next_idx = fh_idx + fh_dir
-                                            if next_idx >= n:
-                                                fh_dir   = -1
-                                                next_idx = fh_idx - 1
-                                            elif next_idx < 0:
-                                                fh_dir   = 1
-                                                next_idx = fh_idx + 1
+                                            # 사냥 구역(sweeps>0)끼리만 왕복 — 통과 구역은 낙사 복귀 전용
+                                            n = len(fh_zones)
+                                            hunt_up   = [i for i in range(fh_idx + 1, n)
+                                                         if fh_zones[i].sweeps > 0]
+                                            hunt_down = [i for i in range(fh_idx - 1, -1, -1)
+                                                         if fh_zones[i].sweeps > 0]
+                                            if fh_dir > 0:
+                                                if hunt_up:
+                                                    next_idx = hunt_up[0]
+                                                elif hunt_down:
+                                                    fh_dir   = -1
+                                                    next_idx = hunt_down[0]
+                                                else:
+                                                    next_idx = fh_idx
+                                            else:
+                                                if hunt_down:
+                                                    next_idx = hunt_down[0]
+                                                elif hunt_up:
+                                                    fh_dir   = 1
+                                                    next_idx = hunt_up[0]
+                                                else:
+                                                    next_idx = fh_idx
 
-                                            if 0 <= next_idx < n and next_idx != fh_idx:
+                                            if next_idx != fh_idx:
                                                 if zone.rope_x >= 0:
                                                     fh_rope_x = zone.rope_x
-                                                    # zone.rope_x는 rope 이름 없이 저장된 X — 매칭 시도
                                                     matched_r = next(
                                                         (r for r in ropes if r.x == zone.rope_x), None
                                                     )
@@ -546,18 +638,20 @@ class BotLoop:
                                                     fh_rope_x    = zone.right_x
                                                     fh_climb_sec = 2.5
                                                 fh_next_idx = next_idx
-                                                fh_next_dir = fh_dir
+                                                fh_next_dir = 1 if fh_zones[next_idx].y_min < zone.y_min else -1
                                                 fh_state    = "to_rope"
                                                 fh_half_count = 0
                                                 fh_last_side  = ""
                                                 self._map_navigator.release_direction()
                                                 self._status(
                                                     f"[층별] {zone.name} 완료 "
-                                                    f"→ 밧줄 X={fh_rope_x} 이동"
+                                                    f"→ {fh_zones[next_idx].name} 이동"
                                                 )
 
-                    # 이동 + 스킬 (층 이동 중에는 스킵 — 공격키가 밧줄 잡기를 방해함)
-                    if not use_floor_hunt or fh_state == "patrol":
+                    # 이동 + 스킬 (층 이동 중 또는 통과 층에서는 스킵)
+                    _on_transit = (use_floor_hunt and fh_state == "patrol"
+                                   and fh_zones[fh_idx].sweeps == 0)
+                    if not use_floor_hunt or (fh_state == "patrol" and not _on_transit):
                         if self._enable_move:
                             self._map_navigator.run_one_step()
                         if self._enable_attack:
@@ -570,6 +664,11 @@ class BotLoop:
             self._map_navigator.release_direction()
             if self._floor_hunt_thread and self._floor_hunt_thread.is_alive():
                 self._floor_hunt_thread.join(timeout=3)
+            # 내부 정지(이탈 감지 등)인 경우 UI 상태 동기화
+            try:
+                self._on_stop_cb()
+            except Exception:
+                pass
         logger.info("봇 루프 종료")
 
     # ── 포션 전용 루프 (별도 스레드) ─────────────────────────────────
@@ -1079,6 +1178,188 @@ class BotLoop:
             for _ in range(cfg.get(stat, 0)):
                 logger.debug("스텟 배분: %s", stat)
         self._input.press_key("s")
+
+    def _check_map_exit(self) -> None:
+        """미니맵 이름 영역 이미지 비교로 사냥터 이탈을 감지한다.
+        저장된 기준 이미지(map_name_ref.png)와 현재 화면을 매 1초마다 비교.
+        연속 N회 유사도 < threshold 이면 이탈 판정."""
+        cfg = self._config.get("map_exit") or {}
+        if not cfg.get("enabled"):
+            return
+        name_region = cfg.get("name_region")
+        if not name_region or len(name_region) < 4:
+            return  # 기준 영역 미설정 → 동작 안 함
+        from core.config_manager import get_user_templates_dir
+        ref_path = os.path.join(get_user_templates_dir(), "map_name_ref.png")
+        if not os.path.exists(ref_path):
+            return  # 기준 이미지 없음 → 동작 안 함
+
+        x, y, w, h = name_region
+        current = self._screen.capture({"left": int(x), "top": int(y), "width": int(w), "height": int(h)})
+        score = self._screen.find_template_score(current, ref_path)
+
+        threshold = float(cfg.get("threshold", 0.75))
+        if score >= threshold:
+            self._map_exit_fail = 0   # 일치 → 카운터 초기화
+            return
+
+        self._map_exit_fail += 1
+        grace = int(cfg.get("grace_count", 3))
+        self._status(f"[이탈감지] 유사도={score:.2f} ({self._map_exit_fail}/{grace}회)")
+        if self._map_exit_fail < grace:
+            return
+
+        # 이탈 판정 (중복 실행 방지)
+        self._map_exit_fail = -9999
+        action = cfg.get("action", "stop")
+        self._status(f"⚠️ 사냥터 이탈 감지 (유사도={score:.2f}) — 맵이 바뀌었습니다")
+        if action in ("telegram", "both"):
+            self._send_map_exit_telegram()
+        if action in ("stop", "both"):
+            self._stop_event.set()
+
+    def _send_map_exit_telegram(self) -> None:
+        """사냥터 이탈 시 텔레그램 알림 발송 (기존 거탐 설정 공유)."""
+        ld = self._config.get("settings1", "lie_detector") or {}
+        token   = ld.get("tg_token", "")
+        chat_id = ld.get("tg_chat_id", "")
+        if not token or not chat_id:
+            return
+        prefix = ld.get("tg_prefix", "").strip()
+        msg = (f"{prefix} 사냥터 이탈 감지!" if prefix
+               else "⚠️ [MapleBot] 사냥터 이탈 감지!")
+        import threading as _t
+        def _send(_tok=token, _cid=chat_id, _m=msg):
+            try:
+                from ui.tab_settings1 import _send_telegram
+                _send_telegram(_tok, _cid, _m)
+            except Exception:
+                pass
+        _t.Thread(target=_send, daemon=True).start()
+
+    # ── 매크로방지몹 감지 및 해제 ─────────────────────────────────────
+    def _check_anti_mob(self, screenshot) -> None:
+        """화면 템플릿 매칭으로 방지몹을 감지하고 해제 절차를 실행한다."""
+        cfg = self._config.get("anti_mob") or {}
+        if not cfg.get("enabled"):
+            return
+
+        import glob
+        patterns = sorted(glob.glob("templates/anti_mob_*.png"))
+        if not patterns:
+            return
+
+        region = cfg.get("detect_region")
+        if region and len(region) == 4:
+            rx, ry, rw, rh = region
+            target = self._screen.capture({"left": int(rx), "top": int(ry),
+                                           "width": int(rw), "height": int(rh)})
+        else:
+            target = screenshot
+
+        detected = False
+        for tpl_path in patterns:
+            if self._screen.find_template_score(target, tpl_path) >= 0.65:
+                detected = True
+                break
+
+        if not detected:
+            return
+
+        self._status("⚠️ 매크로방지몹 감지! 공격 정지 후 해제 시작...")
+        self._anti_mob_active = True
+        prev_attack = self._enable_attack
+        self._enable_attack = False
+        try:
+            self._handle_anti_mob(cfg)
+        except Exception as exc:
+            self._status(f"매크로방지몹 해제 오류: {exc}")
+        finally:
+            self._enable_attack = prev_attack
+            self._anti_mob_active = False
+            self._status("매크로방지몹 해제 완료 — 공격 재개")
+
+    def _handle_anti_mob(self, cfg: dict) -> None:
+        """방지몹 해제 절차: 이동 → 타입별 동작."""
+        mob_type = cfg.get("type", "click")
+        target_x = int(cfg.get("target_x", 100))
+        self._move_to_minimap_x(target_x)
+        if mob_type == "click":
+            self._anti_mob_click(cfg)
+        elif mob_type == "item":
+            self._anti_mob_item(cfg)
+        elif mob_type == "basic":
+            self._anti_mob_basic(cfg)
+
+    def _move_to_minimap_x(self, target_x: int, timeout: float = 6.0) -> None:
+        """미니맵 X 좌표로 방향키로 이동한다. timeout 초 안에 못 도달하면 반환."""
+        self._map_navigator.release_direction()
+        start = time.time()
+        while not self._stop_event.is_set():
+            if time.time() - start > timeout:
+                break
+            pos = self._minimap_reader.get_character_pos()
+            if pos is None:
+                time.sleep(0.1)
+                continue
+            diff = target_x - pos[0]
+            if abs(diff) <= 4:
+                break
+            if diff > 0:
+                self._input.key_up("left")
+                self._input.key_down("right")
+            else:
+                self._input.key_up("right")
+                self._input.key_down("left")
+            time.sleep(0.08)
+        self._map_navigator.release_direction()
+        time.sleep(0.2)
+
+    def _anti_mob_click(self, cfg: dict) -> None:
+        """클릭형: 설정된 키 시퀀스를 순서대로 누른다."""
+        keys_str = cfg.get("click_keys", "space,enter")
+        keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+        for key in keys:
+            self._input.press_key(key)
+            time.sleep(random.uniform(0.15, 0.3))
+
+    def _anti_mob_item(self, cfg: dict) -> None:
+        """아이템 뿌리기형: 인벤토리 열기 → 기타탭 클릭 → Ctrl+클릭으로 버리기."""
+        inv_tab   = cfg.get("item_inv_tab")
+        item_slot = cfg.get("item_slot")
+        if not inv_tab or not item_slot:
+            self._status("⚠ 아이템 뿌리기형: 인벤토리 탭 또는 슬롯 좌표 미설정")
+            return
+        # 인벤토리 열기
+        self._input.press_key("i")
+        time.sleep(random.uniform(0.4, 0.6))
+        # 기타탭 클릭
+        tx, ty, tw, th = inv_tab
+        self._input.click(tx + tw // 2, ty + th // 2)
+        time.sleep(random.uniform(0.3, 0.5))
+        # 아이템 슬롯 Ctrl+클릭 (1개 버리기)
+        sx, sy, sw, sh = item_slot
+        scx, scy = sx + sw // 2, sy + sh // 2
+        self._input.key_down("ctrl")
+        time.sleep(0.05)
+        self._input.click(scx, scy)
+        time.sleep(0.1)
+        self._input.key_up("ctrl")
+        time.sleep(random.uniform(0.3, 0.5))
+        # 수량 확인 팝업 Enter
+        self._input.press_key("enter")
+        time.sleep(0.3)
+        # 인벤토리 닫기
+        self._input.press_key("i")
+        time.sleep(0.3)
+
+    def _anti_mob_basic(self, cfg: dict) -> None:
+        """기본 공격형: 공격 키를 N회 누른다."""
+        count = max(1, int(cfg.get("basic_count", 5)))
+        attack_key = (self._config.get("attack") or {}).get("key", "ctrl")
+        for _ in range(count):
+            self._input.press_key(attack_key)
+            time.sleep(random.uniform(0.1, 0.2))
 
     def _status(self, msg: str) -> None:
         logger.info(msg)

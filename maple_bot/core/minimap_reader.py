@@ -99,7 +99,7 @@ class Zone:
         rope = f"  로프 X={self.rope_x}" if self.rope_x >= 0 else "  로프 없음"
         rnd = (f"  랜덤 {self.random_margin_min}~{self.random_margin_max}px"
                if self.random_margin_max > 0 else "")
-        sw = f"  왕복 {self.sweeps}회" if self.sweeps > 0 else "  왕복 무제한"
+        sw = f"  왕복 {self.sweeps}회" if self.sweeps > 0 else "  왕복 통과"
         pat = f"  패턴:{self.key_pattern}" if self.key_pattern else ""
         return f"{self.name}: X {self.left_x}~{self.right_x}  Y {self.y_min}~{self.y_max}{rope}{rnd}{sw}{pat}"
 

@@ -65,10 +65,10 @@ class _ZoneEditDialog(QDialog):
         self.spin_sweeps.setSingleStep(0.5)
         self.spin_sweeps.setDecimals(1)
         self.spin_sweeps.setValue(float(zone.sweeps))
-        self.spin_sweeps.setToolTip("0 = 무제한, 0.5 단위 가능")
+        self.spin_sweeps.setToolTip("0 = 통과 (사냥 없이 즉시 다음 층), 0.5 단위 가능")
         self.spin_sweeps.setFixedWidth(70)
         row_sw.addWidget(self.spin_sweeps)
-        row_sw.addWidget(QLabel("회  (0=무제한, 0.5 단위)"))
+        row_sw.addWidget(QLabel("회  (0=통과, 0.5 단위)"))
         row_sw.addStretch()
         lay.addLayout(row_sw)
 
@@ -433,7 +433,7 @@ class TabCoordinate(QWidget):
         self.spin_zone_sweeps.setDecimals(1)
         self.spin_zone_sweeps.setValue(2.0)
         self.spin_zone_sweeps.setFixedWidth(65)
-        self.spin_zone_sweeps.setToolTip("층별 사냥 시 이 층에서 왕복할 횟수 (0 = 무제한, 0.5 단위)")
+        self.spin_zone_sweeps.setToolTip("층별 사냥 시 이 층에서 왕복할 횟수 (0 = 통과, 0.5 단위)")
         opt.addWidget(self.spin_zone_sweeps)
         opt.addWidget(QLabel("회"))
         opt.addStretch()
@@ -618,9 +618,26 @@ class TabCoordinate(QWidget):
         note.setStyleSheet("color: gray; font-size: 10px;")
         route_lay.addWidget(note)
 
+        # 리스트 + 우측 ↑↓ 버튼
+        list_row = QHBoxLayout()
         self.lst_route = QListWidget()
-        self.lst_route.setMaximumHeight(110)
-        route_lay.addWidget(self.lst_route)
+        self.lst_route.setMaximumHeight(120)
+        list_row.addWidget(self.lst_route)
+
+        btn_col = QVBoxLayout()
+        btn_up   = QPushButton("↑")
+        btn_down = QPushButton("↓")
+        btn_up.setFixedSize(28, 32)
+        btn_down.setFixedSize(28, 32)
+        btn_up.setToolTip("선택 항목 위로")
+        btn_down.setToolTip("선택 항목 아래로")
+        btn_up.clicked.connect(self._route_step_up)
+        btn_down.clicked.connect(self._route_step_down)
+        btn_col.addWidget(btn_up)
+        btn_col.addWidget(btn_down)
+        btn_col.addStretch()
+        list_row.addLayout(btn_col)
+        route_lay.addLayout(list_row)
 
         add_row = QHBoxLayout()
         add_row.addWidget(QLabel("목적지"))
@@ -681,6 +698,22 @@ class TabCoordinate(QWidget):
         row = self.lst_route.currentRow()
         if row >= 0:
             self.lst_route.takeItem(row)
+
+    def _route_step_up(self) -> None:
+        row = self.lst_route.currentRow()
+        if row <= 0:
+            return
+        item = self.lst_route.takeItem(row)
+        self.lst_route.insertItem(row - 1, item)
+        self.lst_route.setCurrentRow(row - 1)
+
+    def _route_step_down(self) -> None:
+        row = self.lst_route.currentRow()
+        if row < 0 or row >= self.lst_route.count() - 1:
+            return
+        item = self.lst_route.takeItem(row)
+        self.lst_route.insertItem(row + 1, item)
+        self.lst_route.setCurrentRow(row + 1)
 
     def _save_floor_hunt(self) -> None:
         route_mode = self.rb_route.isChecked()
@@ -1077,3 +1110,4 @@ class TabCoordinate(QWidget):
 
         # 콤보박스 채우기
         self._refresh_route_combos()
+
