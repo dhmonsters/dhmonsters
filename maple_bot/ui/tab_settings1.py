@@ -1000,33 +1000,6 @@ class TabSettings1(QWidget):
             self.combo_map_exit_action.setCurrentIndex(idx)
         self._refresh_map_name_ref_label()
 
-        am = self.config.get("anti_mob") or {}
-        self.chk_anti_mob.setChecked(am.get("enabled", False))
-        type_labels = {"click": "클릭형", "item": "아이템 뿌리기형", "basic": "기본 공격형"}
-        tlabel = type_labels.get(am.get("type", "click"), "클릭형")
-        tidx = self.combo_anti_mob_type.findText(tlabel)
-        if tidx >= 0:
-            self.combo_anti_mob_type.setCurrentIndex(tidx)
-        self.spin_anti_mob_x.setValue(am.get("target_x", 100))
-        self.edit_anti_mob_keys.setText(am.get("click_keys", "space,enter"))
-        self.spin_anti_mob_count.setValue(am.get("basic_count", 5))
-        # 탐지 영역 라벨
-        dr = am.get("detect_region")
-        if dr and len(dr) == 4:
-            self.lbl_anti_mob_region.setText(f"탐지 영역: X={dr[0]} Y={dr[1]} W={dr[2]} H={dr[3]}")
-            self.lbl_anti_mob_region.setStyleSheet("color: green;")
-        else:
-            self.lbl_anti_mob_region.setText("탐지 영역: 전체 화면")
-            self.lbl_anti_mob_region.setStyleSheet("color: gray;")
-        # 아이템형 좌표 라벨
-        for key, lbl in self._anti_mob_item_coords.items():
-            v = am.get(key)
-            if v and len(v) == 4:
-                lbl.setText(f"X={v[0]} Y={v[1]} W={v[2]} H={v[3]}")
-                lbl.setStyleSheet("color: green; font-size: 10px;")
-            else:
-                lbl.setText("미설정")
-                lbl.setStyleSheet("color: gray; font-size: 10px;")
 
     def save_to_config(self):
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())
@@ -1055,9 +1028,3 @@ class TabSettings1(QWidget):
         self.config.set("map_exit", "grace_count", self.spin_map_exit_grace.value())
         self.config.set("map_exit", "action",      action_map.get(self.combo_map_exit_action.currentText(), "stop"))
 
-        type_map = {"클릭형": "click", "아이템 뿌리기형": "item", "기본 공격형": "basic"}
-        self.config.set("anti_mob", "enabled",     self.chk_anti_mob.isChecked())
-        self.config.set("anti_mob", "type",        type_map.get(self.combo_anti_mob_type.currentText(), "click"))
-        self.config.set("anti_mob", "target_x",    self.spin_anti_mob_x.value())
-        self.config.set("anti_mob", "click_keys",  self.edit_anti_mob_keys.text().strip())
-        self.config.set("anti_mob", "basic_count", self.spin_anti_mob_count.value())
