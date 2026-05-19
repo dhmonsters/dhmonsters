@@ -51,7 +51,6 @@ class TabSettings1(QWidget):
 
         layout.addWidget(self._build_lie_detector_group())
         layout.addWidget(self._build_user_detected_group())
-        layout.addWidget(self._build_map_exit_group())
         layout.addWidget(self._build_stat_assign_group())
         layout.addStretch()
 
@@ -795,110 +794,6 @@ class TabSettings1(QWidget):
         return group
 
     # ── 사냥터 이탈 감지 설정 ────────────────────────────────────────
-    def _build_map_exit_group(self):
-        group = QGroupBox("사냥터 이탈 감지 설정")
-        layout = QVBoxLayout(group)
-
-        self.chk_map_exit = QCheckBox("이탈 감지 활성화 (미니맵 이름이 바뀌면 봇 정지/알림)")
-        layout.addWidget(self.chk_map_exit)
-
-        # 맵 이름 기준 이미지 행
-        ref_row = QHBoxLayout()
-        self.lbl_map_name_ref = QLabel("❌ 기준 이미지 없음")
-        self.lbl_map_name_ref.setStyleSheet("color: red;")
-        self._refresh_map_name_ref_label()
-        ref_row.addWidget(self.lbl_map_name_ref)
-        ref_row.addStretch()
-        btn_capture_name = QPushButton("📷 현재 맵 이름 저장")
-        btn_capture_name.setFixedWidth(150)
-        btn_capture_name.setToolTip(
-            "사냥터에서 미니맵 이름 텍스트 부분만 드래그로 선택하세요.\n"
-            "기준 이미지로 저장되며, 다른 맵으로 이동하면 감지됩니다."
-        )
-        btn_capture_name.clicked.connect(self._capture_map_name_ref)
-        ref_row.addWidget(btn_capture_name)
-        layout.addLayout(ref_row)
-
-        # 판정 횟수 행
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("판정 횟수"))
-        self.spin_map_exit_grace = QSpinBox()
-        self.spin_map_exit_grace.setRange(1, 30)
-        self.spin_map_exit_grace.setValue(3)
-        self.spin_map_exit_grace.setFixedWidth(55)
-        row1.addWidget(self.spin_map_exit_grace)
-        row1.addWidget(QLabel("회 연속 불일치 시 이탈로 판정 (1회=약 1초)"))
-        row1.addStretch()
-        layout.addLayout(row1)
-
-        # 감지 시 동작 행
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("감지 시 동작"))
-        self.combo_map_exit_action = QComboBox()
-        self.combo_map_exit_action.addItems(["봇 정지", "텔레그램 알림", "봇 정지 + 텔레그램"])
-        self.combo_map_exit_action.setFixedWidth(170)
-        row2.addWidget(self.combo_map_exit_action)
-        row2.addWidget(QLabel("(텔레그램은 위 거탐 설정의 토큰/Chat ID 공유)"))
-        row2.addStretch()
-        layout.addLayout(row2)
-
-        btn_save = QPushButton("💾 저장")
-        btn_save.setFixedWidth(70)
-        btn_save.clicked.connect(self._save_map_exit_settings)
-        layout.addWidget(btn_save, alignment=Qt.AlignmentFlag.AlignRight)
-
-        return group
-
-    def _refresh_map_name_ref_label(self) -> None:
-        """기준 이미지 존재 여부에 따라 라벨을 갱신한다."""
-        from core.config_manager import get_user_templates_dir
-        ref_path = os.path.join(get_user_templates_dir(), "map_name_ref.png")
-        if os.path.exists(ref_path):
-            me = self.config.get("map_exit") or {}
-            nr = me.get("name_region")
-            if nr and len(nr) == 4:
-                w, h = nr[2], nr[3]
-                self.lbl_map_name_ref.setText(f"✅ 기준 이미지 저장됨 ({w}×{h} px)")
-            else:
-                self.lbl_map_name_ref.setText("✅ 기준 이미지 저장됨")
-            self.lbl_map_name_ref.setStyleSheet("color: green;")
-        else:
-            self.lbl_map_name_ref.setText("❌ 기준 이미지 없음 — '📷 현재 맵 이름 저장' 클릭")
-            self.lbl_map_name_ref.setStyleSheet("color: red;")
-
-    def _capture_map_name_ref(self) -> None:
-        """RegionSelector로 미니맵 이름 영역 선택 후 기준 이미지로 저장한다."""
-        sel = RegionSelector()
-        sel.region_selected.connect(self._save_map_name_ref)
-        self._map_name_selector = sel
-        sel.show()
-
-    def _save_map_name_ref(self, x: int, y: int, w: int, h: int) -> None:
-        from core.config_manager import get_user_templates_dir
-        tpl_dir = get_user_templates_dir()
-        ref_path = os.path.join(tpl_dir, "map_name_ref.png")
-        try:
-            with mss.mss() as sct:
-                raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
-                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-                cv2.imwrite(ref_path, img)
-        except Exception as exc:
-            QMessageBox.critical(self, "저장 실패", f"이미지 저장 오류: {exc}")
-            return
-        self.config.set("map_exit", "name_region", [x, y, w, h])
-        self.config.save()
-        self._refresh_map_name_ref_label()
-        QMessageBox.information(self, "저장 완료", f"맵 이름 기준 이미지 저장 완료 ({w}×{h} px)")
-
-    def _save_map_exit_settings(self) -> None:
-        action_map = {"봇 정지": "stop", "텔레그램 알림": "telegram", "봇 정지 + 텔레그램": "both"}
-        action = action_map.get(self.combo_map_exit_action.currentText(), "stop")
-        self.config.set("map_exit", "enabled",     self.chk_map_exit.isChecked())
-        self.config.set("map_exit", "grace_count", self.spin_map_exit_grace.value())
-        self.config.set("map_exit", "action",      action)
-        self.config.save()
-        QMessageBox.information(self, "저장 완료", "사냥터 이탈 감지 설정이 저장되었습니다.")
-
     # ── 레벨업 스텟찍기 설정 ──────────────────────────────────────────
     def _build_stat_assign_group(self):
         group = QGroupBox("레벨업 스텟찍기 설정")
@@ -963,16 +858,6 @@ class TabSettings1(QWidget):
         for stat in ["STR", "INT", "DEX", "LUK"]:
             self.stat_spins[stat].setValue(sa.get(stat, 0))
 
-        me = self.config.get("map_exit") or {}
-        self.chk_map_exit.setChecked(me.get("enabled", False))
-        self.spin_map_exit_grace.setValue(me.get("grace_count", 3))
-        action_labels = {"stop": "봇 정지", "telegram": "텔레그램 알림", "both": "봇 정지 + 텔레그램"}
-        label = action_labels.get(me.get("action", "stop"), "봇 정지")
-        idx = self.combo_map_exit_action.findText(label)
-        if idx >= 0:
-            self.combo_map_exit_action.setCurrentIndex(idx)
-        self._refresh_map_name_ref_label()
-
 
     def save_to_config(self):
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())
@@ -993,8 +878,4 @@ class TabSettings1(QWidget):
         for stat, spin in self.stat_spins.items():
             self.config.set("settings1", "stat_assign", stat, spin.value())
 
-        action_map = {"봇 정지": "stop", "텔레그램 알림": "telegram", "봇 정지 + 텔레그램": "both"}
-        self.config.set("map_exit", "enabled",     self.chk_map_exit.isChecked())
-        self.config.set("map_exit", "grace_count", self.spin_map_exit_grace.value())
-        self.config.set("map_exit", "action",      action_map.get(self.combo_map_exit_action.currentText(), "stop"))
 
