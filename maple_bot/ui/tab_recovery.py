@@ -252,10 +252,9 @@ class TabRecovery(QWidget):
         layout = QVBoxLayout(group)
 
         note = QLabel(
-            "퀵슬롯의 포션 아이템 칸을 드래그로 지정하세요. "
-            "아이템 그래픽 색상 픽셀이 50개 미만이면 수량 0으로 판정합니다.\n"
-            "'수량 상태 확인'으로 포션 있을 때/없을 때 픽셀 수를 먼저 확인하세요. "
-            "마을 귀환 주문서(위치 탭)가 활성화되어야 귀환 작동합니다."
+            "슬롯 전체가 아닌 숫자(수량)만 표시되는 부분을 드래그로 지정하세요.\n"
+            "예: 슬롯 우하단의 '150' 같은 숫자 텍스트 영역만 잡으면 인식률이 높아집니다.\n"
+            "마을 귀환 주문서(위치 탭)가 활성화되어야 귀환이 작동합니다."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: gray; font-size: 10px;")
@@ -273,7 +272,7 @@ class TabRecovery(QWidget):
         hp_row.addStretch()
         btn_hp_cnt = QPushButton("📍 드래그 설정")
         btn_hp_cnt.setFixedWidth(90)
-        btn_hp_cnt.setToolTip("HP 포션이 등록된 퀵슬롯(아이템 슬롯) 영역을 드래그해서 지정하세요.")
+        btn_hp_cnt.setToolTip("슬롯 전체가 아닌 수량 숫자(예: '150')가 표시되는 부분만 드래그하세요.\n슬롯 우하단 모서리의 작은 숫자 영역만 잡으면 OCR 인식률이 높아집니다.")
         btn_hp_cnt.clicked.connect(self._select_hp_count_region)
         btn_hp_cnt_rst = QPushButton("✕")
         btn_hp_cnt_rst.setFixedWidth(24)
@@ -291,7 +290,7 @@ class TabRecovery(QWidget):
         mp_row.addStretch()
         btn_mp_cnt = QPushButton("📍 드래그 설정")
         btn_mp_cnt.setFixedWidth(90)
-        btn_mp_cnt.setToolTip("MP 포션이 등록된 퀵슬롯(아이템 슬롯) 영역을 드래그해서 지정하세요.")
+        btn_mp_cnt.setToolTip("슬롯 전체가 아닌 수량 숫자(예: '200')가 표시되는 부분만 드래그하세요.\n슬롯 우하단 모서리의 작은 숫자 영역만 잡으면 OCR 인식률이 높아집니다.")
         btn_mp_cnt.clicked.connect(self._select_mp_count_region)
         btn_mp_cnt_rst = QPushButton("✕")
         btn_mp_cnt_rst.setFixedWidth(24)

@@ -55,30 +55,38 @@ def _get_easy():
 # ── 공용 전처리 ──────────────────────────────────────────────────────────
 
 def _preprocess_slot(img: np.ndarray) -> list:
-    """퀵슬롯 이미지를 OCR용으로 전처리한 버전 목록을 반환한다.
+    """수량 숫자 영역 이미지를 OCR용으로 전처리한 버전 목록을 반환한다.
 
-    마플스토리 퀵슬롯 아이템 수량은 우하단에 흰색 소형 폰트로 표시된다.
+    마플스토리 수량 숫자는 어두운 배경에 흰색 소형 폰트로 표시된다.
+    사용자가 숫자 부분만 드래그해서 잡은 작은 이미지(약 20×12px)를 가정한다.
+
     시도 순서:
-    ① 전체 이미지 4배 확대 + 이진화 (threshold 140)
-    ② 우하단 절반 크롭 + 4배 확대 + 이진화
-    ③ 전체 이미지 4배 확대 + 이진화 (threshold 200, 더 엄격)
+    ① 6배 확대 + 이진화 (threshold 130) — 기본
+    ② 6배 확대 + OTSU 자동 이진화 — 배경이 다양한 경우
+    ③ 4배 확대 + 이진화 (threshold 160)
     ④ 원본
     """
     import cv2
     h, w = img.shape[:2]
 
-    def _to_thresh(src: np.ndarray, thr: int = 140) -> np.ndarray:
-        big = cv2.resize(src, (src.shape[1] * 4, src.shape[0] * 4),
+    def _scale_thresh(src: np.ndarray, scale: int, thr: int) -> np.ndarray:
+        big = cv2.resize(src, (src.shape[1] * scale, src.shape[0] * scale),
                          interpolation=cv2.INTER_CUBIC)
         gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY)
-        return cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
+        _, t = cv2.threshold(gray, thr, 255, cv2.THRESH_BINARY)
+        return cv2.cvtColor(t, cv2.COLOR_GRAY2BGR)
 
-    crop = img[h // 2:, w // 2:]   # 우하단 절반 (숫자 위치)
+    def _scale_otsu(src: np.ndarray, scale: int) -> np.ndarray:
+        big = cv2.resize(src, (src.shape[1] * scale, src.shape[0] * scale),
+                         interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+        _, t = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return cv2.cvtColor(t, cv2.COLOR_GRAY2BGR)
+
     return [
-        _to_thresh(img, 140),
-        _to_thresh(crop, 140),
-        _to_thresh(img, 200),
+        _scale_thresh(img, 6, 130),
+        _scale_otsu(img, 6),
+        _scale_thresh(img, 4, 160),
         img,
     ]
 

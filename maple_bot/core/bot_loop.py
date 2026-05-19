@@ -1240,24 +1240,20 @@ class BotLoop:
         if not hp_region and not mp_region:
             return
 
-        import cv2
+        from core.ocr_detector import read_number
 
         def _is_zero(region) -> bool | None:
-            """슬롯 영역을 캡처해 채색 픽셀(아이템 그래픽) 수가 임계값 미만이면 빈 슬롯으로 판단.
-
-            채색 픽셀 기준: HSV 채도>50 AND 명도>50
-            임계값: 50px — 슬롯 전체(~87×43px) 기준으로 아이템이 없으면 거의 0에 가까움.
-            """
+            """수량 숫자 영역을 OCR로 읽어 0이면 True, 수량 있으면 False, 실패면 None 반환."""
             if not region or len(region) < 4:
                 return None
             x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
             try:
                 img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
-                hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                mask = (hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 50)
-                px = int(mask.sum())
-                self._status(f"[포션수량] 채색픽셀={px}px")
-                return px < 50  # 50px 미만 → 빈 슬롯(수량 0)으로 판정
+                n = read_number(img)
+                if n is None:
+                    return None  # 읽기 실패 — 오탐 방지를 위해 무시
+                self._status(f"[포션수량] {n}개")
+                return n == 0
             except Exception:
                 return None
 
