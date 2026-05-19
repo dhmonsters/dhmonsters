@@ -103,6 +103,11 @@ DEFAULT_CONFIG = {
             "key": "0",
             "cooldown_sec": 3.0,
         },
+        "potion_count": {
+            "hp_region": None,      # [x, y, w, h] — HP 포션 슬롯 영역
+            "mp_region": None,      # [x, y, w, h] — MP 포션 슬롯 영역
+            "zero_return": False,   # 수량 0 시 마을 귀환 활성화
+        },
     },
     "map_exit": {
         "enabled": False,
