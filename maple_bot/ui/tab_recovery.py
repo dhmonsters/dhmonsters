@@ -361,8 +361,8 @@ class TabRecovery(QWidget):
             x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
             try:
                 img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
-                from core.ocr_detector import read_number, save_debug_images, _bright_pixel_ratio, _scale_slot
-                ratio = _bright_pixel_ratio(_scale_slot(img))
+                from core.ocr_detector import read_number, save_debug_images, _bright_pixel_ratio, _prepare_slot
+                ratio = _bright_pixel_ratio(_prepare_slot(img))
                 n = read_number(img)
                 if n is not None:
                     return f"{n}개 (밝기:{ratio:.3f})"
