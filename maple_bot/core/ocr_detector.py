@@ -78,19 +78,37 @@ def _get_rapid():
 
 # ── 전처리 ───────────────────────────────────────────────────────────────
 
-def _scale_slot(img: np.ndarray) -> np.ndarray:
-    """슬롯 이미지를 4배 확대한다. easyocr은 원본 컬러 이미지가 가장 잘 동작한다."""
+def _prepare_slot(img: np.ndarray) -> np.ndarray:
+    """마플스토리 퀵슬롯 이미지에서 숫자 영역만 추출해 OCR용으로 전처리한다.
+
+    체커보드(반투명) 배경 + 흰색 픽셀 폰트를 다음 순서로 처리.
+    1. 하단 35% 크롭 — 수량 숫자는 항상 슬롯 하단에 위치
+    2. 6배 확대
+    3. threshold=200 이진화 + 반전 — 흰 글자 → 검은 글자 (OCR 표준)
+    4. 형태학적 Closing — 자릿수 내부 구멍 메우기
+    5. 팽창(Dilate) — 획 두껍게
+    6. 흰색 패딩 추가
+    """
     import cv2
     h, w = img.shape[:2]
-    return cv2.resize(img, (w * 4, h * 4), interpolation=cv2.INTER_CUBIC)
+    bottom = img[int(h * 0.65):, :]
+    big = cv2.resize(bottom, (bottom.shape[1] * 6, bottom.shape[0] * 6),
+                     interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+    _, t = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+    closed = cv2.morphologyEx(t, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    dilated = cv2.dilate(closed, np.ones((3, 3), np.uint8), iterations=1)
+    padded = cv2.copyMakeBorder(dilated, 15, 15, 30, 30,
+                                 cv2.BORDER_CONSTANT, value=255)
+    return cv2.cvtColor(padded, cv2.COLOR_GRAY2BGR)
 
 
 def save_debug_images(img: np.ndarray, folder: str = "debug_ocr") -> None:
-    """원본과 4배 확대 이미지를 folder에 저장한다 (테스트/디버깅용)."""
+    """원본과 전처리 이미지를 folder에 저장한다 (테스트/디버깅용)."""
     import cv2, os
     os.makedirs(folder, exist_ok=True)
     cv2.imwrite(os.path.join(folder, "00_original.png"), img)
-    cv2.imwrite(os.path.join(folder, "01_scaled4x.png"), _scale_slot(img))
+    cv2.imwrite(os.path.join(folder, "01_prepared.png"), _prepare_slot(img))
     logger.info("디버그 이미지 저장: %s", folder)
 
 
@@ -103,23 +121,23 @@ def _bright_pixel_ratio(img: np.ndarray, threshold: int = 200) -> float:
     return float(np.count_nonzero(gray >= threshold)) / gray.size
 
 
-def read_number(scene: np.ndarray, zero_bright_threshold: float = 0.04) -> int | None:
+def read_number(scene: np.ndarray) -> int | None:
     """퀵슬롯 이미지에서 아이템 수량 숫자를 읽어 정수로 반환한다.
 
-    슬롯 전체 이미지(약 32×32px)를 4배 확대해서 easyocr(영어)로 인식.
-    OCR 실패 시: 밝은 픽셀 비율이 zero_bright_threshold 이하면 0 반환
-    (슬롯에 '0' 표시 또는 빈 슬롯 → 밝은 픽셀 극히 적음).
-    우선순위: easyocr(영어) → RapidOCR → 밝기 기반 0 감지 → None
+    슬롯 전체 이미지(약 70×70px)를 받아:
+    1. 하단 35% 크롭 → 6배 확대 → threshold/morphological 전처리
+    2. easyocr 영어 모드로 숫자 인식
+    3. RapidOCR 폴백
     """
     import re
 
-    scaled = _scale_slot(scene)
+    prepared = _prepare_slot(scene)
 
-    # 1순위: easyocr 영어 모드 (단일 자리 숫자에 강함)
+    # 1순위: easyocr 영어 모드
     reader = _get_easy_en()
     if reader is not None:
         try:
-            results = reader.readtext(scaled, detail=0, paragraph=False,
+            results = reader.readtext(prepared, detail=0, paragraph=False,
                                        allowlist="0123456789")
             text = "".join(results).strip()
             m = re.search(r"\d+", text)
@@ -128,17 +146,17 @@ def read_number(scene: np.ndarray, zero_bright_threshold: float = 0.04) -> int |
         except Exception as exc:
             logger.warning("easyocr 숫자 읽기 실패: %s", exc)
 
-    # 2순위: RapidOCR (easyocr 없을 때 폴백)
+    # 2순위: RapidOCR 폴백
     engine = _get_rapid()
     if engine is not None:
         try:
-            result, _ = engine(scaled, use_det=True, use_cls=False, use_rec=True)
+            result, _ = engine(prepared, use_det=True, use_cls=False, use_rec=True)
             if result:
                 text = "".join(r[1] for r in result if r and len(r) > 1)
                 m = re.search(r"\d+", text)
                 if m:
                     return int(m.group())
-            result2, _ = engine(scaled, use_det=False, use_cls=False, use_rec=True)
+            result2, _ = engine(prepared, use_det=False, use_cls=False, use_rec=True)
             if result2:
                 text2 = "".join(r[1] for r in result2 if r and len(r) > 1)
                 m2 = re.search(r"\d+", text2)
@@ -146,14 +164,6 @@ def read_number(scene: np.ndarray, zero_bright_threshold: float = 0.04) -> int |
                     return int(m2.group())
         except Exception as exc:
             logger.warning("RapidOCR 숫자 읽기 실패: %s", exc)
-
-    # 3순위: 밝기 기반 0 감지 (OCR이 '0'이나 '1' 같은 단일 자리를 못 읽을 때)
-    # 슬롯에 숫자가 없거나 '0' 표시: 흰 픽셀이 극히 적음
-    ratio = _bright_pixel_ratio(scaled)
-    logger.debug("밝기 비율: %.3f (임계값: %.3f)", ratio, zero_bright_threshold)
-    if ratio <= zero_bright_threshold:
-        logger.info("밝기 기반 0 감지 (비율=%.3f)", ratio)
-        return 0
 
     return None
 
