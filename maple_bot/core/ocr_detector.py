@@ -1,9 +1,18 @@
 # OCR 기반 화면 텍스트/숫자 감지 — easyocr(영어) 우선, rapidocr 폴백
 from __future__ import annotations
 import logging
+import sys
+import site
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# user site-packages가 sys.path에 없을 경우 명시적으로 추가
+# (PyQt 앱 컨텍스트에서 user site가 누락되는 경우 대비)
+_user_site = site.getusersitepackages()
+if _user_site and _user_site not in sys.path:
+    sys.path.insert(0, _user_site)
+    print(f"[OCR] user site-packages 경로 추가: {_user_site}", flush=True)
 
 # ── easyocr 엔진 (숫자 + 영어, 단일 자리 인식에 강함) ───────────────────
 _easy_en_reader = None
@@ -135,10 +144,12 @@ def read_number(scene: np.ndarray) -> int | None:
 
     # 1순위: easyocr 영어 모드
     reader = _get_easy_en()
+    print(f"[OCR DEBUG] reader={type(reader).__name__ if reader else None} prepared={prepared.shape}", flush=True)
     if reader is not None:
         try:
             results = reader.readtext(prepared, detail=0, paragraph=False,
                                        allowlist="0123456789")
+            print(f"[OCR DEBUG] easyocr raw={results}", flush=True)
             text = "".join(results).strip()
             m = re.search(r"\d+", text)
             if m:
