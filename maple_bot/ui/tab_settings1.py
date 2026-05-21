@@ -50,6 +50,7 @@ class TabSettings1(QWidget):
         layout.setSpacing(8)
 
         layout.addWidget(self._build_lie_detector_group())
+        layout.addWidget(self._build_transparent_shape_group())
         layout.addWidget(self._build_user_detected_group())
         layout.addWidget(self._build_stat_assign_group())
         layout.addStretch()
@@ -763,6 +764,141 @@ class TabSettings1(QWidget):
             os.remove(f)
         self._refresh_template_label()
 
+    # ── 투명 도형 찾기 설정 ───────────────────────────────────────────────
+    def _build_transparent_shape_group(self):
+        group = QGroupBox("투명 도형 찾기 설정")
+        layout = QVBoxLayout(group)
+
+        self.chk_transparent_enabled = QCheckBox("투명 도형 찾기 미니게임 자동 해제")
+        self.chk_transparent_enabled.toggled.connect(self._save_transparent_shape)
+        layout.addWidget(self.chk_transparent_enabled)
+
+        # 타이틀 템플릿 캡처 행
+        tpl_row = QHBoxLayout()
+        self.lbl_transparent_title = QLabel("타이틀 템플릿: 없음")
+        self.lbl_transparent_title.setStyleSheet("color: red;")
+        btn_tpl = QPushButton("+ 타이틀 템플릿 캡처")
+        btn_tpl.setToolTip(
+            "게임 팝업 상단의 '투명 도형 찾기' 제목 텍스트 영역을\n"
+            "드래그로 선택하면 templates/transparent_shape_title.png 로 저장됩니다."
+        )
+        btn_tpl.clicked.connect(self._capture_transparent_title)
+        btn_tpl_del = QPushButton("삭제")
+        btn_tpl_del.setFixedWidth(45)
+        btn_tpl_del.clicked.connect(self._delete_transparent_title)
+        tpl_row.addWidget(self.lbl_transparent_title)
+        tpl_row.addStretch()
+        tpl_row.addWidget(btn_tpl)
+        tpl_row.addWidget(btn_tpl_del)
+        layout.addLayout(tpl_row)
+
+        # 게임판 ROI 캡처 행
+        roi_row = QHBoxLayout()
+        self.lbl_transparent_roi = QLabel("게임판 영역: 미설정")
+        self.lbl_transparent_roi.setStyleSheet("color: red;")
+        btn_roi = QPushButton("+ 게임판 영역 캡처")
+        btn_roi.setToolTip(
+            "게임판(갈색 배경 영역 전체)을 드래그로 선택하세요.\n"
+            "게임창 client 좌표로 자동 변환되어 저장됩니다."
+        )
+        btn_roi.clicked.connect(self._capture_transparent_roi)
+        btn_roi_del = QPushButton("삭제")
+        btn_roi_del.setFixedWidth(45)
+        btn_roi_del.clicked.connect(self._delete_transparent_roi)
+        roi_row.addWidget(self.lbl_transparent_roi)
+        roi_row.addStretch()
+        roi_row.addWidget(btn_roi)
+        roi_row.addWidget(btn_roi_del)
+        layout.addLayout(roi_row)
+
+        self.chk_transparent_debug = QCheckBox("디버그 오버레이 표시 (cv2 창)")
+        self.chk_transparent_debug.toggled.connect(self._save_transparent_shape)
+        layout.addWidget(self.chk_transparent_debug)
+
+        return group
+
+    def _refresh_transparent_status_labels(self):
+        import os
+        path = "templates/transparent_shape_title.png"
+        if os.path.exists(path):
+            self.lbl_transparent_title.setText("타이틀 템플릿: 저장됨")
+            self.lbl_transparent_title.setStyleSheet("color: green;")
+        else:
+            self.lbl_transparent_title.setText("타이틀 템플릿: 없음")
+            self.lbl_transparent_title.setStyleSheet("color: red;")
+
+        roi_cfg = self.config.get("settings1", "transparent_shape", "board_roi")
+        if roi_cfg and roi_cfg.get("w"):
+            w, h = roi_cfg["w"], roi_cfg["h"]
+            cx, cy = roi_cfg["client_x"], roi_cfg["client_y"]
+            self.lbl_transparent_roi.setText(f"게임판: client({cx},{cy}) {w}×{h}")
+            self.lbl_transparent_roi.setStyleSheet("color: green;")
+        else:
+            self.lbl_transparent_roi.setText("게임판 영역: 미설정")
+            self.lbl_transparent_roi.setStyleSheet("color: red;")
+
+    def _capture_transparent_title(self):
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_transparent_title_region)
+        self._transparent_title_selector = sel
+        sel.show()
+
+    def _save_transparent_title_region(self, x, y, w, h):
+        import mss
+        import os
+        os.makedirs("templates", exist_ok=True)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite("templates/transparent_shape_title.png", img)
+        self._refresh_transparent_status_labels()
+        QMessageBox.information(self, "완료", f"타이틀 템플릿 저장 완료 ({w}×{h}px)")
+
+    def _delete_transparent_title(self):
+        import os
+        path = "templates/transparent_shape_title.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_transparent_status_labels()
+
+    def _capture_transparent_roi(self):
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_transparent_roi_region)
+        self._transparent_roi_selector = sel
+        sel.show()
+
+    def _save_transparent_roi_region(self, abs_x, abs_y, w, h):
+        from core.screen_reader import ScreenReader
+        window_title = self.config.get("settings2", "game_window_title") or "MapleStory"
+        sr = ScreenReader()
+        origin = sr.get_window_client_origin(window_title)
+        if origin:
+            client_x = abs_x - origin[0]
+            client_y = abs_y - origin[1]
+        else:
+            client_x, client_y = abs_x, abs_y
+        self.config.set("settings1", "transparent_shape", "board_roi", {
+            "client_x": client_x,
+            "client_y": client_y,
+            "w": w,
+            "h": h,
+        })
+        self.config.save()
+        self._refresh_transparent_status_labels()
+        QMessageBox.information(self, "완료", f"게임판 영역 저장 완료 (client {client_x},{client_y}, {w}×{h}px)")
+
+    def _delete_transparent_roi(self):
+        self.config.set("settings1", "transparent_shape", "board_roi", None)
+        self.config.save()
+        self._refresh_transparent_status_labels()
+
+    def _save_transparent_shape(self):
+        self.config.set("settings1", "transparent_shape", "enabled",
+                        self.chk_transparent_enabled.isChecked())
+        self.config.set("settings1", "transparent_shape", "debug_overlay",
+                        self.chk_transparent_debug.isChecked())
+        self.config.save()
+
     # ── 유저발견 시 설정 ───────────────────────────────────────────────
     def _build_user_detected_group(self):
         group = QGroupBox("유저발견 시 설정")
@@ -858,6 +994,10 @@ class TabSettings1(QWidget):
         for stat in ["STR", "INT", "DEX", "LUK"]:
             self.stat_spins[stat].setValue(sa.get(stat, 0))
 
+        ts = self.config.get("settings1", "transparent_shape") or {}
+        self.chk_transparent_enabled.setChecked(bool(ts.get("enabled", False)))
+        self.chk_transparent_debug.setChecked(bool(ts.get("debug_overlay", False)))
+        self._refresh_transparent_status_labels()
 
     def save_to_config(self):
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())
