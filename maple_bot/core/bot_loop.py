@@ -21,10 +21,11 @@ from core.floor_hunter import FloorHunter
 logger = logging.getLogger(__name__)
 
 TEMPLATES = {
-    "lie_detector": "templates/lie_detector.png",
-    "player_on_map": "templates/player_on_map.png",
-    "level_up":      "templates/level_up.png",
-    "dead":          "templates/dead.png",
+    "lie_detector":      "templates/lie_detector.png",
+    "transparent_shape": "templates/transparent_shape_title.png",
+    "player_on_map":     "templates/player_on_map.png",
+    "level_up":          "templates/level_up.png",
+    "dead":              "templates/dead.png",
 }
 
 SAFETY_CHECK_INTERVAL = 1.0   # 화면 캡처 기반 안전 감지 주기 (초)
@@ -80,6 +81,8 @@ class BotLoop:
         self._enable_potion     = True
         self._enable_lie_notify = True   # 거탐 알림 (경보음 + 텔레그램)
         self._enable_lie_solve  = True   # 거탐 해제 (퍼즐 자동 풀기)
+        self._enable_transparent_shape = True  # 투명 도형 찾기 자동 해제
+        self._transparent_game  = None   # lazy init: TransparentShapeGame
         self._anti_mob_active   = False  # 방지몹 해제 중 재진입 방지
 
     def _game_window_title(self) -> str:
@@ -128,13 +131,15 @@ class BotLoop:
 
     def set_modules(self, attack: bool = True, move: bool = True,
                     potion: bool = True,
-                    lie_notify: bool = True, lie_solve: bool = True) -> None:
+                    lie_notify: bool = True, lie_solve: bool = True,
+                    transparent_shape: bool = True) -> None:
         """모듈별 활성화 여부를 설정한다. 봇 실행 중에도 적용된다."""
-        self._enable_attack     = attack
-        self._enable_move       = move
-        self._enable_potion     = potion
-        self._enable_lie_notify = lie_notify
-        self._enable_lie_solve  = lie_solve
+        self._enable_attack            = attack
+        self._enable_move              = move
+        self._enable_potion            = potion
+        self._enable_lie_notify        = lie_notify
+        self._enable_lie_solve         = lie_solve
+        self._enable_transparent_shape = transparent_shape
 
     def reload_pattern(self) -> None:
         self._load_patterns()
@@ -312,6 +317,14 @@ class BotLoop:
                             if use_floor_hunt:
                                 fh_last_side = ""   # 거탐 해제 후 직전 방향 무효화
                                 if fh_state != "patrol":  # 층 이동 중이었다면 순찰로 복귀
+                                    self._input.key_up("up")
+                                    self._map_navigator.release_direction()
+                                    fh_state = "patrol"
+                            continue
+                        if self._enable_transparent_shape and self._check_transparent_shape(screenshot):
+                            if use_floor_hunt:
+                                fh_last_side = ""
+                                if fh_state != "patrol":
                                     self._input.key_up("up")
                                     self._map_navigator.release_direction()
                                     fh_state = "patrol"
@@ -739,6 +752,43 @@ class BotLoop:
         logger.info("포션 루프 종료")
 
     # ── 감지 핸들러 ───────────────────────────────────────────────────
+    def _check_transparent_shape(self, screenshot) -> bool:
+        """투명 도형 찾기 미니게임 감지 시 폐루프 추적 루프를 실행한다."""
+        cfg = self._config.get("settings1", "transparent_shape") or {}
+        if not cfg.get("enabled"):
+            return False
+
+        # lazy init
+        if self._transparent_game is None:
+            from core.transparent_shape_game import TransparentShapeGame
+            self._transparent_game = TransparentShapeGame(
+                self._screen, self._input, self._config, self._stop_event
+            )
+            self._transparent_game.window_title = self._game_window_title()
+
+        title_pos = self._transparent_game.detect_title(screenshot)
+        if title_pos is None:
+            return False
+
+        self._status("투명 도형 찾기 감지! 마우스 추적 시작...")
+        floor_cfg = self._config.get("floor_hunt") or {}
+        if floor_cfg.get("enabled"):
+            self._floor_hunter.pause()
+        try:
+            self._input.focus_game_window()
+            self._transparent_game.run_follow_loop(self._status)
+        finally:
+            if floor_cfg.get("enabled"):
+                self._floor_hunter.resume()
+            if cfg.get("debug_overlay"):
+                import cv2
+                try:
+                    cv2.destroyWindow("transparent_shape_debug")
+                except Exception:
+                    pass
+            self._status("투명 도형 찾기: 완료, 사냥 재개")
+        return True
+
     def _check_lie_detector(self, screenshot) -> bool:
         cfg = self._config.get("settings1", "lie_detector") or {}
         if not cfg.get("enabled"):

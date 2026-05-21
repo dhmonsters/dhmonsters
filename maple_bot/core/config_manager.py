@@ -41,6 +41,11 @@ DEFAULT_CONFIG = {
             "shutdown_pc": False,
             "reconnect_after": False,
         },
+        "transparent_shape": {
+            "enabled": False,
+            "debug_overlay": False,
+            "board_roi": None,   # {"client_x":..., "client_y":..., "w":..., "h":...}
+        },
         "user_detected": {
             "enabled": False,
             "interval_minutes": 5,
