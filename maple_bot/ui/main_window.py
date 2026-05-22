@@ -20,7 +20,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = ConfigManager()
         self.hotkey_manager = HotkeyManager(self)
-        self.setWindowTitle("DHMONSTERS v1.1.7")
+        self.setWindowTitle("DHMONSTERS v1.1.8")
         self.setMinimumSize(520, 600)
         self._build_ui()
         self._setup_bot()

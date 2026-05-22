@@ -294,9 +294,11 @@ class BotLoop:
             else:
                 self._status("⚠ [층별] 구역이 없습니다 — 좌표 탭에서 구역을 먼저 추가하세요.")
 
-        last_safety = 0.0
-        last_focus  = 0.0
-        FOCUS_INTERVAL = 4.0
+        last_safety      = 0.0
+        last_focus       = 0.0
+        last_potion_cnt  = 0.0
+        FOCUS_INTERVAL        = 4.0
+        POTION_CNT_INTERVAL   = 30.0   # 포션 수량 체크 주기 (초)
         self._map_exit_fail = 0  # 사냥터 이탈 감지 연속 불일치 카운터
         try:
             while not self._stop_event.is_set():
@@ -338,6 +340,11 @@ class BotLoop:
                         # 매크로방지몹 감지
                         if not self._anti_mob_active:
                             self._check_anti_mob(screenshot)
+
+                    # 포션 수량 체크 (30초마다)
+                    if now - last_potion_cnt >= POTION_CNT_INTERVAL:
+                        last_potion_cnt = now
+                        self._check_potion_count()
 
                     # 층별 핑퐁 상태머신
                     if use_floor_hunt and fh_zones:
@@ -1267,6 +1274,60 @@ class BotLoop:
             self._send_map_exit_telegram()
         if action in ("stop", "both"):
             self._stop_event.set()
+
+    def _check_potion_count(self) -> None:
+        """포션 슬롯 영역을 OCR로 읽어 수량 0이면 마을 귀환을 실행한다."""
+        pc = self._config.get("recovery", "potion_count") or {}
+        if not pc.get("zero_return", False):
+            return
+
+        ts = self._config.get("town_scroll") or {}
+        if not ts.get("enabled", False):
+            return
+
+        hp_region = pc.get("hp_region")
+        mp_region = pc.get("mp_region")
+        if not hp_region and not mp_region:
+            return
+
+        from core.ocr_detector import read_number
+
+        def _is_zero(region) -> bool | None:
+            """수량 숫자 영역을 OCR로 읽어 0이면 True, 수량 있으면 False, 실패면 None 반환."""
+            if not region or len(region) < 4:
+                return None
+            x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
+            try:
+                img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
+                n = read_number(img)
+                if n is None:
+                    return None  # 읽기 실패 — 오탐 방지를 위해 무시
+                self._status(f"[포션수량] {n}개")
+                return n == 0
+            except Exception:
+                return None
+
+        hp_zero = _is_zero(hp_region) if hp_region else None
+        mp_zero = _is_zero(mp_region) if mp_region else None
+
+        # 읽기 실패(None)는 무시, 명확히 0인 경우만 귀환
+        if hp_zero is not True and mp_zero is not True:
+            return
+
+        kind = "HP" if hp_zero else "MP"
+        if hp_zero and mp_zero:
+            kind = "HP+MP"
+        self._status(f"⚠️ {kind} 포션 수량 0 감지 — 마을 귀환 실행")
+        self._use_town_scroll()
+
+    def _use_town_scroll(self) -> None:
+        """마을 귀환 주문서 키를 눌러 귀환하고 봇을 정지한다."""
+        ts = self._config.get("town_scroll") or {}
+        key = ts.get("key", "")
+        if key:
+            self._input.press_key(key)
+        time.sleep(1.0)
+        self._stop_event.set()
 
     def _send_map_exit_telegram(self) -> None:
         """사냥터 이탈 시 텔레그램 알림 발송 (기존 거탐 설정 공유)."""

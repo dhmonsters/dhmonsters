@@ -31,6 +31,7 @@ class TabRecovery(QWidget):
         layout.addWidget(self._build_mp_group())
         layout.addWidget(self._build_pet_food_group())
         layout.addWidget(self._build_bar_coord_group())
+        layout.addWidget(self._build_potion_count_group())
 
         btn_save = QPushButton("설정 저장")
         btn_save.clicked.connect(self.save_to_config)
@@ -246,6 +247,135 @@ class TabRecovery(QWidget):
 
         return group
 
+    def _build_potion_count_group(self) -> QGroupBox:
+        group = QGroupBox("포션 수량 확인 (수량 0 시 마을 귀환)")
+        layout = QVBoxLayout(group)
+
+        note = QLabel(
+            "퀵슬롯 아이템 칸 전체를 드래그로 지정하세요 (수량 숫자가 보이는 슬롯 1칸).\n"
+            "숫자 부분만 잡으면 인식 실패 — 슬롯 전체(약 32×32px)를 선택해야 합니다.\n"
+            "마을 귀환 주문서(위치 탭)가 활성화되어야 귀환이 작동합니다."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(note)
+
+        self.chk_potion_zero_return = QCheckBox("수량 0 시 마을 귀환 활성화")
+        layout.addWidget(self.chk_potion_zero_return)
+
+        # HP 포션 슬롯 영역
+        hp_row = QHBoxLayout()
+        hp_row.addWidget(QLabel("HP 포션 슬롯"))
+        self.lbl_hp_count_region = QLabel("미설정")
+        self.lbl_hp_count_region.setStyleSheet("color: gray; font-size: 10px;")
+        hp_row.addWidget(self.lbl_hp_count_region)
+        hp_row.addStretch()
+        btn_hp_cnt = QPushButton("📍 드래그 설정")
+        btn_hp_cnt.setFixedWidth(90)
+        btn_hp_cnt.setToolTip("퀵슬롯 칸 전체를 드래그하세요 (수량 숫자가 있는 슬롯 1칸 전체, 약 32×32px).")
+        btn_hp_cnt.clicked.connect(self._select_hp_count_region)
+        btn_hp_cnt_rst = QPushButton("✕")
+        btn_hp_cnt_rst.setFixedWidth(24)
+        btn_hp_cnt_rst.clicked.connect(self._reset_hp_count_region)
+        hp_row.addWidget(btn_hp_cnt)
+        hp_row.addWidget(btn_hp_cnt_rst)
+        layout.addLayout(hp_row)
+
+        # MP 포션 슬롯 영역
+        mp_row = QHBoxLayout()
+        mp_row.addWidget(QLabel("MP 포션 슬롯"))
+        self.lbl_mp_count_region = QLabel("미설정")
+        self.lbl_mp_count_region.setStyleSheet("color: gray; font-size: 10px;")
+        mp_row.addWidget(self.lbl_mp_count_region)
+        mp_row.addStretch()
+        btn_mp_cnt = QPushButton("📍 드래그 설정")
+        btn_mp_cnt.setFixedWidth(90)
+        btn_mp_cnt.setToolTip("퀵슬롯 칸 전체를 드래그하세요 (수량 숫자가 있는 슬롯 1칸 전체, 약 32×32px).")
+        btn_mp_cnt.clicked.connect(self._select_mp_count_region)
+        btn_mp_cnt_rst = QPushButton("✕")
+        btn_mp_cnt_rst.setFixedWidth(24)
+        btn_mp_cnt_rst.clicked.connect(self._reset_mp_count_region)
+        mp_row.addWidget(btn_mp_cnt)
+        mp_row.addWidget(btn_mp_cnt_rst)
+        layout.addLayout(mp_row)
+
+        # 테스트 버튼
+        test_row = QHBoxLayout()
+        btn_test_cnt = QPushButton("수량 상태 확인")
+        btn_test_cnt.clicked.connect(self._test_potion_count)
+        self.lbl_count_result = QLabel("HP: -  MP: -")
+        test_row.addWidget(btn_test_cnt)
+        test_row.addWidget(self.lbl_count_result)
+        test_row.addStretch()
+        layout.addLayout(test_row)
+
+        return group
+
+    def _select_hp_count_region(self) -> None:
+        self._selector = RegionSelector()
+        self._selector.region_selected.connect(self._apply_hp_count_region)
+        self._selector.show()
+
+    def _select_mp_count_region(self) -> None:
+        self._selector = RegionSelector()
+        self._selector.region_selected.connect(self._apply_mp_count_region)
+        self._selector.show()
+
+    def _apply_hp_count_region(self, x: int, y: int, w: int, h: int) -> None:
+        self.config.set("recovery", "potion_count", "hp_region", [x, y, w, h])
+        self.config.save()
+        self.lbl_hp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
+        self.lbl_hp_count_region.setStyleSheet("color: green; font-size: 10px;")
+
+    def _apply_mp_count_region(self, x: int, y: int, w: int, h: int) -> None:
+        self.config.set("recovery", "potion_count", "mp_region", [x, y, w, h])
+        self.config.save()
+        self.lbl_mp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
+        self.lbl_mp_count_region.setStyleSheet("color: green; font-size: 10px;")
+
+    def _reset_hp_count_region(self) -> None:
+        self.config.set("recovery", "potion_count", "hp_region", None)
+        self.config.save()
+        self.lbl_hp_count_region.setText("미설정")
+        self.lbl_hp_count_region.setStyleSheet("color: gray; font-size: 10px;")
+
+    def _reset_mp_count_region(self) -> None:
+        self.config.set("recovery", "potion_count", "mp_region", None)
+        self.config.save()
+        self.lbl_mp_count_region.setText("미설정")
+        self.lbl_mp_count_region.setStyleSheet("color: gray; font-size: 10px;")
+
+    def _test_potion_count(self) -> None:
+        """포션 슬롯 영역을 OCR로 읽어 수량을 표시한다. 실패 시 debug_ocr/ 폴더에 이미지 저장."""
+        pc = self.config.get("recovery", "potion_count") or {}
+        hp_r = pc.get("hp_region")
+        mp_r = pc.get("mp_region")
+
+        self.lbl_count_result.setText("읽는 중...")
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+
+        def _read_count(region, label: str) -> str:
+            if not region or len(region) < 4:
+                return "미설정"
+            x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
+            try:
+                img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
+                from core.ocr_detector import read_number, save_debug_images, _bright_pixel_ratio, _prepare_slot
+                ratio = _bright_pixel_ratio(_prepare_slot(img))
+                n = read_number(img)
+                if n is not None:
+                    return f"{n}개 (밝기:{ratio:.3f})"
+                # OCR 실패 → 디버그 이미지 저장
+                save_debug_images(img, folder=f"debug_ocr_{label}")
+                return f"읽기 실패 (밝기:{ratio:.3f}) → debug_ocr_{label}/"
+            except Exception as e:
+                return f"오류: {e}"
+
+        hp_s = _read_count(hp_r, "hp")
+        mp_s = _read_count(mp_r, "mp")
+        self.lbl_count_result.setText(f"HP: {hp_s}  MP: {mp_s}")
+
     # ── HP/MP 비율 테스트 ─────────────────────────────────────────────
     def _test_ratio(self) -> None:
         """현재 화면에서 HP/MP 비율을 읽어 표시한다."""
@@ -334,6 +464,13 @@ class TabRecovery(QWidget):
             "key":          self.edit_pet_key.text().strip(),
             "interval_min": self.spin_pet_interval.value(),
         })
+        # 포션 수량 확인 설정 저장 (영역은 드래그 시 즉시 저장, 여기서는 체크박스만)
+        pc = self.config.get("recovery", "potion_count") or {}
+        self.config.set("recovery", "potion_count", {
+            "hp_region":    pc.get("hp_region"),
+            "mp_region":    pc.get("mp_region"),
+            "zero_return":  self.chk_potion_zero_return.isChecked(),
+        })
         self.config.save()
 
     def load_from_config(self) -> None:
@@ -368,4 +505,18 @@ class TabRecovery(QWidget):
         self.spin_mp_x.setValue(mp_coord.get("x", 0))
         self.spin_mp_y.setValue(mp_coord.get("y", 0))
         self.spin_mp_w.setValue(mp_coord.get("width", 0))
+
+        # 포션 수량 확인
+        pc = self.config.get("recovery", "potion_count") or {}
+        self.chk_potion_zero_return.setChecked(bool(pc.get("zero_return", False)))
+        hp_r = pc.get("hp_region")
+        if hp_r and len(hp_r) == 4:
+            x, y, w, h = hp_r
+            self.lbl_hp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
+            self.lbl_hp_count_region.setStyleSheet("color: green; font-size: 10px;")
+        mp_r = pc.get("mp_region")
+        if mp_r and len(mp_r) == 4:
+            x, y, w, h = mp_r
+            self.lbl_mp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
+            self.lbl_mp_count_region.setStyleSheet("color: green; font-size: 10px;")
 

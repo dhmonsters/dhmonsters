@@ -15,7 +15,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from ui.region_selector import RegionSelector
-from ui.widgets import HotkeyCapture
 
 
 class TabPosition(QWidget):
@@ -385,7 +384,7 @@ class TabPosition(QWidget):
         group = QGroupBox("마을 귀환 주문서")
         layout = QVBoxLayout(group)
 
-        note = QLabel("단축키를 누르면 설정된 키를 눌러 마을로 귀환합니다.")
+        note = QLabel("포션 수량이 0이 되거나 봇 내부에서 귀환 명령 시 설정된 키를 눌러 마을로 귀환합니다.")
         note.setStyleSheet("color: gray; font-size: 10px;")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -399,10 +398,6 @@ class TabPosition(QWidget):
         self.edit_town_scroll_key.setFixedWidth(55)
         self.edit_town_scroll_key.setToolTip("귀환 주문서가 등록된 단축키 (예: 9, 0, F1)")
         row.addWidget(self.edit_town_scroll_key)
-        row.addSpacing(16)
-        row.addWidget(QLabel("단축키"))
-        self.btn_town_scroll_hk = HotkeyCapture("", self._apply_town_scroll_hotkey)
-        row.addWidget(self.btn_town_scroll_hk)
         row.addStretch()
         layout.addLayout(row)
 
@@ -413,31 +408,11 @@ class TabPosition(QWidget):
 
         return group
 
-    def _apply_town_scroll_hotkey(self, key: str) -> None:
-        """글로벌 단축키 등록 — 눌리면 귀환 키를 입력한다."""
-        if not self._hk or not key:
-            return
-
-        def _use_scroll():
-            if not self.chk_town_scroll.isChecked():
-                return
-            scroll_key = self.edit_town_scroll_key.text().strip()
-            if not scroll_key:
-                return
-            from core.input_controller import InputController
-            InputController("").press_key(scroll_key)
-
-        self._hk.register("town_scroll", key, _use_scroll)
-
     def _save_town_scroll_settings(self) -> None:
         key = self.edit_town_scroll_key.text().strip()
-        hk  = self.btn_town_scroll_hk.current_key() or ""
         self.config.set("town_scroll", "enabled", self.chk_town_scroll.isChecked())
         self.config.set("town_scroll", "key",     key)
-        self.config.set("town_scroll", "hotkey",  hk)
         self.config.save()
-        if hk and self._hk:
-            self._apply_town_scroll_hotkey(hk)
         QMessageBox.information(self, "저장 완료", "마을 귀환 주문서 설정이 저장되었습니다.")
 
     # ── 사냥터 복귀 (플레이스홀더) ───────────────────────────────────
@@ -458,9 +433,6 @@ class TabPosition(QWidget):
     # ── 핫키 매니저 주입 ─────────────────────────────────────────────
     def set_hotkey_manager(self, hk) -> None:
         self._hk = hk
-        town_key = self.btn_town_scroll_hk.current_key()
-        if town_key:
-            self._apply_town_scroll_hotkey(town_key)
 
     # ── config 연동 ───────────────────────────────────────────────────
     def load_from_config(self) -> None:
@@ -499,13 +471,9 @@ class TabPosition(QWidget):
         ts = self.config.get("town_scroll") or {}
         self.chk_town_scroll.setChecked(bool(ts.get("enabled", False)))
         self.edit_town_scroll_key.setText(ts.get("key", "9"))
-        saved_hk = ts.get("hotkey", "")
-        if saved_hk:
-            self.btn_town_scroll_hk.set_key(saved_hk)
 
     def save_to_config(self) -> None:
         # 마을 귀환 주문서
         self.config.set("town_scroll", "enabled", self.chk_town_scroll.isChecked())
         self.config.set("town_scroll", "key",     self.edit_town_scroll_key.text().strip())
-        self.config.set("town_scroll", "hotkey",  self.btn_town_scroll_hk.current_key() or "")
         self.config.save()
