@@ -65,8 +65,24 @@ DEFAULT_CONFIG = {
     "attack": {
         "key":               "ctrl",
         "monster_template":  "",
+        "monster_folder":    "",     # 몬스터 이미지 폴더 경로 (비우면 monsters/ 루트 사용)
         "jump_before_attack": False,
         "riding_on_rope":     False,
+        "range_px":           150,    # 오버레이 공격 범위 박스 좌/우 픽셀
+        # ── ScreenPositionResolver 파라미터 ─────────────────────────
+        "camera_w_ratio":     0.5,    # 미니맵 폭 대비 카메라 가시 폭 비율 (0.0~1.0)
+        "char_y_ratio":       0.6,    # 화면 높이 대비 캐릭터 Y 비율 (0.0~1.0)
+        "char_offset_x":      0,      # 변환 결과 X 미세 보정 픽셀
+        "char_offset_y":      0,      # 변환 결과 Y 미세 보정 픽셀
+        "floor_profiles":     [],     # [{minimap_y, screen_y, name}, ...] 층별 Y 보정
+        "box_h":              120,    # 공격 박스 높이 (픽셀)
+        "monster_range_h":       120,   # 몬스터 인식 범위 박스 높이 (픽셀)
+        "monster_range_px":      600,   # 몬스터 인식 범위 박스 좌/우 픽셀 (0=화면 전체)
+        "monster_range_y_offset": 0,   # 몬스터 인식 범위 Y 오프셋 (양수=위로, 공격박스와 독립)
+        "local_window_size":   80,    # 디버그 미니맵 패널 크롭 범위 (미니맵 픽셀, 작을수록 더 확대)
+        "deadzone_ratio":      0.0,   # DeadZone 비율 (0=항상 중앙, 0.3=중앙 30% 고정 영역)
+        "name_tag_threshold":  0.70,  # 이름표 템플릿 매칭 신뢰도 임계값 (0.3~1.0)
+        "name_tag_y_offset":   0,     # 이름표 중앙에서 위로 이동할 픽셀 (양수=위쪽)
     },
     "hunt_mode": "key",   # "key" | "image" | "coordinate"
     "hunt_grounds": {
