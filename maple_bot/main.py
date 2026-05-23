@@ -8,6 +8,22 @@ import threading
 _base = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
 os.chdir(_base)
 
+# ── 미처리 예외를 error.log 에 기록 (noconsole 빌드 디버깅용) ───────────
+import traceback
+import datetime
+
+def _log_exception(exc_type, exc_value, exc_tb):
+    try:
+        with open("error.log", "a", encoding="utf-8") as f:
+            f.write(f"\n{'='*60}\n")
+            f.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]\n")
+            f.write("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+    except Exception:
+        pass
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+sys.excepthook = _log_exception
+
 # PyInstaller 번들 환경에서 certifi CA 인증서 경로 수동 지정
 # → requests HTTPS 연결 시 "TLS CA certificate bundle" 오류 방지
 if getattr(sys, "frozen", False):
