@@ -14,9 +14,9 @@ _PROJECT  = "djdpfwoolwqrasqretng"
 _ANON_KEY = "sb_publishable_qUnX4JoLF1MqNzjZGSURmQ_HerOiHZr"
 _BASE_URL = f"https://{_PROJECT}.supabase.co"
 
-# 서비스 롤 키 (Supabase Dashboard → Settings → API → service_role)
-# 처음 실행 시 입력 창이 나옵니다.
+# 인증 키 저장 파일 (처음 실행 시 입력 창이 나옵니다)
 _SERVICE_KEY_FILE = os.path.join(os.path.dirname(__file__), ".service_key")
+_ADMIN_KEY_FILE   = os.path.join(os.path.dirname(__file__), ".admin_key")
 
 # ── HWID (현재 PC) ───────────────────────────────────────────────────────
 def _get_hwid() -> str:
@@ -47,20 +47,42 @@ def _save_service_key(key: str) -> None:
     with open(_SERVICE_KEY_FILE, "w") as f:
         f.write(key.strip())
 
+def _load_admin_key() -> str:
+    if os.path.exists(_ADMIN_KEY_FILE):
+        with open(_ADMIN_KEY_FILE) as f:
+            return f.read().strip()
+    return ""
 
-def generate_license(name: str, days: int) -> dict:
-    """generate Edge Function 호출 → 라이선스 키 반환."""
+def _save_admin_key(key: str) -> None:
+    with open(_ADMIN_KEY_FILE, "w") as f:
+        f.write(key.strip())
+
+
+def generate_license(name: str, days: int) -> str:
+    """generate Edge Function 호출 → 라이선스 키(str) 반환."""
     import requests
     expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
     resp = requests.post(
         f"{_BASE_URL}/functions/v1/generate",
-        headers=_headers(service=True),
+        headers={
+            **_headers(service=True),
+            "X-Admin-Key": _load_admin_key(),
+        },
         json={"expires_at": expires_at, "note": name},
         timeout=10,
     )
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"서버 오류 {resp.status_code}: {resp.text}")
-    return resp.json()
+    data = resp.json()
+    # 응답 형식: {"keys": ["XXXX-XXXX-XXXX-XXXX"]}
+    keys = data.get("keys") or data.get("key") or []
+    if isinstance(keys, list):
+        key = keys[0] if keys else ""
+    else:
+        key = str(keys)
+    if not key:
+        raise RuntimeError(f"서버 응답에 키 없음: {data}")
+    return key
 
 
 def fetch_licenses() -> list[dict]:
@@ -199,7 +221,7 @@ class App(tk.Tk):
         self._status = tk.Label(btn_bar, text="", fg="gray", anchor="w")
         self._status.pack(side="left", padx=12)
 
-        tk.Label(btn_bar, text="🔑 서비스 키 변경",
+        tk.Label(btn_bar, text="⚙ 키 설정 변경",
                  fg="blue", cursor="hand2").pack(side="right", padx=8)
         btn_bar.winfo_children()[-1].bind("<Button-1>", lambda _: self._ask_service_key())
 
@@ -214,31 +236,41 @@ class App(tk.Tk):
 
     # ── 서비스 키 확인/입력 ───────────────────────────────────────────
     def _check_service_key(self):
-        if not _load_service_key():
+        if not _load_service_key() or not _load_admin_key():
             self.after(200, self._ask_service_key)
         else:
             self.after(300, self._refresh)
 
     def _ask_service_key(self):
         dlg = tk.Toplevel(self)
-        dlg.title("Supabase 서비스 롤 키 입력")
-        dlg.geometry("520x140")
+        dlg.title("Supabase 키 설정")
+        dlg.geometry("540x200")
         dlg.grab_set()
-        tk.Label(dlg, text="Supabase Dashboard → Settings → API → service_role 키",
-                 wraplength=480).pack(padx=16, pady=(14, 4))
-        var = tk.StringVar(value=_load_service_key())
-        ent = tk.Entry(dlg, textvariable=var, width=60, show="*")
-        ent.pack(padx=16)
+
+        tk.Label(dlg, text="서비스 롤 키  (Settings → API → service_role)",
+                 anchor="w").grid(row=0, column=0, padx=16, pady=(16, 2), sticky="w")
+        svc_var = tk.StringVar(value=_load_service_key())
+        tk.Entry(dlg, textvariable=svc_var, width=60, show="*").grid(row=1, column=0, padx=16)
+
+        tk.Label(dlg, text="관리자 키  (ADMIN_KEY 시크릿 값)",
+                 anchor="w").grid(row=2, column=0, padx=16, pady=(12, 2), sticky="w")
+        adm_var = tk.StringVar(value=_load_admin_key())
+        tk.Entry(dlg, textvariable=adm_var, width=60, show="*").grid(row=3, column=0, padx=16)
+
         def _save():
-            k = var.get().strip()
-            if not k:
+            svc = svc_var.get().strip()
+            adm = adm_var.get().strip()
+            if not svc or not adm:
+                messagebox.showwarning("입력 오류", "두 키 모두 입력하세요.", parent=dlg)
                 return
-            _save_service_key(k)
+            _save_service_key(svc)
+            _save_admin_key(adm)
             dlg.destroy()
             self._refresh()
+
         tk.Button(dlg, text="저장", command=_save,
-                  bg="#4CAF50", fg="white", width=12).pack(pady=10)
-        ent.focus()
+                  bg="#4CAF50", fg="white", width=12).grid(row=4, column=0, pady=14)
+        dlg.grid_columnconfigure(0, weight=1)
 
     # ── 라이선스 발급 ─────────────────────────────────────────────────
     def _on_issue(self):
@@ -259,8 +291,7 @@ class App(tk.Tk):
 
         def _do():
             try:
-                result = generate_license(name, days)
-                key = result.get("key", result.get("license_key", ""))
+                key = generate_license(name, days)
                 self.after(0, lambda: self._issue_done(key, name, days))
             except Exception as e:
                 self.after(0, lambda: self._issue_error(str(e)))
@@ -270,7 +301,7 @@ class App(tk.Tk):
     def _issue_done(self, key: str, name: str, days: int):
         self._btn_issue.config(state="normal", text="+ 라이선스 발급")
         if not key:
-            messagebox.showerror("오류", "서버 응답에서 키를 찾을 수 없습니다.", parent=self)
+            messagebox.showerror("오류", "서버 응답에서 키를 찾을 수 없습니다.\n관리자 키를 확인하세요.", parent=self)
             return
         # 클립보드에 즉시 복사
         self.clipboard_clear()
