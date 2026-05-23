@@ -23,14 +23,13 @@ def _send_telegram(token: str, chat_id: str, text: str) -> tuple[bool, str]:
         return False, str(e)
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QCheckBox, QSpinBox, QComboBox, QLabel, QLineEdit, QScrollArea,
-    QPushButton, QMessageBox, QInputDialog,
+    QCheckBox, QSpinBox, QLabel, QLineEdit, QScrollArea,
+    QPushButton, QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from ui.region_selector import RegionSelector
 from ui.widgets import HotkeyCapture
-from ui.dialog_lie_setup import LieDetectorSetupDialog
 
 
 class TabSettings1(QWidget):
@@ -113,119 +112,6 @@ class TabSettings1(QWidget):
         hk_row.addStretch()
         layout.addLayout(hk_row)
 
-        # ── 퍼즐 해제 좌표 (2~5번 영역) ─────────────────────────────
-        layout.addWidget(QLabel("── 퍼즐 해제 좌표 ──────────────────"))
-
-        # 창 인식 상태 안내 라벨
-        self.lbl_coord_mode = QLabel()
-        self.lbl_coord_mode.setStyleSheet("font-size: 11px;")
-        self._refresh_coord_mode_label()
-        layout.addWidget(self.lbl_coord_mode)
-
-        # 한번에 설정 — 2단계 버튼
-        quick_row = QHBoxLayout()
-        btn_capture_ss = QPushButton("📷 스크린샷 캡처")
-        btn_capture_ss.setToolTip(
-            "거짓말탐지기 창 전체를 드래그로 선택하면\n"
-            "스크린샷을 저장하고 즉시 닫힙니다.\n"
-            "이후 '이미지에서 설정' 버튼으로 열어서 영역을 지정하세요."
-        )
-        btn_capture_ss.clicked.connect(self._capture_lie_screenshot)
-
-        btn_open_ss = QPushButton("🖼 이미지에서 설정")
-        btn_open_ss.setToolTip(
-            "저장된 스크린샷을 열어 각 영역을 드래그로 설정합니다.\n"
-            "캡처 없이 게임 화면 밖에서 여유롭게 지정할 수 있습니다."
-        )
-        btn_open_ss.clicked.connect(self._open_lie_setup_from_file)
-        self._btn_open_ss = btn_open_ss  # 저장 이미지 없을 때 비활성화 참조용
-
-        quick_row.addWidget(btn_capture_ss)
-        quick_row.addWidget(btn_open_ss)
-        quick_row.addStretch()
-        layout.addLayout(quick_row)
-        self._solve_areas = {}   # key → QLabel
-        solve_area_defs = [
-            ("puzzle_area", "②  퍼즐 영역 (빈칸 탐색)"),
-            ("piece_area",  "③  바 (드래그 범위)"),
-            ("next_btn",    "④  >> 버튼"),
-            ("confirm_btn", "⑤  확인 버튼"),
-            ("done_btn",    "완료 팝업 확인"),
-        ]
-        for key, title in solve_area_defs:
-            row = QHBoxLayout()
-            lbl_title = QLabel(title)
-            lbl_title.setFixedWidth(140)
-            lbl_coord = QLabel("미설정")
-            lbl_coord.setStyleSheet("color: gray;")
-            self._solve_areas[key] = lbl_coord
-            btn_set = QPushButton("📍")
-            btn_set.setFixedWidth(32)
-            btn_set.clicked.connect(lambda _, k=key: self._set_solve_area(k))
-            btn_rst = QPushButton("✕")
-            btn_rst.setFixedWidth(24)
-            btn_rst.clicked.connect(lambda _, k=key: self._reset_solve_area(k))
-            row.addWidget(lbl_title)
-            row.addWidget(lbl_coord)
-            row.addStretch()
-            row.addWidget(btn_set)
-            row.addWidget(btn_rst)
-            layout.addLayout(row)
-
-        # ── 좌표 프리셋 저장/불러오기 ─────────────────────────────────
-        layout.addWidget(QLabel("── 좌표 프리셋 ──────────────────────"))
-        preset_row = QHBoxLayout()
-        self._combo_preset = QComboBox()
-        self._combo_preset.setMinimumWidth(140)
-        self._combo_preset.setToolTip("저장된 프리셋 목록")
-        btn_preset_save = QPushButton("💾 저장")
-        btn_preset_save.setFixedWidth(70)
-        btn_preset_save.setToolTip("현재 좌표 + 템플릿을 프리셋으로 저장합니다.")
-        btn_preset_save.clicked.connect(self._save_lie_preset)
-        btn_preset_load = QPushButton("📂 불러오기")
-        btn_preset_load.setFixedWidth(80)
-        btn_preset_load.setToolTip("선택한 프리셋을 불러옵니다.")
-        btn_preset_load.clicked.connect(self._load_lie_preset)
-        btn_preset_del = QPushButton("🗑")
-        btn_preset_del.setFixedWidth(30)
-        btn_preset_del.setToolTip("선택한 프리셋을 삭제합니다.")
-        btn_preset_del.clicked.connect(self._delete_lie_preset)
-        preset_row.addWidget(self._combo_preset)
-        preset_row.addWidget(btn_preset_save)
-        preset_row.addWidget(btn_preset_load)
-        preset_row.addWidget(btn_preset_del)
-        preset_row.addStretch()
-        layout.addLayout(preset_row)
-        self._refresh_preset_combo()
-
-        # 빈칸 템플릿 캡처
-        blank_row = QHBoxLayout()
-        self.lbl_lie_blank = QLabel("❌ 빈칸 템플릿 없음")
-        self.lbl_lie_blank.setStyleSheet("color: red;")
-        self._refresh_blank_label()
-        btn_blank_cap = QPushButton("⑥ 빈칸 캡처")
-        btn_blank_cap.setFixedWidth(90)
-        btn_blank_cap.setToolTip("거짓말탐지기 빈칸 부분만 드래그해서 캡처합니다.")
-        btn_blank_cap.clicked.connect(self._capture_lie_blank)
-        btn_blank_del = QPushButton("삭제")
-        btn_blank_del.setFixedWidth(45)
-        btn_blank_del.clicked.connect(self._delete_lie_blank)
-        blank_row.addWidget(self.lbl_lie_blank)
-        blank_row.addStretch()
-        blank_row.addWidget(btn_blank_cap)
-        blank_row.addWidget(btn_blank_del)
-        layout.addLayout(blank_row)
-
-        # 해제 단축키
-        solve_hk_row = QHBoxLayout()
-        solve_hk_row.addWidget(QLabel("해제 단축키"))
-        self.btn_lie_solve_hk = HotkeyCapture("", self._apply_lie_solve_hotkey)
-        self.btn_lie_solve_hk.setFixedWidth(90)
-        self.btn_lie_solve_hk.setToolTip("이 키를 누르면 설정된 좌표로 퍼즐 해제를 시도합니다.")
-        solve_hk_row.addWidget(self.btn_lie_solve_hk)
-        solve_hk_row.addStretch()
-        layout.addLayout(solve_hk_row)
-
         self.chk_lie_enabled = QCheckBox("거짓말탐지기 발견 시")
         layout.addWidget(self.chk_lie_enabled)
 
@@ -240,9 +126,6 @@ class TabSettings1(QWidget):
 
         sub_options = [
             ("chk_play_alarm",    "컴퓨터 경보음 내기"),
-            ("chk_close_maple",   "메이플 스토리 종료"),
-            ("chk_shutdown_pc",   "사용자 컴퓨터 종료"),
-            ("chk_reconnect",     "종료 후 다른 캐릭 접속"),
         ]
         for attr, text in sub_options:
             row = QHBoxLayout()
@@ -302,331 +185,6 @@ class TabSettings1(QWidget):
         if saved_key:
             self.btn_lie_region_hk.set_key(saved_key)
             self._apply_lie_region_hotkey(saved_key)
-
-    def _refresh_blank_label(self) -> None:
-        path = "templates/lie_blank.png"
-        import os
-        if os.path.exists(path):
-            self.lbl_lie_blank.setText("✅ 빈칸 템플릿 저장됨")
-            self.lbl_lie_blank.setStyleSheet("color: green;")
-        else:
-            self.lbl_lie_blank.setText("❌ 빈칸 템플릿 없음")
-            self.lbl_lie_blank.setStyleSheet("color: red;")
-
-    def _capture_lie_blank(self) -> None:
-        sel = RegionSelector()
-        sel.region_selected.connect(self._save_lie_blank)
-        self._blank_selector = sel
-        sel.show()
-
-    def _save_lie_blank(self, x: int, y: int, w: int, h: int) -> None:
-        os.makedirs("templates", exist_ok=True)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite("templates/lie_blank.png", img)
-        self._refresh_blank_label()
-        QMessageBox.information(self, "완료", f"빈칸 템플릿 저장 완료 ({w}×{h} px)")
-
-    def _delete_lie_blank(self) -> None:
-        import os
-        path = "templates/lie_blank.png"
-        if os.path.exists(path):
-            os.remove(path)
-        self._refresh_blank_label()
-
-    def _apply_lie_solve_hotkey(self, key: str) -> None:
-        if not self._hk or not key:
-            return
-        # 해제 실행 콜백은 bot_loop에서 수행 — 여기선 key만 저장
-        self.config.set("settings1", "lie_detector", "solve_hotkey", key)
-
-    # ── 프리셋 관리 ───────────────────────────────────────────────────
-    _PRESET_ROOT = "presets/lie_detector"
-
-    def _preset_dir(self, name: str) -> str:
-        return os.path.join(self._PRESET_ROOT, name)
-
-    def _refresh_preset_combo(self) -> None:
-        """저장된 프리셋 목록을 콤보박스에 갱신한다."""
-        self._combo_preset.clear()
-        if os.path.isdir(self._PRESET_ROOT):
-            names = sorted(
-                d for d in os.listdir(self._PRESET_ROOT)
-                if os.path.isdir(os.path.join(self._PRESET_ROOT, d))
-            )
-            self._combo_preset.addItems(names)
-
-    def _save_lie_preset(self) -> None:
-        """현재 좌표 설정 + 템플릿 이미지를 프리셋으로 저장한다."""
-        import json, glob, shutil
-        name, ok = QInputDialog.getText(self, "프리셋 저장", "프리셋 이름을 입력하세요.")
-        if not ok or not name.strip():
-            return
-        name = name.strip()
-
-        preset_dir = self._preset_dir(name)
-        tpl_dir    = os.path.join(preset_dir, "templates")
-        os.makedirs(tpl_dir, exist_ok=True)
-
-        # 현재 좌표 저장
-        ld = self.config.get("settings1", "lie_detector") or {}
-        coord_keys = ["puzzle_area", "piece_area", "next_btn", "confirm_btn", "done_btn"]
-        coords = {k: ld.get(k) for k in coord_keys}
-        with open(os.path.join(preset_dir, "coords.json"), "w", encoding="utf-8") as f:
-            json.dump(coords, f, ensure_ascii=False, indent=2)
-
-        # 템플릿 이미지 복사
-        copied = 0
-        for src in sorted(glob.glob("templates/lie_detector_*.png")):
-            shutil.copy2(src, tpl_dir)
-            copied += 1
-        blank_src = "templates/lie_blank.png"
-        if os.path.exists(blank_src):
-            shutil.copy2(blank_src, tpl_dir)
-
-        self._refresh_preset_combo()
-        # 방금 저장한 항목 선택
-        idx = self._combo_preset.findText(name)
-        if idx >= 0:
-            self._combo_preset.setCurrentIndex(idx)
-        QMessageBox.information(
-            self, "저장 완료",
-            f"프리셋 '{name}' 저장 완료\n좌표 + 템플릿 {copied}개"
-        )
-
-    def _load_lie_preset(self) -> None:
-        """선택한 프리셋을 불러와 좌표와 템플릿을 복원한다."""
-        import json, glob, shutil
-        name = self._combo_preset.currentText()
-        if not name:
-            QMessageBox.warning(self, "알림", "불러올 프리셋을 선택하세요.")
-            return
-
-        preset_dir = self._preset_dir(name)
-        coord_file = os.path.join(preset_dir, "coords.json")
-        if not os.path.exists(coord_file):
-            QMessageBox.warning(self, "오류", f"프리셋 파일을 찾을 수 없습니다:\n{coord_file}")
-            return
-
-        # 좌표 복원
-        with open(coord_file, encoding="utf-8") as f:
-            coords = json.load(f)
-        for key, val in coords.items():
-            self.config.set("settings1", "lie_detector", key, val)
-        self.config.save()
-        self._refresh_solve_area_labels()
-
-        # 템플릿 복원 — 기존 삭제 후 복사
-        os.makedirs("templates", exist_ok=True)
-        for old in glob.glob("templates/lie_detector_*.png"):
-            os.remove(old)
-        blank_dst = "templates/lie_blank.png"
-        if os.path.exists(blank_dst):
-            os.remove(blank_dst)
-
-        tpl_src_dir = os.path.join(preset_dir, "templates")
-        copied = 0
-        if os.path.isdir(tpl_src_dir):
-            for src in sorted(glob.glob(os.path.join(tpl_src_dir, "*.png"))):
-                dst = os.path.join("templates", os.path.basename(src))
-                shutil.copy2(src, dst)
-                copied += 1
-
-        self._refresh_template_label()
-        self._refresh_blank_label()
-        QMessageBox.information(
-            self, "불러오기 완료",
-            f"프리셋 '{name}' 복원 완료\n좌표 + 템플릿 {copied}개"
-        )
-
-    def _delete_lie_preset(self) -> None:
-        """선택한 프리셋 폴더를 삭제한다."""
-        import shutil
-        name = self._combo_preset.currentText()
-        if not name:
-            QMessageBox.warning(self, "알림", "삭제할 프리셋을 선택하세요.")
-            return
-        reply = QMessageBox.question(
-            self, "삭제 확인",
-            f"프리셋 '{name}'을 삭제하시겠습니까?"
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        preset_dir = self._preset_dir(name)
-        if os.path.isdir(preset_dir):
-            shutil.rmtree(preset_dir)
-        self._refresh_preset_combo()
-
-    # ── 한번에 설정 — 2단계 흐름 ────────────────────────────────────
-
-    _SS_IMG_PATH    = "templates/lie_setup_screenshot.png"
-    _SS_REGION_PATH = "templates/lie_setup_region.json"
-
-    def _capture_lie_screenshot(self) -> None:
-        """① 드래그로 거짓말탐지기 창 전체 선택 → 스크린샷+영역 저장 후 즉시 닫힘."""
-        sel = RegionSelector()
-        sel.region_selected.connect(self._save_lie_screenshot)
-        self._quick_selector = sel
-        sel.show()
-
-    def _save_lie_screenshot(self, x: int, y: int, w: int, h: int) -> None:
-        """선택 영역을 스크린샷으로 저장한다."""
-        import json as _json
-        os.makedirs("templates", exist_ok=True)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(self._SS_IMG_PATH, img)
-        with open(self._SS_REGION_PATH, "w", encoding="utf-8") as f:
-            _json.dump({"x": x, "y": y, "w": w, "h": h}, f)
-        QMessageBox.information(
-            self, "캡처 완료",
-            f"스크린샷 저장 완료 ({w}×{h} px)\n"
-            "'이미지에서 설정' 버튼으로 영역을 지정하세요."
-        )
-
-    def _open_lie_setup_from_file(self) -> None:
-        """② 저장된 스크린샷을 열어 다이얼로그에서 하위 영역 설정."""
-        import json as _json
-        if not os.path.exists(self._SS_IMG_PATH) or not os.path.exists(self._SS_REGION_PATH):
-            QMessageBox.warning(
-                self, "스크린샷 없음",
-                "먼저 '📷 스크린샷 캡처' 버튼으로 스크린샷을 저장해 주세요."
-            )
-            return
-
-        img = cv2.imread(self._SS_IMG_PATH)
-        if img is None:
-            QMessageBox.warning(self, "오류", f"스크린샷 파일을 읽을 수 없습니다.\n{self._SS_IMG_PATH}")
-            return
-
-        with open(self._SS_REGION_PATH, encoding="utf-8") as f:
-            rj = _json.load(f)
-        full_region = (rj["x"], rj["y"], rj["w"], rj["h"])
-
-        existing = self.config.get("settings1", "lie_detector") or {}
-        dlg = LieDetectorSetupDialog(
-            full_region=full_region,
-            screenshot=img,
-            existing=existing,
-            parent=self,
-        )
-        if not dlg.exec():
-            return
-
-        # 결과 처리 — 키별 특수 처리
-        saved_mode = "absolute"
-        for key, coords in dlg.result_coords.items():
-            if key == "region":
-                # 감지 영역 → 상대좌표 변환 후 저장
-                ax, ay, aw, ah = coords
-                rx, ry, rw, rh, mode = self._abs_to_rel(ax, ay, aw, ah)
-                self.config.set("settings1", "lie_detector", "region", [rx, ry, rw, rh])
-                saved_mode = mode
-                tag = " [상대]" if mode == "relative" else " [절대]"
-                self.lbl_lie_region.setText(f"감지 영역: X={rx} Y={ry} W={rw} H={rh}{tag}")
-                self.lbl_lie_region.setStyleSheet("color: green;")
-            elif key == "lie_blank":
-                # 빈칸 → 전체 스크린샷에서 해당 영역 크롭 → templates/lie_blank.png
-                fx, fy, fw, fh = full_region
-                ax, ay, aw, ah = coords
-                ix = ax - fx
-                iy = ay - fy
-                ix = max(0, min(ix, img.shape[1] - 1))
-                iy = max(0, min(iy, img.shape[0] - 1))
-                aw = min(aw, img.shape[1] - ix)
-                ah = min(ah, img.shape[0] - iy)
-                if aw > 0 and ah > 0:
-                    crop = img[iy:iy + ah, ix:ix + aw]
-                    cv2.imwrite("templates/lie_blank.png", crop)
-                    self._refresh_blank_label()
-            else:
-                # 나머지 퍼즐 좌표 — 상대좌표 변환 후 저장
-                ax, ay, aw, ah = coords
-                rx, ry, rw, rh, mode = self._abs_to_rel(ax, ay, aw, ah)
-                self.config.set("settings1", "lie_detector", key, [rx, ry, rw, rh])
-                saved_mode = mode
-
-        self.config.set("settings1", "lie_detector", "coord_mode", saved_mode)
-        self.config.save()
-        self._refresh_solve_area_labels()
-        self._refresh_coord_mode_label()
-
-    # ── 창 기반 상대좌표 유틸 ────────────────────────────────────────
-    def _game_window_title(self) -> str:
-        return self.config.get("settings2", "game_window_title") or "MapleStory"
-
-    def _abs_to_rel(self, x: int, y: int, w: int, h: int) -> tuple:
-        """절대좌표 → 게임창 클라이언트 기준 상대좌표.
-        게임 창을 찾지 못하면 절대좌표 그대로 반환한다."""
-        import win32gui
-        try:
-            hwnd = win32gui.FindWindow(None, self._game_window_title())
-            if hwnd:
-                ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
-                return x - ox, y - oy, w, h, "relative"
-        except Exception:
-            pass
-        return x, y, w, h, "absolute"
-
-    def _refresh_coord_mode_label(self) -> None:
-        """퍼즐 좌표 섹션 상단 안내 라벨을 현재 창 인식 상태에 맞게 갱신한다."""
-        import win32gui
-        title = self._game_window_title()
-        try:
-            hwnd = win32gui.FindWindow(None, title)
-            if hwnd:
-                ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
-                self.lbl_coord_mode.setText(
-                    f"🟢 '{title}' 창 인식됨 (X={ox}, Y={oy}) — 좌표를 상대좌표로 저장합니다."
-                )
-                self.lbl_coord_mode.setStyleSheet("color: green; font-size: 11px;")
-                return
-        except Exception:
-            pass
-        self.lbl_coord_mode.setText(
-            f"🟡 '{title}' 창 미인식 — 절대좌표로 저장합니다. (창 이동 시 재설정 필요)"
-        )
-        self.lbl_coord_mode.setStyleSheet("color: #b8860b; font-size: 11px;")
-
-    def _refresh_solve_area_labels(self) -> None:
-        """config에서 퍼즐 좌표를 다시 읽어 라벨을 갱신한다."""
-        ld = self.config.get("settings1", "lie_detector") or {}
-        mode = ld.get("coord_mode", "absolute")
-        tag  = " [상대]" if mode == "relative" else " [절대]"
-        for key, lbl in self._solve_areas.items():
-            coords = ld.get(key)
-            if coords and len(coords) == 4:
-                x, y, w, h = coords
-                lbl.setText(f"X={x} Y={y} W={w} H={h}{tag}")
-                lbl.setStyleSheet("color: green;")
-            else:
-                lbl.setText("미설정")
-                lbl.setStyleSheet("color: gray;")
-
-    def _set_solve_area(self, area_key: str) -> None:
-        self._pending_solve_area = area_key
-        sel = RegionSelector()
-        sel.region_selected.connect(self._save_solve_area)
-        self._solve_selector = sel
-        sel.show()
-
-    def _save_solve_area(self, x: int, y: int, w: int, h: int) -> None:
-        key = self._pending_solve_area
-        rx, ry, rw, rh, mode = self._abs_to_rel(x, y, w, h)
-        self.config.set("settings1", "lie_detector", key, [rx, ry, rw, rh])
-        self.config.set("settings1", "lie_detector", "coord_mode", mode)
-        self.config.save()
-        tag = " [상대]" if mode == "relative" else " [절대]"
-        self._solve_areas[key].setText(f"X={rx} Y={ry} W={rw} H={rh}{tag}")
-        self._solve_areas[key].setStyleSheet("color: green;")
-
-    def _reset_solve_area(self, area_key: str) -> None:
-        self.config.set("settings1", "lie_detector", area_key, None)
-        self.config.save()
-        self._solve_areas[area_key].setText("미설정")
-        self._solve_areas[area_key].setStyleSheet("color: gray;")
 
     def _apply_lie_region_hotkey(self, key: str) -> None:
         if not self._hk or not key:
@@ -957,9 +515,6 @@ class TabSettings1(QWidget):
         ld = self.config.get("settings1", "lie_detector") or {}
         self.chk_lie_enabled.setChecked(ld.get("enabled", False))
         self.chk_play_alarm.setChecked(ld.get("play_alarm", False))
-        self.chk_close_maple.setChecked(ld.get("close_maple", False))
-        self.chk_shutdown_pc.setChecked(ld.get("shutdown_pc", False))
-        self.chk_reconnect.setChecked(ld.get("reconnect_after", False))
         self.chk_tg_enabled.setChecked(ld.get("tg_enabled", False))
         self.edit_tg_prefix.setText(ld.get("tg_prefix", ""))
         self.edit_tg_token.setText(ld.get("tg_token", ""))
@@ -975,12 +530,6 @@ class TabSettings1(QWidget):
         hk_key = ld.get("region_hotkey", "")
         if hk_key:
             self.btn_lie_region_hk.set_key(hk_key)
-        self._refresh_solve_area_labels()
-        self._refresh_coord_mode_label()
-        solve_hk = ld.get("solve_hotkey", "")
-        if solve_hk:
-            self.btn_lie_solve_hk.set_key(solve_hk)
-        self._refresh_blank_label()
 
         ud = self.config.get("settings1", "user_detected") or {}
         self.chk_user_chat.setChecked(ud.get("enabled", False))
@@ -1002,9 +551,6 @@ class TabSettings1(QWidget):
     def save_to_config(self):
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())
         self.config.set("settings1", "lie_detector", "play_alarm",    self.chk_play_alarm.isChecked())
-        self.config.set("settings1", "lie_detector", "close_maple",   self.chk_close_maple.isChecked())
-        self.config.set("settings1", "lie_detector", "shutdown_pc",   self.chk_shutdown_pc.isChecked())
-        self.config.set("settings1", "lie_detector", "reconnect_after", self.chk_reconnect.isChecked())
         self.config.set("settings1", "lie_detector", "tg_enabled",   self.chk_tg_enabled.isChecked())
         self.config.set("settings1", "lie_detector", "tg_prefix",    self.edit_tg_prefix.text().strip())
         self.config.set("settings1", "lie_detector", "tg_token",     self.edit_tg_token.text().strip())

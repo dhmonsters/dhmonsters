@@ -146,7 +146,8 @@ class TabHunt(QWidget):
 
         # ── 행 2: 시간 / 반복 ────────────────────────────────────────
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("간격"))
+        self._lbl_gap = QLabel("간격")
+        row2.addWidget(self._lbl_gap)
         self.key_spin_min = QDoubleSpinBox()
         self.key_spin_min.setRange(0.01, 60.0)
         self.key_spin_min.setSingleStep(0.1)
@@ -179,8 +180,10 @@ class TabHunt(QWidget):
         row2.addStretch()
         layout.addLayout(row2)
 
-        # ── 행 3: 탭/연속기 홀드 시간 ────────────────────────────────
-        row3 = QHBoxLayout()
+        # ── 행 3: 탭/연속기 홀드 시간 (HOLD 동작 선택 시 숨김) ──────
+        self._hold_row_widget = QWidget()
+        row3 = QHBoxLayout(self._hold_row_widget)
+        row3.setContentsMargins(0, 0, 0, 0)
         row3.addWidget(QLabel("홀드"))
         self.key_spin_hold_base = QDoubleSpinBox()
         self.key_spin_hold_base.setRange(0.02, 2.0)
@@ -197,7 +200,7 @@ class TabHunt(QWidget):
         row3.addWidget(self.key_spin_hold_var)
         row3.addWidget(QLabel("초  (탭/연속기 키 누름 유지 시간)"))
         row3.addStretch()
-        layout.addLayout(row3)
+        layout.addWidget(self._hold_row_widget)
 
         btn_row_add = QHBoxLayout()
         self.btn_add = QPushButton("+ 스텝 추가")
@@ -261,10 +264,14 @@ class TabHunt(QWidget):
         return widget
 
     def _on_key_action_changed(self, idx: int) -> None:
+        is_hold  = (idx == 0)
         is_combo = (idx == 2)
         self._lbl_single_key.setVisible(not is_combo)
         self.key_combo_key.setVisible(not is_combo)
         self._combo_editor.setVisible(is_combo)
+        # HOLD: 누름 시간 = min~max 자체가 홀드 시간이므로 별도 홀드 행 불필요
+        self._hold_row_widget.setVisible(not is_hold)
+        self._lbl_gap.setText("누름 시간" if is_hold else "간격")
 
     def _combo_add_key(self) -> None:
         key = self._combo_pick.currentText()

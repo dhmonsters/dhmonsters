@@ -13,6 +13,7 @@ from ui.tab_coordinate import TabCoordinate
 from ui.tab_settings1 import TabSettings1
 from ui.tab_settings2 import TabSettings2
 from ui.tab_misc import TabMisc
+from ui.overlay.debug_overlay import DebugOverlay
 
 
 class MainWindow(QMainWindow):
@@ -20,7 +21,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = ConfigManager()
         self.hotkey_manager = HotkeyManager(self)
-        self.setWindowTitle("DHMONSTERS v1.1.8")
+        self.setWindowTitle("DHMONSTERS v1.2.0")
         self.setMinimumSize(520, 600)
         self._build_ui()
         self._setup_bot()
@@ -72,6 +73,18 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("준비")
 
+    def _save_all(self) -> None:
+        """모든 탭의 설정을 config에 반영하고 파일에 저장한다."""
+        self.tab_main.save_to_config()
+        self.tab_hunt.save_to_config()
+        self.tab_attack.save_to_config()
+        self.tab_recovery.save_to_config()
+        self.tab_coordinate.save_to_config()
+        self.tab_position.save_to_config()
+        self.tab_settings1.save_to_config()
+        self.tab_settings2.save_to_config()
+        self.config.save()
+
     def _setup_bot(self):
         """봇 루프를 생성하고 메인/사냥 탭에 연결."""
         self.bot = BotLoop(
@@ -79,9 +92,11 @@ class MainWindow(QMainWindow):
             on_status=self._on_bot_status,
         )
         self.tab_main.set_bot(self.bot)
+        self.tab_main.set_pre_start_callback(self._save_all)
         self.tab_hunt.set_bot(self.bot)
-        self.bot.set_lie_log(self.tab_misc.append_lie_log)
         self.bot.set_on_stop(self.tab_main.on_bot_stopped)
+
+        self.overlay = DebugOverlay(game_state=self.bot.game_state, config=self.config)
 
     def _on_bot_status(self, msg: str) -> None:
         """봇 스레드 → UI 스레드로 상태 전달."""
@@ -97,13 +112,5 @@ class MainWindow(QMainWindow):
         if self.bot.is_running:
             self.bot.stop()
         self.hotkey_manager.stop()
-        self.tab_main.save_to_config()
-        self.tab_hunt.save_to_config()
-        self.tab_attack.save_to_config()
-        self.tab_recovery.save_to_config()
-        self.tab_coordinate.save_to_config()
-        self.tab_position.save_to_config()
-        self.tab_settings1.save_to_config()
-        self.tab_settings2.save_to_config()
-        self.config.save()
+        self._save_all()
         event.accept()

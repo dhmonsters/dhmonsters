@@ -1031,19 +1031,33 @@ class BotLoop:
         if not self._enable_lie_solve:
             return True   # 감지는 됐으나 해제 생략 — 루프 한 번 스킵
 
-        # 3. 퍼즐 해제 — 수동 좌표 설정 시 우선 사용
-        # 층별 사냥 중이면 일시정지
         floor_cfg = self._config.get("floor_hunt") or {}
         if floor_cfg.get("enabled"):
             self._floor_hunter.pause()
         try:
-            has_manual = all(cfg.get(k) for k in ("puzzle_area", "piece_area", "next_btn", "confirm_btn"))
-            if has_manual:
-                self._solve_lie_detector_manual()
-            else:
+            # ── 투명 도형 찾기 미니게임 연동 ──────────────────────────────
+            ts_cfg = self._config.get("settings1", "transparent_shape") or {}
+            if self._enable_transparent_shape and ts_cfg.get("enabled"):
+                # lazy init
+                if self._transparent_game is None:
+                    from core.transparent_shape_game import TransparentShapeGame
+                    self._transparent_game = TransparentShapeGame(
+                        self._screen, self._input, self._config, self._stop_event
+                    )
+                    self._transparent_game.window_title = self._game_window_title()
+                self._status("거짓말탐지기 → 투명 도형 찾기 실행 중...")
                 self._input.focus_game_window()
-                time.sleep(0.3)
-                self._solve_lie_detector(matched_pos)
+                self._transparent_game.run_follow_loop(self._status)
+                self._status("거짓말탐지기 → 투명 도형 찾기 완료")
+            else:
+                # 3. 퍼즐 해제 — 수동 좌표 설정 시 우선 사용
+                has_manual = all(cfg.get(k) for k in ("puzzle_area", "piece_area", "next_btn", "confirm_btn"))
+                if has_manual:
+                    self._solve_lie_detector_manual()
+                else:
+                    self._input.focus_game_window()
+                    time.sleep(0.3)
+                    self._solve_lie_detector(matched_pos)
             time.sleep(0.8)
         finally:
             if floor_cfg.get("enabled"):

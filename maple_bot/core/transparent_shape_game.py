@@ -72,9 +72,12 @@ class TransparentShapeGame:
             return None
 
         origin = self._screen.get_window_client_origin(self.window_title)
-        if not origin:
-            return None
-        ox, oy = origin
+        # (0, 0) 는 창 못 찾음 신호 — None과 동일하게 처리
+        if not origin or origin == (0, 0):
+            # 창을 못 찾으면 client 좌표를 절대좌표로 간주 (fallback)
+            ox, oy = 0, 0
+        else:
+            ox, oy = origin
         return (ox + cx, oy + cy, w, h)
 
     # ── 감지 파이프라인 ──────────────────────────────────────────────
@@ -175,6 +178,8 @@ class TransparentShapeGame:
 
     # ── 메인 폐루프 ──────────────────────────────────────────────────
     def run_follow_loop(self, on_status: Callable[[str], None]) -> None:
+        import mss as _mss
+
         roi = self.get_board_roi()
         if roi is None:
             on_status("⚠ 투명 도형 찾기: 게임판 ROI 미설정 — 설정1 탭에서 캡처 필요")
@@ -190,46 +195,51 @@ class TransparentShapeGame:
 
         debug_on = bool(self._config.get("settings1", "transparent_shape", "debug_overlay"))
         last_end_check = time.time()
+        region = {"left": bx, "top": by, "width": bw, "height": bh}
 
-        on_status(f"투명 도형 찾기: 추적 시작 (ROI={bw}×{bh})")
+        # ROI 절대 위치를 로그에 표시 (위치 오류 진단용)
+        on_status(f"투명 도형 찾기: 추적 시작 (ROI={bw}×{bh}  위치 X={bx} Y={by})")
 
-        while not self._stop.is_set():
-            loop_start = time.time()
+        # standalone과 동일하게 독립 mss 인스턴스 사용
+        # (ScreenReader의 공유 인스턴스는 스레드 간 혼용 시 오작동 가능)
+        with _mss.mss() as sct:
+            while not self._stop.is_set():
+                loop_start = time.time()
 
-            # 0.5초마다 타이틀 사라졌는지 확인 → 게임 종료
-            if loop_start - last_end_check >= GAME_END_CHECK_INTERVAL:
-                shot = self._screen.capture()
-                if self.detect_title(shot) is None:
-                    on_status("투명 도형 찾기: 게임 종료 감지")
-                    break
-                last_end_check = loop_start
+                # 0.5초마다 타이틀 사라졌는지 확인 → 게임 종료
+                if loop_start - last_end_check >= GAME_END_CHECK_INTERVAL:
+                    shot = self._screen.capture()
+                    if self.detect_title(shot) is None:
+                        on_status("투명 도형 찾기: 게임 종료 감지")
+                        break
+                    last_end_check = loop_start
 
-            # 게임판 캡처
-            board_img = self._screen.capture({"left": bx, "top": by, "width": bw, "height": bh})
-            rel = self.find_shape_in_board(board_img)
+                # 게임판 캡처 — standalone과 동일한 직접 grab
+                raw = sct.grab(region)
+                board_img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                rel = self.find_shape_in_board(board_img)
 
-            if rel is not None:
-                self._lost_count = 0
-                abs_x = bx + rel[0]
-                abs_y = by + rel[1]
-                sx, sy = self._update_ema(abs_x, abs_y)
-                self._move_mouse_toward(sx, sy)
-            else:
-                self._lost_count += 1
-                # EMA는 유지 (마지막 위치 고수)
+                if rel is not None:
+                    self._lost_count = 0
+                    abs_x = bx + rel[0]
+                    abs_y = by + rel[1]
+                    sx, sy = self._update_ema(abs_x, abs_y)
+                    self._move_mouse_toward(sx, sy)
+                else:
+                    self._lost_count += 1
 
-            # 디버그 오버레이
-            if debug_on:
-                try:
-                    dbg = self.draw_debug_overlay(board_img, rel, roi)
-                    cv2.imshow("transparent_shape_debug", dbg)
-                    cv2.waitKey(1)
-                except Exception as exc:
-                    logger.debug("디버그 오버레이 실패: %s", exc)
+                # 디버그 오버레이
+                if debug_on:
+                    try:
+                        dbg = self.draw_debug_overlay(board_img, rel, roi)
+                        cv2.imshow("transparent_shape_debug", dbg)
+                        cv2.waitKey(1)
+                    except Exception as exc:
+                        logger.debug("디버그 오버레이 실패: %s", exc)
 
-            # 프레임 throttle (stop_event 즉시 응답)
-            elapsed = time.time() - loop_start
-            remaining = FRAME_INTERVAL - elapsed
-            if remaining > 0:
-                if self._stop.wait(remaining):
-                    break
+                # 프레임 throttle (stop_event 즉시 응답)
+                elapsed = time.time() - loop_start
+                remaining = FRAME_INTERVAL - elapsed
+                if remaining > 0:
+                    if self._stop.wait(remaining):
+                        break

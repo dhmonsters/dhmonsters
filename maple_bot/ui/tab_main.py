@@ -21,6 +21,7 @@ class TabMain(QWidget):
         self.config = config
         self._bot = None
         self._hk  = None
+        self._pre_start_cb = None   # 봇 시작 직전 호출 (전 탭 자동 저장용)
         self._emitter = _StatusEmitter()
         self._emitter.message.connect(self._append_log)
         self._emitter.bot_stopped.connect(self._on_stop)
@@ -139,10 +140,17 @@ class TabMain(QWidget):
         self.lbl_hk_status.setText("등록됨" if not err else f"오류: {err}")
         self.config.set("hotkeys", "stop", key)
 
+    def set_pre_start_callback(self, cb) -> None:
+        """봇 시작 직전에 호출할 콜백 등록 (main_window에서 전 탭 저장 함수를 주입)."""
+        self._pre_start_cb = cb
+
     # ── 버튼 핸들러 ───────────────────────────────────────────────────
     def _on_start(self) -> None:
         if self._bot is None or self._bot.is_running:
             return
+        # 봇 시작 전 모든 탭 설정을 config에 반영
+        if self._pre_start_cb:
+            self._pre_start_cb()
         self._bot.set_modules(
             attack=self.chk_attack.isChecked(),
             move=self.chk_move.isChecked(),

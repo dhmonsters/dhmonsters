@@ -194,6 +194,16 @@ DEFAULT_CONFIG = {
 }
 
 
+def _deep_merge(base: dict, override: dict) -> None:
+    """override의 값을 base에 재귀적으로 덮어씌운다.
+    base에만 있는 키(새 기본값)는 그대로 유지된다."""
+    for k, v in override.items():
+        if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+
 class ConfigManager:
     def __init__(self):
         self._data = {}
@@ -210,12 +220,13 @@ class ConfigManager:
                 except Exception:
                     pass
 
+        import copy
+        self._data = copy.deepcopy(DEFAULT_CONFIG)
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                self._data = json.load(f)
-        else:
-            import copy
-            self._data = copy.deepcopy(DEFAULT_CONFIG)
+                saved = json.load(f)
+            # 저장된 값을 기본값 위에 덮어씌움 — 새 기본값 키는 자동으로 추가됨
+            _deep_merge(self._data, saved)
 
     def save(self):
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
