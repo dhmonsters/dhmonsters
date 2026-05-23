@@ -516,11 +516,13 @@ class BotLoop:
                                         in_target = (target_zone.y_min <= cy <= target_zone.y_max + Y_TOL)
                                     left_source = not (src_zone.y_min - 5 <= cy <= src_zone.y_max + 5)
                                     arrived = in_target and left_source
+                                    _detected = _zone_by_y(cy)
                                     self._status(
                                         f"[층별] Y={cy} 확인 "
-                                        f"목표 {target_zone.y_min}~{target_zone.y_max} "
-                                        f"출발층 이탈={'✓' if left_source else '✗'} "
-                                        f"→ {'✓ 도착' if arrived else '✗ 실패'}"
+                                        f"목표 {target_zone.name}({target_zone.y_min}~{target_zone.y_max}) "
+                                        f"출발 {src_zone.name}({src_zone.y_min}~{src_zone.y_max}) "
+                                        f"이탈={'✓' if left_source else '✗'} "
+                                        f"→ {'✓ 도착' if arrived else f'✗ 실패[감지:{_detected.name}]'}"
                                     )
                                 if arrived:
                                     fh_idx        = fh_next_idx
@@ -599,16 +601,18 @@ class BotLoop:
                                         fh_last_side   = ""
                                         fh_route_idx   = 0
                                         self._map_navigator.set_zones([fh_zones[fh_idx]])
+                                        _y_str = f" Y={pos[1]}" if pos is not None else ""
                                         self._status(
-                                            f"[층별] 낙사/이탈 감지 → '{fh_zones[fh_idx].name}' 복귀"
+                                            f"[층별] 낙사/이탈 감지{_y_str} → '{fh_zones[fh_idx].name}'({fh_zones[fh_idx].y_min}~{fh_zones[fh_idx].y_max}) 복귀"
                                         )
                                         _apply_zone_pattern(fh_zones[fh_idx])
                                     else:
                                         # 같은 층에서 밧줄 재시도
                                         self._map_navigator.set_zones([fh_zones[fh_idx]])
                                         fh_state = "to_rope"
+                                        _y_str = f" Y={pos[1]}" if pos is not None else ""
                                         self._status(
-                                            f"[층별] {target_zone.name} 도착 실패 → 재시도"
+                                            f"[층별] {target_zone.name} 도착 실패{_y_str} → 재시도"
                                         )
 
                         else:  # patrol
@@ -642,8 +646,9 @@ class BotLoop:
                                         fh_arrive_time = time.time()
                                         self._map_navigator.set_zones([fh_zones[fh_idx]])
                                         self._status(
-                                            f"[층별] {reason} Y={cy_now} → "
-                                            f"'{fh_zones[fh_idx].name}' 복귀"
+                                            f"[층별] {reason} Y={cy_now} "
+                                            f"(현재구역 {cur_zone.name}:{cur_zone.y_min}~{cur_zone.y_max}) → "
+                                            f"'{fh_zones[fh_idx].name}'({fh_zones[fh_idx].y_min}~{fh_zones[fh_idx].y_max}) 복귀"
                                         )
                                         _apply_zone_pattern(fh_zones[fh_idx])  # 복귀 층 패턴 교체
                                     elif not _y_in_any and not y_in_zone:
@@ -651,7 +656,8 @@ class BotLoop:
                                         fh_half_count = int(fh_zones[fh_idx].sweeps * 2)
                                         fh_last_side  = ""
                                         self._status(
-                                            f"[층별] 미등록 층 낙사 Y={cy_now} → "
+                                            f"[층별] 미등록 층 낙사 Y={cy_now} "
+                                            f"(현재구역 {cur_zone.name}:{cur_zone.y_min}~{cur_zone.y_max}) → "
                                             f"'{fh_zones[fh_idx].name}' 즉시 복귀"
                                         )
 
