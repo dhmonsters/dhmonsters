@@ -1359,13 +1359,18 @@ class BotLoop:
         self._last_user_chat_time = now
 
     def _check_level_up(self, screenshot) -> None:
+        # stat_assign 비활성화 시 템플릿 로드 자체를 건너뜀 (missing 파일 경고 방지)
+        sa_cfg = self._config.get("settings1", "stat_assign") or {}
+        if not sa_cfg.get("enabled"):
+            return
+        import os
+        if not os.path.exists(TEMPLATES["level_up"]):
+            return
         pos = self._screen.find_template(screenshot, TEMPLATES["level_up"])
         if pos is None:
             return
         self._status("레벨업 감지")
-        sa_cfg = self._config.get("settings1", "stat_assign") or {}
-        if sa_cfg.get("enabled"):
-            self._assign_stats(sa_cfg)
+        self._assign_stats(sa_cfg)
 
     def _check_dead(self, screenshot) -> bool:
         cfg = self._config.get("settings2", "shutdown") or {}

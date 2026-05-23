@@ -1033,14 +1033,13 @@ class TabCoordinate(QWidget):
 
     # ── 밧줄 버튼 ─────────────────────────────────────────────────────
     def _set_rope_from_pos(self) -> None:
-        # 버튼 클릭 시 바로 현재 위치를 읽어 사용
+        # 버튼 클릭 시 실시간 캐릭터 위치를 읽어 밧줄 X로 설정
         self._sync_minimap_config()
         pos = self._minimap_reader.get_character_pos()
         if pos:
             self._last_pos = pos
+            self._pending_rope_x = pos[0]
             self.lbl_pos.setText(f"위치: X={pos[0]}  Y={pos[1]}")
-        if pos or self._last_pos:
-            self._pending_rope_x = (pos or self._last_pos)[0]
             self.lbl_rope_x.setText(f"밧줄 X: {self._pending_rope_x}")
         else:
             self.lbl_rope_x.setText("감지 실패 — 미니맵 설정 확인 필요")

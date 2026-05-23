@@ -49,7 +49,7 @@ class RopePoint:
 
     def label(self) -> str:
         approach_kor = {"left": "왼쪽", "right": "오른쪽", "both": "양쪽"}.get(self.approach, self.approach)
-        return f"{self.name}  X={self.x}  접근={approach_kor}  점프거리={self.jump_offset}px  오르기={self.climb_sec}s"
+        return f"{self.name}  X={self.x}  접근={approach_kor}  점프거리={self.jump_offset}px  오르기={self.climb_sec:.1f}s"
 
 
 @dataclass
