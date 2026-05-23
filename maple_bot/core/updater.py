@@ -4,7 +4,7 @@ import os
 import sys
 
 # GitHub Raw URL — version.json 위치
-_VERSION_URL = "https://raw.githubusercontent.com/ehdgusve/maple-bot/main/version.json"
+_VERSION_URL = "https://raw.githubusercontent.com/dhmonsters/dhmonsters/main/maple_bot/version.json"
 
 # 로컬 버전 파일 경로
 _LOCAL_VERSION_FILE = "version.txt"
