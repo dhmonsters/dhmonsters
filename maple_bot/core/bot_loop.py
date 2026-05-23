@@ -613,7 +613,8 @@ class BotLoop:
 
                         else:  # patrol
                             # ── 낙사/피격 감지: X 또는 Y가 현재 구역 밖이면 복귀 ──
-                            if pos is not None and (
+                            # Y=0 은 미니맵 오감지(최상단 픽셀 노이즈)로 간주해 무시
+                            if pos is not None and pos[1] > 0 and (
                                 time.time() - fh_arrive_time >= FH_Y_COOLDOWN
                             ):
                                 cur_zone  = fh_zones[fh_idx]

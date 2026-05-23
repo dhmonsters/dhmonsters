@@ -139,7 +139,8 @@ class MinimapReader:
         mask = np.all(diff <= cfg.tolerance, axis=2)   # (H, W) bool 배열
 
         ys, xs = np.where(mask)
-        if len(xs) == 0:
+        # 매칭 픽셀이 너무 적으면 오감지로 간주 (캐릭터 도트는 최소 4픽셀 이상)
+        if len(xs) < 4:
             return None
 
         # 무게중심으로 위치 계산
