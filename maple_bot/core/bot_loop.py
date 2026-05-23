@@ -32,12 +32,30 @@ SAFETY_CHECK_INTERVAL = 1.0   # 화면 캡처 기반 안전 감지 주기 (초)
 POTION_CHECK_INTERVAL = 0.5   # 포션 체크 주기 (초) — 전용 스레드에서 독립 실행
 
 
+class _GameState:
+    """DebugOverlay / TabMonitor가 참조하는 경량 상태 컨테이너."""
+
+    def __init__(self) -> None:
+        import threading
+        self._lock = threading.Lock()
+        self._data: dict = {}
+
+    def update(self, **kwargs) -> None:
+        with self._lock:
+            self._data.update(kwargs)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._data)
+
+
 class BotLoop:
     def __init__(self, config: ConfigManager, on_status: Callable[[str], None] | None = None):
         self._config = config
         self._on_status  = on_status or (lambda msg: None)
-        self._on_stop_cb: Callable[[], None] = lambda: None          # 내부 정지 시 UI 알림 콜백
-        self._on_lie_log: Callable[[str], None] = lambda msg: None   # 거탐 상세 로그 콜백
+        self._on_stop_cb: Callable[[], None] = lambda: None
+        self._on_lie_log: Callable[[str], None] = lambda msg: None
+        self.game_state = _GameState()
         self._screen = ScreenReader()
         window_title = config.get("settings2", "game_window_title") or "MapleStory"
         self._input = InputController(window_title=window_title)
@@ -88,6 +106,11 @@ class BotLoop:
     def _game_window_title(self) -> str:
         """config에서 게임 창 제목을 읽는다. 미설정이면 'MapleStory' 반환."""
         return self._config.get("settings2", "game_window_title") or "MapleStory"
+
+    def _get_coord_origin(self) -> tuple[int, int]:
+        """coord_mode == 'relative'일 때 게임 창 origin을 반환. absolute면 (0,0)."""
+        from core.config_manager import get_game_window_origin
+        return get_game_window_origin(self._config)
 
     def set_on_stop(self, cb: Callable[[], None]) -> None:
         """봇이 내부적으로 정지될 때 UI에 알리는 콜백을 등록한다 (예: 이탈 감지 자동 정지)."""
@@ -169,8 +192,10 @@ class BotLoop:
             raw_zones = self._config.get("zones") or []
             raw_ropes = self._config.get("ropes") or []
 
+        _mm_ox, _mm_oy = self._get_coord_origin()
         cfg = MinimapConfig(
-            region_x=mm.get("region_x", 0), region_y=mm.get("region_y", 0),
+            region_x=mm.get("region_x", 0) + _mm_ox,
+            region_y=mm.get("region_y", 0) + _mm_oy,
             width=mm.get("width", 200), height=mm.get("height", 120),
             char_r=mm.get("char_r", 255), char_g=mm.get("char_g", 255),
             char_b=mm.get("char_b", 255), tolerance=mm.get("tolerance", 40),
@@ -247,6 +272,17 @@ class BotLoop:
         FH_CLIMB_SEC    = 2.5            # UP 키 유지 시간 (초)
         FH_Y_COOLDOWN   = 4.0            # 도착 후 Y 감지 비활성 시간 (초)
 
+        # 픽업 타이머 상태 변수
+        pu_enabled       = False
+        pu_interval      = 110.0
+        pu_key           = "z"
+        pu_hold_sec      = 1.5
+        pu_route: list   = []
+        pu_step_idx      = 0
+        pu_prev_fh_idx   = 0
+        last_pickup_time = time.time()
+        pu_active        = False
+
         # 층별 패턴 프리셋 (key_patterns.presets)
         kp_presets: dict = self._config.get("key_patterns", "presets") or {}
         # 기본 패턴 (층별 패턴 미설정 시 복원용)
@@ -294,11 +330,17 @@ class BotLoop:
             else:
                 self._status("⚠ [층별] 구역이 없습니다 — 좌표 탭에서 구역을 먼저 추가하세요.")
 
+        # 픽업 타이머 설정 로드
+        _pt = self._config.get("pickup_timer") or {}
+        pu_enabled  = bool(_pt.get("enabled", False))
+        pu_interval = float(_pt.get("interval_sec", 110))
+        pu_key      = _pt.get("pickup_key", "z") or "z"
+        pu_hold_sec = float(_pt.get("key_hold_sec", 1.5))
+        pu_route    = _pt.get("route", [])
+
         last_safety      = 0.0
         last_focus       = 0.0
-        last_potion_cnt  = 0.0
         FOCUS_INTERVAL        = 4.0
-        POTION_CNT_INTERVAL   = 30.0   # 포션 수량 체크 주기 (초)
         self._map_exit_fail = 0  # 사냥터 이탈 감지 연속 불일치 카운터
         try:
             while not self._stop_event.is_set():
@@ -341,10 +383,51 @@ class BotLoop:
                         if not self._anti_mob_active:
                             self._check_anti_mob(screenshot)
 
-                    # 포션 수량 체크 (30초마다)
-                    if now - last_potion_cnt >= POTION_CNT_INTERVAL:
-                        last_potion_cnt = now
-                        self._check_potion_count()
+                        # ── 디버그 오버레이용 game_state 갱신 (1초마다) ──────
+                        try:
+                            _gs_pos = self._minimap_reader.get_character_pos()
+                            _hp = self._detector.hp_ratio()
+                            _mp = self._detector.mp_ratio()
+                            self.game_state.update(
+                                char_pos=_gs_pos,
+                                char_pos_smooth=_gs_pos,
+                                hp_ratio=_hp,
+                                mp_ratio=_mp,
+                                bot_state="running",
+                                nav_state=getattr(self._map_navigator, '_direction', '-'),
+                            )
+                        except Exception:
+                            _hp, _mp = 1.0, 1.0
+
+                        # 긴급 마을 귀환 HP/MP % 발동 체크
+                        self._check_town_scroll_trigger(_hp, _mp)
+
+                    # ── 픽업 타이머 발동 체크 ──────────────────────────
+                    if (use_floor_hunt and pu_enabled and not pu_active
+                            and pu_route and fh_state == "patrol"
+                            and now - last_pickup_time >= pu_interval):
+                        ropes = self._map_navigator.ropes
+                        step    = pu_route[0]
+                        to_name = step.get("to_zone", "")
+                        rp_name = step.get("rope", "")
+                        to_zone = next((z for z in fh_zones if z.name == to_name), None)
+                        rp      = next((r for r in ropes if r.name == rp_name), None)
+                        if to_zone and rp:
+                            pu_active      = True
+                            pu_step_idx    = 0
+                            pu_prev_fh_idx = fh_idx
+                            fh_rope_x    = rp.x
+                            fh_climb_sec = rp.climb_sec
+                            fh_next_idx  = fh_zones.index(to_zone)
+                            fh_next_dir  = 1 if to_zone.y_min < fh_zones[fh_idx].y_min else -1
+                            fh_state     = "to_rope"
+                            fh_half_count = 0
+                            fh_last_side  = ""
+                            self._map_navigator.release_direction()
+                            self._status(f"🎒 픽업 타이머 발동 → {to_name}")
+                        else:
+                            last_pickup_time = now  # 오류 시 타이머 리셋 (스팸 방지)
+                            self._status(f"⚠ 픽업 루트 오류: '{to_name}' 또는 '{rp_name}' 미발견")
 
                     # 층별 핑퐁 상태머신
                     if use_floor_hunt and fh_zones:
@@ -445,8 +528,61 @@ class BotLoop:
                                     fh_last_side  = ""
                                     fh_arrive_time = time.time()   # Y 감지 쿨다운 시작
                                     self._map_navigator.set_zones([fh_zones[fh_idx]])
-                                    self._status(f"[층별] {fh_zones[fh_idx].name} 사냥 시작")
                                     _apply_zone_pattern(fh_zones[fh_idx])  # 층 도착 시 패턴 교체
+
+                                    if pu_active:
+                                        # ── 픽업 구역 도착 → 픽업 키 입력 ──
+                                        self._status(f"🎒 {fh_zones[fh_idx].name} 픽업 중...")
+                                        self._input.press_key(pu_key, hold_sec=pu_hold_sec)
+                                        time.sleep(0.2)
+                                        pu_step_idx += 1
+                                        ropes = self._map_navigator.ropes
+
+                                        if pu_step_idx < len(pu_route):
+                                            # 다음 픽업 구역으로 이동
+                                            nxt_step = pu_route[pu_step_idx]
+                                            to_name  = nxt_step.get("to_zone", "")
+                                            rp_name  = nxt_step.get("rope", "")
+                                            to_zone  = next((z for z in fh_zones if z.name == to_name), None)
+                                            rp       = next((r for r in ropes if r.name == rp_name), None)
+                                            if to_zone and rp:
+                                                fh_rope_x    = rp.x
+                                                fh_climb_sec = rp.climb_sec
+                                                fh_next_idx  = fh_zones.index(to_zone)
+                                                fh_next_dir  = 1 if to_zone.y_min < fh_zones[fh_idx].y_min else -1
+                                                fh_state     = "to_rope"
+                                                fh_half_count = 0
+                                                fh_last_side  = ""
+                                                self._map_navigator.release_direction()
+                                                self._status(f"🎒 다음 픽업 구역 → {to_name}")
+                                            else:
+                                                pu_active        = False
+                                                last_pickup_time = time.time()
+                                                self._status(f"⚠ 픽업 루트 오류 → 사냥 재개")
+                                        else:
+                                            # 모든 픽업 구역 완료 → 원래 사냥 구역 복귀
+                                            pu_active        = False
+                                            last_pickup_time = time.time()
+                                            origin_zone = fh_zones[pu_prev_fh_idx]
+                                            rp_back = next(
+                                                (r for r in ropes if r.name == pu_route[-1].get("rope", "")),
+                                                None,
+                                            )
+                                            if rp_back and pu_prev_fh_idx != fh_idx:
+                                                fh_rope_x    = rp_back.x
+                                                fh_climb_sec = rp_back.climb_sec
+                                                fh_next_idx  = pu_prev_fh_idx
+                                                fh_next_dir  = 1 if origin_zone.y_min < fh_zones[fh_idx].y_min else -1
+                                                fh_state     = "to_rope"
+                                                fh_half_count = 0
+                                                fh_last_side  = ""
+                                                self._map_navigator.release_direction()
+                                                self._status(f"🎒 픽업 완료 → '{origin_zone.name}' 복귀")
+                                            else:
+                                                self._map_navigator.set_zones([fh_zones[fh_idx]])
+                                                self._status("🎒 픽업 완료 — 사냥 재개")
+                                    else:
+                                        self._status(f"[층별] {fh_zones[fh_idx].name} 사냥 시작")
                                 else:
                                     # 도착 실패 → 실제 Y 위치로 현재 층 재판별
                                     if pos is not None:
@@ -492,6 +628,11 @@ class BotLoop:
                                     actual_zone = _zone_by_y(cy_now)
                                     actual_idx  = fh_zones.index(actual_zone)
                                     reason = ("X범위 이탈" if not x_in_zone else "낙사(Y 이탈)")
+                                    # 현재 Y가 어떤 구역에도 속하지 않으면 → 미등록 층 낙사
+                                    _y_in_any = any(
+                                        z.y_min - 8 <= cy_now <= z.y_max + 8
+                                        for z in fh_zones
+                                    )
                                     if actual_idx != fh_idx:
                                         fh_idx        = actual_idx
                                         fh_half_count = 0
@@ -504,6 +645,14 @@ class BotLoop:
                                             f"'{fh_zones[fh_idx].name}' 복귀"
                                         )
                                         _apply_zone_pattern(fh_zones[fh_idx])  # 복귀 층 패턴 교체
+                                    elif not _y_in_any and not y_in_zone:
+                                        # 미등록 층 낙사: fh_half_count 강제 만료 → 즉시 밧줄 이동 발동
+                                        fh_half_count = int(fh_zones[fh_idx].sweeps * 2)
+                                        fh_last_side  = ""
+                                        self._status(
+                                            f"[층별] 미등록 층 낙사 Y={cy_now} → "
+                                            f"'{fh_zones[fh_idx].name}' 즉시 복귀"
+                                        )
 
                             # ── 왕복 횟수 카운트 ──────────────────────
                             zone = fh_zones[fh_idx]
@@ -684,6 +833,7 @@ class BotLoop:
             self._map_navigator.release_direction()
             if self._floor_hunt_thread and self._floor_hunt_thread.is_alive():
                 self._floor_hunt_thread.join(timeout=3)
+            self.game_state.update(bot_state="stopped", monster_positions=[], char_pos=None)
             # 내부 정지(이탈 감지 등)인 경우 UI 상태 동기화
             try:
                 self._on_stop_cb()
@@ -880,17 +1030,6 @@ class BotLoop:
         # ── 해제 (거탐 해제 모듈이 꺼진 경우 알림만 하고 복귀) ────────
         if not self._enable_lie_solve:
             return True   # 감지는 됐으나 해제 생략 — 루프 한 번 스킵
-
-        # 3. 종료 옵션 처리
-        import subprocess
-        if cfg.get("close_maple"):
-            self._stop_event.set()
-            subprocess.Popen("taskkill /F /IM MapleStory.exe", shell=True)
-            return True
-        if cfg.get("shutdown_pc"):
-            self._stop_event.set()
-            subprocess.Popen("shutdown /s /t 10", shell=True)
-            return True
 
         # 3. 퍼즐 해제 — 수동 좌표 설정 시 우선 사용
         # 층별 사냥 중이면 일시정지
@@ -1252,7 +1391,8 @@ class BotLoop:
             return  # 기준 이미지 없음 → 동작 안 함
 
         x, y, w, h = name_region
-        current = self._screen.capture({"left": int(x), "top": int(y), "width": int(w), "height": int(h)})
+        ox, oy = self._get_coord_origin()
+        current = self._screen.capture({"left": int(x) + ox, "top": int(y) + oy, "width": int(w), "height": int(h)})
         score = self._screen.find_template_score(current, ref_path)
 
         threshold = float(cfg.get("threshold", 0.75))
@@ -1275,50 +1415,28 @@ class BotLoop:
         if action in ("stop", "both"):
             self._stop_event.set()
 
-    def _check_potion_count(self) -> None:
-        """포션 슬롯 영역을 OCR로 읽어 수량 0이면 마을 귀환을 실행한다."""
-        pc = self._config.get("recovery", "potion_count") or {}
-        if not pc.get("zero_return", False):
-            return
-
+    def _check_town_scroll_trigger(self, hp: float, mp: float) -> None:
+        """HP 또는 MP가 설정 퍼센트 미만이면 긴급 마을 귀환 키를 발동한다."""
         ts = self._config.get("town_scroll") or {}
         if not ts.get("enabled", False):
             return
-
-        hp_region = pc.get("hp_region")
-        mp_region = pc.get("mp_region")
-        if not hp_region and not mp_region:
+        hp_on = ts.get("hp_trigger", False)
+        mp_on = ts.get("mp_trigger", False)
+        if not hp_on and not mp_on:
             return
 
-        from core.ocr_detector import read_number
+        hp_pct = int(ts.get("hp_trigger_pct", 10)) / 100.0
+        mp_pct = int(ts.get("mp_trigger_pct", 10)) / 100.0
 
-        def _is_zero(region) -> bool | None:
-            """수량 숫자 영역을 OCR로 읽어 0이면 True, 수량 있으면 False, 실패면 None 반환."""
-            if not region or len(region) < 4:
-                return None
-            x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
-            try:
-                img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
-                n = read_number(img)
-                if n is None:
-                    return None  # 읽기 실패 — 오탐 방지를 위해 무시
-                self._status(f"[포션수량] {n}개")
-                return n == 0
-            except Exception:
-                return None
+        reasons = []
+        if hp_on and hp < hp_pct:
+            reasons.append(f"HP {hp*100:.0f}% < {hp_pct*100:.0f}%")
+        if mp_on and mp < mp_pct:
+            reasons.append(f"MP {mp*100:.0f}% < {mp_pct*100:.0f}%")
 
-        hp_zero = _is_zero(hp_region) if hp_region else None
-        mp_zero = _is_zero(mp_region) if mp_region else None
-
-        # 읽기 실패(None)는 무시, 명확히 0인 경우만 귀환
-        if hp_zero is not True and mp_zero is not True:
-            return
-
-        kind = "HP" if hp_zero else "MP"
-        if hp_zero and mp_zero:
-            kind = "HP+MP"
-        self._status(f"⚠️ {kind} 포션 수량 0 감지 — 마을 귀환 실행")
-        self._use_town_scroll()
+        if reasons:
+            self._status(f"⚠️ 긴급 마을 귀환 발동 ({' '.join(reasons)})")
+            self._use_town_scroll()
 
     def _use_town_scroll(self) -> None:
         """마을 귀환 주문서 키를 눌러 귀환하고 봇을 정지한다."""
@@ -1363,7 +1481,8 @@ class BotLoop:
         region = cfg.get("detect_region")
         if region and len(region) == 4:
             rx, ry, rw, rh = region
-            target = self._screen.capture({"left": int(rx), "top": int(ry),
+            _amob_ox, _amob_oy = self._get_coord_origin()
+            target = self._screen.capture({"left": int(rx) + _amob_ox, "top": int(ry) + _amob_oy,
                                            "width": int(rw), "height": int(rh)})
         else:
             target = screenshot

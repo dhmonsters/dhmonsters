@@ -148,13 +148,24 @@ DEFAULT_CONFIG = {
         "basic_count":    5,            # 기본공격형 공격 횟수
     },
     "town_scroll": {
-        "enabled":  False,
-        "key":      "9",                # 마을 귀환 주문서 사용 키
-        "hotkey":   "",                 # 단축키 (글로벌 핫키)
+        "enabled":          False,
+        "key":              "9",        # 긴급 마을 귀환 키
+        "hp_trigger":       False,      # HP % 미만 발동 여부
+        "hp_trigger_pct":   10,         # HP 발동 퍼센트
+        "mp_trigger":       False,      # MP % 미만 발동 여부
+        "mp_trigger_pct":   10,         # MP 발동 퍼센트
     },
     "hunting_return": {
         "enabled":  False,
     },
+    "pickup_timer": {
+        "enabled":      False,
+        "interval_sec": 110,    # 수집 주기 (초) — 아이템 소멸 2분보다 10초 여유
+        "pickup_key":   "z",    # 아이템 줍기 키
+        "key_hold_sec": 1.5,    # 각 구역에서 픽업 키 유지 시간
+        "route":        [],     # [{to_zone: str, rope: str}, ...]
+    },
+    "coord_mode": "absolute",   # "absolute" | "relative" (게임 창 클라이언트 기준 상대 좌표)
     "settings2": {
         "shutdown": {
             "on_death": False,
@@ -224,3 +235,23 @@ class ConfigManager:
         for k in keys[:-1]:
             node = node.setdefault(k, {})
         node[keys[-1]] = value
+
+
+def get_game_window_origin(config: "ConfigManager") -> tuple[int, int]:
+    """coord_mode == 'relative'일 때 게임 창 클라이언트 좌상단 절대 좌표를 반환.
+
+    absolute 모드이거나 창을 찾지 못하면 (0, 0) 반환.
+    드래그로 영역을 선택할 때 이 값을 빼서 상대 좌표로 저장하고,
+    화면 캡처 시에는 이 값을 더해 절대 좌표로 복원한다.
+    """
+    if (config.get("coord_mode") or "absolute") != "relative":
+        return (0, 0)
+    title = config.get("settings2", "game_window_title") or "MapleStory"
+    try:
+        import win32gui
+        hwnd = win32gui.FindWindow(None, title)
+        if hwnd:
+            return win32gui.ClientToScreen(hwnd, (0, 0))
+    except Exception:
+        pass
+    return (0, 0)

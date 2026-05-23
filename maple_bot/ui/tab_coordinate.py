@@ -279,6 +279,7 @@ class TabCoordinate(QWidget):
         layout.addWidget(self._build_zone_group())
         layout.addWidget(self._build_rope_group())
         layout.addWidget(self._build_floor_hunt_group())
+        layout.addWidget(self._build_pickup_timer_group())
         layout.addStretch()
 
         scroll_area.setWidget(inner)
@@ -684,6 +685,13 @@ class TabCoordinate(QWidget):
         self.cmb_route_rope.clear()
         for r in ropes:
             self.cmb_route_rope.addItem(r.get("name", ""))
+        # 픽업 타이머 콤보도 동일하게 갱신
+        self.cmb_pickup_zone.clear()
+        for z in sorted(zones, key=lambda x: x.get("name", "")):
+            self.cmb_pickup_zone.addItem(z.get("name", ""))
+        self.cmb_pickup_rope.clear()
+        for r in ropes:
+            self.cmb_pickup_rope.addItem(r.get("name", ""))
 
     def _add_route_step(self) -> None:
         to_zone = self.cmb_route_zone.currentText()
@@ -727,15 +735,153 @@ class TabCoordinate(QWidget):
         self.config.set("floor_hunt", "route",      route)
         self.config.save()
 
+    # ── 아이템 수집 타이머 ────────────────────────────────────────────
+    def _build_pickup_timer_group(self) -> QGroupBox:
+        """아이템 수집 타이머 UI."""
+        group = QGroupBox("아이템 수집 타이머")
+        layout = QVBoxLayout(group)
+
+        note = QLabel(
+            "설정한 주기마다 사냥을 잠시 멈추고 수집 루트를 순회하며 아이템을 줍습니다.\n"
+            "수집 루트는 아래에서 직접 지정하세요 (구역 + 밧줄 조합)."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(note)
+
+        row0 = QHBoxLayout()
+        self.chk_pickup = QCheckBox("타이머 활성화")
+        row0.addWidget(self.chk_pickup)
+        row0.addStretch()
+        layout.addLayout(row0)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("수집 주기"))
+        self.spin_pickup_interval = QSpinBox()
+        self.spin_pickup_interval.setRange(10, 600)
+        self.spin_pickup_interval.setValue(110)
+        self.spin_pickup_interval.setSuffix(" 초")
+        self.spin_pickup_interval.setFixedWidth(80)
+        row1.addWidget(self.spin_pickup_interval)
+        row1.addSpacing(16)
+        row1.addWidget(QLabel("픽업 키"))
+        self.edit_pickup_key = QLineEdit("z")
+        self.edit_pickup_key.setFixedWidth(45)
+        row1.addWidget(self.edit_pickup_key)
+        row1.addSpacing(16)
+        row1.addWidget(QLabel("키 유지"))
+        self.dspin_pickup_hold = QDoubleSpinBox()
+        self.dspin_pickup_hold.setRange(0.1, 10.0)
+        self.dspin_pickup_hold.setSingleStep(0.1)
+        self.dspin_pickup_hold.setValue(1.5)
+        self.dspin_pickup_hold.setSuffix(" 초")
+        self.dspin_pickup_hold.setFixedWidth(75)
+        row1.addWidget(self.dspin_pickup_hold)
+        row1.addStretch()
+        layout.addLayout(row1)
+
+        layout.addWidget(QLabel("수집 루트 (순서대로 방문)"))
+
+        list_row = QHBoxLayout()
+        self.lst_pickup_route = QListWidget()
+        self.lst_pickup_route.setMaximumHeight(100)
+        list_row.addWidget(self.lst_pickup_route)
+
+        btn_col = QVBoxLayout()
+        btn_pu = QPushButton("↑"); btn_pu.setFixedSize(28, 32)
+        btn_pd = QPushButton("↓"); btn_pd.setFixedSize(28, 32)
+        btn_pu.clicked.connect(self._pickup_step_up)
+        btn_pd.clicked.connect(self._pickup_step_down)
+        btn_col.addWidget(btn_pu)
+        btn_col.addWidget(btn_pd)
+        btn_col.addStretch()
+        list_row.addLayout(btn_col)
+        layout.addLayout(list_row)
+
+        add_row = QHBoxLayout()
+        add_row.addWidget(QLabel("목적지"))
+        self.cmb_pickup_zone = QComboBox()
+        self.cmb_pickup_zone.setMinimumWidth(80)
+        add_row.addWidget(self.cmb_pickup_zone)
+        add_row.addWidget(QLabel("밧줄"))
+        self.cmb_pickup_rope = QComboBox()
+        self.cmb_pickup_rope.setMinimumWidth(80)
+        add_row.addWidget(self.cmb_pickup_rope)
+        btn_add_pu = QPushButton("+ 추가")
+        btn_add_pu.setFixedWidth(60)
+        btn_del_pu = QPushButton("삭제")
+        btn_del_pu.setFixedWidth(50)
+        btn_add_pu.clicked.connect(self._add_pickup_step)
+        btn_del_pu.clicked.connect(self._del_pickup_step)
+        add_row.addWidget(btn_add_pu)
+        add_row.addWidget(btn_del_pu)
+        add_row.addStretch()
+        layout.addLayout(add_row)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_save_pu = QPushButton("저장")
+        btn_save_pu.setFixedWidth(55)
+        btn_save_pu.clicked.connect(self._save_pickup_timer)
+        btn_row.addWidget(btn_save_pu)
+        layout.addLayout(btn_row)
+
+        return group
+
+    def _add_pickup_step(self) -> None:
+        to_zone = self.cmb_pickup_zone.currentText()
+        rope    = self.cmb_pickup_rope.currentText()
+        if to_zone and rope:
+            self.lst_pickup_route.addItem(f"→ {to_zone}  (밧줄: {rope})")
+            item = self.lst_pickup_route.item(self.lst_pickup_route.count() - 1)
+            item.setData(Qt.ItemDataRole.UserRole, {"to_zone": to_zone, "rope": rope})
+
+    def _del_pickup_step(self) -> None:
+        row = self.lst_pickup_route.currentRow()
+        if row >= 0:
+            self.lst_pickup_route.takeItem(row)
+
+    def _pickup_step_up(self) -> None:
+        row = self.lst_pickup_route.currentRow()
+        if row <= 0:
+            return
+        item = self.lst_pickup_route.takeItem(row)
+        self.lst_pickup_route.insertItem(row - 1, item)
+        self.lst_pickup_route.setCurrentRow(row - 1)
+
+    def _pickup_step_down(self) -> None:
+        row = self.lst_pickup_route.currentRow()
+        if row < 0 or row >= self.lst_pickup_route.count() - 1:
+            return
+        item = self.lst_pickup_route.takeItem(row)
+        self.lst_pickup_route.insertItem(row + 1, item)
+        self.lst_pickup_route.setCurrentRow(row + 1)
+
+    def _save_pickup_timer(self) -> None:
+        route = []
+        for i in range(self.lst_pickup_route.count()):
+            data = self.lst_pickup_route.item(i).data(Qt.ItemDataRole.UserRole)
+            if data:
+                route.append(data)
+        self.config.set("pickup_timer", "enabled",      self.chk_pickup.isChecked())
+        self.config.set("pickup_timer", "interval_sec", self.spin_pickup_interval.value())
+        self.config.set("pickup_timer", "pickup_key",   self.edit_pickup_key.text().strip() or "z")
+        self.config.set("pickup_timer", "key_hold_sec", self.dspin_pickup_hold.value())
+        self.config.set("pickup_timer", "route",        route)
+        self.config.save()
+
     # ── 드래그 / 단축키 ───────────────────────────────────────────────
     def _select_minimap_region(self) -> None:
         self._selector = RegionSelector()
         self._selector.region_selected.connect(self._apply_minimap_region)
 
     def _apply_minimap_region(self, x: int, y: int, w: int, h: int) -> None:
-        self.spin_rx.setValue(x); self.spin_ry.setValue(y)
+        from core.config_manager import get_game_window_origin
+        ox, oy = get_game_window_origin(self._config)
+        rx, ry = x - ox, y - oy
+        self.spin_rx.setValue(rx); self.spin_ry.setValue(ry)
         self.spin_rw.setValue(w); self.spin_rh.setValue(h)
-        self.lbl_mm_hk.setText(f"({x},{y}) {w}×{h}")
+        self.lbl_mm_hk.setText(f"({rx},{ry}) {w}×{h}")
 
     def _apply_mm_hotkey(self, key: str) -> None:
         if not self._hk:
@@ -1110,4 +1256,18 @@ class TabCoordinate(QWidget):
 
         # 콤보박스 채우기
         self._refresh_route_combos()
+
+        # 픽업 타이머 설정 로드
+        pt = self.config.get("pickup_timer") or {}
+        self.chk_pickup.setChecked(bool(pt.get("enabled", False)))
+        self.spin_pickup_interval.setValue(int(pt.get("interval_sec", 110)))
+        self.edit_pickup_key.setText(pt.get("pickup_key", "z"))
+        self.dspin_pickup_hold.setValue(float(pt.get("key_hold_sec", 1.5)))
+        self.lst_pickup_route.clear()
+        for step in pt.get("route", []):
+            to_zone = step.get("to_zone", "")
+            rope    = step.get("rope", "")
+            self.lst_pickup_route.addItem(f"→ {to_zone}  (밧줄: {rope})")
+            item = self.lst_pickup_route.item(self.lst_pickup_route.count() - 1)
+            item.setData(Qt.ItemDataRole.UserRole, step)
 
