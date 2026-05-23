@@ -162,6 +162,23 @@ class TabMain(QWidget):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.lbl_status.setText("실행 중 🟢")
+        # 단축키가 게임창에 전달되어 축소되는 경우 방지 — 300ms 후 게임창 포커스 복귀
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(300, self._refocus_game)
+
+    def _refocus_game(self) -> None:
+        """봇 시작 후 게임 창 포커스를 복귀한다."""
+        try:
+            import win32gui, win32con
+            title = (self._bot._config.get("settings2", "game_window_title")
+                     or "MapleStory") if self._bot else "MapleStory"
+            hwnd = win32gui.FindWindow(None, title)
+            if hwnd:
+                if win32gui.IsIconic(hwnd):   # 최소화된 경우에만 복원
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
 
     def _on_stop(self) -> None:
         if self._bot is None:
