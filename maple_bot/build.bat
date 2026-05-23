@@ -39,6 +39,7 @@ echo [3/3] Copying files...
 if not exist dist mkdir dist
 xcopy /E /I /Y .obf_build\dist\dhmonsters dist\dhmonsters
 copy /Y config.json dist\dhmonsters\config.json
+copy /Y version.txt dist\dhmonsters\version.txt
 
 echo.
 echo ========================================
