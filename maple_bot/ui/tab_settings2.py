@@ -10,7 +10,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QListWidget, QDialog, QDialogButtonBox,
-    QScrollArea, QMessageBox,
+    QScrollArea, QMessageBox, QComboBox, QCheckBox,
 )
 from PyQt6.QtCore import pyqtSignal
 
@@ -20,13 +20,22 @@ from ui.region_selector import RegionSelector
 class TabSettings2(QWidget):
     _junk_status_sig    = pyqtSignal(str)   # 배경 스레드 → 메인 스레드 상태 전달
     _junk_done_sig      = pyqtSignal()      # 판매 완료 → 버튼 재활성화
+    _shop_done_sig      = pyqtSignal()      # 상점열기 완료 → 버튼 재활성화
     _update_result_sig  = pyqtSignal(object)  # 업데이트 확인 결과 (dict | None)
+
+    @staticmethod
+    def _to_physical(x: int, y: int, w: int, h: int) -> tuple[int, int, int, int]:
+        """PyQt6 논리 픽셀 → mss 물리 픽셀 변환. logical_to_physical() 위임."""
+        from ui.region_selector import logical_to_physical
+        return logical_to_physical(x, y, w, h)
 
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self._log_cb = None   # 메인 로그창 콜백 (MainWindow에서 주입)
         self._junk_status_sig.connect(self._on_junk_status)
         self._junk_done_sig.connect(lambda: self.btn_junk_run.setEnabled(True))
+        self._shop_done_sig.connect(lambda: self.btn_open_shop.setEnabled(True))
         self._update_result_sig.connect(self._on_update_result)
 
         scroll = QScrollArea()
@@ -71,9 +80,14 @@ class TabSettings2(QWidget):
         self.btn_check_update.setText("확인 중...")
 
         def _worker():
-            from core.updater import check_for_update
-            info = check_for_update()
-            self._update_result_sig.emit(info)  # None or dict
+            import logging
+            try:
+                from core.updater import check_for_update
+                info = check_for_update()
+            except Exception as e:
+                logging.getLogger(__name__).error("업데이트 확인 실패: %s", e)
+                info = None
+            self._update_result_sig.emit(info)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -120,7 +134,36 @@ class TabSettings2(QWidget):
         row.addStretch()
         layout.addLayout(row)
 
+        # 좌표 모드 (상대/절대)
+        coord_row = QHBoxLayout()
+        coord_row.addWidget(QLabel("좌표 모드"))
+        self.combo_coord_mode = QComboBox()
+        self.combo_coord_mode.addItems(["절대 좌표 (absolute)", "상대 좌표 (relative)"])
+        current_mode = self.config.get("coord_mode") or "absolute"
+        self.combo_coord_mode.setCurrentIndex(0 if current_mode == "absolute" else 1)
+        self.combo_coord_mode.setFixedWidth(200)
+        coord_row.addWidget(self.combo_coord_mode)
+        btn_coord_save = QPushButton("저장")
+        btn_coord_save.setFixedWidth(55)
+        btn_coord_save.clicked.connect(self._save_coord_mode)
+        coord_row.addWidget(btn_coord_save)
+        coord_row.addStretch()
+        layout.addLayout(coord_row)
+
+        coord_note = QLabel(
+            "상대 좌표: 게임 창 이동 시 좌표 재설정 불필요. 위 '창 제목'이 정확히 설정돼 있어야 합니다."
+        )
+        coord_note.setWordWrap(True)
+        coord_note.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(coord_note)
+
         return group
+
+    def _save_coord_mode(self) -> None:
+        mode = "relative" if self.combo_coord_mode.currentIndex() == 1 else "absolute"
+        self.config.set("coord_mode", mode)
+        self.config.save()
+        QMessageBox.information(self, "저장", f"좌표 모드가 '{mode}'로 저장되었습니다.")
 
     def _show_window_list(self) -> None:
         """현재 열린 창 제목 목록을 팝업으로 표시. 더블클릭하면 자동 입력."""
@@ -168,44 +211,289 @@ class TabSettings2(QWidget):
     def _build_junk_sell_group(self):
         group = QGroupBox("잡템 자동 판매")
         layout = QVBoxLayout(group)
-
-        layout.addWidget(QLabel("── 좌표 설정 ──────────────────────"))
-
-        # (설정키, 표시명, 영역여부)
-        coord_defs = [
-            ("cash_tab",     "캐시 탭",       False),
-            ("first_slot",   "첫번째 슬롯",    False),
-            ("shop_etc_tab", "상점 기타 탭",   False),
-            ("shop_area",    "상점 목록 영역",  True),
-            ("scroll_pos",   "스크롤 위치",     False),
-            ("sell_confirm", "판매 확인 버튼",  False),
-        ]
         self._junk_coord_lbls: dict[str, QLabel] = {}
 
-        for key, title, is_area in coord_defs:
-            row = QHBoxLayout()
-            lbl_title = QLabel(title)
-            lbl_title.setFixedWidth(110)
-            lbl_val = QLabel("미설정")
-            lbl_val.setStyleSheet("color: gray; font-size: 10px;")
-            self._junk_coord_lbls[key] = lbl_val
+        # ══ ① 상점 열기 섹션 ══════════════════════════════════════════
+        layout.addWidget(QLabel("─ ① 상점 열기 설정 ─────────────────────"))
 
-            btn_set = QPushButton("📍 드래그" if is_area else "📍")
-            btn_set.setFixedWidth(78 if is_area else 32)
-            btn_set.clicked.connect(lambda _, k=key, a=is_area: self._set_junk_coord(k, a))
+        # 인벤토리 키 설정
+        inv_key_row = QHBoxLayout()
+        lbl_inv_key = QLabel("인벤토리 키")
+        lbl_inv_key.setFixedWidth(90)
+        self.edit_inventory_key = QLineEdit("i")
+        self.edit_inventory_key.setFixedWidth(50)
+        self.edit_inventory_key.setMaxLength(10)
+        self.edit_inventory_key.setToolTip(
+            "인벤토리를 여는 단축키입니다. (기본: i)\n"
+            "인벤토리가 이미 열려있으면 키를 누르지 않습니다."
+        )
+        inv_key_row.addWidget(lbl_inv_key)
+        inv_key_row.addWidget(self.edit_inventory_key)
+        inv_key_row.addStretch()
+        layout.addLayout(inv_key_row)
 
-            btn_rst = QPushButton("✕")
-            btn_rst.setFixedWidth(24)
-            btn_rst.clicked.connect(lambda _, k=key: self._reset_junk_coord(k))
+        # 캐시탭 기본 이미지 (비활성 상태 — 클릭 전 회색)
+        cash_tpl_row = QHBoxLayout()
+        lbl_ct = QLabel("캐시탭 이미지")
+        lbl_ct.setFixedWidth(100)
+        self.lbl_cash_tpl = QLabel("미등록")
+        self.lbl_cash_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_cash_tpl = QPushButton("📷 캡처")
+        btn_cash_tpl.setFixedWidth(65)
+        btn_cash_tpl.setToolTip("캐시탭 버튼을 드래그해서 저장합니다. (클릭 전 기본 상태)")
+        btn_cash_tpl.clicked.connect(self._capture_cash_tab_template)
+        btn_cash_tpl_del = QPushButton("✕")
+        btn_cash_tpl_del.setFixedWidth(24)
+        btn_cash_tpl_del.clicked.connect(self._clear_cash_tab_template)
+        cash_tpl_row.addWidget(lbl_ct)
+        cash_tpl_row.addWidget(self.lbl_cash_tpl)
+        cash_tpl_row.addStretch()
+        cash_tpl_row.addWidget(btn_cash_tpl)
+        cash_tpl_row.addWidget(btn_cash_tpl_del)
+        layout.addLayout(cash_tpl_row)
+        self._refresh_cash_tpl_label()
 
-            row.addWidget(lbl_title)
-            row.addWidget(lbl_val)
-            row.addStretch()
-            row.addWidget(btn_set)
-            row.addWidget(btn_rst)
-            layout.addLayout(row)
+        # 캐시탭 활성 이미지 (클릭 후 분홍색 상태 — 이걸 감지해야 상점이 열린 것)
+        cash_act_row = QHBoxLayout()
+        lbl_ca = QLabel("캐시탭 활성 이미지")
+        lbl_ca.setFixedWidth(100)
+        self.lbl_cash_active_tpl = QLabel("미등록")
+        self.lbl_cash_active_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_cash_act = QPushButton("📷 캡처")
+        btn_cash_act.setFixedWidth(65)
+        btn_cash_act.setToolTip(
+            "캐시탭을 클릭했을 때 분홍색/하이라이트 상태를 드래그해서 저장합니다.\n"
+            "이 이미지가 감지되면 캐시탭 클릭 성공으로 판단하고 첫번째 슬롯을 누릅니다."
+        )
+        btn_cash_act.clicked.connect(self._capture_cash_tab_active_template)
+        btn_cash_act_del = QPushButton("✕")
+        btn_cash_act_del.setFixedWidth(24)
+        btn_cash_act_del.clicked.connect(self._clear_cash_tab_active_template)
+        cash_act_row.addWidget(lbl_ca)
+        cash_act_row.addWidget(self.lbl_cash_active_tpl)
+        cash_act_row.addStretch()
+        cash_act_row.addWidget(btn_cash_act)
+        cash_act_row.addWidget(btn_cash_act_del)
+        layout.addLayout(cash_act_row)
+        self._refresh_cash_active_tpl_label()
 
-        layout.addWidget(QLabel("── 판매 아이템 템플릿 ──────────────────"))
+        # 인벤토리 바 이미지 (우선 인식 앵커 — 큰 이미지라 인식 안정적)
+        inv_tpl_row = QHBoxLayout()
+        lbl_inv = QLabel("인벤토리 바 이미지")
+        lbl_inv.setFixedWidth(120)
+        self.lbl_inv_tpl = QLabel("미등록")
+        self.lbl_inv_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_inv_tpl = QPushButton("📷 캡처")
+        btn_inv_tpl.setFixedWidth(65)
+        btn_inv_tpl.setToolTip(
+            "인벤토리 상단 타이틀 바 ('ITEM INVENTORY' 글자 영역)를 드래그로 캡처하세요.\n"
+            "창 크기가 고정이므로 한 번만 설정하면 됩니다.\n"
+            "이 이미지를 먼저 찾아 캐시탭 위치를 역산합니다."
+        )
+        btn_inv_tpl.clicked.connect(self._capture_inventory_template)
+        btn_inv_tpl_del = QPushButton("✕")
+        btn_inv_tpl_del.setFixedWidth(24)
+        btn_inv_tpl_del.clicked.connect(self._clear_inventory_template)
+        inv_tpl_row.addWidget(lbl_inv)
+        inv_tpl_row.addWidget(self.lbl_inv_tpl)
+        inv_tpl_row.addStretch()
+        inv_tpl_row.addWidget(btn_inv_tpl)
+        inv_tpl_row.addWidget(btn_inv_tpl_del)
+        layout.addLayout(inv_tpl_row)
+        self._refresh_inv_tpl_label()
+
+        # 설정 안내
+        guide = QLabel(
+            "📌 설정 순서:\n"
+            "  1. 게임에서 인벤토리 열기\n"
+            "  2. '인벤토리 바 이미지' 캡처 (ITEM INVENTORY 바)\n"
+            "  3. '캐시탭 위치' 지정 (인벤토리 열린 상태 유지)\n"
+            "  4. 캐시탭 클릭 → 분홍색으로 변하면 '캐시탭 활성 이미지' 캡처\n"
+            "  5. '첫번째 슬롯' 위치 지정 (NPC 상점 첫 칸)"
+        )
+        guide.setStyleSheet("color: #555; font-size: 10px; padding: 4px 0px;")
+        guide.setWordWrap(True)
+        layout.addWidget(guide)
+
+        # 캐시탭 좌표 (앵커 기준 오프셋 계산용 + 단독 fallback)
+        self._add_junk_coord_row(layout, "cash_tab", "캐시탭 위치", False,
+                                 tip="인벤토리 열린 상태에서 캐시탭 버튼을 드래그로 지정하세요.\n"
+                                     "인벤토리 바 이미지와 함께 사용하면 위치가 달라져도 자동 보정됩니다.")
+
+        # 첫번째 슬롯 좌표
+        self._add_junk_coord_row(layout, "first_slot", "첫번째 슬롯", False,
+                                 tip="NPC 상점의 첫번째 슬롯 위치를 지정하세요.\n"
+                                     "캐시탭 활성 이미지 위치 기준 상대 오프셋으로 자동 보정됩니다.")
+
+        # 상점 열림 확인 이미지
+        shop_open_row = QHBoxLayout()
+        lbl_so = QLabel("상점 열림 확인")
+        lbl_so.setFixedWidth(100)
+        self.lbl_shop_open_tpl = QLabel("미등록 (없으면 생략)")
+        self.lbl_shop_open_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_so_cap = QPushButton("📷 캡처")
+        btn_so_cap.setFixedWidth(65)
+        btn_so_cap.setToolTip(
+            "상점이 열렸을 때만 보이는 고유 UI 요소를 드래그해서 저장합니다.\n"
+            "예) 상점 창 타이틀 바, '기타' 탭 텍스트 등.\n"
+            "이 이미지가 감지되면 상점 열림 성공으로 판단합니다."
+        )
+        btn_so_cap.clicked.connect(self._capture_shop_open_template)
+        btn_so_del = QPushButton("✕")
+        btn_so_del.setFixedWidth(24)
+        btn_so_del.clicked.connect(self._clear_shop_open_template)
+        shop_open_row.addWidget(lbl_so)
+        shop_open_row.addWidget(self.lbl_shop_open_tpl)
+        shop_open_row.addStretch()
+        shop_open_row.addWidget(btn_so_cap)
+        shop_open_row.addWidget(btn_so_del)
+        layout.addLayout(shop_open_row)
+        self._refresh_shop_open_tpl_label()
+
+        # 상점 열기 버튼
+        open_row = QHBoxLayout()
+        self.btn_open_shop = QPushButton("🏪 상점 열기")
+        self.btn_open_shop.setFixedHeight(32)
+        self.btn_open_shop.setStyleSheet(
+            "QPushButton { background-color: #27ae60; color: white; font-weight: bold; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #2ecc71; }"
+            "QPushButton:disabled { background-color: #95a5a6; }"
+        )
+        self.btn_open_shop.setToolTip("i키 → 캐시탭 클릭 → 첫번째 슬롯 클릭 순서로 상점을 엽니다.")
+        self.btn_open_shop.clicked.connect(self._run_open_shop)
+        self.lbl_junk_status = QLabel("대기 중")
+        self.lbl_junk_status.setStyleSheet("color: gray; font-size: 10px;")
+        open_row.addWidget(self.btn_open_shop)
+        open_row.addWidget(self.lbl_junk_status)
+        open_row.addStretch()
+        layout.addLayout(open_row)
+
+        # ══ ② 장비 판매 설정 ══════════════════════════════════════════
+        layout.addSpacing(6)
+        layout.addWidget(QLabel("─ ② 장비 판매 설정 ─────────────────────"))
+
+        # 장비 일괄 판매 버튼 템플릿
+        eq_btn_row = QHBoxLayout()
+        lbl_eq = QLabel("장비 일괄 판매")
+        lbl_eq.setFixedWidth(100)
+        self.lbl_equip_sell_tpl = QLabel("미등록")
+        self.lbl_equip_sell_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_eq_cap = QPushButton("📷 캡처")
+        btn_eq_cap.setFixedWidth(65)
+        btn_eq_cap.setToolTip("NPC 상점의 '장비 일괄 판매' 버튼 이미지를 드래그해서 저장합니다.")
+        btn_eq_cap.clicked.connect(self._capture_equip_sell_template)
+        btn_eq_del = QPushButton("✕")
+        btn_eq_del.setFixedWidth(24)
+        btn_eq_del.clicked.connect(self._clear_equip_sell_template)
+        eq_btn_row.addWidget(lbl_eq)
+        eq_btn_row.addWidget(self.lbl_equip_sell_tpl)
+        eq_btn_row.addStretch()
+        eq_btn_row.addWidget(btn_eq_cap)
+        eq_btn_row.addWidget(btn_eq_del)
+        layout.addLayout(eq_btn_row)
+        self._refresh_equip_sell_tpl_label()
+
+        # 장비 일괄 판매 확인 버튼 템플릿
+        eq_conf_row = QHBoxLayout()
+        lbl_ec = QLabel("일괄 판매 확인")
+        lbl_ec.setFixedWidth(100)
+        self.lbl_equip_confirm_tpl = QLabel("미등록 (없으면 Enter 키 사용)")
+        self.lbl_equip_confirm_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_ec_cap = QPushButton("📷 캡처")
+        btn_ec_cap.setFixedWidth(65)
+        btn_ec_cap.setToolTip(
+            "장비 일괄 판매 후 나타나는 확인 팝업의 '확인' 버튼 이미지를 저장합니다.\n"
+            "미등록 시 확인창이 감지되지 않으면 Enter 키로 대체합니다."
+        )
+        btn_ec_cap.clicked.connect(self._capture_equip_confirm_template)
+        btn_ec_del = QPushButton("✕")
+        btn_ec_del.setFixedWidth(24)
+        btn_ec_del.clicked.connect(self._clear_equip_confirm_template)
+        eq_conf_row.addWidget(lbl_ec)
+        eq_conf_row.addWidget(self.lbl_equip_confirm_tpl)
+        eq_conf_row.addStretch()
+        eq_conf_row.addWidget(btn_ec_cap)
+        eq_conf_row.addWidget(btn_ec_del)
+        layout.addLayout(eq_conf_row)
+        self._refresh_equip_confirm_tpl_label()
+
+        # 상점 나가기 버튼 좌표 (템플릿보다 단순 좌표가 더 안정적)
+        self._add_junk_coord_row(layout, "shop_exit_btn", "상점 나가기", False,
+                                 tip="상점 창의 '상점 나가기' 또는 닫기(X) 버튼 좌표입니다.\n"
+                                     "미설정 시 ESC 키 2회로 대체합니다.")
+
+        # ══ ③ 기타템 판매 설정 ════════════════════════════════════════
+        layout.addSpacing(6)
+        layout.addWidget(QLabel("─ ③ 기타템 판매 설정 ───────────────────"))
+
+        # 기타템 판매 활성화 체크박스
+        chk_row = QHBoxLayout()
+        self.chk_junk_sell = QCheckBox("기타템 판매 활성화")
+        self.chk_junk_sell.setToolTip(
+            "체크 시: 장비 판매 후 상점 기타탭으로 이동해 아이템 템플릿 판매를 진행합니다.\n"
+            "미체크 시: 장비 판매 후 바로 상점을 닫습니다."
+        )
+        self.chk_junk_sell.stateChanged.connect(self._save_junk_sell_enabled)
+        chk_row.addWidget(self.chk_junk_sell)
+        chk_row.addStretch()
+        layout.addLayout(chk_row)
+
+        etc_coord_defs = [
+            ("shop_area",  "상점 목록 영역", True,
+             "기타 탭 아이템 목록이 표시되는 영역을 드래그로 지정합니다."),
+            ("scroll_pos", "스크롤 위치",   False,
+             "아이템 목록 스크롤바 위치입니다. 아래로 스크롤할 때 사용합니다."),
+        ]
+        for key, title, is_area, tip in etc_coord_defs:
+            self._add_junk_coord_row(layout, key, title, is_area, tip=tip)
+
+        # 기타탭 활성 이미지
+        etc_act_row = QHBoxLayout()
+        lbl_ea = QLabel("기타탭 활성 이미지")
+        lbl_ea.setFixedWidth(110)
+        self.lbl_etc_active_tpl = QLabel("미등록 (없으면 0.6초 대기)")
+        self.lbl_etc_active_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_ea_cap = QPushButton("📷 캡처")
+        btn_ea_cap.setFixedWidth(65)
+        btn_ea_cap.setToolTip("기타탭 클릭 후 활성화된(하이라이트) 상태를 드래그해서 저장합니다.")
+        btn_ea_cap.clicked.connect(self._capture_etc_active_template)
+        btn_ea_del = QPushButton("✕")
+        btn_ea_del.setFixedWidth(24)
+        btn_ea_del.clicked.connect(self._clear_etc_active_template)
+        etc_act_row.addWidget(lbl_ea)
+        etc_act_row.addWidget(self.lbl_etc_active_tpl)
+        etc_act_row.addStretch()
+        etc_act_row.addWidget(btn_ea_cap)
+        etc_act_row.addWidget(btn_ea_del)
+        layout.addLayout(etc_act_row)
+        self._refresh_etc_active_tpl_label()
+
+        # 스크롤 최하단 이미지
+        scroll_bot_row = QHBoxLayout()
+        lbl_sb = QLabel("스크롤 최하단")
+        lbl_sb.setFixedWidth(110)
+        self.lbl_scroll_bottom_tpl = QLabel("미등록 (없으면 3회 연속 미탐지 시 종료)")
+        self.lbl_scroll_bottom_tpl.setStyleSheet("color: gray; font-size: 10px;")
+        btn_sb_cap = QPushButton("📷 캡처")
+        btn_sb_cap.setFixedWidth(65)
+        btn_sb_cap.setToolTip(
+            "스크롤이 최하단에 도달했을 때만 보이는 UI 요소를 드래그해서 저장합니다.\n"
+            "예) 스크롤바 끝 표시, 빈 슬롯 영역 등."
+        )
+        btn_sb_cap.clicked.connect(self._capture_scroll_bottom_template)
+        btn_sb_del = QPushButton("✕")
+        btn_sb_del.setFixedWidth(24)
+        btn_sb_del.clicked.connect(self._clear_scroll_bottom_template)
+        scroll_bot_row.addWidget(lbl_sb)
+        scroll_bot_row.addWidget(self.lbl_scroll_bottom_tpl)
+        scroll_bot_row.addStretch()
+        scroll_bot_row.addWidget(btn_sb_cap)
+        scroll_bot_row.addWidget(btn_sb_del)
+        layout.addLayout(scroll_bot_row)
+        self._refresh_scroll_bottom_tpl_label()
+
+        layout.addSpacing(4)
+        layout.addWidget(QLabel("─ 판매 아이템 템플릿 ───────────────────"))
 
         tpl_row = QHBoxLayout()
         self.lbl_junk_tpl = QLabel("없음")
@@ -226,17 +514,41 @@ class TabSettings2(QWidget):
 
         # 판매 실행
         run_row = QHBoxLayout()
-        self.btn_junk_run = QPushButton("▶ 판매 실행")
-        self.btn_junk_run.setFixedWidth(120)
+        self.btn_junk_run = QPushButton("▶ 판매 실행  (상점열기 → 판매까지 전체)")
+        self.btn_junk_run.setFixedHeight(30)
         self.btn_junk_run.clicked.connect(self._run_junk_sell)
-        self.lbl_junk_status = QLabel("대기 중")
-        self.lbl_junk_status.setStyleSheet("color: gray; font-size: 10px;")
         run_row.addWidget(self.btn_junk_run)
-        run_row.addWidget(self.lbl_junk_status)
         run_row.addStretch()
         layout.addLayout(run_row)
 
         return group
+
+    def _add_junk_coord_row(self, layout, key: str, title: str,
+                             is_area: bool, tip: str = "") -> None:
+        """좌표 설정 행 1줄을 layout에 추가한다."""
+        row = QHBoxLayout()
+        lbl_title = QLabel(title)
+        lbl_title.setFixedWidth(100)
+        lbl_val = QLabel("미설정")
+        lbl_val.setStyleSheet("color: gray; font-size: 10px;")
+        self._junk_coord_lbls[key] = lbl_val
+
+        btn_set = QPushButton("📍 드래그" if is_area else "📍 지정")
+        btn_set.setFixedWidth(68 if is_area else 55)
+        if tip:
+            btn_set.setToolTip(tip)
+        btn_set.clicked.connect(lambda _, k=key, a=is_area: self._set_junk_coord(k, a))
+
+        btn_rst = QPushButton("✕")
+        btn_rst.setFixedWidth(24)
+        btn_rst.clicked.connect(lambda _, k=key: self._reset_junk_coord(k))
+
+        row.addWidget(lbl_title)
+        row.addWidget(lbl_val)
+        row.addStretch()
+        row.addWidget(btn_set)
+        row.addWidget(btn_rst)
+        layout.addLayout(row)
 
     # ── 잡템 좌표 설정 ────────────────────────────────────────────────
     def _set_junk_coord(self, key: str, is_area: bool) -> None:
@@ -250,19 +562,145 @@ class TabSettings2(QWidget):
     def _save_junk_coord(self, x: int, y: int, w: int, h: int) -> None:
         key     = self._pending_junk_key
         is_area = self._pending_junk_area
+
         if is_area:
-            val  = [x, y, w, h]
-            text = f"X={x} Y={y} W={w} H={h}"
+            # 영역 캡처용 — mss 물리 좌표로 변환
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            val  = [px, py, pw, ph]
+            text = f"X={px} Y={py} W={pw} H={ph}"
+            self.config.set("settings2", "junk_sell", key, val)
+
+        elif key == "cash_tab":
+            # 인벤토리 바 감지 → 오프셋만 저장
+            self._save_cash_tab_offset(x + w // 2, y + h // 2)
+            return
+
+        elif key == "first_slot":
+            # 캐시탭 활성 이미지 감지 → 오프셋만 저장
+            self._save_first_slot_offset(x + w // 2, y + h // 2)
+            return
+
         else:
-            cx, cy = x + w // 2, y + h // 2
-            val  = [cx, cy]
-            text = f"X={cx} Y={cy}"
-        self.config.set("settings2", "junk_sell", key, val)
+            # 클릭 좌표 — 가상 데스크톱 오프셋 포함한 절대 좌표로 변환
+            cx_phys, cy_phys = self._to_physical(x + w // 2, y + h // 2, 0, 0)[:2]
+            val  = [cx_phys, cy_phys]
+            text = f"X={cx_phys} Y={cy_phys}"
+            self.config.set("settings2", "junk_sell", key, val)
+
+        inv_key = self.edit_inventory_key.text().strip() or "i"
+        self.config.set("settings2", "junk_sell", "inventory_key", inv_key)
         self.config.save()
         lbl = self._junk_coord_lbls.get(key)
         if lbl:
             lbl.setText(text)
             lbl.setStyleSheet("color: green; font-size: 10px;")
+
+    def _save_cash_tab_offset(self, cx: int, cy: int) -> None:
+        """캐시탭 중심 좌표 → 현재 화면의 인벤토리 바를 감지해 오프셋 계산 후 저장."""
+        import time as _time
+        _time.sleep(0.05)
+        inv_tpl = "templates/junk/inventory.png"
+        if not os.path.exists(inv_tpl):
+            QMessageBox.warning(self, "오류",
+                "인벤토리 바 이미지가 없습니다.\n먼저 '인벤토리 바 이미지'를 캡처하세요.")
+            return
+        with mss.mss() as sct:
+            mon = sct.monitors[0]
+            raw = sct.grab(mon)
+            scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+        template = cv2.imread(inv_tpl)
+        result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        if max_val < 0.70:
+            QMessageBox.warning(self, "오류",
+                f"화면에서 인벤토리 바를 찾지 못했습니다 (점수: {max_val:.2f}).\n"
+                "인벤토리를 열어놓은 상태에서 다시 지정하세요.")
+            return
+        th, tw = template.shape[:2]
+        inv_cx = mon["left"] + max_loc[0] + tw // 2
+        inv_cy = mon["top"]  + max_loc[1] + th // 2
+        # cx, cy 는 RegionSelector 논리 픽셀 → mss 물리 픽셀로 변환해 비교
+        cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
+        offset = [cx_phys - inv_cx, cy_phys - inv_cy]
+        self.config.set("settings2", "junk_sell", "cash_tab_offset", offset)
+        inv_key = self.edit_inventory_key.text().strip() or "i"
+        self.config.set("settings2", "junk_sell", "inventory_key", inv_key)
+        self.config.save()
+        lbl = self._junk_coord_lbls.get("cash_tab")
+        if lbl:
+            lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
+            lbl.setStyleSheet("color: green; font-size: 10px;")
+        QMessageBox.information(self, "완료",
+            f"캐시탭 오프셋 저장: dx={offset[0]}, dy={offset[1]}\n"
+            f"(인벤토리 중심 {inv_cx},{inv_cy} 기준)")
+
+    def _save_first_slot_offset(self, cx: int, cy: int) -> None:
+        """첫번째 슬롯 중심 → 캐시탭 활성 이미지 감지해 오프셋 계산 후 저장."""
+        import time as _time
+        _time.sleep(0.05)
+        active_tpl = "templates/junk/cash_tab_active.png"
+        if not os.path.exists(active_tpl):
+            # 활성 이미지 없으면 캐시탭 기준으로 오프셋 저장
+            cash_tab_offset = (self.config.get("settings2", "junk_sell", "cash_tab_offset") or [])
+            if not cash_tab_offset:
+                QMessageBox.warning(self, "오류",
+                    "캐시탭 활성 이미지도 없고 캐시탭 오프셋도 없습니다.\n"
+                    "캐시탭 설정을 먼저 완료하세요.")
+                return
+            # 현재 화면에서 인벤토리 감지 후 캐시탭 위치 역산
+            with mss.mss() as sct:
+                mon = sct.monitors[0]
+                raw = sct.grab(mon)
+                scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            inv_tpl = "templates/junk/inventory.png"
+            template = cv2.imread(inv_tpl)
+            result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            if max_val >= 0.70:
+                th, tw = template.shape[:2]
+                inv_cx = mon["left"] + max_loc[0] + tw // 2
+                inv_cy = mon["top"]  + max_loc[1] + th // 2
+                ref_x = inv_cx + cash_tab_offset[0]
+                ref_y = inv_cy + cash_tab_offset[1]
+            else:
+                QMessageBox.warning(self, "오류", "인벤토리를 찾지 못했습니다.")
+                return
+            cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
+            offset = [cx_phys - ref_x, cy_phys - ref_y]
+            self.config.set("settings2", "junk_sell", "first_slot_offset", offset)
+            self.config.save()
+            lbl = self._junk_coord_lbls.get("first_slot")
+            if lbl:
+                lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
+                lbl.setStyleSheet("color: green; font-size: 10px;")
+            return
+
+        with mss.mss() as sct:
+            mon = sct.monitors[0]
+            raw = sct.grab(mon)
+            scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+        template = cv2.imread(active_tpl)
+        result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
+        if max_val < 0.70:
+            QMessageBox.warning(self, "오류",
+                f"캐시탭 활성 이미지를 찾지 못했습니다 (점수: {max_val:.2f}).\n"
+                "캐시탭이 활성화된 상태(분홍색)에서 지정하세요.")
+            return
+        th, tw = template.shape[:2]
+        act_cx = mon["left"] + max_loc[0] + tw // 2
+        act_cy = mon["top"]  + max_loc[1] + th // 2
+        cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
+        offset = [cx_phys - act_cx, cy_phys - act_cy]
+        self.config.set("settings2", "junk_sell", "first_slot_offset", offset)
+        self.config.save()
+        lbl = self._junk_coord_lbls.get("first_slot")
+        if lbl:
+            lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
+            lbl.setStyleSheet("color: green; font-size: 10px;")
+        QMessageBox.information(self, "완료",
+            f"첫번째 슬롯 오프셋 저장: dx={offset[0]}, dy={offset[1]}\n"
+            f"(활성 캐시탭 중심 {act_cx},{act_cy} 기준)")
 
     def _reset_junk_coord(self, key: str) -> None:
         self.config.set("settings2", "junk_sell", key, None)
@@ -271,6 +709,172 @@ class TabSettings2(QWidget):
         if lbl:
             lbl.setText("미설정")
             lbl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 캐시탭 템플릿 관리 ───────────────────────────────────────────
+    def _capture_cash_tab_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_cash_tab_template)
+        self._cash_tpl_selector = sel
+        sel.show()
+
+    def _save_cash_tab_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)   # RegionSelector 오버레이 완전 소멸 대기
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/cash_tab.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        self._refresh_cash_tpl_label()
+        QMessageBox.information(self, "완료", f"캐시탭 템플릿 저장 완료 ({pw}×{ph}px)")
+
+    def _clear_cash_tab_template(self) -> None:
+        path = "templates/junk/cash_tab.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_cash_tpl_label()
+
+    def _refresh_cash_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/cash_tab.png"):
+            self.lbl_cash_tpl.setText("등록됨")
+            self.lbl_cash_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_cash_tpl.setText("미등록")
+            self.lbl_cash_tpl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 캐시탭 활성 이미지 (클릭 후 분홍색 상태) ────────────────────
+    def _capture_cash_tab_active_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_cash_tab_active_template)
+        self._cash_act_selector = sel
+        sel.show()
+
+    def _save_cash_tab_active_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/cash_tab_active.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        # 캡처 중심을 cash_tab_active_anchor 로 자동 저장 (첫번째 슬롯 오프셋 계산용)
+        cx, cy = x + w // 2, y + h // 2
+        self.config.set("settings2", "junk_sell", "cash_tab_active_anchor", [cx, cy])
+        self.config.save()
+        self._refresh_cash_active_tpl_label()
+        reply = QMessageBox.question(
+            self, "캐시탭 활성 이미지 저장 완료",
+            f"저장 완료 ({w}×{h}px)\n\n"
+            "지금 바로 첫번째 슬롯 위치를 지정하시겠습니까?\n"
+            "(NPC 상점을 열어 첫번째 칸 위치를 드래그하세요)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._set_junk_coord("first_slot", False)
+
+    def _clear_cash_tab_active_template(self) -> None:
+        path = "templates/junk/cash_tab_active.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_cash_active_tpl_label()
+
+    def _refresh_cash_active_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/cash_tab_active.png"):
+            self.lbl_cash_active_tpl.setText("등록됨")
+            self.lbl_cash_active_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_cash_active_tpl.setText("미등록 (없으면 0.5초 대기 후 진행)")
+            self.lbl_cash_active_tpl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 상점 열림 확인 이미지 ────────────────────────────────────────
+    def _capture_shop_open_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_shop_open_template)
+        self._shop_open_selector = sel
+        sel.show()
+
+    def _save_shop_open_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/shop_open.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        self._refresh_shop_open_tpl_label()
+        QMessageBox.information(self, "완료", f"상점 열림 확인 이미지 저장 완료 ({pw}×{ph}px)")
+
+    def _clear_shop_open_template(self) -> None:
+        path = "templates/junk/shop_open.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_shop_open_tpl_label()
+
+    def _refresh_shop_open_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/shop_open.png"):
+            self.lbl_shop_open_tpl.setText("등록됨")
+            self.lbl_shop_open_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_shop_open_tpl.setText("미등록 (없으면 생략)")
+            self.lbl_shop_open_tpl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 인벤토리 바 템플릿 관리 ──────────────────────────────────────
+    def _capture_inventory_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_inventory_template)
+        self._inv_tpl_selector = sel
+        sel.show()
+
+    def _save_inventory_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/inventory.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        # 캡처 당시 중심 좌표를 inventory_anchor 로 자동 저장
+        cx, cy = x + w // 2, y + h // 2
+        self.config.set("settings2", "junk_sell", "inventory_anchor", [cx, cy])
+        self.config.save()
+        lbl = self._junk_coord_lbls.get("inventory_anchor")
+        if lbl:
+            lbl.setText(f"X={cx} Y={cy}")
+            lbl.setStyleSheet("color: green; font-size: 10px;")
+        self._refresh_inv_tpl_label()
+        reply = QMessageBox.question(
+            self, "인벤토리 바 저장 완료",
+            f"인벤토리 바 이미지 저장 완료 ({w}×{h}px)\n\n"
+            "지금 바로 캐시탭 위치를 지정하시겠습니까?\n"
+            "(인벤토리가 열린 상태를 유지해주세요)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._set_junk_coord("cash_tab", False)
+
+    def _clear_inventory_template(self) -> None:
+        path = "templates/junk/inventory.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_inv_tpl_label()
+
+    def _refresh_inv_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/inventory.png"):
+            self.lbl_inv_tpl.setText("등록됨")
+            self.lbl_inv_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_inv_tpl.setText("미등록")
+            self.lbl_inv_tpl.setStyleSheet("color: gray; font-size: 10px;")
 
     # ── 잡템 템플릿 관리 ─────────────────────────────────────────────
     def _capture_junk_template(self) -> None:
@@ -284,12 +888,13 @@ class TabSettings2(QWidget):
         existing = sorted(glob.glob("templates/junk/item_*.png"))
         next_num = len(existing) + 1
         path = f"templates/junk/item_{next_num}.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
         with mss.mss() as sct:
-            raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
             img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
             cv2.imwrite(path, img)
         self._refresh_junk_tpl_label()
-        QMessageBox.information(self, "완료", f"아이템 템플릿 {next_num}번 저장 완료 ({w}×{h}px)")
+        QMessageBox.information(self, "완료", f"아이템 템플릿 {next_num}번 저장 완료 ({pw}×{ph}px)")
 
     def _clear_junk_templates(self) -> None:
         files = glob.glob("templates/junk/item_*.png")
@@ -315,6 +920,186 @@ class TabSettings2(QWidget):
             self.lbl_junk_tpl.setText("없음 (+ 추가 캡처로 등록하세요)")
             self.lbl_junk_tpl.setStyleSheet("color: gray;")
 
+    # ── 기타탭 활성 이미지 ───────────────────────────────────────────
+    def _capture_etc_active_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_etc_active_template)
+        self._etc_act_selector = sel
+        sel.show()
+
+    def _save_etc_active_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/etc_tab_active.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        # 캡처 중심 좌표를 기타탭 클릭 위치로 자동 저장 (절대 좌표 변환 적용)
+        cx_phys, cy_phys = self._to_physical(x + w // 2, y + h // 2, 0, 0)[:2]
+        self.config.set("settings2", "junk_sell", "shop_etc_tab", [cx_phys, cy_phys])
+        self.config.save()
+        self._refresh_etc_active_tpl_label()
+        QMessageBox.information(self, "완료",
+            f"기타탭 활성 이미지 저장 완료 ({pw}×{ph}px)\n"
+            f"기타탭 클릭 위치 자동 저장: X={cx_phys} Y={cy_phys}")
+
+    def _clear_etc_active_template(self) -> None:
+        path = "templates/junk/etc_tab_active.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_etc_active_tpl_label()
+
+    def _refresh_etc_active_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/etc_tab_active.png"):
+            pos = (self.config.get("settings2", "junk_sell") or {}).get("shop_etc_tab")
+            pos_txt = f"  (클릭위치 X={pos[0]} Y={pos[1]})" if pos else ""
+            self.lbl_etc_active_tpl.setText(f"등록됨{pos_txt}")
+            self.lbl_etc_active_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_etc_active_tpl.setText("미등록 (없으면 0.6초 대기)")
+            self.lbl_etc_active_tpl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 스크롤 최하단 이미지 ─────────────────────────────────────────
+    def _capture_scroll_bottom_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_scroll_bottom_template)
+        self._scroll_bot_selector = sel
+        sel.show()
+
+    def _save_scroll_bottom_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/scroll_bottom.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        self._refresh_scroll_bottom_tpl_label()
+        QMessageBox.information(self, "완료", f"스크롤 최하단 이미지 저장 완료 ({pw}×{ph}px)")
+
+    def _clear_scroll_bottom_template(self) -> None:
+        path = "templates/junk/scroll_bottom.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_scroll_bottom_tpl_label()
+
+    def _refresh_scroll_bottom_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/scroll_bottom.png"):
+            self.lbl_scroll_bottom_tpl.setText("등록됨")
+            self.lbl_scroll_bottom_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_scroll_bottom_tpl.setText("미등록 (없으면 3회 연속 미탐지 시 종료)")
+            self.lbl_scroll_bottom_tpl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 장비 일괄 판매 버튼 템플릿 ──────────────────────────────────
+    def _capture_equip_sell_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_equip_sell_template)
+        self._equip_sell_selector = sel
+        sel.show()
+
+    def _save_equip_sell_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/equip_sell_btn.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        self._refresh_equip_sell_tpl_label()
+        QMessageBox.information(self, "완료", f"장비 일괄 판매 버튼 이미지 저장 완료 ({pw}×{ph}px)")
+
+    def _clear_equip_sell_template(self) -> None:
+        path = "templates/junk/equip_sell_btn.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_equip_sell_tpl_label()
+
+    def _refresh_equip_sell_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/equip_sell_btn.png"):
+            self.lbl_equip_sell_tpl.setText("등록됨")
+            self.lbl_equip_sell_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_equip_sell_tpl.setText("미등록")
+            self.lbl_equip_sell_tpl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 장비 일괄 판매 확인 버튼 템플릿 ─────────────────────────────
+    def _capture_equip_confirm_template(self) -> None:
+        sel = RegionSelector()
+        sel.region_selected.connect(self._save_equip_confirm_template)
+        self._equip_conf_selector = sel
+        sel.show()
+
+    def _save_equip_confirm_template(self, x: int, y: int, w: int, h: int) -> None:
+        import time as _time
+        _time.sleep(0.08)
+        os.makedirs("templates/junk", exist_ok=True)
+        path = "templates/junk/equip_sell_confirm.png"
+        px, py, pw, ph = self._to_physical(x, y, w, h)
+        with mss.mss() as sct:
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            cv2.imwrite(path, img)
+        self._refresh_equip_confirm_tpl_label()
+        QMessageBox.information(self, "완료", f"확인 버튼 이미지 저장 완료 ({pw}×{ph}px)")
+
+    def _clear_equip_confirm_template(self) -> None:
+        path = "templates/junk/equip_sell_confirm.png"
+        if os.path.exists(path):
+            os.remove(path)
+        self._refresh_equip_confirm_tpl_label()
+
+    def _refresh_equip_confirm_tpl_label(self) -> None:
+        if os.path.exists("templates/junk/equip_sell_confirm.png"):
+            self.lbl_equip_confirm_tpl.setText("등록됨")
+            self.lbl_equip_confirm_tpl.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_equip_confirm_tpl.setText("미등록 (없으면 Enter 키 사용)")
+            self.lbl_equip_confirm_tpl.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 기타템 판매 활성화 저장 ──────────────────────────────────────
+    def _save_junk_sell_enabled(self) -> None:
+        enabled = self.chk_junk_sell.isChecked()
+        self.config.set("settings2", "junk_sell", "junk_sell_enabled", enabled)
+        self.config.save()
+
+    # ── 상점 열기 ────────────────────────────────────────────────────
+    def _run_open_shop(self) -> None:
+        """i키 → 캐시탭 → 첫번째슬롯 순서로 상점만 열고 종료."""
+        import threading
+        from core.screen_reader import ScreenReader
+        from core.input_controller import InputController
+        from core.junk_seller import open_shop
+
+        self.btn_open_shop.setEnabled(False)
+        self._junk_status_sig.emit("상점 열기 중...")
+
+        title      = self.config.get("settings2", "game_window_title") or "MapleStory"
+        screen     = ScreenReader()
+        input_ctrl = InputController(title)
+
+        def _run():
+            try:
+                open_shop(
+                    self.config,
+                    screen,
+                    input_ctrl,
+                    lambda msg: self._junk_status_sig.emit(msg),
+                )
+            except Exception as e:
+                self._junk_status_sig.emit(f"오류: {e}")
+            finally:
+                self._shop_done_sig.emit()
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # ── 판매 실행 ────────────────────────────────────────────────────
     def _run_junk_sell(self) -> None:
         import threading
@@ -325,8 +1110,9 @@ class TabSettings2(QWidget):
         self.btn_junk_run.setEnabled(False)
         self._junk_status_sig.emit("판매 시작 중...")
 
+        title      = self.config.get("settings2", "game_window_title") or "MapleStory"
         screen     = ScreenReader()
-        input_ctrl = InputController("")
+        input_ctrl = InputController(title)
 
         def _run():
             try:
@@ -343,8 +1129,14 @@ class TabSettings2(QWidget):
 
         threading.Thread(target=_run, daemon=True).start()
 
+    def set_log_callback(self, cb) -> None:
+        """메인 로그창에 기록할 콜백을 주입한다 (MainWindow에서 호출)."""
+        self._log_cb = cb
+
     def _on_junk_status(self, msg: str) -> None:
         self.lbl_junk_status.setText(msg)
+        if self._log_cb:
+            self._log_cb(f"[잡템] {msg}")
 
     # ── config 연동 ───────────────────────────────────────────────────
     def load_from_config(self):
@@ -353,7 +1145,16 @@ class TabSettings2(QWidget):
 
         # 잡템 판매 좌표 라벨 갱신
         junk = self.config.get("settings2", "junk_sell") or {}
+        inv_key = junk.get("inventory_key", "i") or "i"
+        self.edit_inventory_key.setText(inv_key)
         for key, lbl in self._junk_coord_lbls.items():
+            # 오프셋 키 우선 확인
+            offset_key = f"{key}_offset" if key in ("cash_tab", "first_slot") else None
+            ov = junk.get(offset_key) if offset_key else None
+            if ov and len(ov) == 2:
+                lbl.setText(f"오프셋 dx={ov[0]} dy={ov[1]}")
+                lbl.setStyleSheet("color: green; font-size: 10px;")
+                continue
             v = junk.get(key)
             if v and len(v) == 4:
                 lbl.setText(f"X={v[0]} Y={v[1]} W={v[2]} H={v[3]}")
@@ -361,6 +1162,14 @@ class TabSettings2(QWidget):
             elif v and len(v) == 2:
                 lbl.setText(f"X={v[0]} Y={v[1]}")
                 lbl.setStyleSheet("color: green; font-size: 10px;")
+        enabled = bool(junk.get("junk_sell_enabled", False))
+        self.chk_junk_sell.setChecked(enabled)
+        self._refresh_cash_active_tpl_label()
+        self._refresh_shop_open_tpl_label()
+        self._refresh_equip_sell_tpl_label()
+        self._refresh_equip_confirm_tpl_label()
+        self._refresh_etc_active_tpl_label()
+        self._refresh_scroll_bottom_tpl_label()
 
     def save_to_config(self):
         title = self.edit_window_title.text().strip()
