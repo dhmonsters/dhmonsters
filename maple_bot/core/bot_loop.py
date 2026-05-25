@@ -192,19 +192,19 @@ class BotLoop:
             raw_zones = self._config.get("zones") or []
             raw_ropes = self._config.get("ropes") or []
 
-        _mm_ox, _mm_oy = self._get_coord_origin()
+        from core.config_manager import resolve_minimap_coords
+        region_x, region_y, mm_w, mm_h = resolve_minimap_coords(self._config, mm)
         cfg = MinimapConfig(
-            region_x=mm.get("region_x", 0) + _mm_ox,
-            region_y=mm.get("region_y", 0) + _mm_oy,
-            width=mm.get("width", 200), height=mm.get("height", 120),
+            region_x=region_x, region_y=region_y,
+            width=mm_w, height=mm_h,
             char_r=mm.get("char_r", 255), char_g=mm.get("char_g", 255),
             char_b=mm.get("char_b", 255), tolerance=mm.get("tolerance", 40),
             jump_key=mm.get("jump_key", "alt"),
         )
         self._minimap_reader.set_config(cfg)
 
-        zones = [Zone.from_dict(z) for z in raw_zones]
-        ropes = [RopePoint.from_dict(r) for r in raw_ropes]
+        zones = [Zone.from_dict(z, mm_w, mm_h) for z in raw_zones]
+        ropes = [RopePoint.from_dict(r, mm_w)  for r in raw_ropes]
         self._map_navigator.set_zones(zones)
         self._map_navigator.set_ropes(ropes)
         self._map_navigator.set_attack(
@@ -256,13 +256,16 @@ class BotLoop:
         fh_half_count:  int   = 0        # 경계(left/right) 도달 횟수
         fh_last_side:   str   = ""       # 마지막 도달 경계
         fh_state:       str   = "patrol" # "patrol" | "to_rope" | "climbing"
-        fh_rope_x:      int   = 0        # 이동할 밧줄 X 좌표
+        fh_rope_x:      int   = 0        # 이동할 밧줄 X 좌표 (rope.x)
+        fh_current_rope               = None  # 현재 대상 RopePoint (approach/jump_offset 참조용)
         fh_next_idx:    int   = 0        # 전환 후 목적 층 인덱스
         fh_next_dir:    int   = 1        # 전환 시 이동 방향 (+1=위, -1=아래)
         fh_climb_start: float = 0.0      # 오르기/내려가기 시작 시각
         fh_climb_sec:   float = 2.5      # 현재 밧줄의 오르기 시간 (밧줄별 설정)
         fh_arrive_time: float = 0.0      # 도착 확인 시각 (Y 감지 쿨다운 기준)
         fh_rope_escape_time: float = 0.0 # 밧줄 탈출 마지막 시각 (스팸 방지)
+        fh_climb_retry:  int   = 0       # 연속 도착 실패 횟수 (무한루프 방지)
+        FH_MAX_RETRY    = 3              # 이 횟수 초과 시 현재층 순찰로 강제 복귀
         FH_DESCEND_SEC  = 0.3            # 내려가기 완료 후 대기 시간 (초)
         FH_ROPE_ESCAPE_INTERVAL = 0.5    # 밧줄 탈출 시도 최소 간격 (초)
         fh_route:       list  = []       # 커스텀 루트 [{to_zone, rope}, ...]
@@ -317,7 +320,10 @@ class BotLoop:
             _fh_preset  = _fh_presets.get(_fh_active) if _fh_active else None
             raw_zones = _fh_preset.get("zones", []) if _fh_preset else (self._config.get("zones") or [])
             from core.minimap_reader import Zone as _Zone
-            all_zones = [_Zone.from_dict(z) for z in raw_zones]
+            from core.config_manager import resolve_minimap_coords
+            _fh_mm = _fh_preset.get("minimap", {}) if _fh_preset else (self._config.get("minimap") or {})
+            _, _, _fh_mm_w, _fh_mm_h = resolve_minimap_coords(self._config, _fh_mm)
+            all_zones = [_Zone.from_dict(z, _fh_mm_w, _fh_mm_h) for z in raw_zones]
             fh_zones = sorted(all_zones, key=lambda z: z.name)
             fh_cfg = self._config.get("floor_hunt") or {}
             fh_route_mode = bool(fh_cfg.get("route_mode", False))
@@ -416,13 +422,14 @@ class BotLoop:
                             pu_active      = True
                             pu_step_idx    = 0
                             pu_prev_fh_idx = fh_idx
-                            fh_rope_x    = rp.x
-                            fh_climb_sec = rp.climb_sec
-                            fh_next_idx  = fh_zones.index(to_zone)
-                            fh_next_dir  = 1 if to_zone.y_min < fh_zones[fh_idx].y_min else -1
-                            fh_state     = "to_rope"
-                            fh_half_count = 0
-                            fh_last_side  = ""
+                            fh_rope_x      = rp.x
+                            fh_current_rope = rp
+                            fh_climb_sec   = rp.climb_sec
+                            fh_next_idx    = fh_zones.index(to_zone)
+                            fh_next_dir    = 1 if to_zone.y_min < fh_zones[fh_idx].y_min else -1
+                            fh_state       = "to_rope"
+                            fh_half_count  = 0
+                            fh_last_side   = ""
                             self._map_navigator.release_direction()
                             self._status(f"🎒 픽업 타이머 발동 → {to_name}")
                         else:
@@ -449,15 +456,34 @@ class BotLoop:
                             # ── 밧줄로 이동 중 ─────────────────────────
                             if pos is not None:
                                 cx = pos[0]
-                                if abs(cx - fh_rope_x) <= FH_ROPE_EDGE:
-                                    # 밧줄 도달 → 점프/내려가기 실행
+                                # RopePoint.approach + jump_offset 기반 접근 좌표/방향 계산
+                                _crp = fh_current_rope
+                                if _crp is not None:
+                                    if _crp.approach == "left":
+                                        _ax = _crp.x - _crp.jump_offset
+                                        _jd = "right"
+                                    elif _crp.approach == "right":
+                                        _ax = _crp.x + _crp.jump_offset
+                                        _jd = "left"
+                                    else:  # both — 현재 위치 기준
+                                        if cx <= _crp.x:
+                                            _ax = _crp.x - _crp.jump_offset
+                                            _jd = "right"
+                                        else:
+                                            _ax = _crp.x + _crp.jump_offset
+                                            _jd = "left"
+                                else:
+                                    _ax = fh_rope_x
+                                    _jd = "right" if fh_rope_x > cx else "left"
+                                if abs(cx - _ax) <= FH_ROPE_EDGE:
+                                    # 접근 지점 도달 → 관성 유지 점프 (방향키 추가 금지)
+                                    # 방향키를 누르면 옆으로 길게 날아가 밧줄을 놓침
                                     jump_key = self._minimap_reader.config.jump_key or "alt"
                                     self._map_navigator.release_direction()
                                     if fh_next_dir > 0:        # 위층으로
-                                        # 방향키 없이 점프+UP — 방향키를 누르면
-                                        # 옆으로 점프해 밧줄을 놓침
+                                        self._input.key_down(_jd)
                                         self._input.press_key(jump_key, hold_sec=0.12)
-                                        time.sleep(0.10)
+                                        self._input.key_up(_jd)
                                         self._input.key_down("up")
                                     else:                       # 아래층으로
                                         self._input.key_down("down")
@@ -470,7 +496,7 @@ class BotLoop:
                                     self._map_navigator.set_zones([fh_zones[fh_next_idx]])
                                     self._status(f"[층별] → {fh_zones[fh_next_idx].name} 이동 중")
                                 else:
-                                    self._map_navigator.walk_toward(fh_rope_x, cx)
+                                    self._map_navigator.walk_toward(_ax, cx)
 
                         elif fh_state == "climbing":
                             # ── 오르기 / 내려가기 대기 ────────────────
@@ -525,6 +551,7 @@ class BotLoop:
                                         f"→ {'✓ 도착' if arrived else f'✗ 실패[감지:{_detected.name}]'}"
                                     )
                                 if arrived:
+                                    fh_climb_retry = 0            # 도착 성공 → 재시도 카운터 초기화
                                     fh_idx        = fh_next_idx
                                     fh_state      = "patrol"
                                     fh_last_side  = ""
@@ -548,13 +575,14 @@ class BotLoop:
                                             to_zone  = next((z for z in fh_zones if z.name == to_name), None)
                                             rp       = next((r for r in ropes if r.name == rp_name), None)
                                             if to_zone and rp:
-                                                fh_rope_x    = rp.x
-                                                fh_climb_sec = rp.climb_sec
-                                                fh_next_idx  = fh_zones.index(to_zone)
-                                                fh_next_dir  = 1 if to_zone.y_min < fh_zones[fh_idx].y_min else -1
-                                                fh_state     = "to_rope"
-                                                fh_half_count = 0
-                                                fh_last_side  = ""
+                                                fh_rope_x       = rp.x
+                                                fh_current_rope = rp
+                                                fh_climb_sec    = rp.climb_sec
+                                                fh_next_idx     = fh_zones.index(to_zone)
+                                                fh_next_dir     = 1 if to_zone.y_min < fh_zones[fh_idx].y_min else -1
+                                                fh_state        = "to_rope"
+                                                fh_half_count   = 0
+                                                fh_last_side    = ""
                                                 self._map_navigator.release_direction()
                                                 self._status(f"🎒 다음 픽업 구역 → {to_name}")
                                             else:
@@ -571,8 +599,9 @@ class BotLoop:
                                                 None,
                                             )
                                             if rp_back and pu_prev_fh_idx != fh_idx:
-                                                fh_rope_x    = rp_back.x
-                                                fh_climb_sec = rp_back.climb_sec
+                                                fh_rope_x       = rp_back.x
+                                                fh_current_rope = rp_back
+                                                fh_climb_sec    = rp_back.climb_sec
                                                 fh_next_idx  = pu_prev_fh_idx
                                                 fh_next_dir  = 1 if origin_zone.y_min < fh_zones[fh_idx].y_min else -1
                                                 fh_state     = "to_rope"
@@ -607,13 +636,27 @@ class BotLoop:
                                         )
                                         _apply_zone_pattern(fh_zones[fh_idx])
                                     else:
-                                        # 같은 층에서 밧줄 재시도
-                                        self._map_navigator.set_zones([fh_zones[fh_idx]])
-                                        fh_state = "to_rope"
+                                        # 같은 층에서 밧줄 재시도 (재시도 한계 초과 시 현재층 순찰 복귀)
+                                        fh_climb_retry += 1
                                         _y_str = f" Y={pos[1]}" if pos is not None else ""
-                                        self._status(
-                                            f"[층별] {target_zone.name} 도착 실패{_y_str} → 재시도"
-                                        )
+                                        if fh_climb_retry >= FH_MAX_RETRY:
+                                            fh_climb_retry = 0
+                                            fh_state       = "patrol"
+                                            fh_half_count  = 0
+                                            fh_last_side   = ""
+                                            fh_arrive_time = time.time()
+                                            self._map_navigator.set_zones([fh_zones[fh_idx]])
+                                            self._status(
+                                                f"[층별] {target_zone.name} {FH_MAX_RETRY}회 실패{_y_str}"
+                                                f" → {fh_zones[fh_idx].name} 순찰 복귀"
+                                            )
+                                        else:
+                                            self._map_navigator.set_zones([fh_zones[fh_idx]])
+                                            fh_state = "to_rope"
+                                            self._status(
+                                                f"[층별] {target_zone.name} 도착 실패{_y_str}"
+                                                f" → 재시도 ({fh_climb_retry}/{FH_MAX_RETRY})"
+                                            )
 
                         else:  # patrol
                             # ── 낙사/피격 감지: X 또는 Y가 현재 구역 밖이면 복귀 ──
@@ -677,14 +720,15 @@ class BotLoop:
                                     to_zone = next((z for z in fh_zones if z.name == to_name), None)
                                     rp      = next((r for r in ropes if r.name == rp_name), None)
                                     if to_zone and rp:
-                                        fh_rope_x    = rp.x
-                                        fh_climb_sec = rp.climb_sec
-                                        fh_next_idx  = fh_zones.index(to_zone)
-                                        fh_next_dir  = 1 if to_zone.y_min < zone.y_min else -1
-                                        fh_state     = "to_rope"
-                                        fh_half_count = 0
-                                        fh_last_side  = ""
-                                        fh_route_idx += 1
+                                        fh_rope_x       = rp.x
+                                        fh_current_rope = rp
+                                        fh_climb_sec    = rp.climb_sec
+                                        fh_next_idx     = fh_zones.index(to_zone)
+                                        fh_next_dir     = 1 if to_zone.y_min < zone.y_min else -1
+                                        fh_state        = "to_rope"
+                                        fh_half_count   = 0
+                                        fh_last_side    = ""
+                                        fh_route_idx   += 1
                                         self._map_navigator.release_direction()
                                         _transit_moved = True
                                 if not _transit_moved:
@@ -704,16 +748,19 @@ class BotLoop:
                                         next_idx = fh_idx + 1
                                     if 0 <= next_idx < n and next_idx != fh_idx:
                                         if zone.rope_x >= 0:
-                                            fh_rope_x    = zone.rope_x
-                                            matched_r    = next((r for r in ropes if r.x == zone.rope_x), None)
-                                            fh_climb_sec = matched_r.climb_sec if matched_r else 2.5
+                                            fh_rope_x       = zone.rope_x
+                                            matched_r       = next((r for r in ropes if r.x == zone.rope_x), None)
+                                            fh_current_rope = matched_r
+                                            fh_climb_sec    = matched_r.climb_sec if matched_r else 2.5
                                         elif ropes:
-                                            rp_auto      = ropes[min(fh_idx, len(ropes) - 1)]
-                                            fh_rope_x    = rp_auto.x
-                                            fh_climb_sec = rp_auto.climb_sec
+                                            rp_auto         = ropes[min(fh_idx, len(ropes) - 1)]
+                                            fh_rope_x       = rp_auto.x
+                                            fh_current_rope = rp_auto
+                                            fh_climb_sec    = rp_auto.climb_sec
                                         else:
-                                            fh_rope_x    = zone.right_x
-                                            fh_climb_sec = 2.5
+                                            fh_rope_x       = zone.right_x
+                                            fh_current_rope = None
+                                            fh_climb_sec    = 2.5
                                         fh_next_idx   = next_idx
                                         fh_next_dir   = fh_dir
                                         fh_state      = "to_rope"
@@ -754,16 +801,17 @@ class BotLoop:
                                                 (r for r in ropes if r.name == rp_name), None
                                             )
                                             if to_zone and rp:
-                                                fh_rope_x    = rp.x
-                                                fh_climb_sec = rp.climb_sec
-                                                fh_next_idx  = fh_zones.index(to_zone)
-                                                fh_next_dir  = (
+                                                fh_rope_x       = rp.x
+                                                fh_current_rope = rp
+                                                fh_climb_sec    = rp.climb_sec
+                                                fh_next_idx     = fh_zones.index(to_zone)
+                                                fh_next_dir     = (
                                                     1 if to_zone.y_min < zone.y_min else -1
                                                 )
-                                                fh_state      = "to_rope"
-                                                fh_half_count = 0
-                                                fh_last_side  = ""
-                                                fh_route_idx += 1
+                                                fh_state        = "to_rope"
+                                                fh_half_count   = 0
+                                                fh_last_side    = ""
+                                                fh_route_idx   += 1
                                                 self._map_navigator.release_direction()
                                                 self._status(
                                                     f"[층별] {zone.name} 완료 "
@@ -801,21 +849,24 @@ class BotLoop:
 
                                             if next_idx != fh_idx:
                                                 if zone.rope_x >= 0:
-                                                    fh_rope_x = zone.rope_x
-                                                    matched_r = next(
+                                                    fh_rope_x       = zone.rope_x
+                                                    matched_r       = next(
                                                         (r for r in ropes if r.x == zone.rope_x), None
                                                     )
-                                                    fh_climb_sec = matched_r.climb_sec if matched_r else 2.5
+                                                    fh_current_rope = matched_r
+                                                    fh_climb_sec    = matched_r.climb_sec if matched_r else 2.5
                                                 elif ropes:
-                                                    rp_auto = ropes[min(fh_idx, len(ropes) - 1)]
-                                                    fh_rope_x    = rp_auto.x
-                                                    fh_climb_sec = rp_auto.climb_sec
+                                                    rp_auto         = ropes[min(fh_idx, len(ropes) - 1)]
+                                                    fh_rope_x       = rp_auto.x
+                                                    fh_current_rope = rp_auto
+                                                    fh_climb_sec    = rp_auto.climb_sec
                                                 else:
-                                                    fh_rope_x    = zone.right_x
-                                                    fh_climb_sec = 2.5
-                                                fh_next_idx = next_idx
-                                                fh_next_dir = 1 if fh_zones[next_idx].y_min < zone.y_min else -1
-                                                fh_state    = "to_rope"
+                                                    fh_rope_x       = zone.right_x
+                                                    fh_current_rope = None
+                                                    fh_climb_sec    = 2.5
+                                                fh_next_idx   = next_idx
+                                                fh_next_dir   = 1 if fh_zones[next_idx].y_min < zone.y_min else -1
+                                                fh_state      = "to_rope"
                                                 fh_half_count = 0
                                                 fh_last_side  = ""
                                                 self._map_navigator.release_direction()
@@ -830,6 +881,10 @@ class BotLoop:
                     if not use_floor_hunt or (fh_state == "patrol" and not _on_transit):
                         if self._enable_move:
                             self._map_navigator.run_one_step()
+                            # floor_hunt 모드: map_navigator가 자체 밧줄 점프를 하면
+                            # bot_loop의 to_rope 점프 전에 extra 점프가 발생하므로 취소
+                            if use_floor_hunt:
+                                self._map_navigator.cancel_rope_state()
                         if self._enable_attack:
                             self._key_hunter.run_one_step()
 
@@ -967,14 +1022,10 @@ class BotLoop:
 
         # 감지 영역이 설정돼 있으면 해당 영역만 캡처해서 검사
         region = cfg.get("region")
-        if region and len(region) == 4:
-            rx, ry, rw, rh = region
-            # 상대좌표인 경우 절대좌표로 변환
-            if cfg.get("coord_mode") == "relative":
-                origin = self._screen.get_window_client_origin(self._game_window_title())
-                if origin:
-                    rx += origin[0]
-                    ry += origin[1]
+        from core.config_manager import resolve_region_coords
+        resolved = resolve_region_coords(self._config, region)
+        if resolved:
+            rx, ry, rw, rh = resolved
             target = self._screen.capture({"left": rx, "top": ry, "width": rw, "height": rh})
         else:
             target = screenshot

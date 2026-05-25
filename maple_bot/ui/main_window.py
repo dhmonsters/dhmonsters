@@ -21,7 +21,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = ConfigManager()
         self.hotkey_manager = HotkeyManager(self)
-        self.setWindowTitle("DHMONSTERS v1.2.0")
+        self.setWindowTitle("DHMONSTERS v1.2.1")
         self.setMinimumSize(520, 600)
         self._build_ui()
         self._setup_bot()
@@ -72,6 +72,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(tabs)
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("준비")
+
+        # 설정2 탭의 상점/판매 로그를 메인 로그창에도 출력
+        self.tab_settings2.set_log_callback(self.tab_main.emit_status)
 
     def _save_all(self) -> None:
         """모든 탭의 설정을 config에 반영하고 파일에 저장한다."""

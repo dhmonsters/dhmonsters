@@ -1,7 +1,10 @@
-# GitHub Raw에서 최신 버전 정보를 조회하는 업데이트 체커
+# GitHub Raw에서 최신 버전 정보를 조회하고 인스톨러를 다운로드/실행하는 업데이터
 from __future__ import annotations
 import os
 import sys
+import subprocess
+import tempfile
+from typing import Callable
 
 # GitHub Raw URL — version.json 위치
 _VERSION_URL = "https://raw.githubusercontent.com/dhmonsters/dhmonsters/main/maple_bot/version.json"
@@ -66,8 +69,40 @@ def check_for_update() -> dict | None:
     if _parse_version(latest) > _parse_version(current):
         return {
             "current":      current,
-            "latest":       latest,
+            "version":      latest,
             "notes":        data.get("notes", ""),
             "download_url": data.get("download_url", ""),
         }
     return None
+
+
+def download_update(
+    url: str,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> str:
+    """인스톨러를 임시 폴더에 다운로드하고 경로를 반환한다."""
+    import requests
+
+    resp = requests.get(url, stream=True, timeout=30)
+    resp.raise_for_status()
+
+    total = int(resp.headers.get("content-length", 0))
+    suffix = ".exe" if url.lower().endswith(".exe") else ".tmp"
+    fd, path = tempfile.mkstemp(suffix=suffix)
+
+    downloaded = 0
+    with os.fdopen(fd, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=65536):
+            if chunk:
+                f.write(chunk)
+                downloaded += len(chunk)
+                if progress_cb:
+                    progress_cb(downloaded, total)
+
+    return path
+
+
+def apply_update(installer_path: str) -> None:
+    """인스톨러를 실행하고 현재 앱을 종료한다."""
+    subprocess.Popen([installer_path], close_fds=True)
+    sys.exit(0)

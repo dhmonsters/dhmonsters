@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup, QScrollArea, QMessageBox, QCheckBox,
     QDialog, QDialogButtonBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor
 
 from core.minimap_reader import MinimapConfig, Zone, RopePoint, MinimapReader
@@ -213,7 +213,11 @@ class _RopeEditDialog(QDialog):
 
 
 class _ColorPickerOverlay(QWidget):
-    """전화면 투명 오버레이 — 클릭한 픽셀 RGB를 반환하는 스포이드."""
+    """전화면 투명 오버레이 — 클릭한 픽셀 RGB를 반환하는 스포이드.
+
+    모든 모니터를 커버하는 가상 데스크톱 전체 영역에 오버레이를 띄운다.
+    grabKeyboard()로 ESC 입력을 보장한다.
+    """
     color_picked = pyqtSignal(int, int, int)
 
     def __init__(self):
@@ -226,8 +230,24 @@ class _ColorPickerOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setCursor(Qt.CursorShape.CrossCursor)
-        self._screen = ScreenReader()
-        self.showFullScreen()
+        import mss as _mss
+        self._sct = _mss.mss()
+
+        # 모든 모니터를 합친 가상 데스크톱 전체 영역에 오버레이 배치
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QRect
+        total = QRect()
+        for screen in QApplication.screens():
+            total = total.united(screen.geometry())
+        self.setGeometry(total)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.grabKeyboard()   # ESC 입력 보장
+
+    def closeEvent(self, event):
+        self.releaseKeyboard()
+        super().closeEvent(event)
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -240,9 +260,24 @@ class _ColorPickerOverlay(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             x = int(event.globalPosition().x())
             y = int(event.globalPosition().y())
-            r, g, b = self._screen.get_pixel_color(x, y)
+            # 오버레이를 먼저 숨긴 뒤 50ms 후 픽셀 캡처 (오버레이가 화면에서 사라진 후 캡처)
+            self.hide()
+            QTimer.singleShot(50, lambda: self._capture_pixel(x, y))
+        else:
+            self.close()
+
+    def _capture_pixel(self, x: int, y: int) -> None:
+        """오버레이 없는 상태에서 픽셀 색상을 캡처해 시그널로 전달한다."""
+        try:
+            region = {"left": x, "top": y, "width": 1, "height": 1}
+            img = self._sct.grab(region)
+            # mss raw 바이트 순서: B, G, R, A
+            b, g, r = img.raw[0], img.raw[1], img.raw[2]
             self.color_picked.emit(r, g, b)
-        self.close()
+        except Exception:
+            pass
+        finally:
+            self.close()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
@@ -876,12 +911,29 @@ class TabCoordinate(QWidget):
         self._selector.region_selected.connect(self._apply_minimap_region)
 
     def _apply_minimap_region(self, x: int, y: int, w: int, h: int) -> None:
-        from core.config_manager import get_game_window_origin
-        ox, oy = get_game_window_origin(self._config)
-        rx, ry = x - ox, y - oy
+        from ui.region_selector import logical_to_physical
+        from core.config_manager import get_game_window_rect
+        px, py, pw, ph = logical_to_physical(x, y, w, h)
+        ox, oy, cw, ch = get_game_window_rect(self.config)
+        rx, ry = px - ox, py - oy
+
         self.spin_rx.setValue(rx); self.spin_ry.setValue(ry)
-        self.spin_rw.setValue(w); self.spin_rh.setValue(h)
-        self.lbl_mm_hk.setText(f"({rx},{ry}) {w}×{h}")
+        self.spin_rw.setValue(pw); self.spin_rh.setValue(ph)
+
+        # minimap 섹션에 즉시 저장 (비율 포함)
+        mm = dict(self.config.get("minimap") or {})
+        mm.update({"region_x": rx, "region_y": ry, "width": pw, "height": ph})
+        if cw > 0 and ch > 0:
+            mm.update({
+                "region_x_ratio": rx / cw,
+                "region_y_ratio": ry / ch,
+                "width_ratio":    pw / cw,
+                "height_ratio":   ph / ch,
+            })
+        self.config.set("minimap", mm)
+
+        mode = " [비율저장]" if cw > 0 else ""
+        self.lbl_mm_hk.setText(f"({rx},{ry}) {pw}×{ph}{mode}")
 
     def _apply_mm_hotkey(self, key: str) -> None:
         if not self._hk:
@@ -896,11 +948,15 @@ class TabCoordinate(QWidget):
 
     def _apply_zone_region(self, x: int, y: int, w: int, h: int) -> None:
         """드래그된 화면 영역을 미니맵 기준 좌표로 변환해 경계값을 채운다."""
-        rx, ry = self.spin_rx.value(), self.spin_ry.value()
-        left_x  = max(0, x - rx)
-        right_x = max(0, x + w - rx)
-        y_min   = max(0, y - ry)
-        y_max   = max(0, y + h - ry)
+        from ui.region_selector import logical_to_physical
+        from core.config_manager import resolve_minimap_coords
+        px, py, pw, ph = logical_to_physical(x, y, w, h)
+        stored_mm = self.config.get("minimap") or {}
+        mm_x, mm_y, _, _ = resolve_minimap_coords(self.config, stored_mm)
+        left_x  = max(0, px - mm_x)
+        right_x = max(0, px + pw - mm_x)
+        y_min   = max(0, py - mm_y)
+        y_max   = max(0, py + ph - mm_y)
         self._pending_left_x  = left_x
         self._pending_right_x = right_x
         self.lbl_left.setText(f"왼쪽 X: {left_x}")
@@ -947,9 +1003,12 @@ class TabCoordinate(QWidget):
             self.lbl_pos.setText("위치: 감지 실패")
 
     def _sync_minimap_config(self) -> None:
+        from core.config_manager import resolve_minimap_coords
+        stored_mm = self.config.get("minimap") or {}
+        region_x, region_y, width, height = resolve_minimap_coords(self.config, stored_mm)
         self._minimap_reader.set_config(MinimapConfig(
-            region_x=self.spin_rx.value(), region_y=self.spin_ry.value(),
-            width=self.spin_rw.value(), height=self.spin_rh.value(),
+            region_x=region_x, region_y=region_y,
+            width=width, height=height,
             char_r=self.spin_cr.value(), char_g=self.spin_cg.value(),
             char_b=self.spin_cb.value(), tolerance=self.spin_tol.value(),
         ))
@@ -1090,28 +1149,52 @@ class TabCoordinate(QWidget):
 
     # ── 프리셋 관리 ───────────────────────────────────────────────────
     def _current_preset_dict(self) -> dict:
-        """현재 UI 상태를 프리셋 dict로 반환."""
+        """현재 UI 상태를 프리셋 dict로 반환. 비율 키가 있으면 함께 보존."""
+        mm = {
+            "region_x": self.spin_rx.value(), "region_y": self.spin_ry.value(),
+            "width": self.spin_rw.value(), "height": self.spin_rh.value(),
+            "char_r": self.spin_cr.value(), "char_g": self.spin_cg.value(),
+            "char_b": self.spin_cb.value(), "tolerance": self.spin_tol.value(),
+            "jump_key": self.edit_jump_key.text().strip() or "alt",
+            "hotkey_region": self.btn_mm_hotkey.current_key(),
+            "hotkey_zone":   self.btn_zone_hotkey.current_key(),
+        }
+        # config에 저장된 비율 키가 있으면 프리셋에 함께 포함
+        stored_mm = self.config.get("minimap") or {}
+        for k in ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio"):
+            if k in stored_mm:
+                mm[k] = stored_mm[k]
+
+        # 미니맵 현재 픽셀 크기로 zone/rope 비율 계산
+        mm_w = self.spin_rw.value()
+        mm_h = self.spin_rh.value()
         return {
-            "minimap": {
-                "region_x": self.spin_rx.value(), "region_y": self.spin_ry.value(),
-                "width": self.spin_rw.value(), "height": self.spin_rh.value(),
-                "char_r": self.spin_cr.value(), "char_g": self.spin_cg.value(),
-                "char_b": self.spin_cb.value(), "tolerance": self.spin_tol.value(),
-                "jump_key": self.edit_jump_key.text().strip() or "alt",
-                "hotkey_region": self.btn_mm_hotkey.current_key(),
-                "hotkey_zone":   self.btn_zone_hotkey.current_key(),
-            },
-            "zones": [z.to_dict() for z in self._zones],
-            "ropes": [r.to_dict() for r in self._ropes],
+            "minimap": mm,
+            "zones": [z.to_dict(mm_w, mm_h) for z in self._zones],
+            "ropes": [r.to_dict(mm_w)        for r in self._ropes],
         }
 
     def _apply_preset_dict(self, p: dict) -> None:
-        """프리셋 dict를 UI에 반영."""
+        """프리셋 dict를 UI에 반영. 비율 키가 있으면 현재 창 크기로 역산."""
+        from core.config_manager import resolve_minimap_coords
         mm = p.get("minimap", {})
-        self.spin_rx.setValue(mm.get("region_x", 0))
-        self.spin_ry.setValue(mm.get("region_y", 0))
-        self.spin_rw.setValue(mm.get("width", 200))
-        self.spin_rh.setValue(mm.get("height", 120))
+
+        # 미니맵 위치/크기 — 비율이 있으면 현재 창 크기로 역산
+        from core.config_manager import get_game_window_rect
+        rx = mm.get("region_x", 0)
+        ry = mm.get("region_y", 0)
+        rw = mm.get("width", 200)
+        rh = mm.get("height", 120)
+        if mm.get("region_x_ratio") is not None:
+            _, _, raw_cw, raw_ch = get_game_window_rect(self.config)
+            if raw_cw > 0 and raw_ch > 0:
+                rx = int(mm["region_x_ratio"] * raw_cw)
+                ry = int(mm["region_y_ratio"] * raw_ch)
+                rw = max(1, int(mm.get("width_ratio",  0.1)  * raw_cw))
+                rh = max(1, int(mm.get("height_ratio", 0.07) * raw_ch))
+
+        self.spin_rx.setValue(rx); self.spin_ry.setValue(ry)
+        self.spin_rw.setValue(rw); self.spin_rh.setValue(rh)
         self.spin_cr.setValue(mm.get("char_r", 255))
         self.spin_cg.setValue(mm.get("char_g", 255))
         self.spin_cb.setValue(mm.get("char_b", 0))
@@ -1120,12 +1203,14 @@ class TabCoordinate(QWidget):
         self.btn_mm_hotkey.set_key(mm.get("hotkey_region", "f11"))
         self.btn_zone_hotkey.set_key(mm.get("hotkey_zone", "f12"))
 
-        self._zones = [Zone.from_dict(z) for z in p.get("zones", [])]
+        # zone/rope — 현재 미니맵 픽셀 크기로 비율 역산
+        mm_w, mm_h = rw, rh
+        self._zones = [Zone.from_dict(z, mm_w, mm_h) for z in p.get("zones", [])]
         self.zone_list.clear()
         for z in self._zones:
             self.zone_list.addItem(z.label())
 
-        self._ropes = [RopePoint.from_dict(r) for r in p.get("ropes", [])]
+        self._ropes = [RopePoint.from_dict(r, mm_w) for r in p.get("ropes", [])]
         self.rope_list.clear()
         for r in self._ropes:
             self.rope_list.addItem(r.label())
@@ -1224,13 +1309,14 @@ class TabCoordinate(QWidget):
             self.btn_zone_hotkey.set_key(mm.get("hotkey_zone", "f12"))
 
             raw_zones = self.config.get("zones") or []
-            self._zones = [Zone.from_dict(z) for z in raw_zones]
+            mm_w = mm.get("width", 200); mm_h = mm.get("height", 120)
+            self._zones = [Zone.from_dict(z, mm_w, mm_h) for z in raw_zones]
             self.zone_list.clear()
             for z in self._zones:
                 self.zone_list.addItem(z.label())
 
             raw_ropes = self.config.get("ropes") or []
-            self._ropes = [RopePoint.from_dict(r) for r in raw_ropes]
+            self._ropes = [RopePoint.from_dict(r, mm_w) for r in raw_ropes]
             self.rope_list.clear()
             for r in self._ropes:
                 self.rope_list.addItem(r.label())
