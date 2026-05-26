@@ -1126,7 +1126,7 @@ class BotLoop:
                                                 )
 
                     # 이동 + 스킬 (층 이동 중 또는 통과 층에서는 스킵)
-                    _on_transit = (use_floor_hunt and fh_state == "patrol"
+                    _on_transit = (use_floor_hunt and bool(fh_zones) and fh_state == "patrol"
                                    and fh_zones[fh_idx].sweeps == 0)
                     if not use_floor_hunt or (fh_state == "patrol" and not _on_transit):
                         if self._enable_move:
