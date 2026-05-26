@@ -61,24 +61,8 @@ class TransparentShapeGame:
         board_cfg = self._config.get("settings1", "transparent_shape", "board_roi")
         if not board_cfg:
             return None
-        try:
-            cx = int(board_cfg["client_x"])
-            cy = int(board_cfg["client_y"])
-            w  = int(board_cfg["w"])
-            h  = int(board_cfg["h"])
-        except (KeyError, TypeError, ValueError):
-            return None
-        if w <= 0 or h <= 0:
-            return None
-
-        origin = self._screen.get_window_client_origin(self.window_title)
-        # (0, 0) 는 창 못 찾음 신호 — None과 동일하게 처리
-        if not origin or origin == (0, 0):
-            # 창을 못 찾으면 client 좌표를 절대좌표로 간주 (fallback)
-            ox, oy = 0, 0
-        else:
-            ox, oy = origin
-        return (ox + cx, oy + cy, w, h)
+        from core.config_manager import resolve_region_coords
+        return resolve_region_coords(self._config, board_cfg)
 
     # ── 감지 파이프라인 ──────────────────────────────────────────────
     def find_shape_in_board(self, board_img: np.ndarray) -> Optional[tuple]:

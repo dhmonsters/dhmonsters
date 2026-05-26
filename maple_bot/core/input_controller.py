@@ -15,6 +15,7 @@ KEYEVENTF_SCANCODE   = 0x0008
 MOUSEEVENTF_MOVE     = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP   = 0x0004
+MOUSEEVENTF_WHEEL    = 0x0800
 MOUSEEVENTF_ABSOLUTE = 0x8000
 
 # 키 이름 → 가상 키 코드 매핑
@@ -159,6 +160,35 @@ class InputController:
         _click_mouse(True)
         time.sleep(0.05)
         _click_mouse(False)
+
+    def double_click(self, x: int, y: int) -> None:
+        """(x, y) 화면 절대 좌표를 더블클릭한다."""
+        _move_mouse(x, y)
+        time.sleep(0.03)
+        _click_mouse(True)
+        time.sleep(0.05)
+        _click_mouse(False)
+        time.sleep(0.08)
+        _click_mouse(True)
+        time.sleep(0.05)
+        _click_mouse(False)
+
+    def scroll(self, x: int, y: int, clicks: int = -3) -> None:
+        """(x, y) 위치에서 마우스 휠 스크롤.
+
+        clicks > 0 : 위로 (스크롤 업), clicks < 0 : 아래로 (스크롤 다운).
+        Windows WHEEL_DELTA = 120 단위.
+        """
+        _move_mouse(x, y)
+        time.sleep(0.03)
+        delta = int(clicks * 120)
+        # mouseData에 부호 있는 값을 c_ulong으로 전달 (음수는 wrap-around)
+        inp = _INPUT(type=INPUT_MOUSE)
+        inp._input.mi = _MOUSEINPUT(
+            mouseData=ctypes.c_ulong(delta & 0xFFFFFFFF).value,
+            dwFlags=MOUSEEVENTF_WHEEL,
+        )
+        ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
 
     def drag(
         self,

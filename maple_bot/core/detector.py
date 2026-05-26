@@ -61,19 +61,33 @@ class Detector:
     def _bar_ratio(self, bar_type: str) -> float:
         """바 영역을 한 번에 캡처 후 numpy HSV로 처리 — 개별 픽셀 API 호출 없음."""
         coord = self._config.get("coordinate", bar_type) or {}
-        x = coord.get("x")
-        y = coord.get("y")
-        width = coord.get("width")
 
-        # x=0이나 y=0은 유효한 좌표일 수 있으므로 None 또는 width=0만 미설정으로 판단
-        if x is None or y is None or not width:
-            return 1.0
+        from core.config_manager import get_game_window_rect
+        ox, oy, cw, ch = get_game_window_rect(self._config)
 
-        x, y, width = int(x), int(y), int(width)
+        if coord.get("x_ratio") is not None and cw > 0 and ch > 0:
+            # relative 비율 모드 — 현재 창 크기로 역산
+            x     = ox + int(coord["x_ratio"]     * cw)
+            y     = oy + int(coord["y_ratio"]     * ch)
+            width = max(1, int(coord["width_ratio"] * cw))
+        else:
+            # absolute 픽셀 모드
+            px = coord.get("x")
+            py = coord.get("y")
+            width = coord.get("width")
+            # x=0이나 y=0은 유효한 좌표일 수 있으므로 None 또는 width=0만 미설정으로 판단
+            if px is None or py is None or not width:
+                return 1.0
+            x = ox + int(px)
+            y = oy + int(py)
+            width = int(width)
+
         scan_h = 17  # ±8행
 
-        # 바 영역 한 번에 캡처 (mss 개별 호출 없음)
-        region = {"left": x, "top": max(0, y - 8), "width": width, "height": scan_h}
+        # 바 영역 한 번에 캡처 (논리 좌표 → 물리 픽셀 변환 후 mss)
+        from core.config_manager import logical_to_physical_coords
+        px2, py2, pw2, ph2 = logical_to_physical_coords(x, max(0, y - 8), width, scan_h)
+        region = {"left": px2, "top": py2, "width": pw2, "height": ph2}
         img = self._screen.capture(region)   # BGR numpy (H, W, 3)
 
         # numpy 벡터 연산으로 HSV 마스크 계산
@@ -121,7 +135,8 @@ class Detector:
     def _load_template(self, path: str) -> np.ndarray | None:
         if path not in self._template_cache:
             if os.path.exists(path):
-                self._template_cache[path] = cv2.imread(path)
+                buf = np.fromfile(path, dtype=np.uint8)
+                self._template_cache[path] = cv2.imdecode(buf, cv2.IMREAD_COLOR)
             else:
                 self._template_cache[path] = None
         return self._template_cache[path]
@@ -132,12 +147,45 @@ class Detector:
     # ── monsters/ 폴더 이미지 목록 ────────────────────────────────────
     @staticmethod
     def list_monster_templates(folder: str = "monsters") -> list[str]:
-        """monsters/ 폴더의 이미지 파일 목록을 반환."""
+        """monsters/ 폴더(하위 구조 포함)에서 대표 이미지 목록을 반환.
+
+        구조: monsters/몬스터이름/stand/frame_0.png  (하위 폴더 방식)
+              monsters/이미지.png                    (평면 방식)
+
+        하위 폴더 방식이면 stand → 임의 포즈 순으로 첫 프레임만 사용.
+        """
         if not os.path.isdir(folder):
             return []
         exts = {".png", ".jpg", ".bmp"}
-        return [
-            os.path.join(folder, f)
-            for f in sorted(os.listdir(folder))
-            if os.path.splitext(f)[1].lower() in exts
-        ]
+        templates = []
+
+        for item in sorted(os.listdir(folder)):
+            item_path = os.path.join(folder, item)
+            if os.path.isdir(item_path):
+                # 몬스터별 하위 폴더: stand 우선, 없으면 첫 포즈 폴더 사용
+                _pose_dirs = ["stand", "move", "attack1", "attack"]
+                picked = None
+                for pose in _pose_dirs:
+                    pose_path = os.path.join(item_path, pose)
+                    if os.path.isdir(pose_path):
+                        frames = sorted([
+                            f for f in os.listdir(pose_path)
+                            if os.path.splitext(f)[1].lower() in exts
+                        ])
+                        if frames:
+                            picked = os.path.join(pose_path, frames[0])
+                            break
+                if picked is None:
+                    # stand/move 없으면 폴더 내 첫 이미지
+                    for f in sorted(os.listdir(item_path)):
+                        if os.path.splitext(f)[1].lower() in exts:
+                            picked = os.path.join(item_path, f)
+                            break
+                if picked:
+                    templates.append(picked)
+            elif os.path.splitext(item)[1].lower() in exts:
+                # 평면 구조: 직접 이미지
+                templates.append(item_path)
+
+        return templates
+

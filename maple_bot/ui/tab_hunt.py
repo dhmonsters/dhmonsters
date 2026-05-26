@@ -500,6 +500,11 @@ class TabHunt(QWidget):
     # ── config 연동 ───────────────────────────────────────────────────
     def save_to_config(self) -> None:
         self.config.set("key_patterns", "active", self._key_pattern.to_dict())
+        # 현재 패턴 이름이 프리셋으로 존재하면 프리셋도 함께 갱신
+        presets = self.config.get("key_patterns", "presets") or {}
+        if self._key_pattern.name in presets:
+            presets[self._key_pattern.name] = self._key_pattern.to_dict()
+            self.config.set("key_patterns", "presets", presets)
         self.config.save()
 
     def load_from_config(self) -> None:

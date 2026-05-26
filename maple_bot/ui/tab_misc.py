@@ -145,9 +145,6 @@ class _KeyRecorder:
 
 
 class TabMisc(QWidget):
-    # 스레드 안전 거짓말탐지기 로그 시그널
-    _lie_log_signal = pyqtSignal(str)
-
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -155,17 +152,11 @@ class TabMisc(QWidget):
         self._recorder = _KeyRecorder(self._record_queue)
         self._recording = False
         self._hk = None
-        self._lie_monitoring = False
-        self._lie_monitor = _LieDetectorMonitor(self._on_lie_detected)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_hotkey_status_group())
         layout.addWidget(self._build_recorder_group())
-        layout.addWidget(self._build_lie_log_group())
         layout.addStretch()
-
-        # 거탐 로그 시그널 → UI 스레드 슬롯 연결
-        self._lie_log_signal.connect(self._append_lie_log_slot)
 
         # 50ms마다 큐에서 결과를 읽어 리스트에 추가
         self._timer = QTimer(self)
@@ -414,83 +405,6 @@ class TabMisc(QWidget):
         v.addWidget(btn_ok)
         dlg.exec()
 
-    # ── 거짓말탐지기 해제 로그 ─────────────────────────────────────
-    def _build_lie_log_group(self) -> QGroupBox:
-        group = QGroupBox("거짓말탐지기 감시 로그")
-        layout = QVBoxLayout(group)
-
-        lbl = QLabel(
-            "기록 시작을 누르면 거짓말탐지기가 화면에 뜨는 순간 자동으로 시각을 기록합니다.\n"
-            "봇과 별개로 동작하므로 봇을 끄고 손으로 풀어도 감지됩니다."
-        )
-        lbl.setWordWrap(True)
-        layout.addWidget(lbl)
-
-        btn_row = QHBoxLayout()
-        self.btn_lie_record = QPushButton("⏺ 기록 시작")
-        self.btn_lie_record.setFixedHeight(34)
-        self.btn_lie_record.setStyleSheet(
-            "background-color: #4CAF50; color: white; font-weight: bold;"
-        )
-        self.btn_lie_record.clicked.connect(self._toggle_lie_monitor)
-
-        btn_clear = QPushButton("🗑 지우기")
-        btn_clear.setFixedHeight(34)
-        btn_clear.clicked.connect(self._clear_lie_log)
-
-        self.lbl_lie_count = QLabel("0회")
-        self.lbl_lie_count.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-        btn_row.addWidget(self.btn_lie_record)
-        btn_row.addWidget(btn_clear)
-        btn_row.addStretch()
-        btn_row.addWidget(self.lbl_lie_count)
-        layout.addLayout(btn_row)
-
-        self._lie_log_edit = QTextEdit()
-        self._lie_log_edit.setReadOnly(True)
-        self._lie_log_edit.setFont(QFont("Consolas", 9))
-        self._lie_log_edit.setMinimumHeight(200)
-        layout.addWidget(self._lie_log_edit)
-
-        return group
-
-    def _toggle_lie_monitor(self) -> None:
-        if not self._lie_monitoring:
-            self._lie_monitor.start()
-            self._lie_monitoring = True
-            self.btn_lie_record.setText("⏹ 기록 중지")
-            self.btn_lie_record.setStyleSheet(
-                "background-color: #f44336; color: white; font-weight: bold;"
-            )
-        else:
-            self._lie_monitor.stop()
-            self._lie_monitoring = False
-            self.btn_lie_record.setText("⏺ 기록 시작")
-            self.btn_lie_record.setStyleSheet(
-                "background-color: #4CAF50; color: white; font-weight: bold;"
-            )
-
-    def _on_lie_detected(self, msg: str) -> None:
-        """모니터 스레드에서 호출 — 시그널로 UI 스레드에 전달."""
-        self._lie_log_signal.emit(msg)
-
-    def append_lie_log(self, msg: str) -> None:
-        """봇 스레드에서 호출 — 시그널을 통해 UI 스레드로 전달한다."""
-        self._lie_log_signal.emit(msg)
-
-    def _append_lie_log_slot(self, msg: str) -> None:
-        """UI 스레드에서 실행되는 실제 텍스트 추가."""
-        self._lie_log_edit.append(msg)
-        # 감지 횟수 업데이트 (⚠ 포함 행 기준)
-        text = self._lie_log_edit.toPlainText()
-        count = text.count("⚠ 거짓말탐지기 감지")
-        if count > 0:
-            self.lbl_lie_count.setText(f"{count}회")
-
-    def _clear_lie_log(self) -> None:
-        self._lie_log_edit.clear()
-        self.lbl_lie_count.setText("0회")
 
     # ── config 연동 (없음) ───────────────────────────────────────────
     def save_to_config(self):

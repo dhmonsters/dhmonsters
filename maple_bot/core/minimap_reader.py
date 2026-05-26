@@ -32,16 +32,25 @@ class RopePoint:
     jump_offset: int = 15       # 밧줄에서 몇 픽셀 옆에서 점프할지
     climb_sec: float = 2.5      # 밧줄 오르는 데 걸리는 시간 (초)
 
-    def to_dict(self) -> dict:
-        return {"name": self.name, "x": self.x,
-                "approach": self.approach, "jump_offset": self.jump_offset,
-                "climb_sec": self.climb_sec}
+    def to_dict(self, mm_w: int = 0) -> dict:
+        """mm_w > 0 이면 x_ratio 도 함께 저장."""
+        d = {"name": self.name, "x": self.x,
+             "approach": self.approach, "jump_offset": self.jump_offset,
+             "climb_sec": self.climb_sec}
+        if mm_w > 0:
+            d["x_ratio"] = self.x / mm_w
+        return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "RopePoint":
+    def from_dict(cls, d: dict, mm_w: int = 0) -> "RopePoint":
+        """mm_w > 0 이고 x_ratio 가 있으면 비율로부터 픽셀값 계산."""
+        if mm_w > 0 and d.get("x_ratio") is not None:
+            x = max(0, int(d["x_ratio"] * mm_w))
+        else:
+            x = int(d.get("x", 0))
         return cls(
             name=d.get("name", "밧줄"),
-            x=int(d.get("x", 0)),
+            x=x,
             approach=d.get("approach", "both"),
             jump_offset=int(d.get("jump_offset", 15)),
             climb_sec=float(d.get("climb_sec", 2.5)),
@@ -66,29 +75,49 @@ class Zone:
     sweeps: float = 2.0         # 층별 사냥 시 왕복 횟수 (0 = 무제한, 0.5 단위 가능)
     key_pattern: str = ""       # 층별 공격 패턴 프리셋 이름 (빈 문자열 = 기본 패턴 유지)
 
-    def to_dict(self) -> dict:
-        return {
+    def to_dict(self, mm_w: int = 0, mm_h: int = 0) -> dict:
+        """mm_w/mm_h > 0 이면 비율 키도 함께 저장."""
+        d = {
             "name": self.name,
-            "left_x": self.left_x,
-            "right_x": self.right_x,
-            "y_min": self.y_min,
-            "y_max": self.y_max,
+            "left_x": self.left_x, "right_x": self.right_x,
+            "y_min": self.y_min,   "y_max": self.y_max,
             "rope_x": self.rope_x,
             "random_margin_min": self.random_margin_min,
             "random_margin_max": self.random_margin_max,
             "sweeps": float(self.sweeps),
             "key_pattern": self.key_pattern,
         }
+        if mm_w > 0 and mm_h > 0:
+            d.update({
+                "left_x_ratio":  self.left_x  / mm_w,
+                "right_x_ratio": self.right_x / mm_w,
+                "y_min_ratio":   self.y_min   / mm_h,
+                "y_max_ratio":   self.y_max   / mm_h,
+                "rope_x_ratio":  self.rope_x  / mm_w if self.rope_x >= 0 else -1.0,
+            })
+        return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Zone":
+    def from_dict(cls, d: dict, mm_w: int = 0, mm_h: int = 0) -> "Zone":
+        """mm_w/mm_h > 0 이고 비율 키가 있으면 비율로부터 픽셀값 계산."""
+        if mm_w > 0 and mm_h > 0 and d.get("left_x_ratio") is not None:
+            left_x  = max(0, int(d["left_x_ratio"]  * mm_w))
+            right_x = max(0, int(d["right_x_ratio"] * mm_w))
+            y_min   = max(0, int(d["y_min_ratio"]   * mm_h))
+            y_max   = max(0, int(d["y_max_ratio"]   * mm_h))
+            rx_r    = d.get("rope_x_ratio", -1.0)
+            rope_x  = int(rx_r * mm_w) if rx_r >= 0 else -1
+        else:
+            left_x  = int(d.get("left_x", 0))
+            right_x = int(d.get("right_x", 200))
+            y_min   = int(d.get("y_min", 0))
+            y_max   = int(d.get("y_max", 120))
+            rope_x  = int(d.get("rope_x", -1))
         return cls(
             name=d.get("name", "구역"),
-            left_x=int(d.get("left_x", 0)),
-            right_x=int(d.get("right_x", 200)),
-            y_min=int(d.get("y_min", 0)),
-            y_max=int(d.get("y_max", 120)),
-            rope_x=int(d.get("rope_x", -1)),
+            left_x=left_x, right_x=right_x,
+            y_min=y_min,   y_max=y_max,
+            rope_x=rope_x,
             random_margin_min=int(d.get("random_margin_min", 0)),
             random_margin_max=int(d.get("random_margin_max", 0)),
             sweeps=float(d.get("sweeps", 2.0)),

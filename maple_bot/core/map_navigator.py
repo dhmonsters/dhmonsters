@@ -82,6 +82,21 @@ class MapNavigator:
         if self._state in (_APPROACH, _JUMP, _CLIMB):
             self._state       = _PATROL
             self._target_rope = None
+            # _check_rope_trigger 가 release_direction() 을 호출했을 수 있으므로
+            # 방향키가 해제된 경우 즉시 복원
+            if self._held_direction is None:
+                self._hold_direction(self._direction)
+
+    def force_direction(self, direction: str) -> None:
+        """floor_hunt 경계 감지 시 방향을 즉시 강제 전환.
+        몬스터 밀림으로 목표를 지나쳤다가 되돌아온 경우에도 올바른 방향으로 보정한다."""
+        if self._direction == direction and self._held_direction == direction:
+            return
+        self._direction    = direction
+        self._right_target = None   # 다음 _update_direction 에서 새 목표 재계산
+        self._left_target  = None
+        self._last_zone    = None
+        self._hold_direction(direction)
 
     @property
     def ropes(self) -> list[RopePoint]:
@@ -103,15 +118,23 @@ class MapNavigator:
         if self._held_direction == direction:
             return
         if self._held_direction:
-            self._input.key_up(self._held_direction)
-            time.sleep(_rnd(0.001, 0.011))  # 랜덤 딜레이
+            old = self._held_direction
+            self._held_direction = None   # keepalive가 old 방향 재전송하지 못하도록 먼저 해제
+            self._input.key_up(old)
+            time.sleep(_rnd(0.001, 0.011))
         self._held_direction = direction
         self._input.key_down(direction)
 
     def release_direction(self) -> None:
         if self._held_direction:
-            self._input.key_up(self._held_direction)
-            self._held_direction = None
+            old = self._held_direction
+            self._held_direction = None   # keepalive 재전송 차단 후 키업
+            self._input.key_up(old)
+
+    def refresh_direction(self) -> None:
+        """현재 방향키 key_down 재전송 — 스킬 사이 이동 유지용."""
+        if self._held_direction:
+            self._input.key_down(self._held_direction)
 
     # ── 메인 스텝 ─────────────────────────────────────────────────────
     def run_one_step(self) -> None:
@@ -123,7 +146,7 @@ class MapNavigator:
         pos = self._minimap.get_character_pos()
 
         if self._state == _JUMP:
-            self.release_direction()
+            # 방향키 유지한 채 점프 — press_key 직후 _do_jump 내부에서 해제
             self._do_jump()
             return
 
@@ -132,7 +155,7 @@ class MapNavigator:
                 return
             x, _ = pos
             if abs(x - self._approach_x) <= ROPE_MARGIN:
-                self.release_direction()
+                # 방향키 멈추지 않고 _JUMP로 전환 (점프 시 걷기 유지)
                 self._state = _JUMP
                 self._status(f"점프 위치 도달 X={x} → 점프")
             else:
@@ -232,7 +255,8 @@ class MapNavigator:
     def _do_jump(self) -> None:
         jump_key = self._minimap.config.jump_key if self._minimap.config else "alt"
         self._input.press_key(jump_key, hold_sec=_rnd(0.083, 0.127))
-        time.sleep(_rnd(0.121, 0.183))
+        self.release_direction()          # 점프키 입력 직후 방향키 해제 → up으로 전환
+        time.sleep(_rnd(0.05, 0.10))
         self._state       = _CLIMB
         self._climb_start = time.time()
         self._status(f"점프 완료 [{jump_key}] → 오르는 중")

@@ -5,6 +5,31 @@ from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 
 
+def logical_to_physical(x: int, y: int, w: int, h: int) -> tuple[int, int, int, int]:
+    """RegionSelector 위젯-상대 논리 픽셀 → mss 절대 물리 픽셀 변환.
+
+    RegionSelector는 가상 데스크톱 기준 오프셋 위치에 놓인 위젯이므로
+    event.pos()는 위젯-상대 좌표다. 전역 논리 좌표로 변환 후 물리 배율을 곱한다.
+
+    멀티모니터에서 보조 모니터가 주모니터 위/왼쪽에 있으면 virtual desktop
+    origin이 (0,0)이 아닌 음수 값을 가진다 (예: top=-221). 이 오프셋을 반드시 더해야 한다.
+    """
+    import mss as _mss
+    from PyQt6.QtCore import QRect
+    total = QRect()
+    for s in QApplication.screens():
+        total = total.united(s.geometry())
+    with _mss.mss() as sct:
+        mon = sct.monitors[0]
+        phys_w, phys_h = mon["width"], mon["height"]
+    sx = phys_w / max(1, total.width())
+    sy = phys_h / max(1, total.height())
+    # 위젯-상대 → 전역 논리 좌표로 변환 (가상 데스크톱 origin 보정)
+    abs_x = x + total.x()
+    abs_y = y + total.y()
+    return int(abs_x * sx), int(abs_y * sy), int(w * sx), int(h * sy)
+
+
 class RegionSelector(QWidget):
     """마우스 드래그로 화면 영역을 선택한다. ESC로 취소."""
 
@@ -22,9 +47,16 @@ class RegionSelector(QWidget):
         self.setCursor(Qt.CursorShape.CrossCursor)
 
         # 전체 가상 데스크톱(멀티모니터 포함) 크기로 설정
-        geo = QApplication.primaryScreen().virtualGeometry()
-        self.setGeometry(geo)
-        self.showFullScreen()
+        # showFullScreen() 은 봇 모니터만 덮으므로 setGeometry + show() 방식으로 변경
+        from PyQt6.QtCore import QRect
+        total_rect = QRect()
+        for screen in QApplication.screens():
+            total_rect = total_rect.united(screen.geometry())
+        self.setGeometry(total_rect)
+        self.show()
+        self.activateWindow()
+        self.raise_()
+        self.setFocus()
 
         self._start: QPoint | None = None
         self._current: QPoint | None = None
@@ -153,9 +185,11 @@ def capture_template(save_path: str, parent=None) -> bool:
     if w <= 0 or h <= 0:
         return False
 
+    px, py, pw, ph = logical_to_physical(x, y, w, h)
+
     # 선택 영역 캡처
     with mss.mss() as sct:
-        mon = {"left": x, "top": y, "width": w, "height": h}
+        mon = {"left": px, "top": py, "width": pw, "height": ph}
         raw = sct.grab(mon)
         img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
 

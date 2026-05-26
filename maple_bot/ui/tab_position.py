@@ -104,7 +104,9 @@ class TabPosition(QWidget):
         if os.path.exists(ref_path):
             me = self.config.get("map_exit") or {}
             nr = me.get("name_region")
-            if nr and len(nr) == 4:
+            if isinstance(nr, dict):
+                self.lbl_map_name_ref.setText("✅ 기준 이미지 저장됨 (비율)")
+            elif isinstance(nr, list) and len(nr) == 4:
                 w, h = nr[2], nr[3]
                 self.lbl_map_name_ref.setText(f"✅ 기준 이미지 저장됨 ({w}×{h} px)")
             else:
@@ -121,20 +123,34 @@ class TabPosition(QWidget):
         sel.show()
 
     def _save_map_name_ref(self, x: int, y: int, w: int, h: int) -> None:
-        from core.config_manager import get_user_templates_dir
+        from core.config_manager import get_user_templates_dir, get_game_window_rect, logical_to_physical_coords
+        from ui.region_selector import logical_to_physical
+        px, py, pw, ph = logical_to_physical(x, y, w, h)
         ref_path = os.path.join(get_user_templates_dir(), "map_name_ref.png")
         try:
             with mss.mss() as sct:
-                raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
                 img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
                 cv2.imwrite(ref_path, img)
         except Exception as exc:
             QMessageBox.critical(self, "저장 실패", f"이미지 저장 오류: {exc}")
             return
-        self.config.set("map_exit", "name_region", [x, y, w, h])
+        ox, oy, cw, ch = get_game_window_rect(self.config)
+        if cw > 0 and ch > 0:
+            region = {
+                "x_ratio": (x - ox) / cw,
+                "y_ratio": (y - oy) / ch,
+                "w_ratio": w / cw,
+                "h_ratio": h / ch,
+            }
+            mode = "비율"
+        else:
+            region = [x, y, w, h]
+            mode = "절대"
+        self.config.set("map_exit", "name_region", region)
         self.config.save()
         self._refresh_map_name_ref_label()
-        QMessageBox.information(self, "저장 완료", f"맵 이름 기준 이미지 저장 완료 ({w}×{h} px)")
+        QMessageBox.information(self, "저장 완료", f"맵 이름 기준 이미지 저장 완료 ({pw}×{ph} px, {mode})")
 
     def _save_map_exit_settings(self) -> None:
         action_map = {"봇 정지": "stop", "텔레그램 알림": "telegram", "봇 정지 + 텔레그램": "both"}
@@ -299,16 +315,18 @@ class TabPosition(QWidget):
 
     def _save_anti_mob_template(self, x: int, y: int, w: int, h: int) -> None:
         from core.config_manager import get_user_templates_dir
+        from ui.region_selector import logical_to_physical
+        px, py, pw, ph = logical_to_physical(x, y, w, h)
         tpl_dir = get_user_templates_dir()
         existing = sorted(glob.glob(os.path.join(tpl_dir, "anti_mob_*.png")))
         next_num = len(existing) + 1
         path = os.path.join(tpl_dir, f"anti_mob_{next_num}.png")
         with mss.mss() as sct:
-            raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
             img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
             cv2.imwrite(path, img)
         self._refresh_anti_mob_tpl_label()
-        QMessageBox.information(self, "완료", f"방지몹 템플릿 {next_num}번 저장 완료 ({w}×{h}px)")
+        QMessageBox.information(self, "완료", f"방지몹 템플릿 {next_num}번 저장 완료 ({pw}×{ph}px)")
 
     def _clear_anti_mob_templates(self) -> None:
         from core.config_manager import get_user_templates_dir
@@ -333,9 +351,14 @@ class TabPosition(QWidget):
         sel.show()
 
     def _save_anti_mob_region(self, x: int, y: int, w: int, h: int) -> None:
-        self.config.set("anti_mob", "detect_region", [x, y, w, h])
+        from ui.region_selector import logical_to_physical
+        from core.config_manager import get_game_window_origin
+        gx, gy = logical_to_physical(x, y, 0, 0)[:2]
+        ox, oy = get_game_window_origin(self.config)
+        rx, ry = gx - ox, gy - oy
+        self.config.set("anti_mob", "detect_region", [rx, ry, w, h])
         self.config.save()
-        self.lbl_anti_mob_region.setText(f"탐지 영역: X={x} Y={y} W={w} H={h}")
+        self.lbl_anti_mob_region.setText(f"탐지 영역: X={rx} Y={ry} W={w} H={h}")
         self.lbl_anti_mob_region.setStyleSheet("color: green;")
 
     def _reset_anti_mob_region(self) -> None:
@@ -352,13 +375,15 @@ class TabPosition(QWidget):
         sel.show()
 
     def _save_anti_mob_coord(self, x: int, y: int, w: int, h: int) -> None:
+        from ui.region_selector import logical_to_physical
+        gx, gy = logical_to_physical(x, y, 0, 0)[:2]
         key = self._pending_anti_mob_key
-        val = [x, y, w, h]
+        val = [gx, gy, w, h]
         self.config.set("anti_mob", key, val)
         self.config.save()
         lbl = self._anti_mob_item_coords.get(key)
         if lbl:
-            lbl.setText(f"X={x} Y={y} W={w} H={h}")
+            lbl.setText(f"X={gx} Y={gy} W={w} H={h}")
             lbl.setStyleSheet("color: green; font-size: 10px;")
 
     def _reset_anti_mob_coord(self, key: str) -> None:
@@ -379,16 +404,20 @@ class TabPosition(QWidget):
         self.config.save()
         QMessageBox.information(self, "저장 완료", "매크로방지몹 해제 설정이 저장되었습니다.")
 
-    # ── 마을 귀환 주문서 ──────────────────────────────────────────────
+    # ── 긴급 마을 귀환 ───────────────────────────────────────────────
     def _build_town_scroll_group(self) -> QGroupBox:
-        group = QGroupBox("마을 귀환 주문서")
+        group = QGroupBox("긴급 마을 귀환")
         layout = QVBoxLayout(group)
 
-        note = QLabel("포션 수량이 0이 되거나 봇 내부에서 귀환 명령 시 설정된 키를 눌러 마을로 귀환합니다.")
+        note = QLabel(
+            "봇 내부에서 귀환 명령 시 설정된 키를 눌러 마을로 귀환합니다.\n"
+            "HP 또는 MP가 설정 퍼센트 미만이 되면 자동으로 귀환 키를 발동합니다."
+        )
         note.setStyleSheet("color: gray; font-size: 10px;")
         note.setWordWrap(True)
         layout.addWidget(note)
 
+        # 기본 설정 행
         row = QHBoxLayout()
         self.chk_town_scroll = QCheckBox("활성화")
         row.addWidget(self.chk_town_scroll)
@@ -401,6 +430,32 @@ class TabPosition(QWidget):
         row.addStretch()
         layout.addLayout(row)
 
+        # HP 발동 조건
+        hp_row = QHBoxLayout()
+        self.chk_ts_hp = QCheckBox("HP")
+        self.spin_ts_hp_pct = QSpinBox()
+        self.spin_ts_hp_pct.setRange(1, 99)
+        self.spin_ts_hp_pct.setValue(10)
+        self.spin_ts_hp_pct.setFixedWidth(65)
+        self.spin_ts_hp_pct.setSuffix(" % 미만시 발동")
+        hp_row.addWidget(self.chk_ts_hp)
+        hp_row.addWidget(self.spin_ts_hp_pct)
+        hp_row.addStretch()
+        layout.addLayout(hp_row)
+
+        # MP 발동 조건
+        mp_row = QHBoxLayout()
+        self.chk_ts_mp = QCheckBox("MP")
+        self.spin_ts_mp_pct = QSpinBox()
+        self.spin_ts_mp_pct.setRange(1, 99)
+        self.spin_ts_mp_pct.setValue(10)
+        self.spin_ts_mp_pct.setFixedWidth(65)
+        self.spin_ts_mp_pct.setSuffix(" % 미만시 발동")
+        mp_row.addWidget(self.chk_ts_mp)
+        mp_row.addWidget(self.spin_ts_mp_pct)
+        mp_row.addStretch()
+        layout.addLayout(mp_row)
+
         btn_save = QPushButton("💾 저장")
         btn_save.setFixedWidth(70)
         btn_save.clicked.connect(self._save_town_scroll_settings)
@@ -410,10 +465,14 @@ class TabPosition(QWidget):
 
     def _save_town_scroll_settings(self) -> None:
         key = self.edit_town_scroll_key.text().strip()
-        self.config.set("town_scroll", "enabled", self.chk_town_scroll.isChecked())
-        self.config.set("town_scroll", "key",     key)
+        self.config.set("town_scroll", "enabled",          self.chk_town_scroll.isChecked())
+        self.config.set("town_scroll", "key",              key)
+        self.config.set("town_scroll", "hp_trigger",       self.chk_ts_hp.isChecked())
+        self.config.set("town_scroll", "hp_trigger_pct",   self.spin_ts_hp_pct.value())
+        self.config.set("town_scroll", "mp_trigger",       self.chk_ts_mp.isChecked())
+        self.config.set("town_scroll", "mp_trigger_pct",   self.spin_ts_mp_pct.value())
         self.config.save()
-        QMessageBox.information(self, "저장 완료", "마을 귀환 주문서 설정이 저장되었습니다.")
+        QMessageBox.information(self, "저장 완료", "긴급 마을 귀환 설정이 저장되었습니다.")
 
     # ── 사냥터 복귀 (플레이스홀더) ───────────────────────────────────
     def _build_hunting_return_group(self) -> QGroupBox:
@@ -467,13 +526,21 @@ class TabPosition(QWidget):
                 lbl.setStyleSheet("color: green; font-size: 10px;")
         self._refresh_anti_mob_tpl_label()
 
-        # 마을 귀환 주문서
+        # 긴급 마을 귀환
         ts = self.config.get("town_scroll") or {}
         self.chk_town_scroll.setChecked(bool(ts.get("enabled", False)))
         self.edit_town_scroll_key.setText(ts.get("key", "9"))
+        self.chk_ts_hp.setChecked(bool(ts.get("hp_trigger", False)))
+        self.spin_ts_hp_pct.setValue(int(ts.get("hp_trigger_pct", 10)))
+        self.chk_ts_mp.setChecked(bool(ts.get("mp_trigger", False)))
+        self.spin_ts_mp_pct.setValue(int(ts.get("mp_trigger_pct", 10)))
 
     def save_to_config(self) -> None:
-        # 마을 귀환 주문서
-        self.config.set("town_scroll", "enabled", self.chk_town_scroll.isChecked())
-        self.config.set("town_scroll", "key",     self.edit_town_scroll_key.text().strip())
+        # 긴급 마을 귀환
+        self.config.set("town_scroll", "enabled",        self.chk_town_scroll.isChecked())
+        self.config.set("town_scroll", "key",            self.edit_town_scroll_key.text().strip())
+        self.config.set("town_scroll", "hp_trigger",     self.chk_ts_hp.isChecked())
+        self.config.set("town_scroll", "hp_trigger_pct", self.spin_ts_hp_pct.value())
+        self.config.set("town_scroll", "mp_trigger",     self.chk_ts_mp.isChecked())
+        self.config.set("town_scroll", "mp_trigger_pct", self.spin_ts_mp_pct.value())
         self.config.save()

@@ -27,11 +27,10 @@ class TabRecovery(QWidget):
         layout = QVBoxLayout(inner)
         layout.setSpacing(10)
 
+        layout.addWidget(self._build_bar_coord_group())   # ← 맨 위 배치 (먼저 설정해야 포션 감지 작동)
         layout.addWidget(self._build_hp_group())
         layout.addWidget(self._build_mp_group())
         layout.addWidget(self._build_pet_food_group())
-        layout.addWidget(self._build_bar_coord_group())
-        layout.addWidget(self._build_potion_count_group())
 
         btn_save = QPushButton("설정 저장")
         btn_save.clicked.connect(self.save_to_config)
@@ -155,85 +154,73 @@ class TabRecovery(QWidget):
         return group
 
     def _build_bar_coord_group(self) -> QGroupBox:
-        group = QGroupBox("HP / MP 바 좌표 설정")
+        group = QGroupBox("① HP / MP 바 좌표 설정  ← 먼저 설정하세요")
+        group.setStyleSheet("QGroupBox { font-weight: bold; }")
         layout = QVBoxLayout(group)
 
-        note = QLabel(
-            "드래그로 HP/MP 바 영역을 선택하거나 단축키를 설정해 게임 화면에서 직접 지정하세요."
-        )
+        note = QLabel("게임 인터페이스의 HP/MP 바를 드래그해서 지정합니다. (포션 자동사용의 전제조건)")
+        note.setStyleSheet("color: #555; font-size: 10px;")
         note.setWordWrap(True)
         layout.addWidget(note)
 
         # ── HP 바 ──
-        layout.addWidget(QLabel("HP 바"))
+        hp_header = QHBoxLayout()
+        hp_header.addWidget(QLabel("HP 바"))
+        self.lbl_hp_status = QLabel("미설정")
+        self.lbl_hp_status.setStyleSheet("color: red;")
+        hp_header.addWidget(self.lbl_hp_status)
+        hp_header.addStretch()
+        layout.addLayout(hp_header)
 
-        hp_btn_row = QHBoxLayout()
-        btn_hp = QPushButton("드래그로 HP 바 지정")
-        btn_hp.clicked.connect(self._select_hp_region)
-        hp_btn_row.addWidget(btn_hp)
-        hp_btn_row.addSpacing(12)
-        hp_btn_row.addWidget(QLabel("단축키"))
-        self.edit_hp_hotkey = QLineEdit()
-        self.edit_hp_hotkey.setPlaceholderText("예: f9")
-        self.edit_hp_hotkey.setFixedWidth(70)
-        btn_hp_hk = QPushButton("적용")
-        btn_hp_hk.setFixedWidth(45)
-        btn_hp_hk.clicked.connect(self._apply_hp_hotkey)
-        self.edit_hp_hotkey.returnPressed.connect(self._apply_hp_hotkey)
-        self.lbl_hp_hk_status = QLabel("")
-        hp_btn_row.addWidget(self.edit_hp_hotkey)
-        hp_btn_row.addWidget(btn_hp_hk)
-        hp_btn_row.addWidget(self.lbl_hp_hk_status)
-        hp_btn_row.addStretch()
-        layout.addLayout(hp_btn_row)
-
-        hp_spin_row = QHBoxLayout()
+        hp_row = QHBoxLayout()
         self.spin_hp_x = QSpinBox(); self.spin_hp_x.setRange(0, 9999); self.spin_hp_x.setPrefix("X ")
         self.spin_hp_y = QSpinBox(); self.spin_hp_y.setRange(0, 9999); self.spin_hp_y.setPrefix("Y ")
         self.spin_hp_w = QSpinBox(); self.spin_hp_w.setRange(0, 2000); self.spin_hp_w.setPrefix("너비 ")
         for w in [self.spin_hp_x, self.spin_hp_y, self.spin_hp_w]:
             w.setFixedWidth(90)
-            hp_spin_row.addWidget(w)
-        hp_spin_row.addStretch()
-        layout.addLayout(hp_spin_row)
+            hp_row.addWidget(w)
+        btn_hp_sel = QPushButton("📍 HP 영역 지정")
+        btn_hp_sel.setFixedHeight(30)
+        btn_hp_sel.setStyleSheet("QPushButton { background-color: #c0392b; color: white; font-weight: bold; border-radius: 4px; } QPushButton:hover { background-color: #e74c3c; }")
+        btn_hp_sel.clicked.connect(lambda: self._select_bar_region("hp"))
+        btn_hp_reset = QPushButton("초기화")
+        btn_hp_reset.setFixedWidth(55)
+        btn_hp_reset.clicked.connect(lambda: self._reset_bar_region("hp"))
+        hp_row.addWidget(btn_hp_sel)
+        hp_row.addWidget(btn_hp_reset)
+        hp_row.addStretch()
+        layout.addLayout(hp_row)
 
-        # HSV 자동 감지 — 별도 색상 샘플링 불필요
-        layout.addWidget(QLabel("✔ 색상 자동 감지 (빨간=HP / 파란=MP, 흰색 텍스트 자동 제외)"))
+        layout.addWidget(QLabel("✔ 색상 자동 감지 (빨간=HP / 파란=MP)"))
 
         # ── MP 바 ──
-        layout.addSpacing(6)
-        layout.addWidget(QLabel("MP 바"))
+        layout.addSpacing(4)
+        mp_header = QHBoxLayout()
+        mp_header.addWidget(QLabel("MP 바"))
+        self.lbl_mp_status = QLabel("미설정")
+        self.lbl_mp_status.setStyleSheet("color: red;")
+        mp_header.addWidget(self.lbl_mp_status)
+        mp_header.addStretch()
+        layout.addLayout(mp_header)
 
-        mp_btn_row = QHBoxLayout()
-        btn_mp = QPushButton("드래그로 MP 바 지정")
-        btn_mp.clicked.connect(self._select_mp_region)
-        mp_btn_row.addWidget(btn_mp)
-        mp_btn_row.addSpacing(12)
-        mp_btn_row.addWidget(QLabel("단축키"))
-        self.edit_mp_hotkey = QLineEdit()
-        self.edit_mp_hotkey.setPlaceholderText("예: f10")
-        self.edit_mp_hotkey.setFixedWidth(70)
-        btn_mp_hk = QPushButton("적용")
-        btn_mp_hk.setFixedWidth(45)
-        btn_mp_hk.clicked.connect(self._apply_mp_hotkey)
-        self.edit_mp_hotkey.returnPressed.connect(self._apply_mp_hotkey)
-        self.lbl_mp_hk_status = QLabel("")
-        mp_btn_row.addWidget(self.edit_mp_hotkey)
-        mp_btn_row.addWidget(btn_mp_hk)
-        mp_btn_row.addWidget(self.lbl_mp_hk_status)
-        mp_btn_row.addStretch()
-        layout.addLayout(mp_btn_row)
-
-        mp_spin_row = QHBoxLayout()
+        mp_row = QHBoxLayout()
         self.spin_mp_x = QSpinBox(); self.spin_mp_x.setRange(0, 9999); self.spin_mp_x.setPrefix("X ")
         self.spin_mp_y = QSpinBox(); self.spin_mp_y.setRange(0, 9999); self.spin_mp_y.setPrefix("Y ")
         self.spin_mp_w = QSpinBox(); self.spin_mp_w.setRange(0, 2000); self.spin_mp_w.setPrefix("너비 ")
         for w in [self.spin_mp_x, self.spin_mp_y, self.spin_mp_w]:
             w.setFixedWidth(90)
-            mp_spin_row.addWidget(w)
-        mp_spin_row.addStretch()
-        layout.addLayout(mp_spin_row)
-
+            mp_row.addWidget(w)
+        btn_mp_sel = QPushButton("📍 MP 영역 지정")
+        btn_mp_sel.setFixedHeight(30)
+        btn_mp_sel.setStyleSheet("QPushButton { background-color: #2980b9; color: white; font-weight: bold; border-radius: 4px; } QPushButton:hover { background-color: #3498db; }")
+        btn_mp_sel.clicked.connect(lambda: self._select_bar_region("mp"))
+        btn_mp_reset = QPushButton("초기화")
+        btn_mp_reset.setFixedWidth(55)
+        btn_mp_reset.clicked.connect(lambda: self._reset_bar_region("mp"))
+        mp_row.addWidget(btn_mp_sel)
+        mp_row.addWidget(btn_mp_reset)
+        mp_row.addStretch()
+        layout.addLayout(mp_row)
 
         # 현재 HP/MP 비율 실시간 확인
         test_row = QHBoxLayout()
@@ -247,188 +234,100 @@ class TabRecovery(QWidget):
 
         return group
 
-    def _build_potion_count_group(self) -> QGroupBox:
-        group = QGroupBox("포션 수량 확인 (수량 0 시 마을 귀환)")
-        layout = QVBoxLayout(group)
+    def _select_bar_region(self, bar_type: str) -> None:
+        """RegionSelector로 HP 또는 MP 바 영역을 드래그 지정.
 
-        note = QLabel(
-            "퀵슬롯 아이템 칸 전체를 드래그로 지정하세요 (수량 숫자가 보이는 슬롯 1칸).\n"
-            "숫자 부분만 잡으면 인식 실패 — 슬롯 전체(약 32×32px)를 선택해야 합니다.\n"
-            "마을 귀환 주문서(위치 탭)가 활성화되어야 귀환이 작동합니다."
-        )
-        note.setWordWrap(True)
-        note.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(note)
+        relative 모드: 창 크기 대비 비율로 저장 → 창 이동/크기 변경 모두 대응.
+        absolute 모드: 픽셀 절대 좌표로 저장.
+        """
+        from core.config_manager import get_game_window_rect
 
-        self.chk_potion_zero_return = QCheckBox("수량 0 시 마을 귀환 활성화")
-        layout.addWidget(self.chk_potion_zero_return)
+        def _on_selected(x: int, y: int, w: int, h: int) -> None:
+            ox, oy, cw, ch = get_game_window_rect(self.config)
 
-        # HP 포션 슬롯 영역
-        hp_row = QHBoxLayout()
-        hp_row.addWidget(QLabel("HP 포션 슬롯"))
-        self.lbl_hp_count_region = QLabel("미설정")
-        self.lbl_hp_count_region.setStyleSheet("color: gray; font-size: 10px;")
-        hp_row.addWidget(self.lbl_hp_count_region)
-        hp_row.addStretch()
-        btn_hp_cnt = QPushButton("📍 드래그 설정")
-        btn_hp_cnt.setFixedWidth(90)
-        btn_hp_cnt.setToolTip("퀵슬롯 칸 전체를 드래그하세요 (수량 숫자가 있는 슬롯 1칸 전체, 약 32×32px).")
-        btn_hp_cnt.clicked.connect(self._select_hp_count_region)
-        btn_hp_cnt_rst = QPushButton("✕")
-        btn_hp_cnt_rst.setFixedWidth(24)
-        btn_hp_cnt_rst.clicked.connect(self._reset_hp_count_region)
-        hp_row.addWidget(btn_hp_cnt)
-        hp_row.addWidget(btn_hp_cnt_rst)
-        layout.addLayout(hp_row)
+            if cw > 0 and ch > 0:
+                # relative 모드 — 논리 좌표 기준 비율로 저장
+                x_ratio = (x - ox) / cw
+                y_ratio = (y - oy) / ch
+                w_ratio = w / cw
+                coord = {"x_ratio": x_ratio, "y_ratio": y_ratio, "width_ratio": w_ratio}
+                rx, ry, rw = int(x - ox), int(y - oy), w
+            else:
+                # absolute 모드 — 논리 절대 좌표로 저장
+                coord = {"x": x, "y": y, "width": w}
+                rx, ry, rw = x, y, w
 
-        # MP 포션 슬롯 영역
-        mp_row = QHBoxLayout()
-        mp_row.addWidget(QLabel("MP 포션 슬롯"))
-        self.lbl_mp_count_region = QLabel("미설정")
-        self.lbl_mp_count_region.setStyleSheet("color: gray; font-size: 10px;")
-        mp_row.addWidget(self.lbl_mp_count_region)
-        mp_row.addStretch()
-        btn_mp_cnt = QPushButton("📍 드래그 설정")
-        btn_mp_cnt.setFixedWidth(90)
-        btn_mp_cnt.setToolTip("퀵슬롯 칸 전체를 드래그하세요 (수량 숫자가 있는 슬롯 1칸 전체, 약 32×32px).")
-        btn_mp_cnt.clicked.connect(self._select_mp_count_region)
-        btn_mp_cnt_rst = QPushButton("✕")
-        btn_mp_cnt_rst.setFixedWidth(24)
-        btn_mp_cnt_rst.clicked.connect(self._reset_mp_count_region)
-        mp_row.addWidget(btn_mp_cnt)
-        mp_row.addWidget(btn_mp_cnt_rst)
-        layout.addLayout(mp_row)
+            if bar_type == "hp":
+                self.spin_hp_x.setValue(rx)
+                self.spin_hp_y.setValue(ry)
+                self.spin_hp_w.setValue(rw)
+                self.config.set("coordinate", "hp", coord)
+            else:
+                self.spin_mp_x.setValue(rx)
+                self.spin_mp_y.setValue(ry)
+                self.spin_mp_w.setValue(rw)
+                self.config.set("coordinate", "mp", coord)
 
-        # 테스트 버튼
-        test_row = QHBoxLayout()
-        btn_test_cnt = QPushButton("수량 상태 확인")
-        btn_test_cnt.clicked.connect(self._test_potion_count)
-        self.lbl_count_result = QLabel("HP: -  MP: -")
-        test_row.addWidget(btn_test_cnt)
-        test_row.addWidget(self.lbl_count_result)
-        test_row.addStretch()
-        layout.addLayout(test_row)
+            self.config.save()
+            label = "HP" if bar_type == "hp" else "MP"
+            mode  = "비율 저장" if cw > 0 else "픽셀 저장"
+            self.lbl_ratio.setText(f"{label} 바 좌표 {mode} ✓")
+            self._refresh_bar_status()
 
-        return group
-
-    def _select_hp_count_region(self) -> None:
         self._selector = RegionSelector()
-        self._selector.region_selected.connect(self._apply_hp_count_region)
+        self._selector.region_selected.connect(_on_selected)
         self._selector.show()
 
-    def _select_mp_count_region(self) -> None:
-        self._selector = RegionSelector()
-        self._selector.region_selected.connect(self._apply_mp_count_region)
-        self._selector.show()
-
-    def _apply_hp_count_region(self, x: int, y: int, w: int, h: int) -> None:
-        self.config.set("recovery", "potion_count", "hp_region", [x, y, w, h])
+    def _reset_bar_region(self, bar_type: str) -> None:
+        """HP 또는 MP 바 좌표를 초기화한다."""
+        empty = {"x": 0, "y": 0, "width": 0}
+        if bar_type == "hp":
+            self.config.set("coordinate", "hp", empty)
+            self.spin_hp_x.setValue(0); self.spin_hp_y.setValue(0); self.spin_hp_w.setValue(0)
+        else:
+            self.config.set("coordinate", "mp", empty)
+            self.spin_mp_x.setValue(0); self.spin_mp_y.setValue(0); self.spin_mp_w.setValue(0)
         self.config.save()
-        self.lbl_hp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
-        self.lbl_hp_count_region.setStyleSheet("color: green; font-size: 10px;")
+        self._refresh_bar_status()
+        self.lbl_ratio.setText("HP: -  MP: -")
 
-    def _apply_mp_count_region(self, x: int, y: int, w: int, h: int) -> None:
-        self.config.set("recovery", "potion_count", "mp_region", [x, y, w, h])
-        self.config.save()
-        self.lbl_mp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
-        self.lbl_mp_count_region.setStyleSheet("color: green; font-size: 10px;")
+    def _refresh_bar_status(self) -> None:
+        """HP/MP 설정 상태 레이블을 갱신한다."""
+        hp = self.config.get("coordinate", "hp") or {}
+        if hp.get("x_ratio") is not None or hp.get("width", 0) > 0:
+            self.lbl_hp_status.setText("✔ 설정됨")
+            self.lbl_hp_status.setStyleSheet("color: green;")
+        else:
+            self.lbl_hp_status.setText("미설정")
+            self.lbl_hp_status.setStyleSheet("color: red;")
 
-    def _reset_hp_count_region(self) -> None:
-        self.config.set("recovery", "potion_count", "hp_region", None)
-        self.config.save()
-        self.lbl_hp_count_region.setText("미설정")
-        self.lbl_hp_count_region.setStyleSheet("color: gray; font-size: 10px;")
-
-    def _reset_mp_count_region(self) -> None:
-        self.config.set("recovery", "potion_count", "mp_region", None)
-        self.config.save()
-        self.lbl_mp_count_region.setText("미설정")
-        self.lbl_mp_count_region.setStyleSheet("color: gray; font-size: 10px;")
-
-    def _test_potion_count(self) -> None:
-        """포션 슬롯 영역을 OCR로 읽어 수량을 표시한다. 실패 시 debug_ocr/ 폴더에 이미지 저장."""
-        pc = self.config.get("recovery", "potion_count") or {}
-        hp_r = pc.get("hp_region")
-        mp_r = pc.get("mp_region")
-
-        self.lbl_count_result.setText("읽는 중...")
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-
-        def _read_count(region, label: str) -> str:
-            if not region or len(region) < 4:
-                return "미설정"
-            x, y, w, h = int(region[0]), int(region[1]), int(region[2]), int(region[3])
-            try:
-                img = self._screen.capture({"left": x, "top": y, "width": w, "height": h})
-                from core.ocr_detector import read_number, save_debug_images, _bright_pixel_ratio, _prepare_slot
-                ratio = _bright_pixel_ratio(_prepare_slot(img))
-                n = read_number(img)
-                if n is not None:
-                    return f"{n}개 (밝기:{ratio:.3f})"
-                # OCR 실패 → 디버그 이미지 저장
-                save_debug_images(img, folder=f"debug_ocr_{label}")
-                return f"읽기 실패 (밝기:{ratio:.3f}) → debug_ocr_{label}/"
-            except Exception as e:
-                return f"오류: {e}"
-
-        hp_s = _read_count(hp_r, "hp")
-        mp_s = _read_count(mp_r, "mp")
-        self.lbl_count_result.setText(f"HP: {hp_s}  MP: {mp_s}")
+        mp = self.config.get("coordinate", "mp") or {}
+        if mp.get("x_ratio") is not None or mp.get("width", 0) > 0:
+            self.lbl_mp_status.setText("✔ 설정됨")
+            self.lbl_mp_status.setStyleSheet("color: green;")
+        else:
+            self.lbl_mp_status.setText("미설정")
+            self.lbl_mp_status.setStyleSheet("color: red;")
 
     # ── HP/MP 비율 테스트 ─────────────────────────────────────────────
     def _test_ratio(self) -> None:
-        """현재 화면에서 HP/MP 비율을 읽어 표시한다."""
+        hp_coord = self.config.get("coordinate", "hp") or {}
+        mp_coord = self.config.get("coordinate", "mp") or {}
+        hp_set = hp_coord.get("x_ratio") is not None or hp_coord.get("width", 0) > 0
+        mp_set = mp_coord.get("x_ratio") is not None or mp_coord.get("width", 0) > 0
+        if not hp_set and not mp_set:
+            self.lbl_ratio.setText("⚠ HP/MP 바 좌표가 설정되지 않았습니다. '영역 지정'으로 먼저 설정하세요.")
+            return
         from core.detector import Detector
-        from core.config_manager import ConfigManager
         detector = Detector(self._screen, self.config)
         hp = detector.hp_ratio()
         mp = detector.mp_ratio()
-        self.lbl_ratio.setText(f"HP: {hp*100:.0f}%  MP: {mp*100:.0f}%")
-
-    # ── 드래그 선택 ───────────────────────────────────────────────────
-    def _select_hp_region(self) -> None:
-        self._selector = RegionSelector()
-        self._selector.region_selected.connect(self._apply_hp_region)
-
-    def _select_mp_region(self) -> None:
-        self._selector = RegionSelector()
-        self._selector.region_selected.connect(self._apply_mp_region)
-
-    def _apply_hp_region(self, x: int, y: int, w: int, h: int) -> None:
-        self.spin_hp_x.setValue(x)
-        self.spin_hp_y.setValue(y + h // 2)
-        self.spin_hp_w.setValue(w)
-
-    def _apply_mp_region(self, x: int, y: int, w: int, h: int) -> None:
-        self.spin_mp_x.setValue(x)
-        self.spin_mp_y.setValue(y + h // 2)
-        self.spin_mp_w.setValue(w)
-
-    # ── 단축키 등록 ───────────────────────────────────────────────────
-    def _apply_hp_hotkey(self) -> None:
-        if not self._hk:
-            self.lbl_hp_hk_status.setText("단축키 매니저 없음")
-            return
-        key = self.edit_hp_hotkey.text().strip()
-        err = self._hk.register("recovery_hp", key, self._select_hp_region)
-        self.lbl_hp_hk_status.setText("등록됨" if not err else f"오류: {err}")
-
-    def _apply_mp_hotkey(self) -> None:
-        if not self._hk:
-            self.lbl_mp_hk_status.setText("단축키 매니저 없음")
-            return
-        key = self.edit_mp_hotkey.text().strip()
-        err = self._hk.register("recovery_mp", key, self._select_mp_region)
-        self.lbl_mp_hk_status.setText("등록됨" if not err else f"오류: {err}")
+        hp_str = f"{hp*100:.0f}%" if hp_set else "미설정"
+        mp_str = f"{mp*100:.0f}%" if mp_set else "미설정"
+        self.lbl_ratio.setText(f"HP: {hp_str}  MP: {mp_str}")
 
     def set_hotkey_manager(self, hk) -> None:
         self._hk = hk
-        # 저장된 단축키가 있으면 자동 등록
-        if self.edit_hp_hotkey.text().strip():
-            self._apply_hp_hotkey()
-        if self.edit_mp_hotkey.text().strip():
-            self._apply_mp_hotkey()
 
     # ── 저장 / 로드 ───────────────────────────────────────────────────
     def save_to_config(self) -> None:
@@ -444,33 +343,26 @@ class TabRecovery(QWidget):
             "key":          self.edit_mp_key.text().strip() or "0",
             "cooldown_sec": self.spin_mp_cooldown.value(),
         })
-        self.config.set("recovery", "hotkeys", {
-            "hp": self.edit_hp_hotkey.text().strip(),
-            "mp": self.edit_mp_hotkey.text().strip(),
-        })
-        self.config.set("coordinate", "hp", {
-            "x": self.spin_hp_x.value(),
-            "y": self.spin_hp_y.value(),
-            "width": self.spin_hp_w.value(),
-        })
-        self.config.set("coordinate", "mp", {
-            "x": self.spin_mp_x.value(),
-            "y": self.spin_mp_y.value(),
-            "width": self.spin_mp_w.value(),
-        })
         self.config.set("recovery", "pet_food", {
             "enabled":      self.chk_pet_food.isChecked(),
             "pet_count":    self.spin_pet_count.value(),
             "key":          self.edit_pet_key.text().strip(),
             "interval_min": self.spin_pet_interval.value(),
         })
-        # 포션 수량 확인 설정 저장 (영역은 드래그 시 즉시 저장, 여기서는 체크박스만)
-        pc = self.config.get("recovery", "potion_count") or {}
-        self.config.set("recovery", "potion_count", {
-            "hp_region":    pc.get("hp_region"),
-            "mp_region":    pc.get("mp_region"),
-            "zero_return":  self.chk_potion_zero_return.isChecked(),
-        })
+        # 비율 좌표가 이미 저장된 경우 스핀박스 픽셀값으로 덮어쓰지 않음
+        # (비율 저장은 _select_bar_region에서 직접 처리)
+        if self.config.get("coordinate", "hp", "x_ratio") is None:
+            self.config.set("coordinate", "hp", {
+                "x":     self.spin_hp_x.value(),
+                "y":     self.spin_hp_y.value(),
+                "width": self.spin_hp_w.value(),
+            })
+        if self.config.get("coordinate", "mp", "x_ratio") is None:
+            self.config.set("coordinate", "mp", {
+                "x":     self.spin_mp_x.value(),
+                "y":     self.spin_mp_y.value(),
+                "width": self.spin_mp_w.value(),
+            })
         self.config.save()
 
     def load_from_config(self) -> None:
@@ -492,31 +384,28 @@ class TabRecovery(QWidget):
         self.edit_pet_key.setText(pet.get("key", ""))
         self.spin_pet_interval.setValue(pet.get("interval_min", 20))
 
-        hk = self.config.get("recovery", "hotkeys") or {}
-        self.edit_hp_hotkey.setText(hk.get("hp", ""))
-        self.edit_mp_hotkey.setText(hk.get("mp", ""))
+        from core.config_manager import get_game_window_rect
+        _, _, cw, ch = get_game_window_rect(self.config)
 
         hp_coord = self.config.get("coordinate", "hp") or {}
-        self.spin_hp_x.setValue(hp_coord.get("x", 0))
-        self.spin_hp_y.setValue(hp_coord.get("y", 0))
-        self.spin_hp_w.setValue(hp_coord.get("width", 0))
+        if hp_coord.get("x_ratio") is not None and cw > 0 and ch > 0:
+            self.spin_hp_x.setValue(int(hp_coord["x_ratio"] * cw))
+            self.spin_hp_y.setValue(int(hp_coord["y_ratio"] * ch))
+            self.spin_hp_w.setValue(int(hp_coord["width_ratio"] * cw))
+        else:
+            self.spin_hp_x.setValue(hp_coord.get("x", 0))
+            self.spin_hp_y.setValue(hp_coord.get("y", 0))
+            self.spin_hp_w.setValue(hp_coord.get("width", 0))
 
         mp_coord = self.config.get("coordinate", "mp") or {}
-        self.spin_mp_x.setValue(mp_coord.get("x", 0))
-        self.spin_mp_y.setValue(mp_coord.get("y", 0))
-        self.spin_mp_w.setValue(mp_coord.get("width", 0))
+        if mp_coord.get("x_ratio") is not None and cw > 0 and ch > 0:
+            self.spin_mp_x.setValue(int(mp_coord["x_ratio"] * cw))
+            self.spin_mp_y.setValue(int(mp_coord["y_ratio"] * ch))
+            self.spin_mp_w.setValue(int(mp_coord["width_ratio"] * cw))
+        else:
+            self.spin_mp_x.setValue(mp_coord.get("x", 0))
+            self.spin_mp_y.setValue(mp_coord.get("y", 0))
+            self.spin_mp_w.setValue(mp_coord.get("width", 0))
 
-        # 포션 수량 확인
-        pc = self.config.get("recovery", "potion_count") or {}
-        self.chk_potion_zero_return.setChecked(bool(pc.get("zero_return", False)))
-        hp_r = pc.get("hp_region")
-        if hp_r and len(hp_r) == 4:
-            x, y, w, h = hp_r
-            self.lbl_hp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
-            self.lbl_hp_count_region.setStyleSheet("color: green; font-size: 10px;")
-        mp_r = pc.get("mp_region")
-        if mp_r and len(mp_r) == 4:
-            x, y, w, h = mp_r
-            self.lbl_mp_count_region.setText(f"X={x} Y={y} W={w} H={h}")
-            self.lbl_mp_count_region.setStyleSheet("color: green; font-size: 10px;")
+        self._refresh_bar_status()
 

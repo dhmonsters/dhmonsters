@@ -19,9 +19,11 @@ class KeyHunter:
         self,
         input_ctrl: InputController,
         on_status: Callable[[str], None] | None = None,
+        on_move_tick: Callable[[], None] | None = None,
     ):
         self._input = input_ctrl
         self._on_status = on_status or (lambda msg: None)
+        self._on_move_tick = on_move_tick or (lambda: None)
         self._pattern: KeyPattern | None = None
         self._step_index: int = 0
 
@@ -36,6 +38,18 @@ class KeyHunter:
     def has_pattern(self) -> bool:
         return self._pattern is not None and len(self._pattern.steps) > 0
 
+    # ── 이동 유지 sleep ───────────────────────────────────────────────
+    def _sleep_with_move(self, duration: float) -> None:
+        """duration초 동안 50ms 단위로 on_move_tick을 호출해 이동 방향키를 유지한다."""
+        _TICK = 0.05
+        end = time.time() + duration
+        while True:
+            remaining = end - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(_TICK, remaining))
+            self._on_move_tick()
+
     # ── 메인 실행 (bot_loop에서 매 틱 호출) ──────────────────────────
     def run_one_step(self) -> None:
         """현재 스텝을 랜덤 타이밍으로 실행하고 다음 스텝으로 전진."""
@@ -45,12 +59,13 @@ class KeyHunter:
         step = self._pattern.steps[self._step_index]
         self._execute(step)
 
-        # 스텝 사이 랜덤 딜레이
+        # 스텝 사이 랜덤 딜레이 — 이동 유지하며 대기
         delay = random.uniform(
             self._pattern.between_min,
             self._pattern.between_max,
         )
-        time.sleep(delay)
+        self._status(f"이동 대기 {delay:.2f}초")
+        self._sleep_with_move(delay)
 
         self._advance()
 
@@ -60,7 +75,10 @@ class KeyHunter:
         if step.action == ACTION_HOLD:
             duration = random.uniform(step.min_sec, step.max_sec)
             self._status(f"누름 [{step.key}] {duration:.3f}초")
-            self._input.press_key(step.key, hold_sec=duration)
+            # hold 구간에도 방향키 유지 (press_key 내부 sleep 대신 직접 제어)
+            self._input.key_down(step.key)
+            self._sleep_with_move(duration)
+            self._input.key_up(step.key)
 
         elif step.action == ACTION_TAP:
             repeat = random.randint(step.repeat_min, step.repeat_max)
@@ -70,7 +88,7 @@ class KeyHunter:
                 self._input.press_key(step.key, hold_sec=hold)
                 if i < repeat - 1:
                     gap = random.uniform(step.min_sec, step.max_sec)
-                    time.sleep(gap)
+                    self._sleep_with_move(gap)
 
         elif step.action == ACTION_COMBO:
             keys   = step.combo_keys if step.combo_keys else [step.key]
@@ -82,11 +100,11 @@ class KeyHunter:
                     self._input.press_key(k, hold_sec=hold)
                     if i < len(keys) - 1:
                         gap = random.uniform(step.min_sec, step.max_sec)
-                        time.sleep(gap)
+                        self._sleep_with_move(gap)
                 # 연속기 1회 완료 후 다음 반복 전 딜레이 (마지막 반복 제외)
                 if r < repeat - 1:
                     gap = random.uniform(step.min_sec, step.max_sec)
-                    time.sleep(gap)
+                    self._sleep_with_move(gap)
 
     # ── 홀드 시간 계산 ────────────────────────────────────────────────
     @staticmethod

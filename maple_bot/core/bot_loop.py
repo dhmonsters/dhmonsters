@@ -67,16 +67,17 @@ class BotLoop:
             screen_reader=self._screen,
             on_status=self._status,
         )
-        self._key_hunter = KeyHunter(
-            input_ctrl=self._input,
-            on_status=self._status,
-        )
         self._minimap_reader = MinimapReader(self._screen)
         self._map_navigator = MapNavigator(
             minimap_reader=self._minimap_reader,
             input_ctrl=self._input,
             detector=self._detector,
             on_status=self._status,
+        )
+        self._key_hunter = KeyHunter(
+            input_ctrl=self._input,
+            on_status=self._status,
+            on_move_tick=self._map_navigator.refresh_direction,
         )
         self._potion_manager = PotionManager(
             input_ctrl=self._input,
@@ -90,6 +91,7 @@ class BotLoop:
         self._thread: threading.Thread | None = None
         self._potion_thread: threading.Thread | None = None
         self._floor_hunt_thread: threading.Thread | None = None
+        self._direction_thread: threading.Thread | None = None
         self._last_user_chat_time = 0.0
         self._chat_msg_index = 0
 
@@ -102,6 +104,16 @@ class BotLoop:
         self._enable_transparent_shape = True  # 투명 도형 찾기 자동 해제
         self._transparent_game  = None   # lazy init: TransparentShapeGame
         self._anti_mob_active   = False  # 방지몹 해제 중 재진입 방지
+
+        # 자동 판매 상태
+        self._auto_sell_active:      bool  = False  # 안전지대 이동 or 판매 중
+        self._auto_sell_selling:     bool  = False  # sell_junk 스레드 실행 중
+        self._auto_sell_last:        float = 0.0    # 마지막 판매 완료 시각
+        # 단계: "idle"|"to_departure"|"extra_to_rope"|"extra_climbing"|"walk_to_safe"|"selling"
+        self._as_phase:              str   = "idle"
+        self._as_extra_climb_start:  float = 0.0    # 추가 밧줄 이동 시작 시각
+        self._as_walk_diag_timer:    float = 0.0    # walk_to_safe 로그 스팸 방지
+        self._as_return_to_hunt:     bool  = False  # 판매 완료 후 fh_zones[0] 복귀 트리거
 
     def _game_window_title(self) -> str:
         """config에서 게임 창 제목을 읽는다. 미설정이면 'MapleStory' 반환."""
@@ -138,6 +150,9 @@ class BotLoop:
         # 포션 전용 스레드 — 스킬 블로킹과 완전히 분리
         self._potion_thread = threading.Thread(target=self._potion_loop, daemon=True)
         self._potion_thread.start()
+        # 방향키 유지 전용 스레드 — 안전감지 블로킹과 무관하게 40ms마다 key_down 재전송
+        self._direction_thread = threading.Thread(target=self._direction_keepalive_loop, daemon=True)
+        self._direction_thread.start()
         self._status("봇 시작됨")
 
     def stop(self) -> None:
@@ -146,6 +161,8 @@ class BotLoop:
             self._thread.join(timeout=3)
         if self._potion_thread:
             self._potion_thread.join(timeout=2)
+        if self._direction_thread:
+            self._direction_thread.join(timeout=1)
         self._status("봇 정지됨")
 
     @property
@@ -271,6 +288,7 @@ class BotLoop:
         fh_route:       list  = []       # 커스텀 루트 [{to_zone, rope}, ...]
         fh_route_idx:   int   = 0        # 현재 루트 단계
         fh_route_mode:  bool  = False    # True=커스텀 루트, False=자동 왕복
+        fh_fall_timer:  float = 0.0      # B안 낙사 감지: 전체 구역 밖 진입 시각 (0=미감지)
         FH_ROPE_EDGE    = 8              # 밧줄 도달 판정 픽셀
         FH_CLIMB_SEC    = 2.5            # UP 키 유지 시간 (초)
         FH_Y_COOLDOWN   = 4.0            # 도착 후 Y 감지 비활성 시간 (초)
@@ -348,6 +366,13 @@ class BotLoop:
         last_focus       = 0.0
         FOCUS_INTERVAL        = 4.0
         self._map_exit_fail = 0  # 사냥터 이탈 감지 연속 불일치 카운터
+
+        # 봇 시작 시 즉시 판매 여부 결정
+        _junk_init = self._config.get("settings2", "junk_sell") or {}
+        if bool(_junk_init.get("sell_on_start", False)):
+            self._auto_sell_last = 0.0   # 타이머 0 → 첫 루프에서 바로 판매 발동
+        else:
+            self._auto_sell_last = time.time()  # 지금부터 카운트 → 설정 주기 후 첫 판매
         try:
             while not self._stop_event.is_set():
                 try:
@@ -408,6 +433,186 @@ class BotLoop:
                         # 긴급 마을 귀환 HP/MP % 발동 체크
                         self._check_town_scroll_trigger(_hp, _mp)
 
+                    # ── 자동 판매 주기 체크 ────────────────────────────
+                    _junk_cfg       = self._config.get("settings2", "junk_sell") or {}
+                    _auto_enabled   = bool(_junk_cfg.get("auto_sell_enabled", False))
+                    _auto_interval  = float(_junk_cfg.get("auto_sell_interval_min", 10)) * 60
+                    _dep_zone_name  = (_junk_cfg.get("departure_zone") or "").strip()
+                    _extra_rope_cfg = _junk_cfg.get("extra_rope") or {}
+
+                    # 안전지대 좌표 — 비율 우선, 없으면 raw 픽셀 사용
+                    _mm_cfg = self._minimap_reader.config
+                    _mm_w   = _mm_cfg.width
+                    _mm_h   = _mm_cfg.height
+                    _szxr   = _junk_cfg.get("safe_zone_x_ratio")
+                    _szyr   = _junk_cfg.get("safe_zone_y_ratio")
+                    _safe_zone_x = (int(_szxr * _mm_w) if _szxr is not None and _mm_w > 0
+                                    else int(_junk_cfg.get("safe_zone_x", -1)))
+                    _safe_zone_y = (int(_szyr * _mm_h) if _szyr is not None and _mm_h > 0
+                                    else int(_junk_cfg.get("safe_zone_y", -1)))
+
+                    # 타이머 만료 → 이동 시작
+                    if (_auto_enabled and _safe_zone_x >= 0
+                            and not self._auto_sell_active
+                            and now - self._auto_sell_last >= _auto_interval):
+                        self._auto_sell_active  = True
+                        self._auto_sell_selling = False
+                        self._map_navigator.release_direction()
+                        if use_floor_hunt and fh_state != "patrol":
+                            self._input.key_up("up")
+                            fh_state      = "patrol"
+                            fh_half_count = 0
+                        if use_floor_hunt and _dep_zone_name and fh_zones:
+                            self._as_phase = "to_departure"
+                            self._status(f"자동 판매: 출발지 '{_dep_zone_name}' 대기 중...")
+                        else:
+                            self._as_phase = "walk_to_safe"
+                            self._status(f"자동 판매: 안전지대(X={_safe_zone_x})로 이동 중...")
+
+                    if self._auto_sell_active:
+                        if self._as_phase == "selling":
+                            continue  # 판매 스레드 완료 대기
+
+                        elif self._as_phase == "to_departure":
+                            # floor_hunt 이 자연스럽게 층 이동 — patrol 상태에서 출발지 감지
+                            if fh_state == "patrol" and fh_zones and fh_zones[fh_idx].name == _dep_zone_name:
+                                if _extra_rope_cfg.get("x") is not None:
+                                    self._as_phase = "extra_to_rope"
+                                    self._status(f"자동 판매: 출발지 도착, 밧줄(X={_extra_rope_cfg['x']}) 이동")
+                                else:
+                                    self._as_phase = "walk_to_safe"
+                                    self._status("자동 판매: 출발지 도착, 안전지대 걷기 중...")
+                                continue  # 이번 루프 fh_state 머신 스킵
+                            # else: fall-through → fh_state 머신이 층 이동 담당
+
+                        elif self._as_phase == "extra_to_rope":
+                            # 출발지에서 안전지대로 가는 전용 밧줄로 이동
+                            _er_x   = int(_extra_rope_cfg.get("x", 0))
+                            _er_dir = _extra_rope_cfg.get("direction", "up")
+                            _as_pos = self._minimap_reader.get_character_pos()
+                            if _as_pos is not None:
+                                _cx = _as_pos[0]
+                                if abs(_cx - _er_x) <= 8:
+                                    _jump_key = self._minimap_reader.config.jump_key or "alt"
+                                    if _er_dir == "up":
+                                        # 걷기 방향 유지한 채 점프 → 점프 후 해제
+                                        self._input.press_key(_jump_key, hold_sec=0.12)
+                                        self._map_navigator.release_direction()
+                                        self._input.key_down("up")
+                                    else:
+                                        # 아래층 — 멈춰서 down+jump
+                                        self._map_navigator.release_direction()
+                                        self._input.key_down("down")
+                                        time.sleep(0.06)
+                                        self._input.press_key(_jump_key, hold_sec=0.12)
+                                        self._input.key_up("down")
+                                    self._as_extra_climb_start = time.time()
+                                    self._as_phase = "extra_climbing"
+                                    self._status(f"자동 판매: 밧줄 점프 ({_er_dir})")
+                                else:
+                                    self._map_navigator.walk_toward(_er_x, _cx)
+                            continue  # fh_state 머신 스킵
+
+                        elif self._as_phase == "extra_climbing":
+                            # 밧줄 이동 시간 대기
+                            _er_dir = _extra_rope_cfg.get("direction", "up")
+                            _er_sec = float(_extra_rope_cfg.get("climb_sec", 2.5))
+                            if _er_dir == "up":
+                                self._input.key_down("up")
+                            if time.time() - self._as_extra_climb_start >= _er_sec:
+                                self._input.key_up("up")
+                                self._map_navigator.release_direction()
+                                self._as_phase = "walk_to_safe"
+                                self._status("자동 판매: 밧줄 이동 완료, 안전지대 도착 확인 중...")
+                            continue  # fh_state 머신 스킵
+
+                        elif self._as_phase == "walk_to_safe":
+                            # X+Y 모두 도착 확인 후 판매 시작
+                            if _safe_zone_y < 0:
+                                # Y 미설정 — 2초마다 경고
+                                if now - self._as_walk_diag_timer >= 2.0:
+                                    self._status(
+                                        "⚠ 자동 판매: 안전지대 Y 좌표 미설정 "
+                                        "— 설정2 탭 > 📍 현재 위치로 설정을 다시 눌러주세요."
+                                    )
+                                    self._as_walk_diag_timer = now
+                            else:
+                                _as_pos = self._minimap_reader.get_character_pos()
+                                if _as_pos:
+                                    _cx, _cy = _as_pos
+                                    _x_ok = abs(_cx - _safe_zone_x) <= 8
+                                    _y_ok = abs(_cy - _safe_zone_y) <= 8
+                                    if _x_ok and _y_ok:
+                                        self._as_phase          = "selling"
+                                        self._auto_sell_selling = True
+                                        self._map_navigator.release_direction()
+                                        self._status(
+                                            f"자동 판매: 안전지대 도착 "
+                                            f"(X={_cx} Y={_cy}), 판매 시작"
+                                        )
+                                        threading.Thread(
+                                            target=self._auto_sell_worker, daemon=True
+                                        ).start()
+                                    else:
+                                        # 2초마다 진단 로그 (스팸 방지)
+                                        if now - self._as_walk_diag_timer >= 2.0:
+                                            self._status(
+                                                f"자동 판매: 이동 중 "
+                                                f"현재(X={_cx} Y={_cy}) "
+                                                f"목표(X={_safe_zone_x} Y={_safe_zone_y})"
+                                            )
+                                            self._as_walk_diag_timer = now
+                                        # Y가 크게 벗어난 경우 → 밧줄 재시도
+                                        _y_diff = abs(_cy - _safe_zone_y)
+                                        if _y_diff > 15 and _extra_rope_cfg.get("x") is not None:
+                                            self._map_navigator.release_direction()
+                                            self._as_phase = "extra_to_rope"
+                                            self._status(
+                                                f"자동 판매: Y 불일치({_cy}→{_safe_zone_y}), "
+                                                "밧줄 재시도"
+                                            )
+                                        else:
+                                            self._map_navigator.walk_toward(_safe_zone_x, _cx)
+                            continue  # fh_state 머신 스킵
+
+                    # ── 자동 판매 완료 후 사냥 구역 복귀 ──────────────
+                    if (use_floor_hunt and fh_zones
+                            and self._as_return_to_hunt
+                            and not self._auto_sell_active):
+                        self._as_return_to_hunt = False
+                        _rcv_zone  = fh_zones[0]
+                        _pos_now   = self._minimap_reader.get_character_pos()
+                        _cur_y_now = _pos_now[1] if _pos_now else -1
+                        _ropes_rv  = self._map_navigator.ropes
+                        if _rcv_zone.rope_x >= 0:
+                            _rcv_rope = next(
+                                (r for r in _ropes_rv if r.x == _rcv_zone.rope_x), None
+                            )
+                        elif _ropes_rv:
+                            _rcv_rope = _ropes_rv[0]
+                        else:
+                            _rcv_rope = None
+                        fh_rope_x       = (_rcv_rope.x if _rcv_rope
+                                           else (_rcv_zone.rope_x if _rcv_zone.rope_x >= 0
+                                                 else _rcv_zone.right_x))
+                        fh_current_rope = _rcv_rope
+                        fh_climb_sec    = (_rcv_rope.climb_sec if _rcv_rope else FH_CLIMB_SEC)
+                        fh_next_idx     = 0
+                        # 현재 Y 기준으로 방향 결정
+                        if _cur_y_now < 0 or _cur_y_now > _rcv_zone.y_max:
+                            fh_next_dir = 1   # 아래층(1F 등) → 위로 올라가기
+                        else:
+                            fh_next_dir = -1  # 위층(3F 등) → 아래로 내려가기
+                        fh_state        = "to_rope"
+                        fh_half_count   = 0
+                        fh_last_side    = ""
+                        fh_arrive_time  = 0.0   # Y 쿨다운 즉시 해제
+                        self._map_navigator.release_direction()
+                        self._status(
+                            f"자동 판매 완료 → '{_rcv_zone.name}' 복귀 시작"
+                            f" ({'위' if fh_next_dir > 0 else '아래'})"
+                        )
+
                     # ── 픽업 타이머 발동 체크 ──────────────────────────
                     if (use_floor_hunt and pu_enabled and not pu_active
                             and pu_route and fh_state == "patrol"
@@ -456,36 +661,28 @@ class BotLoop:
                             # ── 밧줄로 이동 중 ─────────────────────────
                             if pos is not None:
                                 cx = pos[0]
-                                # RopePoint.approach + jump_offset 기반 접근 좌표/방향 계산
+                                # 접근 목표: 밧줄 X 직접 (v1.1.6 방식)
+                                # 점프 방향: approach 설정 기반 (v1.2.1 방식 유지)
                                 _crp = fh_current_rope
                                 if _crp is not None:
+                                    _ax = _crp.x  # jump_offset 미적용, 밧줄 X 그대로
                                     if _crp.approach == "left":
-                                        _ax = _crp.x - _crp.jump_offset
                                         _jd = "right"
                                     elif _crp.approach == "right":
-                                        _ax = _crp.x + _crp.jump_offset
                                         _jd = "left"
                                     else:  # both — 현재 위치 기준
-                                        if cx <= _crp.x:
-                                            _ax = _crp.x - _crp.jump_offset
-                                            _jd = "right"
-                                        else:
-                                            _ax = _crp.x + _crp.jump_offset
-                                            _jd = "left"
+                                        _jd = "right" if cx <= _crp.x else "left"
                                 else:
                                     _ax = fh_rope_x
                                     _jd = "right" if fh_rope_x > cx else "left"
                                 if abs(cx - _ax) <= FH_ROPE_EDGE:
-                                    # 접근 지점 도달 → 관성 유지 점프 (방향키 추가 금지)
-                                    # 방향키를 누르면 옆으로 길게 날아가 밧줄을 놓침
                                     jump_key = self._minimap_reader.config.jump_key or "alt"
-                                    self._map_navigator.release_direction()
-                                    if fh_next_dir > 0:        # 위층으로
-                                        self._input.key_down(_jd)
+                                    if fh_next_dir > 0:        # 위층 — 걷기 방향 유지한 채 점프
                                         self._input.press_key(jump_key, hold_sec=0.12)
-                                        self._input.key_up(_jd)
+                                        self._map_navigator.release_direction()  # 점프 후 해제
                                         self._input.key_down("up")
-                                    else:                       # 아래층으로
+                                    else:                       # 아래층 — 멈춰서 down+jump
+                                        self._map_navigator.release_direction()
                                         self._input.key_down("down")
                                         time.sleep(0.06)
                                         self._input.press_key(jump_key, hold_sec=0.12)
@@ -506,10 +703,14 @@ class BotLoop:
                             elif (pos is not None
                                     and time.time() - fh_rope_escape_time >= FH_ROPE_ESCAPE_INTERVAL):
                                 # 내려가는 중 밧줄에 걸린 경우 탈출 시도
-                                # fh_rope_x 는 방금 뛰어내린 밧줄이므로 제외 (to_rope 상태에서 처리)
+                                # 점프 직후 0.8초는 원래 밧줄(fh_rope_x) 제외 (오감지 방지)
+                                # 0.8초 이후엔 몬스터 팅김으로 재포획된 경우도 탈출 대상에 포함
+                                _since_jump = time.time() - fh_climb_start
                                 _jk = self._minimap_reader.config.jump_key or "alt"
                                 for _rp in self._map_navigator.ropes:
-                                    if _rp.x != fh_rope_x and abs(pos[0] - _rp.x) <= 3:
+                                    if _rp.x == fh_rope_x and _since_jump < 0.8:
+                                        continue  # 점프 직후에는 원래 밧줄 제외
+                                    if abs(pos[0] - _rp.x) <= 8:  # 3→8px (팅김 대응)
                                         _esc = _rp.approach if _rp.approach in ("left", "right") else "left"
                                         self._map_navigator.release_direction()
                                         self._input.key_down(_esc)
@@ -541,7 +742,11 @@ class BotLoop:
                                     else:
                                         in_target = (target_zone.y_min <= cy <= target_zone.y_max + Y_TOL)
                                     left_source = not (src_zone.y_min - 5 <= cy <= src_zone.y_max + 5)
-                                    arrived = in_target and left_source
+                                    # 낙사 복귀: 출발=목표(동일 층)이면 left_source 조건 불필요
+                                    if src_zone is target_zone:
+                                        arrived = in_target
+                                    else:
+                                        arrived = in_target and left_source
                                     _detected = _zone_by_y(cy)
                                     self._status(
                                         f"[층별] Y={cy} 확인 "
@@ -669,7 +874,7 @@ class BotLoop:
                                     cur_zone.left_x - 5 <= pos[0] <= cur_zone.right_x + 5
                                 )
                                 y_in_zone = (
-                                    cur_zone.y_min - 8 <= pos[1] <= cur_zone.y_max + 8
+                                    cur_zone.y_min - 8 <= pos[1] <= cur_zone.y_max
                                 )
                                 if not x_in_zone or not y_in_zone:
                                     cy_now = pos[1]
@@ -678,7 +883,7 @@ class BotLoop:
                                     reason = ("X범위 이탈" if not x_in_zone else "낙사(Y 이탈)")
                                     # 현재 Y가 어떤 구역에도 속하지 않으면 → 미등록 층 낙사
                                     _y_in_any = any(
-                                        z.y_min - 8 <= cy_now <= z.y_max + 8
+                                        z.y_min - 8 <= cy_now <= z.y_max
                                         for z in fh_zones
                                     )
                                     if actual_idx != fh_idx:
@@ -687,6 +892,7 @@ class BotLoop:
                                         fh_last_side  = ""
                                         fh_route_idx  = 0   # 루트도 초기화
                                         fh_arrive_time = time.time()
+                                        fh_fall_timer  = 0.0  # 등록 층으로 이동 → 타이머 해제
                                         self._map_navigator.set_zones([fh_zones[fh_idx]])
                                         self._status(
                                             f"[층별] {reason} Y={cy_now} "
@@ -695,14 +901,50 @@ class BotLoop:
                                         )
                                         _apply_zone_pattern(fh_zones[fh_idx])  # 복귀 층 패턴 교체
                                     elif not _y_in_any and not y_in_zone:
-                                        # 미등록 층 낙사: fh_half_count 강제 만료 → 즉시 밧줄 이동 발동
-                                        fh_half_count = int(fh_zones[fh_idx].sweeps * 2)
-                                        fh_last_side  = ""
-                                        self._status(
-                                            f"[층별] 미등록 층 낙사 Y={cy_now} "
-                                            f"(현재구역 {cur_zone.name}:{cur_zone.y_min}~{cur_zone.y_max}) → "
-                                            f"'{fh_zones[fh_idx].name}' 즉시 복귀"
-                                        )
+                                        # B안: 모든 등록 구역 밖 낙사 — 1초 지속 시 fh_zones[0]으로 복귀
+                                        if fh_fall_timer <= 0.0:
+                                            fh_fall_timer = time.time()
+                                            self._status(
+                                                f"[층별] 낙사 감지 Y={cy_now} — 1초 확인 중..."
+                                            )
+                                        elif time.time() - fh_fall_timer >= 1.0:
+                                            fh_fall_timer   = 0.0
+                                            _rcv_zone       = fh_zones[0]
+                                            _ropes          = self._map_navigator.ropes
+                                            if _rcv_zone.rope_x >= 0:
+                                                _rcv_rope = next(
+                                                    (r for r in _ropes if r.x == _rcv_zone.rope_x),
+                                                    None,
+                                                )
+                                            elif _ropes:
+                                                _rcv_rope = _ropes[0]
+                                            else:
+                                                _rcv_rope = None
+                                            fh_rope_x       = (_rcv_rope.x if _rcv_rope
+                                                                else (_rcv_zone.rope_x
+                                                                      if _rcv_zone.rope_x >= 0
+                                                                      else _rcv_zone.right_x))
+                                            fh_current_rope = _rcv_rope
+                                            fh_climb_sec    = (_rcv_rope.climb_sec if _rcv_rope
+                                                                else FH_CLIMB_SEC)
+                                            fh_next_idx     = 0
+                                            # 현재 Y 기준으로 방향 결정
+                                            # (아래층=Y큼 → 위로, 위층=Y작음 → 아래로)
+                                            fh_next_dir     = (
+                                                1 if cy_now > _rcv_zone.y_max else -1
+                                            )
+                                            fh_state        = "to_rope"
+                                            fh_half_count   = 0
+                                            fh_last_side    = ""
+                                            self._map_navigator.release_direction()
+                                            self._status(
+                                                f"[층별] 낙사 확정 Y={cy_now} "
+                                                f"→ '{_rcv_zone.name}'"
+                                                f"({_rcv_zone.y_min}~{_rcv_zone.y_max}) 복귀 시작"
+                                            )
+                                else:
+                                    # X·Y 모두 구역 안 → 낙사 타이머 초기화
+                                    fh_fall_timer = 0.0
 
                             # ── 왕복 횟수 카운트 ──────────────────────
                             zone = fh_zones[fh_idx]
@@ -777,6 +1019,14 @@ class BotLoop:
                                     side = "right"
                                 else:
                                     side = ""
+
+                                # 경계 감지 시 map_navigator 방향 즉시 강제 보정
+                                # — key_hunter 블록 중 경계를 지나쳤다가 몬스터 밀림으로
+                                #   되돌아온 경우에도 올바른 방향으로 즉시 전환
+                                if side == "left":
+                                    self._map_navigator.force_direction("right")
+                                elif side == "right":
+                                    self._map_navigator.force_direction("left")
 
                                 if side and side != fh_last_side:
                                     fh_last_side   = side
@@ -903,6 +1153,37 @@ class BotLoop:
                 pass
         logger.info("봇 루프 종료")
 
+    # ── 자동 판매 스레드 ──────────────────────────────────────────────
+    def _auto_sell_worker(self) -> None:
+        """안전지대 도착 후 sell_junk 를 실행하는 전용 스레드."""
+        try:
+            from core.junk_seller import sell_junk
+            sell_junk(
+                self._config,
+                self._screen,
+                self._input,
+                self._status,
+                self._stop_event,
+            )
+        except Exception as e:
+            self._status(f"자동 판매 오류: {e}")
+            logger.exception("자동 판매 오류: %s", e)
+        finally:
+            self._auto_sell_last    = time.time()
+            self._auto_sell_selling = False
+            self._auto_sell_active  = False
+            self._as_phase          = "idle"
+            self._as_return_to_hunt = True   # 메인 루프에 사냥 구역 복귀 신호
+            self._status("자동 판매 완료 — 사냥 구역 복귀 중...")
+
+    # ── 방향키 유지 전용 루프 (별도 스레드) ──────────────────────────
+    def _direction_keepalive_loop(self) -> None:
+        """안전감지/스킬 블로킹과 무관하게 40ms마다 방향키 key_down을 재전송."""
+        while not self._stop_event.is_set():
+            if self._enable_move:
+                self._map_navigator.refresh_direction()
+            self._stop_event.wait(timeout=0.04)
+
     # ── 포션 전용 루프 (별도 스레드) ─────────────────────────────────
     def _potion_loop(self) -> None:
         """포션 · 펫먹이 · 버프를 주기적으로 처리하는 전용 스레드."""
@@ -950,6 +1231,7 @@ class BotLoop:
                         pet_logged = False  # 설정이 비활성화되면 다음 활성화 시 재출력
 
                 # ── 버프 (동적 목록) ──────────────────────────────────
+                # 여러 버프가 동시 만료될 때 스킬 모션 시간을 주어 순차 발동
                 for btype, cfg_key, label in [
                     ("normal", "normal_buffs", "일반버프"),
                     ("toggle", "toggle_buffs", "온오프버프"),
@@ -962,8 +1244,9 @@ class BotLoop:
                         interval = float(buff.get("interval_sec", 180))
                         if now - last_buffs.get(key_id, 0.0) >= interval:
                             self._input.press_key(buff["key"].strip())
+                            last_buffs[key_id] = time.time()
                             self._status(f"✨ {label} 사용 ({buff['key']})")
-                            last_buffs[key_id] = now
+                            time.sleep(0.7)  # 스킬 모션 완료 대기 (다음 버프 캔슬 방지)
 
             except Exception as exc:
                 logger.warning("포션 루프 오류: %s", exc)
@@ -1022,11 +1305,12 @@ class BotLoop:
 
         # 감지 영역이 설정돼 있으면 해당 영역만 캡처해서 검사
         region = cfg.get("region")
-        from core.config_manager import resolve_region_coords
+        from core.config_manager import resolve_region_coords, logical_to_physical_coords
         resolved = resolve_region_coords(self._config, region)
         if resolved:
             rx, ry, rw, rh = resolved
-            target = self._screen.capture({"left": rx, "top": ry, "width": rw, "height": rh})
+            rpx, rpy, rpw, rph = logical_to_physical_coords(rx, ry, rw, rh)
+            target = self._screen.capture({"left": rpx, "top": rpy, "width": rpw, "height": rph})
         else:
             target = screenshot
 
@@ -1460,16 +1744,19 @@ class BotLoop:
         if not cfg.get("enabled"):
             return
         name_region = cfg.get("name_region")
-        if not name_region or len(name_region) < 4:
+        if not name_region:
             return  # 기준 영역 미설정 → 동작 안 함
-        from core.config_manager import get_user_templates_dir
+        from core.config_manager import get_user_templates_dir, resolve_region_coords, logical_to_physical_coords
         ref_path = os.path.join(get_user_templates_dir(), "map_name_ref.png")
         if not os.path.exists(ref_path):
             return  # 기준 이미지 없음 → 동작 안 함
 
-        x, y, w, h = name_region
-        ox, oy = self._get_coord_origin()
-        current = self._screen.capture({"left": int(x) + ox, "top": int(y) + oy, "width": int(w), "height": int(h)})
+        resolved = resolve_region_coords(self._config, name_region)
+        if not resolved:
+            return
+        lx, ly, lw, lh = resolved
+        px, py, pw, ph = logical_to_physical_coords(lx, ly, lw, lh)
+        current = self._screen.capture({"left": px, "top": py, "width": pw, "height": ph})
         score = self._screen.find_template_score(current, ref_path)
 
         threshold = float(cfg.get("threshold", 0.75))
@@ -1556,11 +1843,15 @@ class BotLoop:
             return
 
         region = cfg.get("detect_region")
-        if region and len(region) == 4:
-            rx, ry, rw, rh = region
-            _amob_ox, _amob_oy = self._get_coord_origin()
-            target = self._screen.capture({"left": int(rx) + _amob_ox, "top": int(ry) + _amob_oy,
-                                           "width": int(rw), "height": int(rh)})
+        if region:
+            from core.config_manager import resolve_region_coords, logical_to_physical_coords
+            resolved_r = resolve_region_coords(self._config, region)
+            if resolved_r:
+                rlx, rly, rlw, rlh = resolved_r
+                rpx, rpy, rpw, rph = logical_to_physical_coords(rlx, rly, rlw, rlh)
+                target = self._screen.capture({"left": rpx, "top": rpy, "width": rpw, "height": rph})
+            else:
+                target = screenshot
         else:
             target = screenshot
 

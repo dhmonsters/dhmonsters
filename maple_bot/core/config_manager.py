@@ -40,11 +40,14 @@ DEFAULT_CONFIG = {
             "close_maple": False,
             "shutdown_pc": False,
             "reconnect_after": False,
+            # ── 고정 기본값: 거짓말탐지기 감지 영역 (절대좌표 — 항상 동일) ──
+            "region": [1126, 297, 296, 130],
         },
         "transparent_shape": {
             "enabled": False,
             "debug_overlay": False,
-            "board_roi": None,   # {"client_x":..., "client_y":..., "w":..., "h":...}
+            # ── 고정 기본값: 투명 도형 게임판 영역 ──
+            "board_roi": {"client_x": 32737, "client_y": 32348, "w": 1095, "h": 787},
         },
         "user_detected": {
             "enabled": False,
@@ -108,8 +111,11 @@ DEFAULT_CONFIG = {
         "presets": {},      # name → KeyPattern.to_dict() (층별 패턴 선택용)
     },
     "coordinate": {
-        "hp":  {"x": 0, "y": 0, "width": 0},
-        "mp":  {"x": 0, "y": 0, "width": 0},
+        # ── 고정 기본값: HP/MP 상대좌표 비율 (항상 동일) ──
+        "hp": {"x": 0, "y": 0, "width": 0,
+               "x_ratio": 0.216015625, "y_ratio": 1.127100073046019, "width_ratio": 0.105078125},
+        "mp": {"x": 0, "y": 0, "width": 0,
+               "x_ratio": 0.3234375,   "y_ratio": 1.127100073046019, "width_ratio": 0.105078125},
     },
     "recovery": {
         "hp_potion": {
@@ -165,7 +171,7 @@ DEFAULT_CONFIG = {
         "key_hold_sec": 1.5,    # 각 구역에서 픽업 키 유지 시간
         "route":        [],     # [{to_zone: str, rope: str}, ...]
     },
-    "coord_mode": "absolute",   # "absolute" | "relative" (게임 창 클라이언트 기준 상대 좌표)
+    "coord_mode": "relative",   # "absolute" | "relative" (게임 창 클라이언트 기준 상대 좌표)
     "settings2": {
         "shutdown": {
             "on_death": False,
@@ -189,6 +195,31 @@ DEFAULT_CONFIG = {
             "email": "",
             "password1": "",
             "password2": "",
+        },
+        # ── 고정 기본값: 잡템 자동 판매 좌표 (항상 동일) ──
+        "junk_sell": {
+            "inventory_key":          "i",
+            "cash_tab":               [2084, 627],
+            "cash_tab_active_anchor": [1211, 587],
+            "cash_tab_offset":        [173, 27],
+            "first_slot":             [1753, 710],
+            "first_slot_offset":      [-334, 86],
+            "inventory_anchor":       [1039, 559],
+            "equip_sell_btn":         [1749, 555],
+            "equip_sell_confirm":     [1439, 1141],
+            "shop_etc_tab":           [1682, 548],
+            "shop_exit_btn":          [1156, 333],
+            "shop_area":              [1288, 590, 516, 514],
+            "scroll_pos":             [1822, 845],
+            # 아래는 사용자별 설정 (기본값만)
+            "junk_sell_enabled":      False,
+            "auto_sell_enabled":      False,
+            "auto_sell_interval_min": 10,
+            "sell_on_start":          False,
+            "safe_zone_x":            -1,
+            "safe_zone_y":            -1,
+            "departure_zone":         "",
+            "extra_rope":             {},
         },
     },
 }
@@ -252,17 +283,116 @@ def get_game_window_origin(config: "ConfigManager") -> tuple[int, int]:
     """coord_mode == 'relative'일 때 게임 창 클라이언트 좌상단 절대 좌표를 반환.
 
     absolute 모드이거나 창을 찾지 못하면 (0, 0) 반환.
-    드래그로 영역을 선택할 때 이 값을 빼서 상대 좌표로 저장하고,
-    화면 캡처 시에는 이 값을 더해 절대 좌표로 복원한다.
+    """
+    ox, oy, _, _ = get_game_window_rect(config)
+    return (ox, oy)
+
+
+def resolve_minimap_coords(config: "ConfigManager", mm: dict) -> tuple[int, int, int, int]:
+    """미니맵 화면 좌표 (region_x, region_y, width, height) 를 절대 픽셀로 반환.
+
+    비율 키가 있고 게임 창을 찾은 경우 → 비율 × 창 크기로 계산 (창 이동/리사이즈 모두 대응).
+    그 외 → 저장된 픽셀값 + 창 origin (기존 absolute 방식).
+    """
+    ox, oy, cw, ch = get_game_window_rect(config)
+
+    if cw > 0 and ch > 0 and mm.get("region_x_ratio") is not None:
+        region_x = ox + int(mm["region_x_ratio"] * cw)
+        region_y = oy + int(mm["region_y_ratio"] * ch)
+        width    = max(1, int(mm.get("width_ratio",  0.1)  * cw))
+        height   = max(1, int(mm.get("height_ratio", 0.07) * ch))
+    else:
+        region_x = ox + int(mm.get("region_x", 0))
+        region_y = oy + int(mm.get("region_y", 0))
+        width    = max(1, int(mm.get("width",  200)))
+        height   = max(1, int(mm.get("height", 120)))
+
+    return (region_x, region_y, width, height)
+
+
+def resolve_region_coords(config: "ConfigManager", region_cfg) -> tuple[int, int, int, int] | None:
+    """감지 영역 설정(dict 비율 or list 픽셀)을 절대 화면 좌표 (x, y, w, h)로 변환.
+
+    지원 포맷.
+    - {x_ratio, y_ratio, w_ratio, h_ratio} — 게임 창 크기 대비 비율
+    - {client_x, client_y, w, h}           — 게임 창 클라이언트 기준 픽셀 (구버전)
+    - [x, y, w, h]                          — 절대 픽셀 (레거시)
+    """
+    if not region_cfg:
+        return None
+    ox, oy, cw, ch = get_game_window_rect(config)
+
+    if isinstance(region_cfg, dict):
+        if region_cfg.get("x_ratio") is not None and cw > 0:
+            x = ox + int(region_cfg["x_ratio"] * cw)
+            y = oy + int(region_cfg["y_ratio"] * ch)
+            w = max(1, int(region_cfg["w_ratio"] * cw))
+            h = max(1, int(region_cfg["h_ratio"] * ch))
+        else:
+            # 구버전 client_x/client_y 또는 x/y 픽셀 형식
+            x = ox + int(region_cfg.get("client_x", region_cfg.get("x", 0)))
+            y = oy + int(region_cfg.get("client_y", region_cfg.get("y", 0)))
+            w = max(1, int(region_cfg.get("w", region_cfg.get("width", 0))))
+            h = max(1, int(region_cfg.get("h", region_cfg.get("height", 0))))
+    elif isinstance(region_cfg, list) and len(region_cfg) == 4:
+        # 레거시 [x, y, w, h] — 절대 픽셀
+        x, y, w, h = int(region_cfg[0]), int(region_cfg[1]), int(region_cfg[2]), int(region_cfg[3])
+    else:
+        return None
+
+    if w <= 0 or h <= 0:
+        return None
+    return (x, y, w, h)
+
+
+def logical_to_physical_coords(x: int, y: int, w: int, h: int) -> tuple[int, int, int, int]:
+    """논리 픽셀(Qt/win32 좌표계) → mss 물리 픽셀 변환.
+
+    DPI 배율이 100%가 아닌 시스템에서 mss.grab()에 논리 좌표를 그대로 전달하면
+    잘못된 영역을 캡처한다. 이 함수로 변환 후 전달해야 한다.
+    """
+    try:
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QRect
+        import mss as _mss
+        app = QApplication.instance()
+        if app is None:
+            return x, y, w, h
+        total = QRect()
+        for s in app.screens():
+            total = total.united(s.geometry())
+        with _mss.mss() as sct:
+            mon = sct.monitors[0]
+            phys_w, phys_h = mon["width"], mon["height"]
+        sx = phys_w / max(1, total.width())
+        sy = phys_h / max(1, total.height())
+        abs_x = x + total.x()
+        abs_y = y + total.y()
+        return int(abs_x * sx), int(abs_y * sy), int(w * sx), int(h * sy)
+    except Exception:
+        return x, y, w, h
+
+
+def get_game_window_rect(config: "ConfigManager") -> tuple[int, int, int, int]:
+    """게임 창 클라이언트 영역의 (left, top, width, height) 를 반환.
+
+    coord_mode == 'relative'이고 창을 찾은 경우에만 실제 값을 반환한다.
+    그 외에는 (0, 0, 0, 0) 반환 — 호출부에서 width/height == 0 이면
+    절대 좌표 모드로 처리한다.
     """
     if (config.get("coord_mode") or "absolute") != "relative":
-        return (0, 0)
+        return (0, 0, 0, 0)
     title = config.get("settings2", "game_window_title") or "MapleStory"
     try:
         import win32gui
         hwnd = win32gui.FindWindow(None, title)
         if hwnd:
-            return win32gui.ClientToScreen(hwnd, (0, 0))
+            ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+            cw = right - left
+            ch = bottom - top
+            if cw > 0 and ch > 0:
+                return (ox, oy, cw, ch)
     except Exception:
         pass
-    return (0, 0)
+    return (0, 0, 0, 0)

@@ -199,10 +199,25 @@ class TabSettings1(QWidget):
         self._region_selector.show()
 
     def _save_lie_region(self, x: int, y: int, w: int, h: int) -> None:
+        from core.config_manager import get_game_window_rect
+        ox, oy, cw, ch = get_game_window_rect(self.config)
+        if cw > 0 and ch > 0:
+            region = {
+                "x_ratio": (x - ox) / cw,
+                "y_ratio": (y - oy) / ch,
+                "w_ratio": w / cw,
+                "h_ratio": h / ch,
+            }
+            disp_x, disp_y = int(x - ox), int(y - oy)
+            mode = "비율"
+        else:
+            region = [x, y, w, h]
+            disp_x, disp_y = x, y
+            mode = "픽셀"
         # 1. 영역 config 저장
-        self.config.set("settings1", "lie_detector", "region", [x, y, w, h])
+        self.config.set("settings1", "lie_detector", "region", region)
         self.config.save()
-        self.lbl_lie_region.setText(f"감지 영역: X={x} Y={y} W={w} H={h}")
+        self.lbl_lie_region.setText(f"감지 영역: X={disp_x} Y={disp_y} W={w} H={h} ({mode})")
         self.lbl_lie_region.setStyleSheet("color: green;")
 
         # 2. 동일 영역을 템플릿으로도 자동 저장
@@ -211,15 +226,17 @@ class TabSettings1(QWidget):
         existing = sorted(glob.glob("templates/lie_detector_*.png"))
         next_num = len(existing) + 1
         path = f"templates/lie_detector_{next_num}.png"
+        from ui.region_selector import logical_to_physical
+        px, py, pw, ph = logical_to_physical(x, y, w, h)
         with mss.mss() as sct:
-            raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
             img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
             cv2.imwrite(path, img)
         self._refresh_template_label()
         QMessageBox.information(
             self, "영역 설정 완료",
             f"감지 영역 저장 완료\n"
-            f"템플릿 {next_num}번으로 자동 캡처됨 ({w}×{h} px)"
+            f"템플릿 {next_num}번으로 자동 캡처됨 ({pw}×{ph} px)"
         )
 
     def _reset_lie_region(self) -> None:
@@ -386,11 +403,25 @@ class TabSettings1(QWidget):
             self.lbl_transparent_title.setStyleSheet("color: red;")
 
         roi_cfg = self.config.get("settings1", "transparent_shape", "board_roi")
-        if roi_cfg and roi_cfg.get("w"):
-            w, h = roi_cfg["w"], roi_cfg["h"]
-            cx, cy = roi_cfg["client_x"], roi_cfg["client_y"]
-            self.lbl_transparent_roi.setText(f"게임판: client({cx},{cy}) {w}×{h}")
-            self.lbl_transparent_roi.setStyleSheet("color: green;")
+        if roi_cfg and isinstance(roi_cfg, dict):
+            from core.config_manager import get_game_window_rect
+            ox, oy, cw, ch = get_game_window_rect(self.config)
+            if roi_cfg.get("x_ratio") is not None and cw > 0:
+                cx = int(roi_cfg["x_ratio"] * cw)
+                cy = int(roi_cfg["y_ratio"] * ch)
+                w  = int(roi_cfg["w_ratio"] * cw)
+                h  = int(roi_cfg["h_ratio"] * ch)
+            else:
+                cx = roi_cfg.get("client_x", roi_cfg.get("x", 0))
+                cy = roi_cfg.get("client_y", roi_cfg.get("y", 0))
+                w  = roi_cfg.get("w", roi_cfg.get("width", 0))
+                h  = roi_cfg.get("h", roi_cfg.get("height", 0))
+            if w:
+                self.lbl_transparent_roi.setText(f"게임판: client({cx},{cy}) {w}×{h}")
+                self.lbl_transparent_roi.setStyleSheet("color: green;")
+            else:
+                self.lbl_transparent_roi.setText("게임판 영역: 미설정")
+                self.lbl_transparent_roi.setStyleSheet("color: red;")
         else:
             self.lbl_transparent_roi.setText("게임판 영역: 미설정")
             self.lbl_transparent_roi.setStyleSheet("color: red;")
@@ -404,13 +435,15 @@ class TabSettings1(QWidget):
     def _save_transparent_title_region(self, x, y, w, h):
         import mss
         import os
+        from ui.region_selector import logical_to_physical
+        px, py, pw, ph = logical_to_physical(x, y, w, h)
         os.makedirs("templates", exist_ok=True)
         with mss.mss() as sct:
-            raw = sct.grab({"left": x, "top": y, "width": w, "height": h})
+            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
             img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
             cv2.imwrite("templates/transparent_shape_title.png", img)
         self._refresh_transparent_status_labels()
-        QMessageBox.information(self, "완료", f"타이틀 템플릿 저장 완료 ({w}×{h}px)")
+        QMessageBox.information(self, "완료", f"타이틀 템플릿 저장 완료 ({pw}×{ph}px)")
 
     def _delete_transparent_title(self):
         import os
@@ -426,24 +459,33 @@ class TabSettings1(QWidget):
         sel.show()
 
     def _save_transparent_roi_region(self, abs_x, abs_y, w, h):
-        from core.screen_reader import ScreenReader
-        window_title = self.config.get("settings2", "game_window_title") or "MapleStory"
-        sr = ScreenReader()
-        origin = sr.get_window_client_origin(window_title)
-        if origin:
-            client_x = abs_x - origin[0]
-            client_y = abs_y - origin[1]
+        from core.config_manager import get_game_window_rect
+        ox, oy, cw, ch = get_game_window_rect(self.config)
+        if cw > 0 and ch > 0:
+            roi = {
+                "x_ratio": (abs_x - ox) / cw,
+                "y_ratio": (abs_y - oy) / ch,
+                "w_ratio": w / cw,
+                "h_ratio": h / ch,
+            }
+            client_x, client_y = int(abs_x - ox), int(abs_y - oy)
+            mode = "비율"
         else:
-            client_x, client_y = abs_x, abs_y
-        self.config.set("settings1", "transparent_shape", "board_roi", {
-            "client_x": client_x,
-            "client_y": client_y,
-            "w": w,
-            "h": h,
-        })
+            # absolute 모드 — 구버전 client_x/client_y 형식으로 저장
+            from core.screen_reader import ScreenReader
+            window_title = self.config.get("settings2", "game_window_title") or "MapleStory"
+            origin = ScreenReader().get_window_client_origin(window_title)
+            if origin:
+                client_x = abs_x - origin[0]
+                client_y = abs_y - origin[1]
+            else:
+                client_x, client_y = abs_x, abs_y
+            roi = {"client_x": client_x, "client_y": client_y, "w": w, "h": h}
+            mode = "픽셀"
+        self.config.set("settings1", "transparent_shape", "board_roi", roi)
         self.config.save()
         self._refresh_transparent_status_labels()
-        QMessageBox.information(self, "완료", f"게임판 영역 저장 완료 (client {client_x},{client_y}, {w}×{h}px)")
+        QMessageBox.information(self, "완료", f"게임판 영역 저장 완료 (client {client_x},{client_y}, {w}×{h}px, {mode})")
 
     def _delete_transparent_roi(self):
         self.config.set("settings1", "transparent_shape", "board_roi", None)
@@ -520,7 +562,19 @@ class TabSettings1(QWidget):
         self.edit_tg_token.setText(ld.get("tg_token", ""))
         self.edit_tg_chat.setText(ld.get("tg_chat_id", ""))
         region = ld.get("region")
-        if region and len(region) == 4:
+        if isinstance(region, dict) and region.get("x_ratio") is not None:
+            from core.config_manager import get_game_window_rect
+            ox, oy, cw, ch = get_game_window_rect(self.config)
+            if cw > 0:
+                disp_x = int(region["x_ratio"] * cw)
+                disp_y = int(region["y_ratio"] * ch)
+                disp_w = int(region["w_ratio"] * cw)
+                disp_h = int(region["h_ratio"] * ch)
+                self.lbl_lie_region.setText(f"감지 영역: X={disp_x} Y={disp_y} W={disp_w} H={disp_h} (비율)")
+            else:
+                self.lbl_lie_region.setText("감지 영역: 비율 저장됨")
+            self.lbl_lie_region.setStyleSheet("color: green;")
+        elif region and isinstance(region, list) and len(region) == 4:
             x, y, w, h = region
             self.lbl_lie_region.setText(f"감지 영역: X={x} Y={y} W={w} H={h}")
             self.lbl_lie_region.setStyleSheet("color: green;")

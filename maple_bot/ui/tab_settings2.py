@@ -10,7 +10,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QListWidget, QDialog, QDialogButtonBox,
-    QScrollArea, QMessageBox, QComboBox, QCheckBox,
+    QScrollArea, QMessageBox, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox,
 )
 from PyQt6.QtCore import pyqtSignal
 
@@ -512,6 +512,167 @@ class TabSettings2(QWidget):
         layout.addLayout(tpl_row)
         self._refresh_junk_tpl_label()
 
+        # ══ ④ 자동 판매 주기 설정 ════════════════════════════════════════
+        layout.addSpacing(6)
+        layout.addWidget(QLabel("─ ④ 자동 판매 주기 설정 ──────────────"))
+
+        auto_note = QLabel(
+            "⚠ 봇 실행 중 지정 주기마다 안전지대로 이동 후 판매를 자동 실행합니다.\n"
+            "안전지대 X는 미니맵 기준 몬스터가 없는 위치의 X 좌표입니다."
+        )
+        auto_note.setWordWrap(True)
+        auto_note.setStyleSheet("color: #888; font-size: 10px;")
+        layout.addWidget(auto_note)
+
+        # 활성화 체크박스
+        auto_chk_row = QHBoxLayout()
+        self.chk_auto_sell = QCheckBox("자동 판매 활성화")
+        self.chk_auto_sell.stateChanged.connect(self._save_auto_sell_settings)
+        auto_chk_row.addWidget(self.chk_auto_sell)
+        auto_chk_row.addStretch()
+        layout.addLayout(auto_chk_row)
+
+        # 봇 시작 시 즉시 판매 체크박스
+        sell_on_start_row = QHBoxLayout()
+        self.chk_sell_on_start = QCheckBox("봇 시작 시 즉시 판매")
+        self.chk_sell_on_start.setToolTip(
+            "체크: 봇 시작 즉시 첫 판매를 실행합니다.\n"
+            "미체크: 첫 판매는 설정한 주기가 지난 뒤 실행됩니다."
+        )
+        self.chk_sell_on_start.stateChanged.connect(self._save_auto_sell_settings)
+        sell_on_start_row.addWidget(self.chk_sell_on_start)
+        sell_on_start_row.addStretch()
+        layout.addLayout(sell_on_start_row)
+
+        # 판매 주기
+        interval_row = QHBoxLayout()
+        interval_row.addWidget(QLabel("판매 주기"))
+        self.spin_auto_sell_interval = QSpinBox()
+        self.spin_auto_sell_interval.setRange(1, 120)
+        self.spin_auto_sell_interval.setValue(10)
+        self.spin_auto_sell_interval.setSuffix(" 분")
+        self.spin_auto_sell_interval.setFixedWidth(80)
+        self.spin_auto_sell_interval.valueChanged.connect(self._save_auto_sell_settings)
+        interval_row.addWidget(self.spin_auto_sell_interval)
+        interval_row.addStretch()
+        layout.addLayout(interval_row)
+
+        # 안전지대 X,Y — 현재 내 위치로 설정 버튼
+        safe_zone_row = QHBoxLayout()
+        lbl_sz = QLabel("안전지대 X,Y")
+        lbl_sz.setFixedWidth(85)
+        self.lbl_safe_zone_x = QLabel("미설정")
+        self.lbl_safe_zone_x.setStyleSheet("color: gray; font-size: 10px;")
+        btn_safe_zone = QPushButton("📍 현재 위치로 설정")
+        btn_safe_zone.setFixedWidth(120)
+        btn_safe_zone.setToolTip(
+            "캐릭터를 안전지대에 위치시킨 뒤 클릭하세요.\n"
+            "미니맵 기준 현재 X, Y 좌표가 안전지대로 저장됩니다."
+        )
+        btn_safe_zone.clicked.connect(self._set_safe_zone_xy)
+        btn_safe_zone_rst = QPushButton("✕")
+        btn_safe_zone_rst.setFixedWidth(24)
+        btn_safe_zone_rst.clicked.connect(self._reset_safe_zone_xy)
+        safe_zone_row.addWidget(lbl_sz)
+        safe_zone_row.addWidget(self.lbl_safe_zone_x)
+        safe_zone_row.addStretch()
+        safe_zone_row.addWidget(btn_safe_zone)
+        safe_zone_row.addWidget(btn_safe_zone_rst)
+        layout.addLayout(safe_zone_row)
+
+        # 안전지대 이동 경로 설정
+        layout.addWidget(QLabel("안전지대 이동 경로  (층 이동 없으면 출발지 미설정)"))
+
+        dep_note = QLabel(
+            "층 이동이 필요하면: 출발지 층(기존 사냥 구역)을 선택하고\n"
+            "그 층에서 안전지대로 가는 밧줄 X·방향·이동시간을 입력하세요.\n"
+            "봇이 출발지 도달 후 해당 밧줄을 타고 안전지대로 이동합니다."
+        )
+        dep_note.setWordWrap(True)
+        dep_note.setStyleSheet("color: #888; font-size: 10px;")
+        layout.addWidget(dep_note)
+
+        # 출발지 층 선택
+        dep_row = QHBoxLayout()
+        lbl_dep = QLabel("출발지 층")
+        lbl_dep.setFixedWidth(75)
+        self.combo_departure_zone = QComboBox()
+        self.combo_departure_zone.setFixedWidth(150)
+        self.combo_departure_zone.setToolTip(
+            "안전지대 이동 전 경유할 마지막 사냥 층을 선택합니다.\n"
+            "'미설정' 선택 시 현재 층에서 바로 안전지대 X,Y로 걷습니다.\n"
+            "🔄 버튼으로 좌표 탭의 구역 목록을 불러오세요."
+        )
+        self.combo_departure_zone.addItem("미설정")
+        self.combo_departure_zone.currentIndexChanged.connect(self._save_departure_settings)
+        btn_refresh_zones = QPushButton("🔄")
+        btn_refresh_zones.setFixedWidth(28)
+        btn_refresh_zones.setToolTip("좌표 탭의 구역 목록을 불러옵니다.")
+        btn_refresh_zones.clicked.connect(self._populate_departure_zones)
+        dep_row.addWidget(lbl_dep)
+        dep_row.addWidget(self.combo_departure_zone)
+        dep_row.addWidget(btn_refresh_zones)
+        dep_row.addStretch()
+        layout.addLayout(dep_row)
+
+        # 밧줄 X 좌표 (미니맵 픽셀 기준 — 현재 위치로 자동 설정 권장)
+        rope_x_row = QHBoxLayout()
+        lbl_rx = QLabel("밧줄 X 좌표")
+        lbl_rx.setFixedWidth(75)
+        self.spin_extra_rope_x = QSpinBox()
+        self.spin_extra_rope_x.setRange(0, 999)
+        self.spin_extra_rope_x.setValue(0)
+        self.spin_extra_rope_x.setFixedWidth(60)
+        self.spin_extra_rope_x.setToolTip(
+            "출발지 → 안전지대 밧줄의 미니맵 픽셀 X 좌표입니다.\n"
+            "캐릭터를 밧줄 위(또는 바로 옆)에 위치시킨 뒤 📍 버튼으로 설정하세요.\n"
+            "직접 입력 시 미니맵 내 픽셀 좌표(0~미니맵폭)를 입력해야 합니다."
+        )
+        self.spin_extra_rope_x.valueChanged.connect(self._save_departure_settings)
+        btn_capture_rope_x = QPushButton("📍")
+        btn_capture_rope_x.setFixedWidth(28)
+        btn_capture_rope_x.setToolTip(
+            "캐릭터를 밧줄 위(또는 바로 옆)에 위치시킨 뒤 클릭하면\n"
+            "현재 미니맵 X 좌표가 자동으로 입력됩니다."
+        )
+        btn_capture_rope_x.clicked.connect(self._capture_extra_rope_x)
+        rope_x_row.addWidget(lbl_rx)
+        rope_x_row.addWidget(self.spin_extra_rope_x)
+        rope_x_row.addWidget(btn_capture_rope_x)
+        rope_x_row.addStretch()
+        layout.addLayout(rope_x_row)
+
+        # 이동 방향
+        rope_dir_row = QHBoxLayout()
+        lbl_rd = QLabel("이동 방향")
+        lbl_rd.setFixedWidth(75)
+        self.combo_extra_rope_dir = QComboBox()
+        self.combo_extra_rope_dir.addItems(["위로 (up)", "아래로 (down)"])
+        self.combo_extra_rope_dir.setFixedWidth(120)
+        self.combo_extra_rope_dir.setToolTip("안전지대가 출발지보다 위층이면 '위로', 아래층이면 '아래로'.")
+        self.combo_extra_rope_dir.currentIndexChanged.connect(self._save_departure_settings)
+        rope_dir_row.addWidget(lbl_rd)
+        rope_dir_row.addWidget(self.combo_extra_rope_dir)
+        rope_dir_row.addStretch()
+        layout.addLayout(rope_dir_row)
+
+        # 이동 시간
+        rope_sec_row = QHBoxLayout()
+        lbl_rs = QLabel("이동 시간")
+        lbl_rs.setFixedWidth(75)
+        self.spin_extra_rope_climb = QDoubleSpinBox()
+        self.spin_extra_rope_climb.setRange(0.5, 15.0)
+        self.spin_extra_rope_climb.setSingleStep(0.5)
+        self.spin_extra_rope_climb.setValue(2.5)
+        self.spin_extra_rope_climb.setSuffix(" 초")
+        self.spin_extra_rope_climb.setFixedWidth(85)
+        self.spin_extra_rope_climb.setToolTip("밧줄을 타고 이동하는 시간(초). 실제 도착 시간에 맞게 조절하세요.")
+        self.spin_extra_rope_climb.valueChanged.connect(self._save_departure_settings)
+        rope_sec_row.addWidget(lbl_rs)
+        rope_sec_row.addWidget(self.spin_extra_rope_climb)
+        rope_sec_row.addStretch()
+        layout.addLayout(rope_sec_row)
+
         # 판매 실행
         run_row = QHBoxLayout()
         self.btn_junk_run = QPushButton("▶ 판매 실행  (상점열기 → 판매까지 전체)")
@@ -560,147 +721,156 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_junk_coord(self, x: int, y: int, w: int, h: int) -> None:
-        key     = self._pending_junk_key
-        is_area = self._pending_junk_area
+        try:
+            key     = self._pending_junk_key
+            is_area = self._pending_junk_area
 
-        if is_area:
-            # 영역 캡처용 — mss 물리 좌표로 변환
-            px, py, pw, ph = self._to_physical(x, y, w, h)
-            val  = [px, py, pw, ph]
-            text = f"X={px} Y={py} W={pw} H={ph}"
-            self.config.set("settings2", "junk_sell", key, val)
+            if is_area:
+                # 영역 캡처용 — mss 물리 좌표로 변환
+                px, py, pw, ph = self._to_physical(x, y, w, h)
+                val  = [px, py, pw, ph]
+                text = f"X={px} Y={py} W={pw} H={ph}"
+                self.config.set("settings2", "junk_sell", key, val)
 
-        elif key == "cash_tab":
-            # 인벤토리 바 감지 → 오프셋만 저장
-            self._save_cash_tab_offset(x + w // 2, y + h // 2)
-            return
+            elif key == "cash_tab":
+                # 인벤토리 바 감지 → 오프셋만 저장
+                self._save_cash_tab_offset(x + w // 2, y + h // 2)
+                return
 
-        elif key == "first_slot":
-            # 캐시탭 활성 이미지 감지 → 오프셋만 저장
-            self._save_first_slot_offset(x + w // 2, y + h // 2)
-            return
+            elif key == "first_slot":
+                # 캐시탭 활성 이미지 감지 → 오프셋만 저장
+                self._save_first_slot_offset(x + w // 2, y + h // 2)
+                return
 
-        else:
-            # 클릭 좌표 — 가상 데스크톱 오프셋 포함한 절대 좌표로 변환
-            cx_phys, cy_phys = self._to_physical(x + w // 2, y + h // 2, 0, 0)[:2]
-            val  = [cx_phys, cy_phys]
-            text = f"X={cx_phys} Y={cy_phys}"
-            self.config.set("settings2", "junk_sell", key, val)
+            else:
+                # 클릭 좌표 — 가상 데스크톱 오프셋 포함한 절대 좌표로 변환
+                cx_phys, cy_phys = self._to_physical(x + w // 2, y + h // 2, 0, 0)[:2]
+                val  = [cx_phys, cy_phys]
+                text = f"X={cx_phys} Y={cy_phys}"
+                self.config.set("settings2", "junk_sell", key, val)
 
-        inv_key = self.edit_inventory_key.text().strip() or "i"
-        self.config.set("settings2", "junk_sell", "inventory_key", inv_key)
-        self.config.save()
-        lbl = self._junk_coord_lbls.get(key)
-        if lbl:
-            lbl.setText(text)
-            lbl.setStyleSheet("color: green; font-size: 10px;")
+            inv_key = self.edit_inventory_key.text().strip() or "i"
+            self.config.set("settings2", "junk_sell", "inventory_key", inv_key)
+            self.config.save()
+            lbl = self._junk_coord_lbls.get(key)
+            if lbl:
+                lbl.setText(text)
+                lbl.setStyleSheet("color: green; font-size: 10px;")
+        except Exception as e:
+            QMessageBox.warning(self, "좌표 저장 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _save_cash_tab_offset(self, cx: int, cy: int) -> None:
         """캐시탭 중심 좌표 → 현재 화면의 인벤토리 바를 감지해 오프셋 계산 후 저장."""
-        import time as _time
-        _time.sleep(0.05)
-        inv_tpl = "templates/junk/inventory.png"
-        if not os.path.exists(inv_tpl):
-            QMessageBox.warning(self, "오류",
-                "인벤토리 바 이미지가 없습니다.\n먼저 '인벤토리 바 이미지'를 캡처하세요.")
-            return
-        with mss.mss() as sct:
-            mon = sct.monitors[0]
-            raw = sct.grab(mon)
-            scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-        template = cv2.imread(inv_tpl)
-        result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
-        if max_val < 0.70:
-            QMessageBox.warning(self, "오류",
-                f"화면에서 인벤토리 바를 찾지 못했습니다 (점수: {max_val:.2f}).\n"
-                "인벤토리를 열어놓은 상태에서 다시 지정하세요.")
-            return
-        th, tw = template.shape[:2]
-        inv_cx = mon["left"] + max_loc[0] + tw // 2
-        inv_cy = mon["top"]  + max_loc[1] + th // 2
-        # cx, cy 는 RegionSelector 논리 픽셀 → mss 물리 픽셀로 변환해 비교
-        cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
-        offset = [cx_phys - inv_cx, cy_phys - inv_cy]
-        self.config.set("settings2", "junk_sell", "cash_tab_offset", offset)
-        inv_key = self.edit_inventory_key.text().strip() or "i"
-        self.config.set("settings2", "junk_sell", "inventory_key", inv_key)
-        self.config.save()
-        lbl = self._junk_coord_lbls.get("cash_tab")
-        if lbl:
-            lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
-            lbl.setStyleSheet("color: green; font-size: 10px;")
-        QMessageBox.information(self, "완료",
-            f"캐시탭 오프셋 저장: dx={offset[0]}, dy={offset[1]}\n"
-            f"(인벤토리 중심 {inv_cx},{inv_cy} 기준)")
-
-    def _save_first_slot_offset(self, cx: int, cy: int) -> None:
-        """첫번째 슬롯 중심 → 캐시탭 활성 이미지 감지해 오프셋 계산 후 저장."""
-        import time as _time
-        _time.sleep(0.05)
-        active_tpl = "templates/junk/cash_tab_active.png"
-        if not os.path.exists(active_tpl):
-            # 활성 이미지 없으면 캐시탭 기준으로 오프셋 저장
-            cash_tab_offset = (self.config.get("settings2", "junk_sell", "cash_tab_offset") or [])
-            if not cash_tab_offset:
+        try:
+            import time as _time
+            _time.sleep(0.05)
+            inv_tpl = "templates/junk/inventory.png"
+            if not os.path.exists(inv_tpl):
                 QMessageBox.warning(self, "오류",
-                    "캐시탭 활성 이미지도 없고 캐시탭 오프셋도 없습니다.\n"
-                    "캐시탭 설정을 먼저 완료하세요.")
+                    "인벤토리 바 이미지가 없습니다.\n먼저 '인벤토리 바 이미지'를 캡처하세요.")
                 return
-            # 현재 화면에서 인벤토리 감지 후 캐시탭 위치 역산
             with mss.mss() as sct:
                 mon = sct.monitors[0]
                 raw = sct.grab(mon)
                 scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            inv_tpl = "templates/junk/inventory.png"
             template = cv2.imread(inv_tpl)
             result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(result)
-            if max_val >= 0.70:
-                th, tw = template.shape[:2]
-                inv_cx = mon["left"] + max_loc[0] + tw // 2
-                inv_cy = mon["top"]  + max_loc[1] + th // 2
-                ref_x = inv_cx + cash_tab_offset[0]
-                ref_y = inv_cy + cash_tab_offset[1]
-            else:
-                QMessageBox.warning(self, "오류", "인벤토리를 찾지 못했습니다.")
+            if max_val < 0.70:
+                QMessageBox.warning(self, "오류",
+                    f"화면에서 인벤토리 바를 찾지 못했습니다 (점수: {max_val:.2f}).\n"
+                    "인벤토리를 열어놓은 상태에서 다시 지정하세요.")
                 return
+            th, tw = template.shape[:2]
+            inv_cx = mon["left"] + max_loc[0] + tw // 2
+            inv_cy = mon["top"]  + max_loc[1] + th // 2
+            # cx, cy 는 RegionSelector 논리 픽셀 → mss 물리 픽셀로 변환해 비교
             cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
-            offset = [cx_phys - ref_x, cy_phys - ref_y]
+            offset = [cx_phys - inv_cx, cy_phys - inv_cy]
+            self.config.set("settings2", "junk_sell", "cash_tab_offset", offset)
+            inv_key = self.edit_inventory_key.text().strip() or "i"
+            self.config.set("settings2", "junk_sell", "inventory_key", inv_key)
+            self.config.save()
+            lbl = self._junk_coord_lbls.get("cash_tab")
+            if lbl:
+                lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
+                lbl.setStyleSheet("color: green; font-size: 10px;")
+            QMessageBox.information(self, "완료",
+                f"캐시탭 오프셋 저장: dx={offset[0]}, dy={offset[1]}\n"
+                f"(인벤토리 중심 {inv_cx},{inv_cy} 기준)")
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"캐시탭 오프셋 저장 중 오류가 발생했습니다:\n{e}")
+
+    def _save_first_slot_offset(self, cx: int, cy: int) -> None:
+        """첫번째 슬롯 중심 → 캐시탭 활성 이미지 감지해 오프셋 계산 후 저장."""
+        try:
+            import time as _time
+            _time.sleep(0.05)
+            active_tpl = "templates/junk/cash_tab_active.png"
+            if not os.path.exists(active_tpl):
+                # 활성 이미지 없으면 캐시탭 기준으로 오프셋 저장
+                cash_tab_offset = (self.config.get("settings2", "junk_sell", "cash_tab_offset") or [])
+                if not cash_tab_offset:
+                    QMessageBox.warning(self, "오류",
+                        "캐시탭 활성 이미지도 없고 캐시탭 오프셋도 없습니다.\n"
+                        "캐시탭 설정을 먼저 완료하세요.")
+                    return
+                # 현재 화면에서 인벤토리 감지 후 캐시탭 위치 역산
+                with mss.mss() as sct:
+                    mon = sct.monitors[0]
+                    raw = sct.grab(mon)
+                    scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                inv_tpl = "templates/junk/inventory.png"
+                template = cv2.imread(inv_tpl)
+                result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                if max_val >= 0.70:
+                    th, tw = template.shape[:2]
+                    inv_cx = mon["left"] + max_loc[0] + tw // 2
+                    inv_cy = mon["top"]  + max_loc[1] + th // 2
+                    ref_x = inv_cx + cash_tab_offset[0]
+                    ref_y = inv_cy + cash_tab_offset[1]
+                else:
+                    QMessageBox.warning(self, "오류", "인벤토리를 찾지 못했습니다.")
+                    return
+                cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
+                offset = [cx_phys - ref_x, cy_phys - ref_y]
+                self.config.set("settings2", "junk_sell", "first_slot_offset", offset)
+                self.config.save()
+                lbl = self._junk_coord_lbls.get("first_slot")
+                if lbl:
+                    lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
+                    lbl.setStyleSheet("color: green; font-size: 10px;")
+                return
+
+            with mss.mss() as sct:
+                mon = sct.monitors[0]
+                raw = sct.grab(mon)
+                scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            template = cv2.imread(active_tpl)
+            result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            if max_val < 0.70:
+                QMessageBox.warning(self, "오류",
+                    f"캐시탭 활성 이미지를 찾지 못했습니다 (점수: {max_val:.2f}).\n"
+                    "캐시탭이 활성화된 상태(분홍색)에서 지정하세요.")
+                return
+            th, tw = template.shape[:2]
+            act_cx = mon["left"] + max_loc[0] + tw // 2
+            act_cy = mon["top"]  + max_loc[1] + th // 2
+            cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
+            offset = [cx_phys - act_cx, cy_phys - act_cy]
             self.config.set("settings2", "junk_sell", "first_slot_offset", offset)
             self.config.save()
             lbl = self._junk_coord_lbls.get("first_slot")
             if lbl:
                 lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
                 lbl.setStyleSheet("color: green; font-size: 10px;")
-            return
-
-        with mss.mss() as sct:
-            mon = sct.monitors[0]
-            raw = sct.grab(mon)
-            scene = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-        template = cv2.imread(active_tpl)
-        result = cv2.matchTemplate(scene, template, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(result)
-        if max_val < 0.70:
-            QMessageBox.warning(self, "오류",
-                f"캐시탭 활성 이미지를 찾지 못했습니다 (점수: {max_val:.2f}).\n"
-                "캐시탭이 활성화된 상태(분홍색)에서 지정하세요.")
-            return
-        th, tw = template.shape[:2]
-        act_cx = mon["left"] + max_loc[0] + tw // 2
-        act_cy = mon["top"]  + max_loc[1] + th // 2
-        cx_phys, cy_phys = self._to_physical(cx, cy, 0, 0)[:2]
-        offset = [cx_phys - act_cx, cy_phys - act_cy]
-        self.config.set("settings2", "junk_sell", "first_slot_offset", offset)
-        self.config.save()
-        lbl = self._junk_coord_lbls.get("first_slot")
-        if lbl:
-            lbl.setText(f"오프셋 dx={offset[0]} dy={offset[1]}")
-            lbl.setStyleSheet("color: green; font-size: 10px;")
-        QMessageBox.information(self, "완료",
-            f"첫번째 슬롯 오프셋 저장: dx={offset[0]}, dy={offset[1]}\n"
-            f"(활성 캐시탭 중심 {act_cx},{act_cy} 기준)")
+            QMessageBox.information(self, "완료",
+                f"첫번째 슬롯 오프셋 저장: dx={offset[0]}, dy={offset[1]}\n"
+                f"(활성 캐시탭 중심 {act_cx},{act_cy} 기준)")
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"첫번째 슬롯 오프셋 저장 중 오류가 발생했습니다:\n{e}")
 
     def _reset_junk_coord(self, key: str) -> None:
         self.config.set("settings2", "junk_sell", key, None)
@@ -718,17 +888,20 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_cash_tab_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)   # RegionSelector 오버레이 완전 소멸 대기
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/cash_tab.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_cash_tpl_label()
-        QMessageBox.information(self, "완료", f"캐시탭 템플릿 저장 완료 ({pw}×{ph}px)")
+        try:
+            import time as _time
+            _time.sleep(0.08)   # RegionSelector 오버레이 완전 소멸 대기
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/cash_tab.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            self._refresh_cash_tpl_label()
+            QMessageBox.information(self, "완료", f"캐시탭 템플릿 저장 완료 ({pw}×{ph}px)")
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_cash_tab_template(self) -> None:
         path = "templates/junk/cash_tab.png"
@@ -752,30 +925,33 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_cash_tab_active_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/cash_tab_active.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        # 캡처 중심을 cash_tab_active_anchor 로 자동 저장 (첫번째 슬롯 오프셋 계산용)
-        cx, cy = x + w // 2, y + h // 2
-        self.config.set("settings2", "junk_sell", "cash_tab_active_anchor", [cx, cy])
-        self.config.save()
-        self._refresh_cash_active_tpl_label()
-        reply = QMessageBox.question(
-            self, "캐시탭 활성 이미지 저장 완료",
-            f"저장 완료 ({w}×{h}px)\n\n"
-            "지금 바로 첫번째 슬롯 위치를 지정하시겠습니까?\n"
-            "(NPC 상점을 열어 첫번째 칸 위치를 드래그하세요)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._set_junk_coord("first_slot", False)
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/cash_tab_active.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            # 캡처 중심을 cash_tab_active_anchor 로 자동 저장 (첫번째 슬롯 오프셋 계산용)
+            cx, cy = x + w // 2, y + h // 2
+            self.config.set("settings2", "junk_sell", "cash_tab_active_anchor", [cx, cy])
+            self.config.save()
+            self._refresh_cash_active_tpl_label()
+            reply = QMessageBox.question(
+                self, "캐시탭 활성 이미지 저장 완료",
+                f"저장 완료 ({w}×{h}px)\n\n"
+                "지금 바로 첫번째 슬롯 위치를 지정하시겠습니까?\n"
+                "(NPC 상점을 열어 첫번째 칸 위치를 드래그하세요)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._set_junk_coord("first_slot", False)
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_cash_tab_active_template(self) -> None:
         path = "templates/junk/cash_tab_active.png"
@@ -799,17 +975,20 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_shop_open_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/shop_open.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_shop_open_tpl_label()
-        QMessageBox.information(self, "완료", f"상점 열림 확인 이미지 저장 완료 ({pw}×{ph}px)")
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/shop_open.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            self._refresh_shop_open_tpl_label()
+            QMessageBox.information(self, "완료", f"상점 열림 확인 이미지 저장 완료 ({pw}×{ph}px)")
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_shop_open_template(self) -> None:
         path = "templates/junk/shop_open.png"
@@ -833,34 +1012,37 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_inventory_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/inventory.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        # 캡처 당시 중심 좌표를 inventory_anchor 로 자동 저장
-        cx, cy = x + w // 2, y + h // 2
-        self.config.set("settings2", "junk_sell", "inventory_anchor", [cx, cy])
-        self.config.save()
-        lbl = self._junk_coord_lbls.get("inventory_anchor")
-        if lbl:
-            lbl.setText(f"X={cx} Y={cy}")
-            lbl.setStyleSheet("color: green; font-size: 10px;")
-        self._refresh_inv_tpl_label()
-        reply = QMessageBox.question(
-            self, "인벤토리 바 저장 완료",
-            f"인벤토리 바 이미지 저장 완료 ({w}×{h}px)\n\n"
-            "지금 바로 캐시탭 위치를 지정하시겠습니까?\n"
-            "(인벤토리가 열린 상태를 유지해주세요)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._set_junk_coord("cash_tab", False)
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/inventory.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            # 캡처 당시 중심 좌표를 inventory_anchor 로 자동 저장
+            cx, cy = x + w // 2, y + h // 2
+            self.config.set("settings2", "junk_sell", "inventory_anchor", [cx, cy])
+            self.config.save()
+            lbl = self._junk_coord_lbls.get("inventory_anchor")
+            if lbl:
+                lbl.setText(f"X={cx} Y={cy}")
+                lbl.setStyleSheet("color: green; font-size: 10px;")
+            self._refresh_inv_tpl_label()
+            reply = QMessageBox.question(
+                self, "인벤토리 바 저장 완료",
+                f"인벤토리 바 이미지 저장 완료 ({w}×{h}px)\n\n"
+                "지금 바로 캐시탭 위치를 지정하시겠습니까?\n"
+                "(인벤토리가 열린 상태를 유지해주세요)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._set_junk_coord("cash_tab", False)
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_inventory_template(self) -> None:
         path = "templates/junk/inventory.png"
@@ -884,17 +1066,22 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_junk_template(self, x: int, y: int, w: int, h: int) -> None:
-        os.makedirs("templates/junk", exist_ok=True)
-        existing = sorted(glob.glob("templates/junk/item_*.png"))
-        next_num = len(existing) + 1
-        path = f"templates/junk/item_{next_num}.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_junk_tpl_label()
-        QMessageBox.information(self, "완료", f"아이템 템플릿 {next_num}번 저장 완료 ({pw}×{ph}px)")
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            existing = sorted(glob.glob("templates/junk/item_*.png"))
+            next_num = len(existing) + 1
+            path = f"templates/junk/item_{next_num}.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            self._refresh_junk_tpl_label()
+            QMessageBox.information(self, "완료", f"아이템 템플릿 {next_num}번 저장 완료 ({pw}×{ph}px)")
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_junk_templates(self) -> None:
         files = glob.glob("templates/junk/item_*.png")
@@ -928,23 +1115,26 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_etc_active_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/etc_tab_active.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        # 캡처 중심 좌표를 기타탭 클릭 위치로 자동 저장 (절대 좌표 변환 적용)
-        cx_phys, cy_phys = self._to_physical(x + w // 2, y + h // 2, 0, 0)[:2]
-        self.config.set("settings2", "junk_sell", "shop_etc_tab", [cx_phys, cy_phys])
-        self.config.save()
-        self._refresh_etc_active_tpl_label()
-        QMessageBox.information(self, "완료",
-            f"기타탭 활성 이미지 저장 완료 ({pw}×{ph}px)\n"
-            f"기타탭 클릭 위치 자동 저장: X={cx_phys} Y={cy_phys}")
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/etc_tab_active.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            # 캡처 중심 좌표를 기타탭 클릭 위치로 자동 저장 (절대 좌표 변환 적용)
+            cx_phys, cy_phys = self._to_physical(x + w // 2, y + h // 2, 0, 0)[:2]
+            self.config.set("settings2", "junk_sell", "shop_etc_tab", [cx_phys, cy_phys])
+            self.config.save()
+            self._refresh_etc_active_tpl_label()
+            QMessageBox.information(self, "완료",
+                f"기타탭 활성 이미지 저장 완료 ({pw}×{ph}px)\n"
+                f"기타탭 클릭 위치 자동 저장: X={cx_phys} Y={cy_phys}")
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_etc_active_template(self) -> None:
         path = "templates/junk/etc_tab_active.png"
@@ -970,17 +1160,20 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_scroll_bottom_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/scroll_bottom.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_scroll_bottom_tpl_label()
-        QMessageBox.information(self, "완료", f"스크롤 최하단 이미지 저장 완료 ({pw}×{ph}px)")
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/scroll_bottom.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            self._refresh_scroll_bottom_tpl_label()
+            QMessageBox.information(self, "완료", f"스크롤 최하단 이미지 저장 완료 ({pw}×{ph}px)")
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_scroll_bottom_template(self) -> None:
         path = "templates/junk/scroll_bottom.png"
@@ -1004,17 +1197,20 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_equip_sell_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/equip_sell_btn.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_equip_sell_tpl_label()
-        QMessageBox.information(self, "완료", f"장비 일괄 판매 버튼 이미지 저장 완료 ({pw}×{ph}px)")
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/equip_sell_btn.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            self._refresh_equip_sell_tpl_label()
+            QMessageBox.information(self, "완료", f"장비 일괄 판매 버튼 이미지 저장 완료 ({pw}×{ph}px)")
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_equip_sell_template(self) -> None:
         path = "templates/junk/equip_sell_btn.png"
@@ -1038,17 +1234,20 @@ class TabSettings2(QWidget):
         sel.show()
 
     def _save_equip_confirm_template(self, x: int, y: int, w: int, h: int) -> None:
-        import time as _time
-        _time.sleep(0.08)
-        os.makedirs("templates/junk", exist_ok=True)
-        path = "templates/junk/equip_sell_confirm.png"
-        px, py, pw, ph = self._to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_equip_confirm_tpl_label()
-        QMessageBox.information(self, "완료", f"확인 버튼 이미지 저장 완료 ({pw}×{ph}px)")
+        try:
+            import time as _time
+            _time.sleep(0.08)
+            os.makedirs("templates/junk", exist_ok=True)
+            path = "templates/junk/equip_sell_confirm.png"
+            px, py, pw, ph = self._to_physical(x, y, w, h)
+            with mss.mss() as sct:
+                raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
+                img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                cv2.imwrite(path, img)
+            self._refresh_equip_confirm_tpl_label()
+            QMessageBox.information(self, "완료", f"확인 버튼 이미지 저장 완료 ({pw}×{ph}px)")
+        except Exception as e:
+            QMessageBox.warning(self, "캡처 오류", f"저장 중 오류가 발생했습니다:\n{e}")
 
     def _clear_equip_confirm_template(self) -> None:
         path = "templates/junk/equip_sell_confirm.png"
@@ -1069,6 +1268,121 @@ class TabSettings2(QWidget):
         enabled = self.chk_junk_sell.isChecked()
         self.config.set("settings2", "junk_sell", "junk_sell_enabled", enabled)
         self.config.save()
+
+    # ── 자동 판매 주기 설정 ───────────────────────────────────────────
+    def _save_auto_sell_settings(self) -> None:
+        self.config.set("settings2", "junk_sell", "auto_sell_enabled",
+                        self.chk_auto_sell.isChecked())
+        self.config.set("settings2", "junk_sell", "auto_sell_interval_min",
+                        self.spin_auto_sell_interval.value())
+        self.config.set("settings2", "junk_sell", "sell_on_start",
+                        self.chk_sell_on_start.isChecked())
+        self.config.save()
+
+    def _read_minimap_pos(self):
+        """현재 미니맵 캐릭터 위치 (x, y)를 반환. 실패 시 None."""
+        from core.minimap_reader import MinimapReader, MinimapConfig
+        from core.config_manager import resolve_minimap_coords
+        from core.screen_reader import ScreenReader
+        active  = self.config.get("hunt_grounds", "active") or ""
+        presets = self.config.get("hunt_grounds", "presets") or {}
+        preset  = presets.get(active) if active else None
+        mm = preset.get("minimap", {}) if preset else (self.config.get("minimap") or {})
+        region_x, region_y, mm_w, mm_h = resolve_minimap_coords(self.config, mm)
+        cfg = MinimapConfig(
+            region_x=region_x, region_y=region_y,
+            width=mm_w, height=mm_h,
+            char_r=mm.get("char_r", 255), char_g=mm.get("char_g", 255),
+            char_b=mm.get("char_b", 255), tolerance=mm.get("tolerance", 40),
+        )
+        reader = MinimapReader(ScreenReader())
+        reader.set_config(cfg)
+        return reader.get_character_pos()
+
+    def _set_safe_zone_xy(self) -> None:
+        """미니맵에서 현재 캐릭터 X,Y 좌표를 안전지대로 저장 (비율도 함께 저장)."""
+        try:
+            from core.config_manager import resolve_minimap_coords
+            active  = self.config.get("hunt_grounds", "active") or ""
+            presets = self.config.get("hunt_grounds", "presets") or {}
+            preset  = presets.get(active) if active else None
+            mm      = preset.get("minimap", {}) if preset else (self.config.get("minimap") or {})
+            _, _, mm_w, mm_h = resolve_minimap_coords(self.config, mm)
+            pos = self._read_minimap_pos()
+            if pos is None:
+                QMessageBox.warning(self, "오류",
+                    "캐릭터 위치를 감지하지 못했습니다.\n"
+                    "미니맵 설정(좌표·색상)을 확인하세요.")
+                return
+            x, y = pos
+            self.config.set("settings2", "junk_sell", "safe_zone_x", x)
+            self.config.set("settings2", "junk_sell", "safe_zone_y", y)
+            # 비율도 함께 저장 — 미니맵 크기 변경 시 자동 보정
+            if mm_w > 0:
+                self.config.set("settings2", "junk_sell", "safe_zone_x_ratio", x / mm_w)
+            if mm_h > 0:
+                self.config.set("settings2", "junk_sell", "safe_zone_y_ratio", y / mm_h)
+            self.config.save()
+            self.lbl_safe_zone_x.setText(f"X={x}  Y={y}")
+            self.lbl_safe_zone_x.setStyleSheet("color: green; font-size: 10px;")
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"안전지대 설정 중 오류가 발생했습니다:\n{e}")
+
+    def _reset_safe_zone_xy(self) -> None:
+        for k in ("safe_zone_x", "safe_zone_y", "safe_zone_x_ratio", "safe_zone_y_ratio"):
+            self.config.set("settings2", "junk_sell", k, None)
+        self.config.save()
+        self.lbl_safe_zone_x.setText("미설정")
+        self.lbl_safe_zone_x.setStyleSheet("color: gray; font-size: 10px;")
+
+    # ── 안전지대 이동 경로 관리 ───────────────────────────────────────
+    def _capture_extra_rope_x(self) -> None:
+        """캐릭터 현재 미니맵 X 좌표를 밧줄 X로 캡처해서 SpinBox에 설정."""
+        try:
+            pos = self._read_minimap_pos()
+            if pos is None:
+                QMessageBox.warning(self, "오류",
+                    "캐릭터 위치를 감지하지 못했습니다.\n"
+                    "미니맵 설정(좌표·색상)을 확인하세요.")
+                return
+            x = pos[0]
+            self.spin_extra_rope_x.blockSignals(True)
+            self.spin_extra_rope_x.setValue(x)
+            self.spin_extra_rope_x.blockSignals(False)
+            self._save_departure_settings()
+        except Exception as e:
+            QMessageBox.warning(self, "오류", f"밧줄 X 캡처 중 오류가 발생했습니다:\n{e}")
+
+    def _save_departure_settings(self) -> None:
+        """출발지 층 + 추가 밧줄 설정을 config에 저장."""
+        dep = self.combo_departure_zone.currentText()
+        if dep == "미설정":
+            dep = ""
+        self.config.set("settings2", "junk_sell", "departure_zone", dep)
+        _extra = {
+            "x":        self.spin_extra_rope_x.value(),
+            "direction": "up" if self.combo_extra_rope_dir.currentIndex() == 0 else "down",
+            "climb_sec": self.spin_extra_rope_climb.value(),
+        }
+        self.config.set("settings2", "junk_sell", "extra_rope", _extra)
+        self.config.save()
+
+    def _populate_departure_zones(self) -> None:
+        """현재 활성 프리셋의 구역 이름을 출발지 드롭다운에 로드."""
+        active    = self.config.get("hunt_grounds", "active") or ""
+        presets   = self.config.get("hunt_grounds", "presets") or {}
+        preset    = presets.get(active) if active else None
+        raw_zones = preset.get("zones", []) if preset else (self.config.get("zones") or [])
+        names     = [z.get("name", "") for z in raw_zones if z.get("name", "")]
+
+        prev = self.combo_departure_zone.currentText()
+        self.combo_departure_zone.blockSignals(True)
+        self.combo_departure_zone.clear()
+        self.combo_departure_zone.addItem("미설정")
+        self.combo_departure_zone.addItems(names)
+        idx = self.combo_departure_zone.findText(prev)
+        self.combo_departure_zone.setCurrentIndex(max(0, idx))
+        self.combo_departure_zone.blockSignals(False)
 
     # ── 상점 열기 ────────────────────────────────────────────────────
     def _run_open_shop(self) -> None:
@@ -1164,6 +1478,36 @@ class TabSettings2(QWidget):
                 lbl.setStyleSheet("color: green; font-size: 10px;")
         enabled = bool(junk.get("junk_sell_enabled", False))
         self.chk_junk_sell.setChecked(enabled)
+
+        # 자동 판매 주기 설정 로드
+        self.chk_auto_sell.setChecked(bool(junk.get("auto_sell_enabled", False)))
+        self.spin_auto_sell_interval.setValue(int(junk.get("auto_sell_interval_min", 10)))
+        self.chk_sell_on_start.setChecked(bool(junk.get("sell_on_start", False)))
+        safe_x = int(junk.get("safe_zone_x", -1))
+        safe_y = int(junk.get("safe_zone_y", -1))
+        if safe_x >= 0:
+            _pos_txt = f"X={safe_x}  Y={safe_y}" if safe_y >= 0 else f"X={safe_x}"
+            self.lbl_safe_zone_x.setText(_pos_txt)
+            self.lbl_safe_zone_x.setStyleSheet("color: green; font-size: 10px;")
+        else:
+            self.lbl_safe_zone_x.setText("미설정")
+            self.lbl_safe_zone_x.setStyleSheet("color: gray; font-size: 10px;")
+
+        # 경로 설정 복원
+        self._populate_departure_zones()
+        dep_zone = (junk.get("departure_zone") or "").strip()
+        if dep_zone:
+            _dep_idx = self.combo_departure_zone.findText(dep_zone)
+            if _dep_idx >= 0:
+                self.combo_departure_zone.blockSignals(True)
+                self.combo_departure_zone.setCurrentIndex(_dep_idx)
+                self.combo_departure_zone.blockSignals(False)
+        extra_rope = junk.get("extra_rope") or {}
+        self.spin_extra_rope_x.setValue(int(extra_rope.get("x", 0)))
+        _dir = extra_rope.get("direction", "up")
+        self.combo_extra_rope_dir.setCurrentIndex(0 if _dir == "up" else 1)
+        self.spin_extra_rope_climb.setValue(float(extra_rope.get("climb_sec", 2.5)))
+
         self._refresh_cash_active_tpl_label()
         self._refresh_shop_open_tpl_label()
         self._refresh_equip_sell_tpl_label()
