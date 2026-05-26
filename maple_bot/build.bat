@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo  MapleBot v1.2.1 Build (PyArmor + PyInstaller)
+echo  DHMONSTERS v1.2.2 Build (PyArmor + PyInstaller)
 echo ========================================
 
 py -m pip show pyarmor >nul 2>&1
