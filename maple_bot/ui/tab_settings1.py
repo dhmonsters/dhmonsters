@@ -52,6 +52,7 @@ class TabSettings1(QWidget):
         layout.addWidget(self._build_transparent_shape_group())
         layout.addWidget(self._build_user_detected_group())
         layout.addWidget(self._build_stat_assign_group())
+        layout.addWidget(self._build_yolo_group())
         layout.addStretch()
 
         scroll.setWidget(inner)
@@ -552,6 +553,78 @@ class TabSettings1(QWidget):
 
         return group
 
+    # ── YOLO11 설정 ───────────────────────────────────────────────────
+    def _build_yolo_group(self):
+        from PyQt6.QtWidgets import QDoubleSpinBox, QFileDialog
+        group = QGroupBox("YOLO11 몬스터 감지 설정")
+        layout = QVBoxLayout(group)
+
+        # 활성화
+        self.chk_yolo_enabled = QCheckBox("YOLO11 감지 활성화 (비활성 시 기존 템플릿 매칭 사용)")
+        self.chk_yolo_enabled.stateChanged.connect(self._save_yolo_settings)
+        layout.addWidget(self.chk_yolo_enabled)
+
+        # 모델 경로
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel("모델 경로"))
+        self.edit_yolo_model = QLineEdit()
+        self.edit_yolo_model.setPlaceholderText("*.pt 파일 경로 (비우면 폴백)")
+        self.edit_yolo_model.editingFinished.connect(self._save_yolo_settings)
+        model_row.addWidget(self.edit_yolo_model)
+        btn_browse = QPushButton("찾아보기")
+        btn_browse.setFixedWidth(70)
+        btn_browse.clicked.connect(self._browse_yolo_model)
+        model_row.addWidget(btn_browse)
+        layout.addLayout(model_row)
+
+        # 신뢰도 / IoU
+        params_row = QHBoxLayout()
+        params_row.addWidget(QLabel("신뢰도"))
+        self.spin_yolo_conf = QDoubleSpinBox()
+        self.spin_yolo_conf.setRange(0.1, 1.0)
+        self.spin_yolo_conf.setSingleStep(0.05)
+        self.spin_yolo_conf.setDecimals(2)
+        self.spin_yolo_conf.setFixedWidth(65)
+        self.spin_yolo_conf.valueChanged.connect(self._save_yolo_settings)
+        params_row.addWidget(self.spin_yolo_conf)
+        params_row.addSpacing(12)
+        params_row.addWidget(QLabel("IoU"))
+        self.spin_yolo_iou = QDoubleSpinBox()
+        self.spin_yolo_iou.setRange(0.1, 1.0)
+        self.spin_yolo_iou.setSingleStep(0.05)
+        self.spin_yolo_iou.setDecimals(2)
+        self.spin_yolo_iou.setFixedWidth(65)
+        self.spin_yolo_iou.valueChanged.connect(self._save_yolo_settings)
+        params_row.addWidget(self.spin_yolo_iou)
+        params_row.addSpacing(12)
+        params_row.addWidget(QLabel("추론 간격(프레임)"))
+        self.spin_yolo_every_n = QSpinBox()
+        self.spin_yolo_every_n.setRange(1, 30)
+        self.spin_yolo_every_n.setFixedWidth(55)
+        self.spin_yolo_every_n.valueChanged.connect(self._save_yolo_settings)
+        params_row.addWidget(self.spin_yolo_every_n)
+        params_row.addStretch()
+        layout.addLayout(params_row)
+
+        return group
+
+    def _browse_yolo_model(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "YOLO 모델 선택", "", "PyTorch 모델 (*.pt);;모든 파일 (*)"
+        )
+        if path:
+            self.edit_yolo_model.setText(path)
+            self._save_yolo_settings()
+
+    def _save_yolo_settings(self) -> None:
+        self.config.set("yolo", "enabled",      self.chk_yolo_enabled.isChecked())
+        self.config.set("yolo", "model_path",   self.edit_yolo_model.text().strip())
+        self.config.set("yolo", "confidence",   self.spin_yolo_conf.value())
+        self.config.set("yolo", "iou",          self.spin_yolo_iou.value())
+        self.config.set("yolo", "every_n_frame", self.spin_yolo_every_n.value())
+        self.config.save()
+
     # ── config 연동 ───────────────────────────────────────────────────
     def load_from_config(self):
         ld = self.config.get("settings1", "lie_detector") or {}
@@ -602,6 +675,13 @@ class TabSettings1(QWidget):
         self.chk_transparent_debug.setChecked(bool(ts.get("debug_overlay", False)))
         self._refresh_transparent_status_labels()
 
+        yolo = self.config.get("yolo") or {}
+        self.chk_yolo_enabled.setChecked(bool(yolo.get("enabled", False)))
+        self.edit_yolo_model.setText(yolo.get("model_path", ""))
+        self.spin_yolo_conf.setValue(float(yolo.get("confidence", 0.5)))
+        self.spin_yolo_iou.setValue(float(yolo.get("iou", 0.45)))
+        self.spin_yolo_every_n.setValue(int(yolo.get("every_n_frame", 2)))
+
     def save_to_config(self):
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())
         self.config.set("settings1", "lie_detector", "play_alarm",    self.chk_play_alarm.isChecked())
@@ -617,5 +697,11 @@ class TabSettings1(QWidget):
         self.config.set("settings1", "stat_assign", "enabled", self.chk_stat_assign.isChecked())
         for stat, spin in self.stat_spins.items():
             self.config.set("settings1", "stat_assign", stat, spin.value())
+
+        self.config.set("yolo", "enabled",       self.chk_yolo_enabled.isChecked())
+        self.config.set("yolo", "model_path",    self.edit_yolo_model.text().strip())
+        self.config.set("yolo", "confidence",    self.spin_yolo_conf.value())
+        self.config.set("yolo", "iou",           self.spin_yolo_iou.value())
+        self.config.set("yolo", "every_n_frame", self.spin_yolo_every_n.value())
 
 
