@@ -16,12 +16,23 @@ from ui.tab_misc import TabMisc
 from ui.overlay.debug_overlay import DebugOverlay
 
 
+def _read_version() -> str:
+    import os, sys
+    try:
+        base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) \
+               else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(base, "version.txt"), encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return "?"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = ConfigManager()
         self.hotkey_manager = HotkeyManager(self)
-        self.setWindowTitle("DHMONSTERS v1.2.1")
+        self.setWindowTitle(f"DHMONSTERS v{_read_version()}")
         self.setMinimumSize(520, 600)
         self._build_ui()
         self._setup_bot()
