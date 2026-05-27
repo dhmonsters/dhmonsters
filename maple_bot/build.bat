@@ -40,6 +40,8 @@ if not exist dist mkdir dist
 xcopy /E /I /Y .obf_build\dist\dhmonsters dist\dhmonsters
 copy /Y config.json dist\dhmonsters\config.json
 copy /Y version.txt dist\dhmonsters\version.txt
+if exist templates xcopy /E /I /Y templates dist\dhmonsters\templates
+if exist monsters xcopy /E /I /Y monsters dist\dhmonsters\monsters
 
 echo.
 echo ========================================
