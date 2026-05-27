@@ -115,9 +115,51 @@ class BotLoop:
         self._as_walk_diag_timer:    float = 0.0    # walk_to_safe 로그 스팸 방지
         self._as_return_to_hunt:     bool  = False  # 판매 완료 후 fh_zones[0] 복귀 트리거
 
+        # YOLO11 파이프라인 (lazy init — _init_yolo() 호출 시 생성)
+        self._yolo_detector     = None  # YoloDetector | None
+        self._char_tracker      = None  # CharacterTracker | None
+        self._roi_manager       = None  # ROIManager | None
+        self._attack_decision   = None  # AttackDecision | None
+        self._yolo_frame_count: int  = 0
+        self._yolo_last_result: dict | None = None  # {"direction", "can_attack"}
+
     def _game_window_title(self) -> str:
         """config에서 게임 창 제목을 읽는다. 미설정이면 'MapleStory' 반환."""
         return self._config.get("settings2", "game_window_title") or "MapleStory"
+
+    def _init_yolo(self) -> None:
+        """YOLO 파이프라인 초기화. 비활성이거나 모델 없으면 조용히 스킵."""
+        cfg = self._config.get("yolo") or {}
+        if not cfg.get("enabled", False):
+            return
+        model_path = (cfg.get("model_path") or "").strip()
+        if not model_path:
+            self._status("YOLO: 모델 경로 미설정 — 템플릿 매칭 폴백")
+            return
+        try:
+            from core.yolo_detector import YoloDetector
+            from core.character_tracker import CharacterTracker
+            from core.roi_manager import ROIManager
+            from core.attack_decision import AttackDecision
+            self._yolo_detector = YoloDetector(
+                model_path,
+                confidence=float(cfg.get("confidence", 0.5)),
+                iou=float(cfg.get("iou", 0.45)),
+                max_det=int(cfg.get("max_det", 20)),
+            )
+            self._char_tracker    = CharacterTracker()
+            self._roi_manager     = ROIManager()
+            ar = cfg.get("attack_range") or {}
+            self._attack_decision = AttackDecision(ar)
+            if self._yolo_detector.is_loaded:
+                self._status(f"YOLO 로드 완료: {model_path}")
+            else:
+                self._status("YOLO 로드 실패 — 템플릿 매칭 폴백")
+                self._yolo_detector = None
+        except Exception as e:
+            logger.warning("_init_yolo 오류: %s", e)
+            self._status(f"YOLO 초기화 오류: {e}")
+            self._yolo_detector = None
 
     def _get_coord_origin(self) -> tuple[int, int]:
         """coord_mode == 'relative'일 때 게임 창 origin을 반환. absolute면 (0,0)."""
@@ -143,6 +185,7 @@ class BotLoop:
         if self._thread and self._thread.is_alive():
             return
         self._load_patterns()
+        self._init_yolo()
         self._stop_event.clear()
         # 메인 루프 (이동 + 스킬)
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -1124,6 +1167,44 @@ class BotLoop:
                                                     f"[층별] {zone.name} 완료 "
                                                     f"→ {fh_zones[next_idx].name} 이동"
                                                 )
+
+                    # ── YOLO11 몬스터 감지 파이프라인 ────────────────────
+                    if self._yolo_detector is not None:
+                        self._yolo_frame_count += 1
+                        _yolo_cfg  = self._config.get("yolo") or {}
+                        _every_n   = max(1, int(_yolo_cfg.get("every_n_frame", 2)))
+                        if self._yolo_frame_count % _every_n == 0:
+                            try:
+                                _frame = self._screen.capture()
+                                if _frame is not None:
+                                    _roi_ratio = _yolo_cfg.get(
+                                        "roi_ratio", [0.1, 0.1, 0.9, 0.9]
+                                    )
+                                    _roi = self._roi_manager.get_absolute_roi(
+                                        _frame.shape, _roi_ratio
+                                    )
+                                    _det = self._yolo_detector.detect(_frame, roi=_roi)
+                                    _char_raw = (
+                                        _det["character"]["center"]
+                                        if _det["character"] else None
+                                    )
+                                    _char_center = self._char_tracker.update(_char_raw)
+                                    _decision = self._attack_decision.calculate(
+                                        _char_center, _det["monsters"]
+                                    )
+                                    self._yolo_last_result = _decision
+                                    # 디버그 오버레이용 game_state 갱신
+                                    try:
+                                        self.game_state.update(
+                                            monster_positions=[
+                                                m["box"] for m in _det["monsters"]
+                                            ],
+                                            char_pos_smooth=_char_center,
+                                        )
+                                    except Exception:
+                                        pass
+                            except Exception as _ye:
+                                logger.warning("YOLO 파이프라인 오류: %s", _ye)
 
                     # 이동 + 스킬 (층 이동 중 또는 통과 층에서는 스킵)
                     _on_transit = (use_floor_hunt and bool(fh_zones) and fh_state == "patrol"
