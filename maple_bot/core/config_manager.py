@@ -222,6 +222,25 @@ DEFAULT_CONFIG = {
             "extra_rope":             {},
         },
     },
+    # ── YOLO11 몬스터 감지 ─────────────────────────────────────────────
+    "yolo": {
+        "enabled":        False,          # True = YOLO 파이프라인 활성화
+        "model_path":     "",             # .pt 파일 경로 (비면 폴백)
+        "confidence":     0.5,            # 감지 신뢰도 임계값
+        "iou":            0.45,           # NMS IoU 임계값
+        "max_det":        20,             # 최대 감지 수
+        "every_n_frame":  2,              # N 프레임마다 1회 추론 (1=매 프레임)
+        # 몬스터 인지 ROI — 프레임 크기 대비 비율 [left, top, right, bottom]
+        "roi_ratio":      [0.1, 0.1, 0.9, 0.9],
+        # 공격 범위 박스 (캐릭터 중심 기준 픽셀)
+        "attack_range": {
+            "left":     300,
+            "right":    300,
+            "vertical": 180,
+            "y_offset": -40,
+        },
+        "dev_mode":       False,          # True = 드래그/편집 UI 표시 (배포 시 False)
+    },
 }
 
 
