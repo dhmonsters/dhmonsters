@@ -107,6 +107,7 @@ class BotLoop:
         self._safety_pending: str | None = None  # 백그라운드 감지 결과: "lie" | "transparent"
         self._lie_yolo      = None               # lazy init: YoloDetector (거짓말탐지기 전용)
         self._anti_mob_active   = False  # 방지몹 해제 중 재진입 방지
+        self._last_buff_time:   float = 0.0  # 마지막 버프 발동 시각 (밧줄 오르기 연장 판단용)
 
         # 자동 판매 상태
         self._auto_sell_active:      bool  = False  # 안전지대 이동 or 판매 중
@@ -833,6 +834,12 @@ class BotLoop:
                                         break
                             elapsed = time.time() - fh_climb_start
                             wait_sec = fh_climb_sec if fh_next_dir > 0 else FH_DESCEND_SEC
+                            # 오르기 중 버프가 발동된 경우 UP 키 1초 추가
+                            _BUFF_UP_EXTRA = 1.0
+                            if (fh_next_dir > 0
+                                    and self._last_buff_time > fh_climb_start
+                                    and elapsed < wait_sec + _BUFF_UP_EXTRA):
+                                wait_sec += _BUFF_UP_EXTRA
                             if elapsed >= wait_sec:
                                 self._input.key_up("up")
                                 self._map_navigator.release_direction()
@@ -1416,6 +1423,7 @@ class BotLoop:
                         if now - last_buffs.get(key_id, 0.0) >= interval:
                             self._input.press_key(buff["key"].strip(), hold_sec=0.35)
                             last_buffs[key_id] = time.time()
+                            self._last_buff_time = time.time()  # 밧줄 오르기 연장 판단용
                             self._status(f"✨ {label} 사용 ({buff['key']})")
                             time.sleep(0.7)  # 스킬 모션 완료 대기 (다음 버프 캔슬 방지)
 

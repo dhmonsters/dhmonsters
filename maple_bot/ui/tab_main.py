@@ -9,6 +9,12 @@ from PyQt6.QtGui import QTextCursor
 from ui.widgets import HotkeyCapture
 
 
+class _DummyCheck:
+    """_log_filters 초기화 전 fallback — 항상 체크 상태로 동작."""
+    def isChecked(self) -> bool:
+        return True
+
+
 class _StatusEmitter(QObject):
     """스레드에서 UI 스레드로 상태 메시지를 안전하게 전달하는 시그널 브릿지."""
     message = pyqtSignal(str)
@@ -101,6 +107,18 @@ class TabMain(QWidget):
     def _build_log_group(self):
         group = QGroupBox("상태 로그")
         layout = QVBoxLayout(group)
+
+        # ── 카테고리 필터 체크박스 ────────────────────────────────────
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("표시:"))
+        self._log_filters: dict[str, QCheckBox] = {}
+        for cat in ("이동", "공격", "버프", "거탐", "기타"):
+            chk = QCheckBox(cat)
+            chk.setChecked(True)
+            self._log_filters[cat] = chk
+            filter_row.addWidget(chk)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
@@ -197,7 +215,31 @@ class TabMain(QWidget):
         """봇이 내부적으로 정지될 때 호출 (별도 스레드 → 시그널로 UI 업데이트)."""
         self._emitter.bot_stopped.emit()
 
+    # ── 로그 카테고리 분류 ─────────────────────────────────────────────
+    _MOVE_KEYS   = ("[층별]", "[진단]", "이동 중", "이동 시작", "이동 완료",
+                    "경계", "밧줄", "전환", "to_rope", "patrol",
+                    "도착", "출발", "방향", "이탈", "재시도", "이동 대기")
+    _ATTACK_KEYS = ("누름 [", "탭   [", "연속기 [", "패턴 1사이클", "사냥 시작",
+                    "공격 패턴", "── 패턴")
+    _BUFF_KEYS   = ("포션 사용", "펫먹이", "버프 사용", "✨", "🐾",
+                    "HP 포션", "MP 포션")
+    _LIE_KEYS    = ("거짓말", "투명 도형", "거탐", "⚠", "lie", "transparent")
+
+    def _get_log_category(self, msg: str) -> str:
+        if any(k in msg for k in self._LIE_KEYS):
+            return "거탐"
+        if any(k in msg for k in self._BUFF_KEYS):
+            return "버프"
+        if any(k in msg for k in self._ATTACK_KEYS):
+            return "공격"
+        if any(k in msg for k in self._MOVE_KEYS):
+            return "이동"
+        return "기타"
+
     def _append_log(self, msg: str) -> None:
+        cat = self._get_log_category(msg)
+        if not self._log_filters.get(cat, _DummyCheck()).isChecked():
+            return
         from datetime import datetime
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_view.append(f"[{timestamp}] {msg}")
