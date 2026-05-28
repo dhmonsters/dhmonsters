@@ -28,7 +28,7 @@ TEMPLATES = {
     "dead":              "templates/dead.png",
 }
 
-SAFETY_CHECK_INTERVAL = 1.0   # 화면 캡처 기반 안전 감지 주기 (초)
+SAFETY_CHECK_INTERVAL = 0.5   # 화면 캡처 기반 안전 감지 주기 (초)
 POTION_CHECK_INTERVAL = 0.5   # 포션 체크 주기 (초) — 전용 스레드에서 독립 실행
 
 
