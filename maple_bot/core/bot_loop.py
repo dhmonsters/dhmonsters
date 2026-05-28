@@ -472,6 +472,7 @@ class BotLoop:
                                     self._map_navigator.release_direction()
                                     fh_state = "patrol"
                         elif _pending == "transparent":
+                            self._fire_lie_alarm()   # 직접 감지 경로에도 경보음·텔레그램 발동
                             _handled = self._check_transparent_shape(_shot)
                             if _handled and use_floor_hunt:
                                 fh_last_side = ""
@@ -1533,6 +1534,34 @@ class BotLoop:
             self._stop_event.wait(SAFETY_CHECK_INTERVAL)
 
     # ── 감지 핸들러 ───────────────────────────────────────────────────
+    def _fire_lie_alarm(self) -> None:
+        """경보음 + 텔레그램 알림 발동. 거짓말탐지기/투명도형 두 경로 공용."""
+        if not self._enable_lie_notify:
+            return
+        cfg = self._config.get("settings1", "lie_detector") or {}
+        # 1. 경보음
+        if cfg.get("play_alarm"):
+            import winsound
+            for _ in range(3):
+                winsound.Beep(1000, 300)
+                time.sleep(0.1)
+        # 2. 텔레그램 (백그라운드 스레드)
+        if cfg.get("tg_enabled"):
+            _token   = cfg.get("tg_token", "")
+            _chat_id = cfg.get("tg_chat_id", "")
+            if _token and _chat_id:
+                _prefix = cfg.get("tg_prefix", "").strip()
+                _msg = (f"{_prefix} 거짓말 탐지기 발견!" if _prefix
+                        else "⚠️ [MapleBot] 거짓말탐지기 발견!")
+                import threading as _t
+                def _send_tg(_tok=_token, _cid=_chat_id, _m=_msg):
+                    try:
+                        from ui.tab_settings1 import _send_telegram
+                        _send_telegram(_tok, _cid, _m)
+                    except Exception:
+                        pass
+                _t.Thread(target=_send_tg, daemon=True).start()
+
     def _check_transparent_shape(self, screenshot) -> bool:
         """투명 도형 찾기 미니게임 감지 시 폐루프 추적 루프를 실행한다.
 
@@ -1601,16 +1630,9 @@ class BotLoop:
         # ── 감지 확정 → 추적 시작 ────────────────────────────────────
         self._status("투명 도형 찾기 감지! 마우스 추적 시작...")
 
-        # bbox → board ROI 자동 계산 (헤더 아래가 게임판)
-        # YOLO: x1,y1,x2,y2 = bbox / 템플릿: title_pos로 추정한 bbox
-        dynamic_roi = None
-        if detected_bbox is not None:
-            x1, y1, x2, y2 = detected_bbox
-            board_h = int(cfg.get("board_height", 500))
-            dynamic_roi = (x1, y2, x2 - x1, board_h)
-            self._status(
-                f"투명 도형 찾기: board ROI 자동 ({x1},{y2}) {x2 - x1}×{board_h}"
-            )
+        # board ROI는 항상 config 비율 좌표 사용 (YOLO bbox는 팝업 전체를 감싸므로
+        # y2를 board 시작점으로 쓰면 화면 밖으로 나갈 수 있음)
+        dynamic_roi = None  # None → run_follow_loop 내부에서 get_board_roi() 호출
 
         # 게임 종료 감지 함수 — YOLO 있으면 YOLO, 없으면 템플릿 매칭
         _yolo_ref = self._transparent_yolo  # 클로저 캡처
@@ -1717,30 +1739,7 @@ class BotLoop:
         self._lie_log(f"   감지 방식={detect_mode}  위치={matched_pos}")
 
         # ── 알림 (거탐 알림 모듈이 켜진 경우) ────────────────────────
-        if self._enable_lie_notify:
-            # 1. 경보음
-            if cfg.get("play_alarm"):
-                import winsound
-                for _ in range(3):
-                    winsound.Beep(1000, 300)
-                    time.sleep(0.1)
-
-            # 2. 텔레그램 알림 (백그라운드 스레드 — 봇 루프 차단 없음)
-            if cfg.get("tg_enabled"):
-                _token   = cfg.get("tg_token", "")
-                _chat_id = cfg.get("tg_chat_id", "")
-                if _token and _chat_id:
-                    _prefix = cfg.get("tg_prefix", "").strip()
-                    _msg = (f"{_prefix} 거짓말 탐지기 발견!" if _prefix
-                            else "⚠️ [MapleBot] 거짓말탐지기 발견!")
-                    import threading as _t
-                    def _send_tg(_tok=_token, _cid=_chat_id, _m=_msg):
-                        try:
-                            from ui.tab_settings1 import _send_telegram
-                            _send_telegram(_tok, _cid, _m)
-                        except Exception:
-                            pass
-                    _t.Thread(target=_send_tg, daemon=True).start()
+        self._fire_lie_alarm()
 
         # ── 해제 (거탐 해제 모듈이 꺼진 경우 알림만 하고 복귀) ────────
         if not self._enable_lie_solve:
