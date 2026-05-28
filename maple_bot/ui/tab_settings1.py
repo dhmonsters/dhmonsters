@@ -29,7 +29,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from ui.region_selector import RegionSelector
-from ui.widgets import HotkeyCapture
 
 
 class TabSettings1(QWidget):
@@ -67,51 +66,27 @@ class TabSettings1(QWidget):
         group = QGroupBox("거짓말탐지기 설정")
         layout = QVBoxLayout(group)
 
-        # 템플릿 캡처
-        cap_row = QHBoxLayout()
-        self.lbl_lie_template = QLabel()
-        self._refresh_template_label()
-        btn_capture = QPushButton("+ 템플릿 추가 캡처")
-        btn_capture.setToolTip(
-            "거짓말탐지기 창이 화면에 떠 있을 때 드래그로 영역을 선택하면\n"
-            "번호가 붙은 템플릿으로 저장됩니다. 여러 장 추가할수록 감지율이 높아집니다."
+        # ── YOLO 모델 경로 (거짓말탐지기 + 투명도형 공용) ───────────────
+        layout.addWidget(QLabel("── YOLO 감지 모델 경로 ──────────────"))
+        yolo_note = QLabel(
+            "거짓말탐지기 감지 및 투명 도형 찾기에 공용으로 사용하는 YOLO 모델 경로입니다."
         )
-        btn_capture.clicked.connect(self._capture_lie_template)
-        btn_clear = QPushButton("전체 삭제")
-        btn_clear.setFixedWidth(70)
-        btn_clear.clicked.connect(self._clear_lie_templates)
-        cap_row.addWidget(self.lbl_lie_template)
-        cap_row.addStretch()
-        cap_row.addWidget(btn_capture)
-        cap_row.addWidget(btn_clear)
-        layout.addLayout(cap_row)
-
-        # 감지 영역 설정
-        region_row = QHBoxLayout()
-        self.lbl_lie_region = QLabel("감지 영역: 전체 화면")
-        self.lbl_lie_region.setStyleSheet("color: gray;")
-        btn_set_region = QPushButton("📍 영역 설정")
-        btn_set_region.setFixedWidth(90)
-        btn_set_region.setToolTip("거짓말탐지기가 나타나는 화면 영역을 드래그로 지정합니다.\n좁게 지정할수록 오탐이 줄어듭니다.")
-        btn_set_region.clicked.connect(self._set_lie_region)
-        btn_reset_region = QPushButton("초기화")
-        btn_reset_region.setFixedWidth(55)
-        btn_reset_region.clicked.connect(self._reset_lie_region)
-        region_row.addWidget(self.lbl_lie_region)
-        region_row.addStretch()
-        region_row.addWidget(btn_set_region)
-        region_row.addWidget(btn_reset_region)
-        layout.addLayout(region_row)
-
-        # 영역 설정 단축키
-        hk_row = QHBoxLayout()
-        hk_row.addWidget(QLabel("영역 설정 단축키"))
-        self.btn_lie_region_hk = HotkeyCapture("", self._apply_lie_region_hotkey)
-        self.btn_lie_region_hk.setFixedWidth(90)
-        self.btn_lie_region_hk.setToolTip("인게임에서 이 키를 누르면 영역 선택 창이 열립니다.")
-        hk_row.addWidget(self.btn_lie_region_hk)
-        hk_row.addStretch()
-        layout.addLayout(hk_row)
+        yolo_note.setStyleSheet("color: #888; font-size: 10px;")
+        layout.addWidget(yolo_note)
+        yolo_row = QHBoxLayout()
+        yolo_row.addWidget(QLabel("모델 경로"))
+        self.edit_lie_yolo = QLineEdit()
+        self.edit_lie_yolo.setPlaceholderText("lie_detector.onnx 경로")
+        btn_lie_yolo_browse = QPushButton("…")
+        btn_lie_yolo_browse.setFixedWidth(30)
+        btn_lie_yolo_browse.clicked.connect(self._browse_lie_yolo)
+        btn_lie_yolo_clear = QPushButton("✕")
+        btn_lie_yolo_clear.setFixedWidth(24)
+        btn_lie_yolo_clear.clicked.connect(lambda: self.edit_lie_yolo.clear())
+        yolo_row.addWidget(self.edit_lie_yolo)
+        yolo_row.addWidget(btn_lie_yolo_browse)
+        yolo_row.addWidget(btn_lie_yolo_clear)
+        layout.addLayout(yolo_row)
 
         self.chk_lie_enabled = QCheckBox("거짓말탐지기 발견 시")
         layout.addWidget(self.chk_lie_enabled)
@@ -182,69 +157,15 @@ class TabSettings1(QWidget):
 
     def set_hotkey_manager(self, hk) -> None:
         self._hk = hk
-        saved_key = (self.config.get("settings1", "lie_detector") or {}).get("region_hotkey", "")
-        if saved_key:
-            self.btn_lie_region_hk.set_key(saved_key)
-            self._apply_lie_region_hotkey(saved_key)
 
-    def _apply_lie_region_hotkey(self, key: str) -> None:
-        if not self._hk or not key:
-            return
-        err = self._hk.register("lie_region", key, self._set_lie_region)
-        if not err:
-            self.config.set("settings1", "lie_detector", "region_hotkey", key)
-
-    def _set_lie_region(self) -> None:
-        self._region_selector = RegionSelector()
-        self._region_selector.region_selected.connect(self._save_lie_region)
-        self._region_selector.show()
-
-    def _save_lie_region(self, x: int, y: int, w: int, h: int) -> None:
-        from core.config_manager import get_game_window_rect
-        ox, oy, cw, ch = get_game_window_rect(self.config)
-        if cw > 0 and ch > 0:
-            region = {
-                "x_ratio": (x - ox) / cw,
-                "y_ratio": (y - oy) / ch,
-                "w_ratio": w / cw,
-                "h_ratio": h / ch,
-            }
-            disp_x, disp_y = int(x - ox), int(y - oy)
-            mode = "비율"
-        else:
-            region = [x, y, w, h]
-            disp_x, disp_y = x, y
-            mode = "픽셀"
-        # 1. 영역 config 저장
-        self.config.set("settings1", "lie_detector", "region", region)
-        self.config.save()
-        self.lbl_lie_region.setText(f"감지 영역: X={disp_x} Y={disp_y} W={w} H={h} ({mode})")
-        self.lbl_lie_region.setStyleSheet("color: green;")
-
-        # 2. 동일 영역을 템플릿으로도 자동 저장
-        import glob
-        os.makedirs("templates", exist_ok=True)
-        existing = sorted(glob.glob("templates/lie_detector_*.png"))
-        next_num = len(existing) + 1
-        path = f"templates/lie_detector_{next_num}.png"
-        from ui.region_selector import logical_to_physical
-        px, py, pw, ph = logical_to_physical(x, y, w, h)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_template_label()
-        QMessageBox.information(
-            self, "영역 설정 완료",
-            f"감지 영역 저장 완료\n"
-            f"템플릿 {next_num}번으로 자동 캡처됨 ({pw}×{ph} px)"
+    def _browse_lie_yolo(self) -> None:
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "거짓말탐지기 YOLO 모델 선택", "", "ONNX 모델 (*.onnx);;모든 파일 (*)"
         )
+        if path:
+            self.edit_lie_yolo.setText(path)
 
-    def _reset_lie_region(self) -> None:
-        self.config.set("settings1", "lie_detector", "region", None)
-        self.config.save()
-        self.lbl_lie_region.setText("감지 영역: 전체 화면")
-        self.lbl_lie_region.setStyleSheet("color: gray;")
 
     def _test_alarm(self) -> None:
         """알람 소리를 즉시 재생한다."""
@@ -286,59 +207,6 @@ class TabSettings1(QWidget):
         else:
             QMessageBox.warning(self, "전송 실패", f"전송 실패:\n{err}")
 
-    def _refresh_template_label(self) -> None:
-        import glob
-        files = sorted(glob.glob("templates/lie_detector_*.png"))
-        count = len(files)
-        if count > 0:
-            self.lbl_lie_template.setText(f"✅ 템플릿 {count}개 저장됨")
-            self.lbl_lie_template.setStyleSheet("color: green;")
-        else:
-            self.lbl_lie_template.setText("❌ 템플릿 없음")
-            self.lbl_lie_template.setStyleSheet("color: red;")
-
-    def _capture_lie_template(self) -> None:
-        """RegionSelector로 영역 선택 후 번호가 붙은 템플릿으로 저장."""
-        self._selector = RegionSelector()
-        self._selector.region_selected.connect(self._save_lie_template)
-        self._selector.show()
-
-    def _save_lie_template(self, x: int, y: int, w: int, h: int) -> None:
-        import glob
-        os.makedirs("templates", exist_ok=True)
-        # 기존 파일 수 확인 후 다음 번호로 저장
-        existing = sorted(glob.glob("templates/lie_detector_*.png"))
-        next_num = len(existing) + 1
-        path = f"templates/lie_detector_{next_num}.png"
-        with mss.mss() as sct:
-            region = {"left": x, "top": y, "width": w, "height": h}
-            raw = sct.grab(region)
-            img = np.array(raw)
-            img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-            cv2.imwrite(path, img)
-        self._refresh_template_label()
-        QMessageBox.information(
-            self, "완료",
-            f"템플릿 {next_num}번 저장 완료 ({w}×{h} px)\n"
-            f"현재 총 {next_num}개 — 여러 장 추가할수록 감지율이 높아집니다."
-        )
-
-    def _clear_lie_templates(self) -> None:
-        """저장된 거짓말탐지기 템플릿을 모두 삭제한다."""
-        import glob
-        files = glob.glob("templates/lie_detector_*.png")
-        if not files:
-            QMessageBox.information(self, "알림", "삭제할 템플릿이 없습니다.")
-            return
-        reply = QMessageBox.question(
-            self, "삭제 확인",
-            f"템플릿 {len(files)}개를 모두 삭제하시겠습니까?",
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        for f in files:
-            os.remove(f)
-        self._refresh_template_label()
 
     # ── 투명 도형 찾기 설정 ───────────────────────────────────────────────
     def _build_transparent_shape_group(self):
@@ -386,6 +254,23 @@ class TabSettings1(QWidget):
         roi_row.addWidget(btn_roi)
         roi_row.addWidget(btn_roi_del)
         layout.addLayout(roi_row)
+
+        board_h_row = QHBoxLayout()
+        board_h_row.addWidget(QLabel("게임판 높이"))
+        from PyQt6.QtWidgets import QSpinBox as _QSpinBox
+        self.spin_transparent_board_h = _QSpinBox()
+        self.spin_transparent_board_h.setRange(100, 1200)
+        self.spin_transparent_board_h.setValue(500)
+        self.spin_transparent_board_h.setSuffix(" px")
+        self.spin_transparent_board_h.setFixedWidth(90)
+        self.spin_transparent_board_h.setToolTip(
+            "YOLO로 빨간 헤더 감지 후 그 아래 퍼즐 영역의 높이 (픽셀).\n"
+            "헤더 bottom부터 이 값만큼 board ROI로 자동 설정됩니다."
+        )
+        self.spin_transparent_board_h.valueChanged.connect(self._save_transparent_shape)
+        board_h_row.addWidget(self.spin_transparent_board_h)
+        board_h_row.addStretch()
+        layout.addLayout(board_h_row)
 
         self.chk_transparent_debug = QCheckBox("디버그 오버레이 표시 (cv2 창)")
         self.chk_transparent_debug.toggled.connect(self._save_transparent_shape)
@@ -498,6 +383,10 @@ class TabSettings1(QWidget):
                         self.chk_transparent_enabled.isChecked())
         self.config.set("settings1", "transparent_shape", "debug_overlay",
                         self.chk_transparent_debug.isChecked())
+        self.config.set("settings1", "transparent_shape", "yolo_model_path",
+                        self.edit_lie_yolo.text().strip())
+        self.config.set("settings1", "transparent_shape", "board_height",
+                        self.spin_transparent_board_h.value())
         self.config.save()
 
     # ── 유저발견 시 설정 ───────────────────────────────────────────────
@@ -628,36 +517,13 @@ class TabSettings1(QWidget):
     # ── config 연동 ───────────────────────────────────────────────────
     def load_from_config(self):
         ld = self.config.get("settings1", "lie_detector") or {}
+        self.edit_lie_yolo.setText(ld.get("yolo_model_path", ""))
         self.chk_lie_enabled.setChecked(ld.get("enabled", False))
         self.chk_play_alarm.setChecked(ld.get("play_alarm", False))
         self.chk_tg_enabled.setChecked(ld.get("tg_enabled", False))
         self.edit_tg_prefix.setText(ld.get("tg_prefix", ""))
         self.edit_tg_token.setText(ld.get("tg_token", ""))
         self.edit_tg_chat.setText(ld.get("tg_chat_id", ""))
-        region = ld.get("region")
-        if isinstance(region, dict) and region.get("x_ratio") is not None:
-            from core.config_manager import get_game_window_rect
-            ox, oy, cw, ch = get_game_window_rect(self.config)
-            if cw > 0:
-                disp_x = int(region["x_ratio"] * cw)
-                disp_y = int(region["y_ratio"] * ch)
-                disp_w = int(region["w_ratio"] * cw)
-                disp_h = int(region["h_ratio"] * ch)
-                self.lbl_lie_region.setText(f"감지 영역: X={disp_x} Y={disp_y} W={disp_w} H={disp_h} (비율)")
-            else:
-                self.lbl_lie_region.setText("감지 영역: 비율 저장됨")
-            self.lbl_lie_region.setStyleSheet("color: green;")
-        elif region and isinstance(region, list) and len(region) == 4:
-            x, y, w, h = region
-            self.lbl_lie_region.setText(f"감지 영역: X={x} Y={y} W={w} H={h}")
-            self.lbl_lie_region.setStyleSheet("color: green;")
-        else:
-            self.lbl_lie_region.setText("감지 영역: 전체 화면")
-            self.lbl_lie_region.setStyleSheet("color: gray;")
-        hk_key = ld.get("region_hotkey", "")
-        if hk_key:
-            self.btn_lie_region_hk.set_key(hk_key)
-
         ud = self.config.get("settings1", "user_detected") or {}
         self.chk_user_chat.setChecked(ud.get("enabled", False))
         self.spin_interval.setValue(ud.get("interval_minutes", 5))
@@ -671,18 +537,33 @@ class TabSettings1(QWidget):
             self.stat_spins[stat].setValue(sa.get(stat, 0))
 
         ts = self.config.get("settings1", "transparent_shape") or {}
+        # 로드 중 시그널이 _save_transparent_shape() 를 호출해 빈 경로로 덮어쓰는 것 방지
+        for _w in (self.chk_transparent_enabled, self.chk_transparent_debug,
+                   self.spin_transparent_board_h):
+            _w.blockSignals(True)
         self.chk_transparent_enabled.setChecked(bool(ts.get("enabled", False)))
         self.chk_transparent_debug.setChecked(bool(ts.get("debug_overlay", False)))
+        self.spin_transparent_board_h.setValue(int(ts.get("board_height", 500)))
+        for _w in (self.chk_transparent_enabled, self.chk_transparent_debug,
+                   self.spin_transparent_board_h):
+            _w.blockSignals(False)
         self._refresh_transparent_status_labels()
 
         yolo = self.config.get("yolo") or {}
+        for _w in (self.chk_yolo_enabled, self.spin_yolo_conf,
+                   self.spin_yolo_iou, self.spin_yolo_every_n):
+            _w.blockSignals(True)
         self.chk_yolo_enabled.setChecked(bool(yolo.get("enabled", False)))
         self.edit_yolo_model.setText(yolo.get("model_path", ""))
         self.spin_yolo_conf.setValue(float(yolo.get("confidence", 0.5)))
         self.spin_yolo_iou.setValue(float(yolo.get("iou", 0.45)))
         self.spin_yolo_every_n.setValue(int(yolo.get("every_n_frame", 2)))
+        for _w in (self.chk_yolo_enabled, self.spin_yolo_conf,
+                   self.spin_yolo_iou, self.spin_yolo_every_n):
+            _w.blockSignals(False)
 
     def save_to_config(self):
+        self.config.set("settings1", "lie_detector", "yolo_model_path", self.edit_lie_yolo.text().strip())
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())
         self.config.set("settings1", "lie_detector", "play_alarm",    self.chk_play_alarm.isChecked())
         self.config.set("settings1", "lie_detector", "tg_enabled",   self.chk_tg_enabled.isChecked())
@@ -703,5 +584,10 @@ class TabSettings1(QWidget):
         self.config.set("yolo", "confidence",    self.spin_yolo_conf.value())
         self.config.set("yolo", "iou",           self.spin_yolo_iou.value())
         self.config.set("yolo", "every_n_frame", self.spin_yolo_every_n.value())
+
+        self.config.set("settings1", "transparent_shape", "yolo_model_path",
+                        self.edit_lie_yolo.text().strip())
+        self.config.set("settings1", "transparent_shape", "board_height",
+                        self.spin_transparent_board_h.value())
 
 

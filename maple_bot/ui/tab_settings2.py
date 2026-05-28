@@ -1479,10 +1479,14 @@ class TabSettings2(QWidget):
         enabled = bool(junk.get("junk_sell_enabled", False))
         self.chk_junk_sell.setChecked(enabled)
 
-        # 자동 판매 주기 설정 로드
+        # 자동 판매 주기 설정 로드 (신호 차단으로 config 덮어쓰기 방지)
+        for _w in (self.chk_auto_sell, self.spin_auto_sell_interval, self.chk_sell_on_start):
+            _w.blockSignals(True)
         self.chk_auto_sell.setChecked(bool(junk.get("auto_sell_enabled", False)))
         self.spin_auto_sell_interval.setValue(int(junk.get("auto_sell_interval_min", 10)))
         self.chk_sell_on_start.setChecked(bool(junk.get("sell_on_start", False)))
+        for _w in (self.chk_auto_sell, self.spin_auto_sell_interval, self.chk_sell_on_start):
+            _w.blockSignals(False)
         safe_x = int(junk.get("safe_zone_x", -1))
         safe_y = int(junk.get("safe_zone_y", -1))
         if safe_x >= 0:

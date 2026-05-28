@@ -29,7 +29,7 @@ class RopePoint:
     name: str = "밧줄"
     x: int = 0                  # 미니맵 기준 X 좌표
     approach: str = "both"      # "left" | "right" | "both"
-    jump_offset: int = 15       # 밧줄에서 몇 픽셀 옆에서 점프할지
+    jump_offset: int = 5        # 밧줄에서 몇 픽셀 옆에서 점프할지
     climb_sec: float = 2.5      # 밧줄 오르는 데 걸리는 시간 (초)
 
     def to_dict(self, mm_w: int = 0) -> dict:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import random
 import time
+import threading
 import logging
 from typing import Callable
 
@@ -26,8 +27,22 @@ class KeyHunter:
         self._on_move_tick = on_move_tick or (lambda: None)
         self._pattern: KeyPattern | None = None
         self._step_index: int = 0
+        self._pause_event = threading.Event()
+        self._pause_event.set()   # 초기 상태: 실행 중
 
     # ── 외부 제어 ─────────────────────────────────────────────────────
+    def pause(self) -> None:
+        """공격 스레드를 일시정지한다 (현재 진행 중인 sleep 도 즉시 중단)."""
+        self._pause_event.clear()
+
+    def resume(self) -> None:
+        """공격 스레드를 재개한다."""
+        self._pause_event.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return not self._pause_event.is_set()
+
     def set_pattern(self, pattern: KeyPattern) -> None:
         self._pattern = pattern
         self._step_index = 0
@@ -40,20 +55,23 @@ class KeyHunter:
 
     # ── 이동 유지 sleep ───────────────────────────────────────────────
     def _sleep_with_move(self, duration: float) -> None:
-        """duration초 동안 50ms 단위로 on_move_tick을 호출해 이동 방향키를 유지한다."""
+        """duration초 동안 50ms 단위로 on_move_tick을 호출해 이동 방향키를 유지한다.
+        pause() 호출 시 즉시 중단."""
         _TICK = 0.05
         end = time.time() + duration
         while True:
+            if not self._pause_event.is_set():
+                break  # 일시정지 — 즉시 중단
             remaining = end - time.time()
             if remaining <= 0:
                 break
             time.sleep(min(_TICK, remaining))
             self._on_move_tick()
 
-    # ── 메인 실행 (bot_loop에서 매 틱 호출) ──────────────────────────
+    # ── 메인 실행 (attack_loop 스레드에서 호출) ───────────────────────
     def run_one_step(self) -> None:
         """현재 스텝을 랜덤 타이밍으로 실행하고 다음 스텝으로 전진."""
-        if not self.has_pattern():
+        if not self.has_pattern() or not self._pause_event.is_set():
             return
 
         step = self._pattern.steps[self._step_index]

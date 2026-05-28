@@ -103,6 +103,9 @@ class BotLoop:
         self._enable_lie_solve  = True   # 거탐 해제 (퍼즐 자동 풀기)
         self._enable_transparent_shape = True  # 투명 도형 찾기 자동 해제
         self._transparent_game  = None   # lazy init: TransparentShapeGame
+        self._transparent_yolo  = None   # lazy init: YoloDetector (투명 도형 전용)
+        self._safety_pending: str | None = None  # 백그라운드 감지 결과: "lie" | "transparent"
+        self._lie_yolo      = None               # lazy init: YoloDetector (거짓말탐지기 전용)
         self._anti_mob_active   = False  # 방지몹 해제 중 재진입 방지
 
         # 자동 판매 상태
@@ -305,6 +308,17 @@ class BotLoop:
     def _run(self) -> None:
         logger.info("봇 루프 시작")
 
+        # 백그라운드 스레드 시작
+        import threading as _th
+        _safety_th = _th.Thread(
+            target=self._safety_detect_loop, daemon=True, name="safety-detect"
+        )
+        _safety_th.start()
+        _attack_th = _th.Thread(
+            target=self._attack_loop, daemon=True, name="attack"
+        )
+        _attack_th.start()
+
         # 층별 핑퐁 사냥 모드 — 구역을 이름순으로 순환
         floor_cfg      = self._config.get("floor_hunt") or {}
         use_floor_hunt = bool(floor_cfg.get("enabled", False))
@@ -332,6 +346,7 @@ class BotLoop:
         fh_route_idx:   int   = 0        # 현재 루트 단계
         fh_route_mode:  bool  = False    # True=커스텀 루트, False=자동 왕복
         fh_fall_timer:  float = 0.0      # B안 낙사 감지: 전체 구역 밖 진입 시각 (0=미감지)
+        fh_to_rope_dir: str   = "right"  # to_rope 이동 방향 (pos 미감지 시 방향 유지용)
         FH_ROPE_EDGE    = 8              # 밧줄 도달 판정 픽셀
         FH_CLIMB_SEC    = 2.5            # UP 키 유지 시간 (초)
         FH_Y_COOLDOWN   = 4.0            # 도착 후 Y 감지 비활성 시간 (초)
@@ -421,32 +436,55 @@ class BotLoop:
                 try:
                     now = time.time()
 
+                    # ── 공격 스레드 pause/resume (루프 최상단 — continue 이전에 항상 실행) ──
+                    _on_transit_top = (use_floor_hunt and bool(fh_zones) and fh_state == "patrol"
+                                       and fh_zones[fh_idx].sweeps == 0)
+                    _can_attack_now = (
+                        not self._auto_sell_active
+                        and (not use_floor_hunt
+                             or (fh_state == "patrol" and not _on_transit_top))
+                    )
+                    if _can_attack_now:
+                        self._key_hunter.resume()
+                    else:
+                        self._key_hunter.pause()
+
                     # 게임 창 포커스 유지
                     if self._enable_move and now - last_focus >= FOCUS_INTERVAL:
                         self._map_navigator.release_direction()
                         self._input.focus_game_window()
                         last_focus = now
 
-                    # 안전 감지 (화면 캡처)
-                    if now - last_safety >= SAFETY_CHECK_INTERVAL:
-                        screenshot = self._screen.capture()
-                        last_safety = now
-                        if (self._enable_lie_notify or self._enable_lie_solve) and self._check_lie_detector(screenshot):
-                            if use_floor_hunt:
-                                fh_last_side = ""   # 거탐 해제 후 직전 방향 무효화
-                                if fh_state != "patrol":  # 층 이동 중이었다면 순찰로 복귀
-                                    self._input.key_up("up")
-                                    self._map_navigator.release_direction()
-                                    fh_state = "patrol"
-                            continue
-                        if self._enable_transparent_shape and self._check_transparent_shape(screenshot):
-                            if use_floor_hunt:
+                    # ── 백그라운드 감지 결과 처리 (거짓말탐지기 · 투명도형) ──
+                    _pending = self._safety_pending
+                    if _pending:
+                        self._safety_pending = None
+                        self._key_hunter.pause()   # 핸들러 실행 전 즉시 공격 중단
+                        _shot = self._screen.capture()
+                        _handled = False
+                        if _pending == "lie":
+                            _handled = self._check_lie_detector(_shot)
+                            if _handled and use_floor_hunt:
                                 fh_last_side = ""
                                 if fh_state != "patrol":
                                     self._input.key_up("up")
                                     self._map_navigator.release_direction()
                                     fh_state = "patrol"
+                        elif _pending == "transparent":
+                            _handled = self._check_transparent_shape(_shot)
+                            if _handled and use_floor_hunt:
+                                fh_last_side = ""
+                                if fh_state != "patrol":
+                                    self._input.key_up("up")
+                                    self._map_navigator.release_direction()
+                                    fh_state = "patrol"
+                        if _handled:
                             continue
+
+                    # ── 경량 안전 감지 (죽음·레벨업·유저·맵이탈) ──────────
+                    if now - last_safety >= SAFETY_CHECK_INTERVAL:
+                        screenshot = self._screen.capture()
+                        last_safety = now
                         if self._check_dead(screenshot):
                             continue
                         self._check_user_on_map(screenshot)
@@ -675,10 +713,12 @@ class BotLoop:
                             fh_climb_sec   = rp.climb_sec
                             fh_next_idx    = fh_zones.index(to_zone)
                             fh_next_dir    = 1 if to_zone.y_min < fh_zones[fh_idx].y_min else -1
+                            _pcx           = pos[0] if pos is not None else rp.x
+                            fh_to_rope_dir = "right" if rp.x > _pcx else "left"
                             fh_state       = "to_rope"
                             fh_half_count  = 0
                             fh_last_side   = ""
-                            self._map_navigator.release_direction()
+                            # release_direction 제거 — walk_toward가 즉시 방향 설정
                             self._status(f"🎒 픽업 타이머 발동 → {to_name}")
                         else:
                             last_pickup_time = now  # 오류 시 타이머 리셋 (스팸 방지)
@@ -708,21 +748,40 @@ class BotLoop:
                                 # 점프 방향: approach 설정 기반 (v1.2.1 방식 유지)
                                 _crp = fh_current_rope
                                 if _crp is not None:
-                                    _ax = _crp.x  # jump_offset 미적용, 밧줄 X 그대로
+                                    # jump_offset 적용: 밧줄 옆에서 점프해 밧줄을 공중에서 잡음
                                     if _crp.approach == "left":
+                                        _ax = _crp.x - _crp.jump_offset
                                         _jd = "right"
                                     elif _crp.approach == "right":
+                                        _ax = _crp.x + _crp.jump_offset
                                         _jd = "left"
                                     else:  # both — 현재 위치 기준
-                                        _jd = "right" if cx <= _crp.x else "left"
+                                        if cx <= _crp.x:
+                                            _ax = _crp.x - _crp.jump_offset
+                                            _jd = "right"
+                                        else:
+                                            _ax = _crp.x + _crp.jump_offset
+                                            _jd = "left"
                                 else:
                                     _ax = fh_rope_x
                                     _jd = "right" if fh_rope_x > cx else "left"
+                                # 점프 전 이동 방향 저장 (pos 미감지 시 폴백용)
+                                fh_to_rope_dir = "right" if _ax > cx else "left"
                                 if abs(cx - _ax) <= FH_ROPE_EDGE:
                                     jump_key = self._minimap_reader.config.jump_key or "alt"
-                                    if fh_next_dir > 0:        # 위층 — 걷기 방향 유지한 채 점프
-                                        self._input.press_key(jump_key, hold_sec=0.12)
-                                        self._map_navigator.release_direction()  # 점프 후 해제
+                                    if fh_next_dir > 0:        # 위층 — 방향키 꾹 누른 채 점프
+                                        # _jd 방향키를 keepalive와 무관하게 직접 key_down
+                                        self._map_navigator.walk_toward(
+                                            1 if _jd == "right" else 0,
+                                            0 if _jd == "right" else 1,
+                                        )
+                                        self._input.key_down(_jd)   # 방향키 확실히 누름
+                                        # 방향키 유지한 채 점프키 누름/뗌
+                                        self._input.key_down(jump_key)
+                                        time.sleep(0.12)
+                                        self._input.key_up(jump_key)
+                                        # 점프 후 방향키 해제 → UP으로 전환
+                                        self._map_navigator.release_direction()
                                         self._input.key_down("up")
                                     else:                       # 아래층 — 멈춰서 down+jump
                                         self._map_navigator.release_direction()
@@ -737,6 +796,13 @@ class BotLoop:
                                     self._status(f"[층별] → {fh_zones[fh_next_idx].name} 이동 중")
                                 else:
                                     self._map_navigator.walk_toward(_ax, cx)
+                            else:
+                                # pos 감지 실패 — 마지막으로 확인된 방향으로 이동 유지
+                                # (전환 직후 release_direction 후 감지 실패 시에도 끊기지 않음)
+                                self._map_navigator.walk_toward(
+                                    1 if fh_to_rope_dir == "right" else 0,
+                                    0 if fh_to_rope_dir == "right" else 1,
+                                )
 
                         elif fh_state == "climbing":
                             # ── 오르기 / 내려가기 대기 ────────────────
@@ -1010,11 +1076,13 @@ class BotLoop:
                                         fh_climb_sec    = rp.climb_sec
                                         fh_next_idx     = fh_zones.index(to_zone)
                                         fh_next_dir     = 1 if to_zone.y_min < zone.y_min else -1
+                                        _tcx            = pos[0] if pos is not None else rp.x
+                                        fh_to_rope_dir  = "right" if rp.x > _tcx else "left"
                                         fh_state        = "to_rope"
                                         fh_half_count   = 0
                                         fh_last_side    = ""
                                         fh_route_idx   += 1
-                                        self._map_navigator.release_direction()
+                                        # release_direction 제거 — walk_toward가 즉시 방향 설정
                                         _transit_moved = True
                                 if not _transit_moved:
                                     n        = len(fh_zones)
@@ -1046,12 +1114,14 @@ class BotLoop:
                                             fh_rope_x       = zone.right_x
                                             fh_current_rope = None
                                             fh_climb_sec    = 2.5
-                                        fh_next_idx   = next_idx
-                                        fh_next_dir   = fh_dir
-                                        fh_state      = "to_rope"
-                                        fh_half_count = 0
-                                        fh_last_side  = ""
-                                        self._map_navigator.release_direction()
+                                        fh_next_idx    = next_idx
+                                        fh_next_dir    = fh_dir
+                                        _tcx           = pos[0] if pos is not None else fh_rope_x
+                                        fh_to_rope_dir = "right" if fh_rope_x > _tcx else "left"
+                                        fh_state       = "to_rope"
+                                        fh_half_count  = 0
+                                        fh_last_side   = ""
+                                        # release_direction 제거 — walk_toward가 즉시 방향 설정
 
                             if not _transit and pos is not None:
                                 cx = pos[0]
@@ -1101,11 +1171,12 @@ class BotLoop:
                                                 fh_next_dir     = (
                                                     1 if to_zone.y_min < zone.y_min else -1
                                                 )
+                                                fh_to_rope_dir  = "right" if rp.x > cx else "left"
                                                 fh_state        = "to_rope"
                                                 fh_half_count   = 0
                                                 fh_last_side    = ""
                                                 fh_route_idx   += 1
-                                                self._map_navigator.release_direction()
+                                                # release_direction 제거 — walk_toward가 즉시 방향 설정
                                                 self._status(
                                                     f"[층별] {zone.name} 완료 "
                                                     f"→ {to_name} (밧줄: {rp_name})"
@@ -1157,12 +1228,13 @@ class BotLoop:
                                                     fh_rope_x       = zone.right_x
                                                     fh_current_rope = None
                                                     fh_climb_sec    = 2.5
-                                                fh_next_idx   = next_idx
-                                                fh_next_dir   = 1 if fh_zones[next_idx].y_min < zone.y_min else -1
-                                                fh_state      = "to_rope"
-                                                fh_half_count = 0
-                                                fh_last_side  = ""
-                                                self._map_navigator.release_direction()
+                                                fh_next_idx    = next_idx
+                                                fh_next_dir    = 1 if fh_zones[next_idx].y_min < zone.y_min else -1
+                                                fh_to_rope_dir = "right" if fh_rope_x > cx else "left"
+                                                fh_state       = "to_rope"
+                                                fh_half_count  = 0
+                                                fh_last_side   = ""
+                                                # release_direction 제거 — walk_toward가 즉시 방향 설정
                                                 self._status(
                                                     f"[층별] {zone.name} 완료 "
                                                     f"→ {fh_zones[next_idx].name} 이동"
@@ -1206,7 +1278,7 @@ class BotLoop:
                             except Exception as _ye:
                                 logger.warning("YOLO 파이프라인 오류: %s", _ye)
 
-                    # 이동 + 스킬 (층 이동 중 또는 통과 층에서는 스킵)
+                    # 이동 (층 이동 중 또는 통과 층에서는 스킵)
                     _on_transit = (use_floor_hunt and bool(fh_zones) and fh_state == "patrol"
                                    and fh_zones[fh_idx].sweeps == 0)
                     if not use_floor_hunt or (fh_state == "patrol" and not _on_transit):
@@ -1216,8 +1288,6 @@ class BotLoop:
                             # bot_loop의 to_rope 점프 전에 extra 점프가 발생하므로 취소
                             if use_floor_hunt:
                                 self._map_navigator.cancel_rope_state()
-                        if self._enable_attack:
-                            self._key_hunter.run_one_step()
 
                 except Exception as exc:
                     logger.exception("루프 오류: %s", exc)
@@ -1256,6 +1326,26 @@ class BotLoop:
             self._as_phase          = "idle"
             self._as_return_to_hunt = True   # 메인 루프에 사냥 구역 복귀 신호
             self._status("자동 판매 완료 — 사냥 구역 복귀 중...")
+
+    # ── 공격 패턴 전용 루프 (별도 스레드) ───────────────────────────────
+    def _attack_loop(self) -> None:
+        """공격 패턴을 메인 루프와 독립적으로 실행하는 전용 스레드.
+
+        fh_state 가 to_rope/climbing 이거나 자동 판매 중에는
+        KeyHunter.pause() 로 중단 신호가 전달되어 자동으로 대기한다.
+        """
+        while not self._stop_event.is_set():
+            try:
+                if self._enable_attack and self._key_hunter.has_pattern():
+                    if self._key_hunter.is_paused:
+                        # 일시정지 중 타이트 스핀 방지 — GIL 양보로 방향키 스레드 우선 실행
+                        self._stop_event.wait(0.05)
+                    else:
+                        self._key_hunter.run_one_step()
+                else:
+                    self._stop_event.wait(0.05)
+            except Exception as exc:
+                logger.warning("attack_loop 오류: %s", exc)
 
     # ── 방향키 유지 전용 루프 (별도 스레드) ──────────────────────────
     def _direction_keepalive_loop(self) -> None:
@@ -1304,7 +1394,7 @@ class BotLoop:
                             pet_logged = True
                         if now - last_pet >= interval_sec:
                             for _ in range(count):
-                                self._input.press_key(key)
+                                self._input.press_key(key, hold_sec=0.35)
                                 time.sleep(0.15)
                             self._status(f"🐾 펫먹이 급여 완료 — [{key}] {count}마리")
                             last_pet = now
@@ -1324,7 +1414,7 @@ class BotLoop:
                         key_id   = (btype, i)
                         interval = float(buff.get("interval_sec", 180))
                         if now - last_buffs.get(key_id, 0.0) >= interval:
-                            self._input.press_key(buff["key"].strip())
+                            self._input.press_key(buff["key"].strip(), hold_sec=0.35)
                             last_buffs[key_id] = time.time()
                             self._status(f"✨ {label} 사용 ({buff['key']})")
                             time.sleep(0.7)  # 스킬 모션 완료 대기 (다음 버프 캔슬 방지)
@@ -1334,14 +1424,121 @@ class BotLoop:
             self._stop_event.wait(timeout=POTION_CHECK_INTERVAL)
         logger.info("포션 루프 종료")
 
+    # ── 백그라운드 안전 감지 스레드 ──────────────────────────────────────
+    def _safety_detect_loop(self) -> None:
+        """거짓말탐지기·투명도형 감지 전용 백그라운드 스레드.
+
+        무거운 YOLO 추론과 템플릿 매칭을 메인 루프 밖에서 실행해
+        공격/이동 딜레이를 방지한다.
+        감지 시 self._safety_pending 에 "lie" 또는 "transparent" 를 저장.
+        메인 루프가 처리한 뒤 None 으로 초기화.
+        """
+        import glob
+        from core.config_manager import resolve_region_coords, logical_to_physical_coords
+        from core.transparent_shape_game import TITLE_TEMPLATE, TITLE_THRESHOLD
+
+        while not self._stop_event.is_set():
+            try:
+                if self._safety_pending is None:
+                    screenshot = self._screen.capture()
+
+                    # ── 거짓말탐지기 감지 ────────────────────────────────
+                    if self._enable_lie_notify or self._enable_lie_solve:
+                        lie_cfg = self._config.get("settings1", "lie_detector") or {}
+                        if lie_cfg.get("enabled"):
+                            _lie_yolo_path = (lie_cfg.get("yolo_model_path") or "").strip()
+
+                            if _lie_yolo_path:
+                                # ── YOLO 전용 감지 (템플릿 매칭 사용 안 함) ──
+                                if self._lie_yolo is None:
+                                    try:
+                                        from core.yolo_detector import YoloDetector
+                                        self._lie_yolo = YoloDetector(
+                                            _lie_yolo_path,
+                                            confidence=float(lie_cfg.get("yolo_confidence", 0.25)),
+                                            iou=0.45,
+                                            max_det=5,
+                                        )
+                                        logger.info("거짓말탐지기 YOLO 로드: %s", _lie_yolo_path)
+                                    except Exception as _e:
+                                        logger.warning("거짓말탐지기 YOLO 로드 실패: %s", _e)
+                                        self._lie_yolo = None
+
+                                if self._lie_yolo and self._lie_yolo.is_loaded:
+                                    _det = self._lie_yolo.detect(screenshot)
+                                    if _det["monsters"]:
+                                        self._safety_pending = "lie"
+                            else:
+                                # ── 템플릿 매칭 폴백 (YOLO 미설정 시) ──
+                                patterns = sorted(glob.glob("templates/lie_detector_*.png"))
+                                if patterns:
+                                    region = lie_cfg.get("region")
+                                    resolved = resolve_region_coords(self._config, region)
+                                    if resolved:
+                                        rx, ry, rw, rh = resolved
+                                        rpx, rpy, rpw, rph = logical_to_physical_coords(
+                                            rx, ry, rw, rh
+                                        )
+                                        target = self._screen.capture(
+                                            {"left": rpx, "top": rpy,
+                                             "width": rpw, "height": rph}
+                                        )
+                                    else:
+                                        target = screenshot
+                                    for tpl_path in patterns:
+                                        _lie_score = self._screen.find_template_score(
+                                            target, tpl_path
+                                        )
+                                        if _lie_score >= 0.65:
+                                            self._safety_pending = "lie"
+                                            break
+                                        elif _lie_score >= 0.3:
+                                            import os as _os
+                                            self._status(
+                                                f"[거탐] {_os.path.basename(tpl_path)} "
+                                                f"점수={_lie_score:.3f} (기준 0.65 미달)"
+                                            )
+
+                    # ── 투명 도형 찾기 감지 ──────────────────────────────
+                    if self._safety_pending is None and self._enable_transparent_shape:
+                        ts_cfg = self._config.get("settings1", "transparent_shape") or {}
+                        if ts_cfg.get("enabled"):
+                            detected = False
+                            # YOLO 감지
+                            if self._transparent_yolo and self._transparent_yolo.is_loaded:
+                                det = self._transparent_yolo.detect(screenshot)
+                                if det["monsters"]:
+                                    detected = True
+                            # 템플릿 매칭 폴백
+                            if not detected:
+                                score = self._screen.find_template_score(
+                                    screenshot, TITLE_TEMPLATE
+                                )
+                                if score >= TITLE_THRESHOLD:
+                                    detected = True
+                            if detected:
+                                self._safety_pending = "transparent"
+
+            except Exception as exc:
+                logger.warning("_safety_detect_loop 오류: %s", exc)
+
+            self._stop_event.wait(SAFETY_CHECK_INTERVAL)
+
     # ── 감지 핸들러 ───────────────────────────────────────────────────
     def _check_transparent_shape(self, screenshot) -> bool:
-        """투명 도형 찾기 미니게임 감지 시 폐루프 추적 루프를 실행한다."""
+        """투명 도형 찾기 미니게임 감지 시 폐루프 추적 루프를 실행한다.
+
+        감지 우선순위:
+          1. YOLO (settings1.transparent_shape.yolo_model_path 설정 시)
+          2. 템플릿 매칭 폴백 (templates/transparent_shape_title.png)
+
+        YOLO 감지 시 board ROI를 bbox에서 자동 계산 (수동 좌표 설정 불필요).
+        """
         cfg = self._config.get("settings1", "transparent_shape") or {}
         if not cfg.get("enabled"):
-            return False
+            return False  # 설정1 탭에서 "투명 도형 찾기 활성화" 체크 필요
 
-        # lazy init
+        # lazy init TransparentShapeGame
         if self._transparent_game is None:
             from core.transparent_shape_game import TransparentShapeGame
             self._transparent_game = TransparentShapeGame(
@@ -1349,17 +1546,84 @@ class BotLoop:
             )
             self._transparent_game.window_title = self._game_window_title()
 
-        title_pos = self._transparent_game.detect_title(screenshot)
-        if title_pos is None:
-            return False
+        # ── 1단계: YOLO 감지 시도 ─────────────────────────────────────
+        detected_bbox = None  # [x1, y1, x2, y2] — 헤더 bbox
+        yolo_model_path = (cfg.get("yolo_model_path") or "").strip()
+        if yolo_model_path:
+            # lazy init 투명 도형 전용 YOLO (신뢰도 0.25 — 소량 학습 데이터 대응)
+            if self._transparent_yolo is None:
+                try:
+                    from core.yolo_detector import YoloDetector
+                    self._transparent_yolo = YoloDetector(
+                        yolo_model_path,
+                        confidence=float(cfg.get("yolo_confidence", 0.25)),
+                        iou=0.45,
+                        max_det=5,
+                    )
+                    logger.info("투명 도형 YOLO 로드: %s", yolo_model_path)
+                except Exception as e:
+                    logger.warning("투명 도형 YOLO 로드 실패: %s", e)
+                    self._transparent_yolo = None
 
+            if self._transparent_yolo and self._transparent_yolo.is_loaded:
+                det = self._transparent_yolo.detect(screenshot)
+                if det["monsters"]:
+                    best = max(det["monsters"], key=lambda m: m["conf"])
+                    detected_bbox = best["box"]  # [x1, y1, x2, y2]
+
+        # ── 2단계: 템플릿 매칭 폴백 ──────────────────────────────────
+        if detected_bbox is None:
+            title_pos = self._transparent_game.detect_title(screenshot)
+            if title_pos is None:
+                return False
+            # 템플릿 중심 좌표로 헤더 bbox 추정 → dynamic_roi 자동 계산에 활용
+            # (config board_roi의 잘못된 좌표 사용 방지)
+            try:
+                import cv2 as _cv2
+                from core.transparent_shape_game import TITLE_TEMPLATE as _TTPL
+                _tpl = _cv2.imread(_TTPL)
+                if _tpl is not None:
+                    _th, _tw = _tpl.shape[:2]
+                    _tx, _ty = title_pos
+                    detected_bbox = [_tx - _tw // 2, _ty - _th // 2,
+                                     _tx + _tw // 2, _ty + _th // 2]
+            except Exception:
+                pass
+
+        # ── 감지 확정 → 추적 시작 ────────────────────────────────────
         self._status("투명 도형 찾기 감지! 마우스 추적 시작...")
+
+        # bbox → board ROI 자동 계산 (헤더 아래가 게임판)
+        # YOLO: x1,y1,x2,y2 = bbox / 템플릿: title_pos로 추정한 bbox
+        dynamic_roi = None
+        if detected_bbox is not None:
+            x1, y1, x2, y2 = detected_bbox
+            board_h = int(cfg.get("board_height", 500))
+            dynamic_roi = (x1, y2, x2 - x1, board_h)
+            self._status(
+                f"투명 도형 찾기: board ROI 자동 ({x1},{y2}) {x2 - x1}×{board_h}"
+            )
+
+        # 게임 종료 감지 함수 — YOLO 있으면 YOLO, 없으면 템플릿 매칭
+        _yolo_ref = self._transparent_yolo  # 클로저 캡처
+
+        def _detect_end(shot) -> bool:
+            """True = 게임 아직 진행 중, False = 게임 종료."""
+            if _yolo_ref and _yolo_ref.is_loaded and detected_bbox is not None:
+                det = _yolo_ref.detect(shot)
+                return bool(det["monsters"])
+            return self._transparent_game.detect_title(shot) is not None
+
         floor_cfg = self._config.get("floor_hunt") or {}
         if floor_cfg.get("enabled"):
             self._floor_hunter.pause()
         try:
             self._input.focus_game_window()
-            self._transparent_game.run_follow_loop(self._status)
+            self._transparent_game.run_follow_loop(
+                self._status,
+                board_roi=dynamic_roi,
+                detect_end_fn=_detect_end,
+            )
         finally:
             if floor_cfg.get("enabled"):
                 self._floor_hunter.resume()
@@ -1377,43 +1641,63 @@ class BotLoop:
         if not cfg.get("enabled"):
             return False
 
-        # templates/lie_detector_*.png 파일을 모두 검사 — 하나라도 매칭되면 감지
-        import glob
-        patterns = sorted(glob.glob("templates/lie_detector_*.png"))
-        if not patterns:
-            self._status("⚠ 거짓말탐지기 템플릿 없음 — 설정1 탭에서 캡처 필요")
-            return False
+        # ── 감지: YOLO 우선, 템플릿 매칭 폴백 ─────────────────────────
+        _lie_yolo_path = (cfg.get("yolo_model_path") or "").strip()
+        matched_pos  = None
+        best_score   = 0.0
+        detect_mode  = ""
+        region       = cfg.get("region")
 
-        # 감지 영역이 설정돼 있으면 해당 영역만 캡처해서 검사
-        region = cfg.get("region")
-        from core.config_manager import resolve_region_coords, logical_to_physical_coords
-        resolved = resolve_region_coords(self._config, region)
-        if resolved:
-            rx, ry, rw, rh = resolved
-            rpx, rpy, rpw, rph = logical_to_physical_coords(rx, ry, rw, rh)
-            target = self._screen.capture({"left": rpx, "top": rpy, "width": rpw, "height": rph})
+        if _lie_yolo_path:
+            # YOLO 전용
+            # _safety_detect_loop 에서 이미 감지 확인됨 → 재감지 실패해도 알림·해제 진행
+            if self._lie_yolo and self._lie_yolo.is_loaded:
+                _det = self._lie_yolo.detect(screenshot)
+                if _det["monsters"]:
+                    _b = _det["monsters"][0]["box"]   # [x1, y1, x2, y2]
+                    matched_pos = (int((_b[0] + _b[2]) / 2), int((_b[1] + _b[3]) / 2))
+                    detect_mode = f"YOLO conf={_det['monsters'][0]['conf']:.2f}"
+                else:
+                    # 재감지 실패 — 화면이 이미 투명도형 찾기로 전환됐을 가능성 높음
+                    # 알림·해제는 계속 진행 (matched_pos=None 이므로 run_follow_loop 사용)
+                    detect_mode = "YOLO 감지됨 (재감지 실패 — 화면 전환 추정)"
+            else:
+                self._status("거짓말탐지기 YOLO: 모델 미로드 — 설정1 탭의 모델 경로를 확인하세요")
+                return False
         else:
-            target = screenshot
+            # 템플릿 매칭 폴백
+            import glob
+            from core.config_manager import resolve_region_coords, logical_to_physical_coords
+            patterns = sorted(glob.glob("templates/lie_detector_*.png"))
+            if not patterns:
+                self._status("⚠ 거짓말탐지기 템플릿 없음 — 설정1 탭에서 캡처 필요")
+                return False
 
-        matched_pos = None
-        best_score = 0.0
-        for tpl_path in patterns:
-            score = self._screen.find_template_score(target, tpl_path)
-            if score > best_score:
-                best_score = score
-            if score >= 0.65:
-                matched_pos = self._screen.find_template(target, tpl_path, threshold=0.65)
-                if matched_pos:
-                    # 영역이 설정된 경우 절대 좌표로 변환
-                    if region and matched_pos:
-                        matched_pos = (matched_pos[0] + rx, matched_pos[1] + ry)
-                    break
+            resolved = resolve_region_coords(self._config, region)
+            if resolved:
+                rx, ry, rw, rh = resolved
+                rpx, rpy, rpw, rph = logical_to_physical_coords(rx, ry, rw, rh)
+                target = self._screen.capture({"left": rpx, "top": rpy, "width": rpw, "height": rph})
+            else:
+                target = screenshot
 
-        if matched_pos is None:
-            self._status(f"[탐지기 점수] {best_score:.2f}  (기준 0.65 이상이면 감지)")
-            return False
+            for tpl_path in patterns:
+                score = self._screen.find_template_score(target, tpl_path)
+                if score > best_score:
+                    best_score = score
+                if score >= 0.65:
+                    matched_pos = self._screen.find_template(target, tpl_path, threshold=0.65)
+                    if matched_pos:
+                        if region and matched_pos:
+                            matched_pos = (matched_pos[0] + rx, matched_pos[1] + ry)
+                        break
 
-        self._status(f"거짓말탐지기 감지! (템플릿 {len(patterns)}개 중 매칭)")
+            if matched_pos is None:
+                self._status(f"[탐지기 점수] {best_score:.2f}  (기준 0.65 이상이면 감지)")
+                return False
+            detect_mode = f"템플릿 {len(patterns)}개 중 매칭"
+
+        self._status(f"거짓말탐지기 감지! ({detect_mode})")
 
         # ── 상세 로그 — ① 감지 영역 ────────────────────────────────────
         self._lie_log("━━━━━ 거짓말탐지기 감지 ━━━━━")
@@ -1422,7 +1706,7 @@ class BotLoop:
             self._lie_log(f"① 감지 영역  X={rx} Y={ry} W={rw} H={rh}  [설정됨]")
         else:
             self._lie_log("① 감지 영역  전체 화면 (미설정)")
-        self._lie_log(f"   템플릿 {len(patterns)}개 검사  최고 점수={best_score:.3f}  위치={matched_pos}")
+        self._lie_log(f"   감지 방식={detect_mode}  위치={matched_pos}")
 
         # ── 알림 (거탐 알림 모듈이 켜진 경우) ────────────────────────
         if self._enable_lie_notify:
@@ -1473,223 +1757,18 @@ class BotLoop:
                 self._transparent_game.run_follow_loop(self._status)
                 self._status("거짓말탐지기 → 투명 도형 찾기 완료")
             else:
-                # 3. 퍼즐 해제 — 수동 좌표 설정 시 우선 사용
-                has_manual = all(cfg.get(k) for k in ("puzzle_area", "piece_area", "next_btn", "confirm_btn"))
-                if has_manual:
-                    self._solve_lie_detector_manual()
-                else:
+                # 투명 도형 찾기 비활성 시 슬라이딩 퍼즐 해제 (matched_pos = YOLO bbox 중심)
+                if matched_pos:
                     self._input.focus_game_window()
                     time.sleep(0.3)
                     self._solve_lie_detector(matched_pos)
+                else:
+                    self._status("⚠ 거짓말탐지기 위치 미확인 — YOLO 모델 설정 필요")
             time.sleep(0.8)
         finally:
             if floor_cfg.get("enabled"):
                 self._floor_hunter.resume()
         return True
-
-    def _solve_lie_detector_manual(self) -> None:
-        """설정된 좌표(②~⑤)로 거짓말탐지기 퍼즐을 사람처럼 해제한다.
-        흐름: ② 빈칸 X 감지 → ④ >> 클릭 → ③ 바를 빈칸 X에 맞춰 드래그 → ⑤ 확인"""
-        import cv2
-        import numpy as np
-
-        cfg = self._config.get("settings1", "lie_detector") or {}
-
-        # ── 상대좌표 → 절대좌표 변환 ──────────────────────────────────
-        coord_mode = cfg.get("coord_mode", "absolute")
-        if coord_mode == "relative":
-            origin = self._screen.get_window_client_origin(self._game_window_title())
-            if origin is None:
-                self._status("⚠ MapleStory 창을 찾을 수 없음 — 상대좌표 변환 실패")
-                return
-            ox, oy = origin
-            def _to_abs(rect):
-                if not rect or len(rect) < 4:
-                    return rect
-                x, y, w, h = rect
-                return [x + ox, y + oy, w, h]
-        else:
-            def _to_abs(rect):
-                return rect
-
-        puzzle_area = _to_abs(cfg.get("puzzle_area"))  # ② 빈칸 탐색 영역
-        bar_area    = _to_abs(cfg.get("piece_area"))   # ③ 드래그 바 범위
-        next_btn    = _to_abs(cfg.get("next_btn"))     # ④ >> 버튼
-        confirm_btn = _to_abs(cfg.get("confirm_btn"))  # ⑤ 확인 버튼
-        done_btn    = _to_abs(cfg.get("done_btn"))     # 완료 팝업 확인 버튼
-
-        if not all([puzzle_area, bar_area, next_btn, confirm_btn]):
-            self._status("⚠ 거짓말탐지기 해제 좌표 미설정 — 설정1 탭에서 ②~⑤ 영역 설정 필요")
-            return
-
-        def rand_pt(region, x_ratio=None):
-            """영역 안 랜덤 float 좌표. x_ratio를 주면 X만 해당 비율로 고정."""
-            x, y, w, h = region
-            rx = x + (w * x_ratio if x_ratio is not None
-                       else random.uniform(w * 0.2, w * 0.8))
-            ry = y + random.uniform(h * 0.2, h * 0.8)
-            return rx, ry
-
-        self._input.focus_game_window()
-        time.sleep(random.uniform(0.2, 0.35))
-
-        # ── 상세 로그 — 좌표 설정값 출력 ──────────────────────────────
-        self._lie_log("━━━━━ 거짓말탐지기 해제 시작 ━━━━━")
-        self._lie_log(f"② 퍼즐 영역   X={puzzle_area[0]} Y={puzzle_area[1]} W={puzzle_area[2]} H={puzzle_area[3]}")
-        self._lie_log(f"③ 바 영역     X={bar_area[0]} Y={bar_area[1]} W={bar_area[2]} H={bar_area[3]}")
-        self._lie_log(f"④ >> 버튼    X={next_btn[0]} Y={next_btn[1]} W={next_btn[2]} H={next_btn[3]}")
-        self._lie_log(f"⑤ 확인 버튼  X={confirm_btn[0]} Y={confirm_btn[1]} W={confirm_btn[2]} H={confirm_btn[3]}")
-
-        # ── ② 퍼즐 영역에서 빈칸 감지 (HSV 채도 → Laplacian 폴백) ────
-        px, py, pw, ph = puzzle_area
-        bx, by, bw, bh = bar_area
-        scene = self._screen.capture({"left": px, "top": py, "width": pw, "height": ph})
-
-        def _find_blank_hsv(img: np.ndarray) -> tuple[int, int, int, int] | None:
-            """HSV 채도 마스크로 회색 단색 사각형(빈칸)을 찾는다.
-            반환: (cx, cy, w, h) 퍼즐 내 좌표. 실패 시 None."""
-            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            s = hsv[:, :, 1]
-            # 채도 25 이하 = 회색/흰색 (하늘색 배경은 채도가 더 높음)
-            _, mask = cv2.threshold(s, 25, 255, cv2.THRESH_BINARY_INV)
-            k = np.ones((3, 3), np.uint8)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  k)  # 점 노이즈 제거
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k)  # 내부 빈틈 채우기
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not contours:
-                return None
-            best = max(contours, key=cv2.contourArea)
-            if cv2.contourArea(best) < 50:
-                return None
-            x, y, w, h = cv2.boundingRect(best)
-            return x + w // 2, y + h // 2, w, h
-
-        def _find_blank_laplacian(img: np.ndarray, step: int = 20) -> int:
-            """Laplacian 분산 스캔으로 텍스처가 가장 없는 X 중심을 반환 (폴백)."""
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            lap  = cv2.Laplacian(gray, cv2.CV_64F)
-            _, w = gray.shape
-            min_var, best_x = float("inf"), w // 2
-            half = step // 2
-            for x in range(0, w - step, half):
-                v = float(lap[:, x:x + step].var())
-                if v < min_var:
-                    min_var = v
-                    best_x  = x + half
-            return best_x
-
-        # 1차: HSV 채도 방식
-        blank_result = _find_blank_hsv(scene)
-        strip_region: dict | None  = None
-        blank_color:  np.ndarray | None = None
-
-        if blank_result is not None:
-            blank_cx, blank_cy, blank_w, blank_h = blank_result
-            blank_abs_x  = float(px + blank_cx)
-            strip_top    = py + blank_cy - blank_h // 2
-            strip_region = {"left": px, "top": max(0, strip_top), "width": pw, "height": max(1, blank_h)}
-            blank_color  = scene[blank_cy, blank_cx].astype(np.int32)   # 실제 화면 샘플
-            self._status(f"거짓말탐지기 → 빈칸 감지(HSV) X={blank_cx} → 절대X={blank_abs_x:.1f}")
-            self._lie_log(f"② 빈칸 감지(HSV)  퍼즐내 cx={blank_cx} cy={blank_cy}  크기={blank_w}×{blank_h}  절대X={blank_abs_x:.1f}")
-            self._lie_log(f"   빈칸 색 샘플  B={blank_color[0]} G={blank_color[1]} R={blank_color[2]}")
-        else:
-            # 2차 폴백: Laplacian 분산 스캔
-            lap_cx      = _find_blank_laplacian(scene)
-            blank_abs_x = float(px + lap_cx)
-            # strip 높이를 바 높이로 근사
-            strip_region = {"left": px, "top": py, "width": pw, "height": ph}
-            blank_color  = scene[ph // 2, lap_cx].astype(np.int32)
-            self._status(f"거짓말탐지기 → 빈칸 감지(Laplacian폴백) X={lap_cx} → 절대X={blank_abs_x:.1f}")
-            self._lie_log(f"② 빈칸 감지(Laplacian폴백)  퍼즐내 cx={lap_cx}  절대X={blank_abs_x:.1f}")
-            self._lie_log(f"   빈칸 색 샘플  B={blank_color[0]} G={blank_color[1]} R={blank_color[2]}")
-
-        # ── ④ >> 버튼 랜덤 클릭 → 오프셋 보정으로 버튼 중심이 빈칸에 정확히 맞춤 ──
-        nx, ny, nw, nh = next_btn
-        btn_cx = nx + nw / 2
-        btn_cy = ny + nh / 2
-        from_x, from_y = rand_pt(next_btn)
-        dx = from_x - btn_cx          # 중심 대비 클릭 오프셋 (목적지에 동일 적용 → 버튼 중심이 blank_abs_x에 정확히 착지)
-        dy = from_y - btn_cy
-        to_x = blank_abs_x + dx       # human_offset 제거 → 정중앙 착지
-        to_y = float(by + bh / 2) + dy
-        drag_dur = random.uniform(1.0, 1.5)
-        self._status(f"거짓말탐지기 → >> 드래그 ({from_x:.1f},{from_y:.1f}) → ({to_x:.1f},{to_y:.1f})")
-        self._lie_log(f"④ >> 버튼 드래그  시작=({from_x:.1f},{from_y:.1f})  끝=({to_x:.1f},{to_y:.1f})"
-                      f"  오프셋 dx={dx:+.1f} dy={dy:+.1f}  소요={drag_dur:.2f}s")
-        self._input.drag_slider((from_x, from_y), (to_x, to_y),
-                                duration=drag_dur)
-
-        # 드래그 후 피스 중심 위치 추적 (미세 조정 기준점)
-        piece_cx = blank_abs_x   # 버튼 중심이 정확히 blank_abs_x에 착지
-        piece_cy = by + bh / 2
-
-        # ── 빈칸 커버 확인 및 미세 조정 (최대 2회) ──────────────────────
-        # 빈칸 Y strip 전체 색상 소실 방식 — piece_cx 추정 오차 없이 빈칸 직접 관찰
-
-        def _blank_remaining() -> tuple[float, float | None]:
-            """빈칸 색 픽셀이 Y strip에 남은 비율과 남은 X 무게중심(퍼즐 내 절대px) 반환.
-            strip_region 또는 blank_color 미설정이면 (1.0, None) 반환."""
-            if strip_region is None or blank_color is None:
-                return 1.0, None
-            strip = self._screen.capture(strip_region)   # (th, pw, 3) BGR
-            diff = np.abs(strip.astype(np.int32) - blank_color)
-            mask = np.all(diff <= 30, axis=2)            # tolerance 30
-            ratio = float(mask.sum()) / max(mask.size, 1)
-            if mask.any():
-                xs = np.where(mask)[1]                   # 열 인덱스 (퍼즐 내 X)
-                return ratio, float(np.mean(xs))
-            return ratio, None
-
-        self._lie_log("── 커버 확인 루프 시작 (최대 3회) ──")
-        for attempt in range(3):
-            time.sleep(random.uniform(0.4, 0.6))
-            ratio, remaining_x = _blank_remaining()
-            covered = ratio < 0.10   # 빈칸 색 10% 미만 = 조각이 덮음
-            status_str = f"거짓말탐지기 → 빈칸색 잔여 {ratio:.2f} ({'✓ 커버됨' if covered else '✗ 미완'})"
-            self._status(status_str)
-            rx_str = f"{remaining_x:.1f}" if remaining_x is not None else "None"
-            self._lie_log(
-                f"   [{attempt+1}차] 잔여비율={ratio:.3f}  남은X={rx_str}  "
-                f"→ {'✓ 커버됨' if covered else '✗ 미완'}"
-            )
-            if covered or attempt >= 2:
-                break
-            if remaining_x is None:
-                break
-            # 남은 빈칸 X 무게중심 → 피스를 그곳으로 이동
-            remaining_abs_x = px + remaining_x
-            adj_x = remaining_abs_x - piece_cx
-            adj_from_x = piece_cx + random.uniform(-1, 1)
-            adj_from_y = piece_cy + random.uniform(-1, 1)
-            adj_to_x   = adj_from_x + adj_x
-            adj_dur    = random.uniform(1.0, 1.8)
-            self._status(f"거짓말탐지기 → 미세 조정 {adj_x:+.1f}px")
-            self._lie_log(
-                f"   미세 조정  adj_x={adj_x:+.1f}px  "
-                f"({adj_from_x:.1f},{adj_from_y:.1f}) → ({adj_to_x:.1f},{adj_from_y:.1f})  "
-                f"소요={adj_dur:.2f}s"
-            )
-            self._input.drag_slider(
-                (adj_from_x, adj_from_y), (adj_to_x, adj_from_y),
-                duration=adj_dur,
-            )
-            piece_cx += adj_x
-
-        # ── ⑤ 확인 버튼 클릭 ─────────────────────────────────────────
-        cx, cy = rand_pt(confirm_btn)
-        self._status(f"거짓말탐지기 → 확인 클릭 ({cx:.1f}, {cy:.1f})")
-        self._lie_log(f"⑤ 확인 버튼 클릭  ({cx:.1f},{cy:.1f})")
-        self._input.click(int(cx), int(cy))
-
-        # ── 완료 팝업 확인 클릭 ───────────────────────────────────────
-        if done_btn:
-            time.sleep(random.uniform(0.5, 0.9))  # 팝업 뜨는 시간 대기
-            dx, dy = rand_pt(done_btn)
-            self._status(f"거짓말탐지기 → 완료 팝업 확인 클릭 ({dx:.1f}, {dy:.1f})")
-            self._input.click(int(dx), int(dy))
-
-        self._lie_log("━━━━━ 거짓말탐지기 해제 종료 ━━━━━")
-        self._status("거짓말탐지기 해제 완료")
 
     def _solve_lie_detector(self, title_pos: tuple) -> None:
         """

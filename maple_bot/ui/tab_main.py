@@ -30,7 +30,7 @@ class TabMain(QWidget):
         layout.addWidget(self._build_control_group())
         layout.addWidget(self._build_module_group())
         layout.addWidget(self._build_hotkey_group())
-        layout.addWidget(self._build_log_group())
+        layout.addWidget(self._build_log_group(), stretch=1)  # 남은 세로 공간 모두 로그창에 할당
 
     # ── UI 빌드 ───────────────────────────────────────────────────────
     def _build_control_group(self):
@@ -104,8 +104,7 @@ class TabMain(QWidget):
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
-        self.log_view.setMaximumHeight(300)
-        layout.addWidget(self.log_view)
+        layout.addWidget(self.log_view, stretch=1)  # 그룹박스 내 세로 공간 모두 차지
 
         btn_clear = QPushButton("로그 지우기")
         btn_clear.clicked.connect(self.log_view.clear)

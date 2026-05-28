@@ -161,10 +161,19 @@ class TransparentShapeGame:
         return dbg
 
     # ── 메인 폐루프 ──────────────────────────────────────────────────
-    def run_follow_loop(self, on_status: Callable[[str], None]) -> None:
+    def run_follow_loop(
+        self,
+        on_status: Callable[[str], None],
+        board_roi: Optional[tuple] = None,
+        detect_end_fn: Optional[Callable] = None,
+    ) -> None:
+        """
+        board_roi: (x, y, w, h) — YOLO bbox 기반 동적 ROI. None이면 config에서 읽음.
+        detect_end_fn: (screenshot) -> bool. True=진행중, False=종료. None이면 템플릿 매칭.
+        """
         import mss as _mss
 
-        roi = self.get_board_roi()
+        roi = board_roi if board_roi is not None else self.get_board_roi()
         if roi is None:
             on_status("⚠ 투명 도형 찾기: 게임판 ROI 미설정 — 설정1 탭에서 캡처 필요")
             return
@@ -190,10 +199,14 @@ class TransparentShapeGame:
             while not self._stop.is_set():
                 loop_start = time.time()
 
-                # 0.5초마다 타이틀 사라졌는지 확인 → 게임 종료
+                # 0.5초마다 게임 종료 확인
                 if loop_start - last_end_check >= GAME_END_CHECK_INTERVAL:
                     shot = self._screen.capture()
-                    if self.detect_title(shot) is None:
+                    if detect_end_fn is not None:
+                        still_active = detect_end_fn(shot)
+                    else:
+                        still_active = self.detect_title(shot) is not None
+                    if not still_active:
                         on_status("투명 도형 찾기: 게임 종료 감지")
                         break
                     last_end_check = loop_start
