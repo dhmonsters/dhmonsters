@@ -34,6 +34,10 @@ _VK_MAP: dict[str, int] = {
     "num0": 0x60, "num1": 0x61, "num2": 0x62, "num3": 0x63,
     "num4": 0x64, "num5": 0x65, "num6": 0x66, "num7": 0x67,
     "num8": 0x68, "num9": 0x69,
+    # OEM 특수문자 키 (ord() 로 구하면 VK 코드가 달라 오작동)
+    ";": 0xBA, "=": 0xBB, ",": 0xBC, "-": 0xBD,
+    ".": 0xBE, "/": 0xBF, "`": 0xC0,
+    "[": 0xDB, "\\": 0xDC, "]": 0xDD, "'": 0xDE,
 }
 
 for _c in "abcdefghijklmnopqrstuvwxyz":
