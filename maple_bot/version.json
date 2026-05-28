@@ -1,5 +1,5 @@
 {
-  "version": "1.2.2",
-  "notes": "- 층별 사냥 구역 미설정 시 루프마다 오류 반복 수정\n- 낙사 감지 Y축 허용 범위 수정 (2층→1층 낙사 미감지 해결)\n- 몬스터 밀림으로 구역 경계 이탈 시 방향 즉시 강제 보정\n- 밧줄 접근 중 방향키 해제 후 복원 안 되는 문제 수정\n- 봇 시작 시 현재 패턴이 프리셋에도 함께 저장되도록 수정\n- 기본값 하드코딩으로 신규 PC 설정 편의성 향상",
-  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v1.2.2/DHMONSTERS_v1.2.2_Setup.exe"
+  "version": "1.2.3",
+  "notes": "- 투명 도형 마우스 추적 수정 (YOLO bbox 기반 자동 ROI 계산)\n- 잡템 자동 판매 좌표 창 이동/크기 변경 대응 (비율 기반 좌표 저장)\n- 거짓말탐지기 YOLO 진단 로그 UI 표시 (로드 성공/실패, 감지 이벤트)\n- 메인 탭 로그 필터 체크박스 소급 적용 (기존 로그도 즉시 필터)\n- 설정 잠금 UI 개선 (잡템 판매·투명 도형 설정 완료 항목 수정 불가 처리)",
+  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v1.2.3/DHMONSTERS_v1.2.3_Setup.exe"
 }
