@@ -22,12 +22,15 @@ class _StatusEmitter(QObject):
 
 
 class TabMain(QWidget):
+    _LOG_BUFFER_MAX = 500  # 메모리에 보관할 최대 메시지 수
+
     def __init__(self, config):
         super().__init__()
         self.config = config
         self._bot = None
         self._hk  = None
         self._pre_start_cb = None   # 봇 시작 직전 호출 (전 탭 자동 저장용)
+        self._log_buffer: list[tuple[str, str, str]] = []  # (category, timestamp, msg)
         self._emitter = _StatusEmitter()
         self._emitter.message.connect(self._append_log)
         self._emitter.bot_stopped.connect(self._on_stop)
@@ -116,6 +119,7 @@ class TabMain(QWidget):
             chk = QCheckBox(cat)
             chk.setChecked(True)
             self._log_filters[cat] = chk
+            chk.stateChanged.connect(self._rerender_log)  # 체크 변경 시 즉시 재렌더링
             filter_row.addWidget(chk)
         filter_row.addStretch()
         layout.addLayout(filter_row)
@@ -125,7 +129,7 @@ class TabMain(QWidget):
         layout.addWidget(self.log_view, stretch=1)  # 그룹박스 내 세로 공간 모두 차지
 
         btn_clear = QPushButton("로그 지우기")
-        btn_clear.clicked.connect(self.log_view.clear)
+        btn_clear.clicked.connect(self._clear_log)
         layout.addWidget(btn_clear)
         return group
 
@@ -237,13 +241,32 @@ class TabMain(QWidget):
         return "기타"
 
     def _append_log(self, msg: str) -> None:
-        cat = self._get_log_category(msg)
-        if not self._log_filters.get(cat, _DummyCheck()).isChecked():
-            return
         from datetime import datetime
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_view.append(f"[{timestamp}] {msg}")
+        cat = self._get_log_category(msg)
+        # 버퍼에 항상 저장 (필터 상태와 무관)
+        self._log_buffer.append((cat, timestamp, msg))
+        if len(self._log_buffer) > self._LOG_BUFFER_MAX:
+            self._log_buffer.pop(0)
+        # 현재 체크 상태일 때만 화면에 출력
+        if self._log_filters.get(cat, _DummyCheck()).isChecked():
+            self.log_view.append(f"[{timestamp}] {msg}")
+            self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+
+    def _rerender_log(self) -> None:
+        """필터 체크박스 변경 시 버퍼 전체를 다시 그린다."""
+        self.log_view.setUpdatesEnabled(False)
+        self.log_view.clear()
+        for cat, ts, msg in self._log_buffer:
+            if self._log_filters.get(cat, _DummyCheck()).isChecked():
+                self.log_view.append(f"[{ts}] {msg}")
+        self.log_view.setUpdatesEnabled(True)
         self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+
+    def _clear_log(self) -> None:
+        """버퍼와 화면 모두 지운다."""
+        self._log_buffer.clear()
+        self.log_view.clear()
 
     # ── 설정 저장/로드 ────────────────────────────────────────────────
     def save_to_config(self):

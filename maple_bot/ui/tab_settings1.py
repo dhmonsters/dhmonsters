@@ -217,64 +217,14 @@ class TabSettings1(QWidget):
         self.chk_transparent_enabled.toggled.connect(self._save_transparent_shape)
         layout.addWidget(self.chk_transparent_enabled)
 
-        # 타이틀 템플릿 캡처 행
-        tpl_row = QHBoxLayout()
-        self.lbl_transparent_title = QLabel("타이틀 템플릿: 없음")
-        self.lbl_transparent_title.setStyleSheet("color: red;")
-        btn_tpl = QPushButton("+ 타이틀 템플릿 캡처")
-        btn_tpl.setToolTip(
-            "게임 팝업 상단의 '투명 도형 찾기' 제목 텍스트 영역을\n"
-            "드래그로 선택하면 templates/transparent_shape_title.png 로 저장됩니다."
-        )
-        btn_tpl.clicked.connect(self._capture_transparent_title)
-        btn_tpl_del = QPushButton("삭제")
-        btn_tpl_del.setFixedWidth(45)
-        btn_tpl_del.clicked.connect(self._delete_transparent_title)
-        tpl_row.addWidget(self.lbl_transparent_title)
-        tpl_row.addStretch()
-        tpl_row.addWidget(btn_tpl)
-        tpl_row.addWidget(btn_tpl_del)
-        layout.addLayout(tpl_row)
+        # 고정 설정값 읽기 전용 표시
+        self.lbl_transparent_title = QLabel("타이틀 템플릿: 확인 중...")
+        self.lbl_transparent_title.setStyleSheet("color: green; font-size: 10px;")
+        layout.addWidget(self.lbl_transparent_title)
 
-        # 게임판 ROI 캡처 행
-        roi_row = QHBoxLayout()
-        self.lbl_transparent_roi = QLabel("게임판 영역: 미설정")
-        self.lbl_transparent_roi.setStyleSheet("color: red;")
-        btn_roi = QPushButton("+ 게임판 영역 캡처")
-        btn_roi.setToolTip(
-            "게임판(갈색 배경 영역 전체)을 드래그로 선택하세요.\n"
-            "게임창 client 좌표로 자동 변환되어 저장됩니다."
-        )
-        btn_roi.clicked.connect(self._capture_transparent_roi)
-        btn_roi_del = QPushButton("삭제")
-        btn_roi_del.setFixedWidth(45)
-        btn_roi_del.clicked.connect(self._delete_transparent_roi)
-        roi_row.addWidget(self.lbl_transparent_roi)
-        roi_row.addStretch()
-        roi_row.addWidget(btn_roi)
-        roi_row.addWidget(btn_roi_del)
-        layout.addLayout(roi_row)
-
-        board_h_row = QHBoxLayout()
-        board_h_row.addWidget(QLabel("게임판 높이"))
-        from PyQt6.QtWidgets import QSpinBox as _QSpinBox
-        self.spin_transparent_board_h = _QSpinBox()
-        self.spin_transparent_board_h.setRange(100, 1200)
-        self.spin_transparent_board_h.setValue(500)
-        self.spin_transparent_board_h.setSuffix(" px")
-        self.spin_transparent_board_h.setFixedWidth(90)
-        self.spin_transparent_board_h.setToolTip(
-            "YOLO로 빨간 헤더 감지 후 그 아래 퍼즐 영역의 높이 (픽셀).\n"
-            "헤더 bottom부터 이 값만큼 board ROI로 자동 설정됩니다."
-        )
-        self.spin_transparent_board_h.valueChanged.connect(self._save_transparent_shape)
-        board_h_row.addWidget(self.spin_transparent_board_h)
-        board_h_row.addStretch()
-        layout.addLayout(board_h_row)
-
-        self.chk_transparent_debug = QCheckBox("디버그 오버레이 표시 (cv2 창)")
-        self.chk_transparent_debug.toggled.connect(self._save_transparent_shape)
-        layout.addWidget(self.chk_transparent_debug)
+        self.lbl_transparent_roi = QLabel("게임판 영역: 확인 중...")
+        self.lbl_transparent_roi.setStyleSheet("color: green; font-size: 10px;")
+        layout.addWidget(self.lbl_transparent_roi)
 
         return group
 
@@ -381,12 +331,6 @@ class TabSettings1(QWidget):
     def _save_transparent_shape(self):
         self.config.set("settings1", "transparent_shape", "enabled",
                         self.chk_transparent_enabled.isChecked())
-        self.config.set("settings1", "transparent_shape", "debug_overlay",
-                        self.chk_transparent_debug.isChecked())
-        self.config.set("settings1", "transparent_shape", "yolo_model_path",
-                        self.edit_lie_yolo.text().strip())
-        self.config.set("settings1", "transparent_shape", "board_height",
-                        self.spin_transparent_board_h.value())
         self.config.save()
 
     # ── 유저발견 시 설정 ───────────────────────────────────────────────
@@ -537,16 +481,9 @@ class TabSettings1(QWidget):
             self.stat_spins[stat].setValue(sa.get(stat, 0))
 
         ts = self.config.get("settings1", "transparent_shape") or {}
-        # 로드 중 시그널이 _save_transparent_shape() 를 호출해 빈 경로로 덮어쓰는 것 방지
-        for _w in (self.chk_transparent_enabled, self.chk_transparent_debug,
-                   self.spin_transparent_board_h):
-            _w.blockSignals(True)
+        self.chk_transparent_enabled.blockSignals(True)
         self.chk_transparent_enabled.setChecked(bool(ts.get("enabled", False)))
-        self.chk_transparent_debug.setChecked(bool(ts.get("debug_overlay", False)))
-        self.spin_transparent_board_h.setValue(int(ts.get("board_height", 500)))
-        for _w in (self.chk_transparent_enabled, self.chk_transparent_debug,
-                   self.spin_transparent_board_h):
-            _w.blockSignals(False)
+        self.chk_transparent_enabled.blockSignals(False)
         self._refresh_transparent_status_labels()
 
         yolo = self.config.get("yolo") or {}
@@ -585,9 +522,7 @@ class TabSettings1(QWidget):
         self.config.set("yolo", "iou",           self.spin_yolo_iou.value())
         self.config.set("yolo", "every_n_frame", self.spin_yolo_every_n.value())
 
-        self.config.set("settings1", "transparent_shape", "yolo_model_path",
-                        self.edit_lie_yolo.text().strip())
-        self.config.set("settings1", "transparent_shape", "board_height",
-                        self.spin_transparent_board_h.value())
+        self.config.set("settings1", "transparent_shape", "enabled",
+                        self.chk_transparent_enabled.isChecked())
 
 

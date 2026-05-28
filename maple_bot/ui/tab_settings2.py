@@ -238,18 +238,9 @@ class TabSettings2(QWidget):
         lbl_ct.setFixedWidth(100)
         self.lbl_cash_tpl = QLabel("미등록")
         self.lbl_cash_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_cash_tpl = QPushButton("📷 캡처")
-        btn_cash_tpl.setFixedWidth(65)
-        btn_cash_tpl.setToolTip("캐시탭 버튼을 드래그해서 저장합니다. (클릭 전 기본 상태)")
-        btn_cash_tpl.clicked.connect(self._capture_cash_tab_template)
-        btn_cash_tpl_del = QPushButton("✕")
-        btn_cash_tpl_del.setFixedWidth(24)
-        btn_cash_tpl_del.clicked.connect(self._clear_cash_tab_template)
         cash_tpl_row.addWidget(lbl_ct)
         cash_tpl_row.addWidget(self.lbl_cash_tpl)
         cash_tpl_row.addStretch()
-        cash_tpl_row.addWidget(btn_cash_tpl)
-        cash_tpl_row.addWidget(btn_cash_tpl_del)
         layout.addLayout(cash_tpl_row)
         self._refresh_cash_tpl_label()
 
@@ -259,21 +250,9 @@ class TabSettings2(QWidget):
         lbl_ca.setFixedWidth(100)
         self.lbl_cash_active_tpl = QLabel("미등록")
         self.lbl_cash_active_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_cash_act = QPushButton("📷 캡처")
-        btn_cash_act.setFixedWidth(65)
-        btn_cash_act.setToolTip(
-            "캐시탭을 클릭했을 때 분홍색/하이라이트 상태를 드래그해서 저장합니다.\n"
-            "이 이미지가 감지되면 캐시탭 클릭 성공으로 판단하고 첫번째 슬롯을 누릅니다."
-        )
-        btn_cash_act.clicked.connect(self._capture_cash_tab_active_template)
-        btn_cash_act_del = QPushButton("✕")
-        btn_cash_act_del.setFixedWidth(24)
-        btn_cash_act_del.clicked.connect(self._clear_cash_tab_active_template)
         cash_act_row.addWidget(lbl_ca)
         cash_act_row.addWidget(self.lbl_cash_active_tpl)
         cash_act_row.addStretch()
-        cash_act_row.addWidget(btn_cash_act)
-        cash_act_row.addWidget(btn_cash_act_del)
         layout.addLayout(cash_act_row)
         self._refresh_cash_active_tpl_label()
 
@@ -283,47 +262,17 @@ class TabSettings2(QWidget):
         lbl_inv.setFixedWidth(120)
         self.lbl_inv_tpl = QLabel("미등록")
         self.lbl_inv_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_inv_tpl = QPushButton("📷 캡처")
-        btn_inv_tpl.setFixedWidth(65)
-        btn_inv_tpl.setToolTip(
-            "인벤토리 상단 타이틀 바 ('ITEM INVENTORY' 글자 영역)를 드래그로 캡처하세요.\n"
-            "창 크기가 고정이므로 한 번만 설정하면 됩니다.\n"
-            "이 이미지를 먼저 찾아 캐시탭 위치를 역산합니다."
-        )
-        btn_inv_tpl.clicked.connect(self._capture_inventory_template)
-        btn_inv_tpl_del = QPushButton("✕")
-        btn_inv_tpl_del.setFixedWidth(24)
-        btn_inv_tpl_del.clicked.connect(self._clear_inventory_template)
         inv_tpl_row.addWidget(lbl_inv)
         inv_tpl_row.addWidget(self.lbl_inv_tpl)
         inv_tpl_row.addStretch()
-        inv_tpl_row.addWidget(btn_inv_tpl)
-        inv_tpl_row.addWidget(btn_inv_tpl_del)
         layout.addLayout(inv_tpl_row)
         self._refresh_inv_tpl_label()
 
-        # 설정 안내
-        guide = QLabel(
-            "📌 설정 순서:\n"
-            "  1. 게임에서 인벤토리 열기\n"
-            "  2. '인벤토리 바 이미지' 캡처 (ITEM INVENTORY 바)\n"
-            "  3. '캐시탭 위치' 지정 (인벤토리 열린 상태 유지)\n"
-            "  4. 캐시탭 클릭 → 분홍색으로 변하면 '캐시탭 활성 이미지' 캡처\n"
-            "  5. '첫번째 슬롯' 위치 지정 (NPC 상점 첫 칸)"
-        )
-        guide.setStyleSheet("color: #555; font-size: 10px; padding: 4px 0px;")
-        guide.setWordWrap(True)
-        layout.addWidget(guide)
-
         # 캐시탭 좌표 (앵커 기준 오프셋 계산용 + 단독 fallback)
-        self._add_junk_coord_row(layout, "cash_tab", "캐시탭 위치", False,
-                                 tip="인벤토리 열린 상태에서 캐시탭 버튼을 드래그로 지정하세요.\n"
-                                     "인벤토리 바 이미지와 함께 사용하면 위치가 달라져도 자동 보정됩니다.")
+        self._add_junk_coord_row(layout, "cash_tab", "캐시탭 위치", False, locked=True)
 
         # 첫번째 슬롯 좌표
-        self._add_junk_coord_row(layout, "first_slot", "첫번째 슬롯", False,
-                                 tip="NPC 상점의 첫번째 슬롯 위치를 지정하세요.\n"
-                                     "캐시탭 활성 이미지 위치 기준 상대 오프셋으로 자동 보정됩니다.")
+        self._add_junk_coord_row(layout, "first_slot", "첫번째 슬롯", False, locked=True)
 
         # 상점 열림 확인 이미지
         shop_open_row = QHBoxLayout()
@@ -331,22 +280,9 @@ class TabSettings2(QWidget):
         lbl_so.setFixedWidth(100)
         self.lbl_shop_open_tpl = QLabel("미등록 (없으면 생략)")
         self.lbl_shop_open_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_so_cap = QPushButton("📷 캡처")
-        btn_so_cap.setFixedWidth(65)
-        btn_so_cap.setToolTip(
-            "상점이 열렸을 때만 보이는 고유 UI 요소를 드래그해서 저장합니다.\n"
-            "예) 상점 창 타이틀 바, '기타' 탭 텍스트 등.\n"
-            "이 이미지가 감지되면 상점 열림 성공으로 판단합니다."
-        )
-        btn_so_cap.clicked.connect(self._capture_shop_open_template)
-        btn_so_del = QPushButton("✕")
-        btn_so_del.setFixedWidth(24)
-        btn_so_del.clicked.connect(self._clear_shop_open_template)
         shop_open_row.addWidget(lbl_so)
         shop_open_row.addWidget(self.lbl_shop_open_tpl)
         shop_open_row.addStretch()
-        shop_open_row.addWidget(btn_so_cap)
-        shop_open_row.addWidget(btn_so_del)
         layout.addLayout(shop_open_row)
         self._refresh_shop_open_tpl_label()
 
@@ -378,18 +314,9 @@ class TabSettings2(QWidget):
         lbl_eq.setFixedWidth(100)
         self.lbl_equip_sell_tpl = QLabel("미등록")
         self.lbl_equip_sell_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_eq_cap = QPushButton("📷 캡처")
-        btn_eq_cap.setFixedWidth(65)
-        btn_eq_cap.setToolTip("NPC 상점의 '장비 일괄 판매' 버튼 이미지를 드래그해서 저장합니다.")
-        btn_eq_cap.clicked.connect(self._capture_equip_sell_template)
-        btn_eq_del = QPushButton("✕")
-        btn_eq_del.setFixedWidth(24)
-        btn_eq_del.clicked.connect(self._clear_equip_sell_template)
         eq_btn_row.addWidget(lbl_eq)
         eq_btn_row.addWidget(self.lbl_equip_sell_tpl)
         eq_btn_row.addStretch()
-        eq_btn_row.addWidget(btn_eq_cap)
-        eq_btn_row.addWidget(btn_eq_del)
         layout.addLayout(eq_btn_row)
         self._refresh_equip_sell_tpl_label()
 
@@ -399,53 +326,34 @@ class TabSettings2(QWidget):
         lbl_ec.setFixedWidth(100)
         self.lbl_equip_confirm_tpl = QLabel("미등록 (없으면 Enter 키 사용)")
         self.lbl_equip_confirm_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_ec_cap = QPushButton("📷 캡처")
-        btn_ec_cap.setFixedWidth(65)
-        btn_ec_cap.setToolTip(
-            "장비 일괄 판매 후 나타나는 확인 팝업의 '확인' 버튼 이미지를 저장합니다.\n"
-            "미등록 시 확인창이 감지되지 않으면 Enter 키로 대체합니다."
-        )
-        btn_ec_cap.clicked.connect(self._capture_equip_confirm_template)
-        btn_ec_del = QPushButton("✕")
-        btn_ec_del.setFixedWidth(24)
-        btn_ec_del.clicked.connect(self._clear_equip_confirm_template)
         eq_conf_row.addWidget(lbl_ec)
         eq_conf_row.addWidget(self.lbl_equip_confirm_tpl)
         eq_conf_row.addStretch()
-        eq_conf_row.addWidget(btn_ec_cap)
-        eq_conf_row.addWidget(btn_ec_del)
         layout.addLayout(eq_conf_row)
         self._refresh_equip_confirm_tpl_label()
 
         # 상점 나가기 버튼 좌표 (템플릿보다 단순 좌표가 더 안정적)
-        self._add_junk_coord_row(layout, "shop_exit_btn", "상점 나가기", False,
-                                 tip="상점 창의 '상점 나가기' 또는 닫기(X) 버튼 좌표입니다.\n"
-                                     "미설정 시 ESC 키 2회로 대체합니다.")
+        self._add_junk_coord_row(layout, "shop_exit_btn", "상점 나가기", False, locked=True)
 
         # ══ ③ 기타템 판매 설정 ════════════════════════════════════════
         layout.addSpacing(6)
         layout.addWidget(QLabel("─ ③ 기타템 판매 설정 ───────────────────"))
 
-        # 기타템 판매 활성화 체크박스
+        # 기타템 판매 활성화 체크박스 (잠금)
         chk_row = QHBoxLayout()
         self.chk_junk_sell = QCheckBox("기타템 판매 활성화")
-        self.chk_junk_sell.setToolTip(
-            "체크 시: 장비 판매 후 상점 기타탭으로 이동해 아이템 템플릿 판매를 진행합니다.\n"
-            "미체크 시: 장비 판매 후 바로 상점을 닫습니다."
-        )
         self.chk_junk_sell.stateChanged.connect(self._save_junk_sell_enabled)
+        self.chk_junk_sell.setEnabled(False)
         chk_row.addWidget(self.chk_junk_sell)
         chk_row.addStretch()
         layout.addLayout(chk_row)
 
         etc_coord_defs = [
-            ("shop_area",  "상점 목록 영역", True,
-             "기타 탭 아이템 목록이 표시되는 영역을 드래그로 지정합니다."),
-            ("scroll_pos", "스크롤 위치",   False,
-             "아이템 목록 스크롤바 위치입니다. 아래로 스크롤할 때 사용합니다."),
+            ("shop_area",  "상점 목록 영역", True),
+            ("scroll_pos", "스크롤 위치",   False),
         ]
-        for key, title, is_area, tip in etc_coord_defs:
-            self._add_junk_coord_row(layout, key, title, is_area, tip=tip)
+        for key, title, is_area in etc_coord_defs:
+            self._add_junk_coord_row(layout, key, title, is_area, locked=True)
 
         # 기타탭 활성 이미지
         etc_act_row = QHBoxLayout()
@@ -453,18 +361,9 @@ class TabSettings2(QWidget):
         lbl_ea.setFixedWidth(110)
         self.lbl_etc_active_tpl = QLabel("미등록 (없으면 0.6초 대기)")
         self.lbl_etc_active_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_ea_cap = QPushButton("📷 캡처")
-        btn_ea_cap.setFixedWidth(65)
-        btn_ea_cap.setToolTip("기타탭 클릭 후 활성화된(하이라이트) 상태를 드래그해서 저장합니다.")
-        btn_ea_cap.clicked.connect(self._capture_etc_active_template)
-        btn_ea_del = QPushButton("✕")
-        btn_ea_del.setFixedWidth(24)
-        btn_ea_del.clicked.connect(self._clear_etc_active_template)
         etc_act_row.addWidget(lbl_ea)
         etc_act_row.addWidget(self.lbl_etc_active_tpl)
         etc_act_row.addStretch()
-        etc_act_row.addWidget(btn_ea_cap)
-        etc_act_row.addWidget(btn_ea_del)
         layout.addLayout(etc_act_row)
         self._refresh_etc_active_tpl_label()
 
@@ -474,21 +373,9 @@ class TabSettings2(QWidget):
         lbl_sb.setFixedWidth(110)
         self.lbl_scroll_bottom_tpl = QLabel("미등록 (없으면 3회 연속 미탐지 시 종료)")
         self.lbl_scroll_bottom_tpl.setStyleSheet("color: gray; font-size: 10px;")
-        btn_sb_cap = QPushButton("📷 캡처")
-        btn_sb_cap.setFixedWidth(65)
-        btn_sb_cap.setToolTip(
-            "스크롤이 최하단에 도달했을 때만 보이는 UI 요소를 드래그해서 저장합니다.\n"
-            "예) 스크롤바 끝 표시, 빈 슬롯 영역 등."
-        )
-        btn_sb_cap.clicked.connect(self._capture_scroll_bottom_template)
-        btn_sb_del = QPushButton("✕")
-        btn_sb_del.setFixedWidth(24)
-        btn_sb_del.clicked.connect(self._clear_scroll_bottom_template)
         scroll_bot_row.addWidget(lbl_sb)
         scroll_bot_row.addWidget(self.lbl_scroll_bottom_tpl)
         scroll_bot_row.addStretch()
-        scroll_bot_row.addWidget(btn_sb_cap)
-        scroll_bot_row.addWidget(btn_sb_del)
         layout.addLayout(scroll_bot_row)
         self._refresh_scroll_bottom_tpl_label()
 
@@ -685,8 +572,8 @@ class TabSettings2(QWidget):
         return group
 
     def _add_junk_coord_row(self, layout, key: str, title: str,
-                             is_area: bool, tip: str = "") -> None:
-        """좌표 설정 행 1줄을 layout에 추가한다."""
+                             is_area: bool, tip: str = "", locked: bool = False) -> None:
+        """좌표 설정 행 1줄을 layout에 추가한다. locked=True이면 버튼 없이 표시만."""
         row = QHBoxLayout()
         lbl_title = QLabel(title)
         lbl_title.setFixedWidth(100)
@@ -694,21 +581,22 @@ class TabSettings2(QWidget):
         lbl_val.setStyleSheet("color: gray; font-size: 10px;")
         self._junk_coord_lbls[key] = lbl_val
 
-        btn_set = QPushButton("📍 드래그" if is_area else "📍 지정")
-        btn_set.setFixedWidth(68 if is_area else 55)
-        if tip:
-            btn_set.setToolTip(tip)
-        btn_set.clicked.connect(lambda _, k=key, a=is_area: self._set_junk_coord(k, a))
-
-        btn_rst = QPushButton("✕")
-        btn_rst.setFixedWidth(24)
-        btn_rst.clicked.connect(lambda _, k=key: self._reset_junk_coord(k))
-
         row.addWidget(lbl_title)
         row.addWidget(lbl_val)
         row.addStretch()
-        row.addWidget(btn_set)
-        row.addWidget(btn_rst)
+
+        if not locked:
+            btn_set = QPushButton("📍 드래그" if is_area else "📍 지정")
+            btn_set.setFixedWidth(68 if is_area else 55)
+            if tip:
+                btn_set.setToolTip(tip)
+            btn_set.clicked.connect(lambda _, k=key, a=is_area: self._set_junk_coord(k, a))
+            btn_rst = QPushButton("✕")
+            btn_rst.setFixedWidth(24)
+            btn_rst.clicked.connect(lambda _, k=key: self._reset_junk_coord(k))
+            row.addWidget(btn_set)
+            row.addWidget(btn_rst)
+
         layout.addLayout(row)
 
     # ── 잡템 좌표 설정 ────────────────────────────────────────────────
@@ -731,6 +619,12 @@ class TabSettings2(QWidget):
                 val  = [px, py, pw, ph]
                 text = f"X={px} Y={py} W={pw} H={ph}"
                 self.config.set("settings2", "junk_sell", key, val)
+                # 게임창 기준 비율도 함께 저장 (창 이동/크기 변경 대응)
+                from core.config_manager import get_game_window_rect
+                ox, oy, cw, ch = get_game_window_rect(self.config)
+                if cw > 0 and ch > 0:
+                    self.config.set("settings2", "junk_sell", key + "_ratio",
+                                    [(px - ox) / cw, (py - oy) / ch, pw / cw, ph / ch])
 
             elif key == "cash_tab":
                 # 인벤토리 바 감지 → 오프셋만 저장
@@ -748,6 +642,12 @@ class TabSettings2(QWidget):
                 val  = [cx_phys, cy_phys]
                 text = f"X={cx_phys} Y={cy_phys}"
                 self.config.set("settings2", "junk_sell", key, val)
+                # 게임창 기준 비율도 함께 저장
+                from core.config_manager import get_game_window_rect
+                ox, oy, cw, ch = get_game_window_rect(self.config)
+                if cw > 0 and ch > 0:
+                    self.config.set("settings2", "junk_sell", key + "_ratio",
+                                    [(cx_phys - ox) / cw, (cy_phys - oy) / ch])
 
             inv_key = self.edit_inventory_key.text().strip() or "i"
             self.config.set("settings2", "junk_sell", "inventory_key", inv_key)

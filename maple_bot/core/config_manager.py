@@ -46,8 +46,8 @@ DEFAULT_CONFIG = {
         "transparent_shape": {
             "enabled": False,
             "debug_overlay": False,
-            # ── 고정 기본값: 투명 도형 게임판 영역 ──
-            "board_roi": {"client_x": 32737, "client_y": 32348, "w": 1095, "h": 787},
+            # ── 고정 기본값: 투명 도형 게임판 영역 (비율 좌표, 2560×1369 기준 중앙 추정값) ──
+            "board_roi": {"x_ratio": 0.286, "y_ratio": 0.183, "w_ratio": 0.428, "h_ratio": 0.575},
         },
         "user_detected": {
             "enabled": False,

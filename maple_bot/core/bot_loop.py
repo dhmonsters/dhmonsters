@@ -1446,6 +1446,15 @@ class BotLoop:
         from core.config_manager import resolve_region_coords, logical_to_physical_coords
         from core.transparent_shape_game import TITLE_TEMPLATE, TITLE_THRESHOLD
 
+        _lie_yolo_init_done = False   # 최초 로드 시도 결과를 UI 로그에 한 번만 출력
+
+        # ── 감지 루프 시작 시 활성화 상태 보고 ─────────────────────────
+        self._status(
+            f"[거탐] 감지 스레드 시작 — "
+            f"lie_notify={self._enable_lie_notify} "
+            f"lie_solve={self._enable_lie_solve}"
+        )
+
         while not self._stop_event.is_set():
             try:
                 if self._safety_pending is None:
@@ -1458,8 +1467,9 @@ class BotLoop:
                             _lie_yolo_path = (lie_cfg.get("yolo_model_path") or "").strip()
 
                             if _lie_yolo_path:
-                                # ── YOLO 전용 감지 (템플릿 매칭 사용 안 함) ──
-                                if self._lie_yolo is None:
+                                # ── YOLO 전용 감지 ──
+                                if self._lie_yolo is None and not _lie_yolo_init_done:
+                                    _lie_yolo_init_done = True
                                     try:
                                         from core.yolo_detector import YoloDetector
                                         self._lie_yolo = YoloDetector(
@@ -1468,14 +1478,19 @@ class BotLoop:
                                             iou=0.45,
                                             max_det=5,
                                         )
-                                        logger.info("거짓말탐지기 YOLO 로드: %s", _lie_yolo_path)
+                                        if self._lie_yolo.is_loaded:
+                                            self._status(f"[거탐] YOLO 로드 완료 (신뢰도={lie_cfg.get('yolo_confidence', 0.25)})")
+                                        else:
+                                            self._status("[거탐] YOLO 로드됐으나 is_loaded=False — 모델 파일 확인 필요")
+                                            self._lie_yolo = None
                                     except Exception as _e:
-                                        logger.warning("거짓말탐지기 YOLO 로드 실패: %s", _e)
+                                        self._status(f"[거탐] YOLO 로드 실패: {_e}")
                                         self._lie_yolo = None
 
                                 if self._lie_yolo and self._lie_yolo.is_loaded:
                                     _det = self._lie_yolo.detect(screenshot)
                                     if _det["monsters"]:
+                                        self._status("[거탐] ⚠ 거짓말탐지기 YOLO 감지!")
                                         self._safety_pending = "lie"
                             else:
                                 # ── 템플릿 매칭 폴백 (YOLO 미설정 시) ──
@@ -1584,7 +1599,8 @@ class BotLoop:
             self._transparent_game.window_title = self._game_window_title()
 
         # ── 1단계: YOLO 감지 시도 ─────────────────────────────────────
-        detected_bbox = None  # [x1, y1, x2, y2] — 헤더 bbox
+        detected_bbox = None    # [x1, y1, x2, y2]
+        _bbox_from_yolo = False # True=팝업 전체 bbox, False=헤더 추정값
         yolo_model_path = (cfg.get("yolo_model_path") or "").strip()
         if yolo_model_path:
             # lazy init 투명 도형 전용 YOLO (신뢰도 0.25 — 소량 학습 데이터 대응)
@@ -1607,6 +1623,7 @@ class BotLoop:
                 if det["monsters"]:
                     best = max(det["monsters"], key=lambda m: m["conf"])
                     detected_bbox = best["box"]  # [x1, y1, x2, y2]
+                    _bbox_from_yolo = True
 
         # ── 2단계: 템플릿 매칭 폴백 ──────────────────────────────────
         if detected_bbox is None:
@@ -1627,15 +1644,25 @@ class BotLoop:
             except Exception:
                 pass
 
-        # ── 감지 확정 → 알람 발동 후 추적 시작 ──────────────────────────
-        # 이 시점에 YOLO 또는 템플릿으로 팝업이 실제 화면에 있음을 확인한 뒤 알람 발동.
-        # 유저가 이미 직접 해제해 팝업이 닫힌 경우 위 return False 로 여기까지 오지 않음.
-        self._fire_lie_alarm()
+        # ── 감지 확정 → 알람은 스레드로 비동기 발동, 추적은 즉시 시작 ────────
+        # 알람(winsound.Beep × 3 ≈ 1.2s)을 메인 흐름에서 실행하면 그 시간 동안
+        # 마우스 추적이 지연돼 도형을 놓친다. 별도 스레드로 분리한다.
+        import threading as _t
+        _t.Thread(target=self._fire_lie_alarm, daemon=True).start()
         self._status("투명 도형 찾기 감지! 마우스 추적 시작...")
 
-        # board ROI는 항상 config 비율 좌표 사용 (YOLO bbox는 팝업 전체를 감싸므로
-        # y2를 board 시작점으로 쓰면 화면 밖으로 나갈 수 있음)
-        dynamic_roi = None  # None → run_follow_loop 내부에서 get_board_roi() 호출
+        # board ROI: YOLO bbox 가용 시 팝업 전체에서 게임판 영역 자동 계산
+        # YOLO bbox = 팝업 전체 → 타이틀바 상단 ~10%를 제외한 나머지가 게임판
+        if _bbox_from_yolo and detected_bbox is not None:
+            _bx1, _by1, _bx2, _by2 = [int(v) for v in detected_bbox]
+            _pw, _ph = _bx2 - _bx1, _by2 - _by1
+            _hdr = max(40, int(_ph * 0.10))   # 타이틀 바 높이 추정 (최소 40px)
+            dynamic_roi = (_bx1, _by1 + _hdr, _pw, _ph - _hdr)
+            self._status(
+                f"게임판 ROI 자동: {_pw}×{_ph - _hdr}  X={_bx1} Y={_by1 + _hdr}"
+            )
+        else:
+            dynamic_roi = None  # None → run_follow_loop 내부에서 get_board_roi() 호출
 
         # 게임 종료 감지 함수 — YOLO 있으면 YOLO, 없으면 템플릿 매칭
         _yolo_ref = self._transparent_yolo  # 클로저 캡처
