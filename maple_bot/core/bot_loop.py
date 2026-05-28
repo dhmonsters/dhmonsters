@@ -472,7 +472,7 @@ class BotLoop:
                                     self._map_navigator.release_direction()
                                     fh_state = "patrol"
                         elif _pending == "transparent":
-                            self._fire_lie_alarm()   # 직접 감지 경로에도 경보음·텔레그램 발동
+                            # 알람은 _check_transparent_shape 내부에서 재감지 후 발동
                             _handled = self._check_transparent_shape(_shot)
                             if _handled and use_floor_hunt:
                                 fh_last_side = ""
@@ -1627,7 +1627,10 @@ class BotLoop:
             except Exception:
                 pass
 
-        # ── 감지 확정 → 추적 시작 ────────────────────────────────────
+        # ── 감지 확정 → 알람 발동 후 추적 시작 ──────────────────────────
+        # 이 시점에 YOLO 또는 템플릿으로 팝업이 실제 화면에 있음을 확인한 뒤 알람 발동.
+        # 유저가 이미 직접 해제해 팝업이 닫힌 경우 위 return False 로 여기까지 오지 않음.
+        self._fire_lie_alarm()
         self._status("투명 도형 찾기 감지! 마우스 추적 시작...")
 
         # board ROI는 항상 config 비율 좌표 사용 (YOLO bbox는 팝업 전체를 감싸므로
