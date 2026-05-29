@@ -3,17 +3,6 @@ import sys
 import os
 import threading
 
-# DPI 인식 모드 — Qt 초기화 전에 설정해야 Win32 API가 물리 픽셀 기준으로 동작
-# 모든 DPI 환경(1080p 100%, 1440p 150% 등)에서 좌표 계산 일관성 보장
-try:
-    import ctypes
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-except Exception:
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()
-    except Exception:
-        pass
-
 # EXE/스크립트 위치를 작업 디렉토리로 고정
 # → config.json, templates/ 등 상대경로가 항상 올바르게 동작함
 _base = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
