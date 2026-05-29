@@ -1,5 +1,5 @@
 {
-  "version": "1.2.3",
-  "notes": "- 투명 도형 마우스 추적 수정 (YOLO bbox 기반 자동 ROI 계산)\n- 잡템 자동 판매 좌표 창 이동/크기 변경 대응 (비율 기반 좌표 저장)\n- 거짓말탐지기 YOLO 진단 로그 UI 표시 (로드 성공/실패, 감지 이벤트)\n- 메인 탭 로그 필터 체크박스 소급 적용 (기존 로그도 즉시 필터)\n- 설정 잠금 UI 개선 (잡템 판매·투명 도형 설정 완료 항목 수정 불가 처리)",
-  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v1.2.3/DHMONSTERS_v1.2.3_Setup.exe"
+  "version": "2.1.4",
+  "notes": "- 층별사냥 하강 중 밧줄 걸림 탈출 로직 수정 (탈출 발동 타이밍 개선)\n- 잡템 자동 판매 상점 열기 포커스 실패 수정 (다른 PC 호환성 개선)\n- YOLO 거짓말탐지기/투명도형 모델 설치 파일에 기본 포함\n- config 모델 경로 절대경로 → 상대경로 변경 (models/lie_detector.pt)",
+  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.4/DHMONSTERS_v2.1.4_Setup.exe"
 }
