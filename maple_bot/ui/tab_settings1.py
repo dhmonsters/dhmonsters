@@ -66,28 +66,6 @@ class TabSettings1(QWidget):
         group = QGroupBox("거짓말탐지기 설정")
         layout = QVBoxLayout(group)
 
-        # ── YOLO 모델 경로 (거짓말탐지기 + 투명도형 공용) ───────────────
-        layout.addWidget(QLabel("── YOLO 감지 모델 경로 ──────────────"))
-        yolo_note = QLabel(
-            "거짓말탐지기 감지 및 투명 도형 찾기에 공용으로 사용하는 YOLO 모델 경로입니다."
-        )
-        yolo_note.setStyleSheet("color: #888; font-size: 10px;")
-        layout.addWidget(yolo_note)
-        yolo_row = QHBoxLayout()
-        yolo_row.addWidget(QLabel("모델 경로"))
-        self.edit_lie_yolo = QLineEdit()
-        self.edit_lie_yolo.setPlaceholderText("models/lie_detector.pt (기본값 자동 적용)")
-        btn_lie_yolo_browse = QPushButton("…")
-        btn_lie_yolo_browse.setFixedWidth(30)
-        btn_lie_yolo_browse.clicked.connect(self._browse_lie_yolo)
-        btn_lie_yolo_clear = QPushButton("✕")
-        btn_lie_yolo_clear.setFixedWidth(24)
-        btn_lie_yolo_clear.clicked.connect(lambda: self.edit_lie_yolo.clear())
-        yolo_row.addWidget(self.edit_lie_yolo)
-        yolo_row.addWidget(btn_lie_yolo_browse)
-        yolo_row.addWidget(btn_lie_yolo_clear)
-        layout.addLayout(yolo_row)
-
         self.chk_lie_enabled = QCheckBox("거짓말탐지기 발견 시")
         layout.addWidget(self.chk_lie_enabled)
 
@@ -157,15 +135,6 @@ class TabSettings1(QWidget):
 
     def set_hotkey_manager(self, hk) -> None:
         self._hk = hk
-
-    def _browse_lie_yolo(self) -> None:
-        from PyQt6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(
-            self, "거짓말탐지기 YOLO 모델 선택", "", "ONNX 모델 (*.onnx);;모든 파일 (*)"
-        )
-        if path:
-            self.edit_lie_yolo.setText(path)
-
 
     def _test_alarm(self) -> None:
         """알람 소리를 즉시 재생한다."""
@@ -461,11 +430,6 @@ class TabSettings1(QWidget):
     # ── config 연동 ───────────────────────────────────────────────────
     def load_from_config(self):
         ld = self.config.get("settings1", "lie_detector") or {}
-        _yolo_path = ld.get("yolo_model_path", "")
-        # 경로가 비어있거나 파일이 없으면 번들 기본 경로로 자동 설정
-        if not _yolo_path or not __import__("os").path.exists(_yolo_path):
-            _yolo_path = "models/lie_detector.pt"
-        self.edit_lie_yolo.setText(_yolo_path)
         self.chk_lie_enabled.setChecked(ld.get("enabled", False))
         self.chk_play_alarm.setChecked(ld.get("play_alarm", False))
         self.chk_tg_enabled.setChecked(ld.get("tg_enabled", False))
@@ -504,7 +468,6 @@ class TabSettings1(QWidget):
             _w.blockSignals(False)
 
     def save_to_config(self):
-        self.config.set("settings1", "lie_detector", "yolo_model_path", self.edit_lie_yolo.text().strip())
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())
         self.config.set("settings1", "lie_detector", "play_alarm",    self.chk_play_alarm.isChecked())
         self.config.set("settings1", "lie_detector", "tg_enabled",   self.chk_tg_enabled.isChecked())
