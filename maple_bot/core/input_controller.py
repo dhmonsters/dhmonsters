@@ -120,17 +120,44 @@ class InputController:
 
     # ── 창 포커스 ─────────────────────────────────────────────────────
     def focus_game_window(self) -> None:
-        """게임 창을 전면으로 가져온다."""
+        """게임 창을 전면으로 가져온다.
+
+        Windows 포그라운드 잠금 우회: AttachThreadInput 기법으로
+        다른 앱이 포커스를 가진 상태에서도 게임 창으로 포커스 이전.
+        """
         try:
             import win32gui
             import win32con
+            import win32api
+            import win32process
             hwnd = win32gui.FindWindow(None, self._window_title)
-            if hwnd:
-                # 최소화된 경우에만 복원 — 최대화/일반 상태에서 SW_RESTORE 호출 시 창이 축소되므로 방지
-                if win32gui.IsIconic(hwnd):
-                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            if not hwnd:
+                return
+            # 최소화된 경우 복원
+            if win32gui.IsIconic(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(0.1)
+            # AttachThreadInput 으로 포그라운드 잠금 우회
+            fg_hwnd = win32gui.GetForegroundWindow()
+            fg_tid  = win32process.GetWindowThreadProcessId(fg_hwnd)[0]
+            my_tid  = win32api.GetCurrentThreadId()
+            attached = False
+            if fg_tid and fg_tid != my_tid:
+                try:
+                    win32api.AttachThreadInput(fg_tid, my_tid, True)
+                    attached = True
+                except Exception:
+                    pass
+            try:
+                win32gui.BringWindowToTop(hwnd)
                 win32gui.SetForegroundWindow(hwnd)
-                time.sleep(0.05)
+            finally:
+                if attached:
+                    try:
+                        win32api.AttachThreadInput(fg_tid, my_tid, False)
+                    except Exception:
+                        pass
+            time.sleep(0.15)
         except Exception:
             pass
 

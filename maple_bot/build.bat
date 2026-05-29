@@ -26,6 +26,7 @@ xcopy /E /I /Y core .obf_build\core
 xcopy /E /I /Y ui .obf_build\ui
 if exist templates xcopy /E /I /Y templates .obf_build\templates
 if exist monsters xcopy /E /I /Y monsters .obf_build\monsters
+if exist models xcopy /E /I /Y models .obf_build\models
 
 echo.
 echo [2/3] PyInstaller building...
@@ -42,6 +43,7 @@ copy /Y config.json dist\dhmonsters\config.json
 copy /Y version.txt dist\dhmonsters\version.txt
 if exist templates xcopy /E /I /Y templates dist\dhmonsters\templates
 if exist monsters xcopy /E /I /Y monsters dist\dhmonsters\monsters
+if exist models xcopy /E /I /Y models dist\dhmonsters\models
 
 echo.
 echo ========================================
