@@ -186,116 +186,7 @@ class TabSettings1(QWidget):
         self.chk_transparent_enabled.toggled.connect(self._save_transparent_shape)
         layout.addWidget(self.chk_transparent_enabled)
 
-        # 고정 설정값 읽기 전용 표시
-        self.lbl_transparent_title = QLabel("타이틀 템플릿: 확인 중...")
-        self.lbl_transparent_title.setStyleSheet("color: green; font-size: 10px;")
-        layout.addWidget(self.lbl_transparent_title)
-
-        self.lbl_transparent_roi = QLabel("게임판 영역: 확인 중...")
-        self.lbl_transparent_roi.setStyleSheet("color: green; font-size: 10px;")
-        layout.addWidget(self.lbl_transparent_roi)
-
         return group
-
-    def _refresh_transparent_status_labels(self):
-        import os
-        path = "templates/transparent_shape_title.png"
-        if os.path.exists(path):
-            self.lbl_transparent_title.setText("타이틀 템플릿: 저장됨")
-            self.lbl_transparent_title.setStyleSheet("color: green;")
-        else:
-            self.lbl_transparent_title.setText("타이틀 템플릿: 없음")
-            self.lbl_transparent_title.setStyleSheet("color: red;")
-
-        roi_cfg = self.config.get("settings1", "transparent_shape", "board_roi")
-        if roi_cfg and isinstance(roi_cfg, dict):
-            from core.config_manager import get_game_window_rect
-            ox, oy, cw, ch = get_game_window_rect(self.config)
-            if roi_cfg.get("x_ratio") is not None and cw > 0:
-                cx = int(roi_cfg["x_ratio"] * cw)
-                cy = int(roi_cfg["y_ratio"] * ch)
-                w  = int(roi_cfg["w_ratio"] * cw)
-                h  = int(roi_cfg["h_ratio"] * ch)
-            else:
-                cx = roi_cfg.get("client_x", roi_cfg.get("x", 0))
-                cy = roi_cfg.get("client_y", roi_cfg.get("y", 0))
-                w  = roi_cfg.get("w", roi_cfg.get("width", 0))
-                h  = roi_cfg.get("h", roi_cfg.get("height", 0))
-            if w:
-                self.lbl_transparent_roi.setText(f"게임판: client({cx},{cy}) {w}×{h}")
-                self.lbl_transparent_roi.setStyleSheet("color: green;")
-            else:
-                self.lbl_transparent_roi.setText("게임판 영역: 미설정")
-                self.lbl_transparent_roi.setStyleSheet("color: red;")
-        else:
-            self.lbl_transparent_roi.setText("게임판 영역: 미설정")
-            self.lbl_transparent_roi.setStyleSheet("color: red;")
-
-    def _capture_transparent_title(self):
-        sel = RegionSelector()
-        sel.region_selected.connect(self._save_transparent_title_region)
-        self._transparent_title_selector = sel
-        sel.show()
-
-    def _save_transparent_title_region(self, x, y, w, h):
-        import mss
-        import os
-        from ui.region_selector import logical_to_physical
-        px, py, pw, ph = logical_to_physical(x, y, w, h)
-        os.makedirs("templates", exist_ok=True)
-        with mss.mss() as sct:
-            raw = sct.grab({"left": px, "top": py, "width": pw, "height": ph})
-            img = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-            cv2.imwrite("templates/transparent_shape_title.png", img)
-        self._refresh_transparent_status_labels()
-        QMessageBox.information(self, "완료", f"타이틀 템플릿 저장 완료 ({pw}×{ph}px)")
-
-    def _delete_transparent_title(self):
-        import os
-        path = "templates/transparent_shape_title.png"
-        if os.path.exists(path):
-            os.remove(path)
-        self._refresh_transparent_status_labels()
-
-    def _capture_transparent_roi(self):
-        sel = RegionSelector()
-        sel.region_selected.connect(self._save_transparent_roi_region)
-        self._transparent_roi_selector = sel
-        sel.show()
-
-    def _save_transparent_roi_region(self, abs_x, abs_y, w, h):
-        from core.config_manager import get_game_window_rect
-        ox, oy, cw, ch = get_game_window_rect(self.config)
-        if cw > 0 and ch > 0:
-            roi = {
-                "x_ratio": (abs_x - ox) / cw,
-                "y_ratio": (abs_y - oy) / ch,
-                "w_ratio": w / cw,
-                "h_ratio": h / ch,
-            }
-            client_x, client_y = int(abs_x - ox), int(abs_y - oy)
-            mode = "비율"
-        else:
-            # absolute 모드 — 구버전 client_x/client_y 형식으로 저장
-            from core.screen_reader import ScreenReader
-            window_title = self.config.get("settings2", "game_window_title") or "MapleStory"
-            origin = ScreenReader().get_window_client_origin(window_title)
-            if origin:
-                client_x = abs_x - origin[0]
-                client_y = abs_y - origin[1]
-            else:
-                client_x, client_y = abs_x, abs_y
-            roi = {"client_x": client_x, "client_y": client_y, "w": w, "h": h}
-            mode = "픽셀"
-        self.config.set("settings1", "transparent_shape", "board_roi", roi)
-        self.config.save()
-        self._refresh_transparent_status_labels()
-        QMessageBox.information(self, "완료", f"게임판 영역 저장 완료 (client {client_x},{client_y}, {w}×{h}px, {mode})")
-
-    def _delete_transparent_roi(self):
-        self.config.set("settings1", "transparent_shape", "board_roi", None)
-        self.config.save()
-        self._refresh_transparent_status_labels()
 
     def _save_transparent_shape(self):
         self.config.set("settings1", "transparent_shape", "enabled",
@@ -452,7 +343,6 @@ class TabSettings1(QWidget):
         self.chk_transparent_enabled.blockSignals(True)
         self.chk_transparent_enabled.setChecked(bool(ts.get("enabled", False)))
         self.chk_transparent_enabled.blockSignals(False)
-        self._refresh_transparent_status_labels()
 
         yolo = self.config.get("yolo") or {}
         for _w in (self.chk_yolo_enabled, self.spin_yolo_conf,

@@ -1600,52 +1600,36 @@ class BotLoop:
             )
             self._transparent_game.window_title = self._game_window_title()
 
-        # ── 1단계: YOLO 감지 시도 ─────────────────────────────────────
-        detected_bbox = None    # [x1, y1, x2, y2]
-        _bbox_from_yolo = False # True=팝업 전체 bbox, False=헤더 추정값
-        yolo_model_path = "models/lie_detector.pt"
-        import os as _os
-        if _os.path.exists(yolo_model_path):
-            # lazy init 투명 도형 전용 YOLO (신뢰도 0.25 — 소량 학습 데이터 대응)
-            if self._transparent_yolo is None:
+        # ── YOLO 감지 (models/lie_detector.pt 고정) ──────────────────
+        detected_bbox = None
+        _bbox_from_yolo = False
+
+        # lazy init 투명 도형 전용 YOLO
+        if self._transparent_yolo is None:
+            import os as _os
+            _yolo_path = "models/lie_detector.pt"
+            if _os.path.exists(_yolo_path):
                 try:
                     from core.yolo_detector import YoloDetector
                     self._transparent_yolo = YoloDetector(
-                        yolo_model_path,
+                        _yolo_path,
                         confidence=float(cfg.get("yolo_confidence", 0.25)),
                         iou=0.45,
                         max_det=5,
                     )
-                    logger.info("투명 도형 YOLO 로드: %s", yolo_model_path)
+                    logger.info("투명 도형 YOLO 로드: %s", _yolo_path)
                 except Exception as e:
                     logger.warning("투명 도형 YOLO 로드 실패: %s", e)
-                    self._transparent_yolo = None
 
-            if self._transparent_yolo and self._transparent_yolo.is_loaded:
-                det = self._transparent_yolo.detect(screenshot)
-                if det["monsters"]:
-                    best = max(det["monsters"], key=lambda m: m["conf"])
-                    detected_bbox = best["box"]  # [x1, y1, x2, y2]
-                    _bbox_from_yolo = True
+        if self._transparent_yolo and self._transparent_yolo.is_loaded:
+            det = self._transparent_yolo.detect(screenshot)
+            if det["monsters"]:
+                best = max(det["monsters"], key=lambda m: m["conf"])
+                detected_bbox = best["box"]
+                _bbox_from_yolo = True
 
-        # ── 2단계: 템플릿 매칭 폴백 ──────────────────────────────────
         if detected_bbox is None:
-            title_pos = self._transparent_game.detect_title(screenshot)
-            if title_pos is None:
-                return False
-            # 템플릿 중심 좌표로 헤더 bbox 추정 → dynamic_roi 자동 계산에 활용
-            # (config board_roi의 잘못된 좌표 사용 방지)
-            try:
-                import cv2 as _cv2
-                from core.transparent_shape_game import TITLE_TEMPLATE as _TTPL
-                _tpl = _cv2.imread(_TTPL)
-                if _tpl is not None:
-                    _th, _tw = _tpl.shape[:2]
-                    _tx, _ty = title_pos
-                    detected_bbox = [_tx - _tw // 2, _ty - _th // 2,
-                                     _tx + _tw // 2, _ty + _th // 2]
-            except Exception:
-                pass
+            return False  # YOLO 미감지 — 팝업 없음
 
         # ── 감지 확정 → 알람은 스레드로 비동기 발동, 추적은 즉시 시작 ────────
         # 알람(winsound.Beep × 3 ≈ 1.2s)을 메인 흐름에서 실행하면 그 시간 동안
@@ -1667,15 +1651,15 @@ class BotLoop:
         else:
             dynamic_roi = None  # None → run_follow_loop 내부에서 get_board_roi() 호출
 
-        # 게임 종료 감지 함수 — YOLO 있으면 YOLO, 없으면 템플릿 매칭
+        # 게임 종료 감지 — YOLO로 팝업 사라지면 종료
         _yolo_ref = self._transparent_yolo  # 클로저 캡처
 
         def _detect_end(shot) -> bool:
             """True = 게임 아직 진행 중, False = 게임 종료."""
-            if _yolo_ref and _yolo_ref.is_loaded and detected_bbox is not None:
+            if _yolo_ref and _yolo_ref.is_loaded:
                 det = _yolo_ref.detect(shot)
                 return bool(det["monsters"])
-            return self._transparent_game.detect_title(shot) is not None
+            return False
 
         floor_cfg = self._config.get("floor_hunt") or {}
         if floor_cfg.get("enabled"):
@@ -1704,61 +1688,23 @@ class BotLoop:
         if not cfg.get("enabled"):
             return False
 
-        # ── 감지: YOLO 우선, 템플릿 매칭 폴백 ─────────────────────────
-        _lie_yolo_path = (cfg.get("yolo_model_path") or "").strip()
+        # ── YOLO 감지 (models/lie_detector.pt 고정) ──────────────────
         matched_pos  = None
-        best_score   = 0.0
         detect_mode  = ""
         region       = cfg.get("region")
 
-        if _lie_yolo_path:
-            # YOLO 전용
-            # _safety_detect_loop 에서 이미 감지 확인됨 → 재감지 실패해도 알림·해제 진행
-            if self._lie_yolo and self._lie_yolo.is_loaded:
-                _det = self._lie_yolo.detect(screenshot)
-                if _det["monsters"]:
-                    _b = _det["monsters"][0]["box"]   # [x1, y1, x2, y2]
-                    matched_pos = (int((_b[0] + _b[2]) / 2), int((_b[1] + _b[3]) / 2))
-                    detect_mode = f"YOLO conf={_det['monsters'][0]['conf']:.2f}"
-                else:
-                    # 재감지 실패 — 화면이 이미 투명도형 찾기로 전환됐을 가능성 높음
-                    # 알림·해제는 계속 진행 (matched_pos=None 이므로 run_follow_loop 사용)
-                    detect_mode = "YOLO 감지됨 (재감지 실패 — 화면 전환 추정)"
+        if self._lie_yolo and self._lie_yolo.is_loaded:
+            _det = self._lie_yolo.detect(screenshot)
+            if _det["monsters"]:
+                _b = _det["monsters"][0]["box"]   # [x1, y1, x2, y2]
+                matched_pos = (int((_b[0] + _b[2]) / 2), int((_b[1] + _b[3]) / 2))
+                detect_mode = f"YOLO conf={_det['monsters'][0]['conf']:.2f}"
             else:
-                self._status("거짓말탐지기 YOLO: 모델 미로드 — 설정1 탭의 모델 경로를 확인하세요")
-                return False
+                # 재감지 실패 — 화면이 이미 투명도형 찾기로 전환됐을 가능성 높음
+                detect_mode = "YOLO 감지됨 (재감지 실패 — 화면 전환 추정)"
         else:
-            # 템플릿 매칭 폴백
-            import glob
-            from core.config_manager import resolve_region_coords, logical_to_physical_coords
-            patterns = sorted(glob.glob("templates/lie_detector_*.png"))
-            if not patterns:
-                self._status("⚠ 거짓말탐지기 템플릿 없음 — 설정1 탭에서 캡처 필요")
-                return False
-
-            resolved = resolve_region_coords(self._config, region)
-            if resolved:
-                rx, ry, rw, rh = resolved
-                rpx, rpy, rpw, rph = logical_to_physical_coords(rx, ry, rw, rh)
-                target = self._screen.capture({"left": rpx, "top": rpy, "width": rpw, "height": rph})
-            else:
-                target = screenshot
-
-            for tpl_path in patterns:
-                score = self._screen.find_template_score(target, tpl_path)
-                if score > best_score:
-                    best_score = score
-                if score >= 0.65:
-                    matched_pos = self._screen.find_template(target, tpl_path, threshold=0.65)
-                    if matched_pos:
-                        if region and matched_pos:
-                            matched_pos = (matched_pos[0] + rx, matched_pos[1] + ry)
-                        break
-
-            if matched_pos is None:
-                self._status(f"[탐지기 점수] {best_score:.2f}  (기준 0.65 이상이면 감지)")
-                return False
-            detect_mode = f"템플릿 {len(patterns)}개 중 매칭"
+            self._status("[거탐] YOLO 모델 미로드 — models/lie_detector.pt 확인 필요")
+            return False
 
         self._status(f"거짓말탐지기 감지! ({detect_mode})")
 
