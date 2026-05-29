@@ -76,7 +76,7 @@ class TabSettings1(QWidget):
         yolo_row = QHBoxLayout()
         yolo_row.addWidget(QLabel("모델 경로"))
         self.edit_lie_yolo = QLineEdit()
-        self.edit_lie_yolo.setPlaceholderText("lie_detector.onnx 경로")
+        self.edit_lie_yolo.setPlaceholderText("models/lie_detector.pt (기본값 자동 적용)")
         btn_lie_yolo_browse = QPushButton("…")
         btn_lie_yolo_browse.setFixedWidth(30)
         btn_lie_yolo_browse.clicked.connect(self._browse_lie_yolo)
@@ -461,7 +461,11 @@ class TabSettings1(QWidget):
     # ── config 연동 ───────────────────────────────────────────────────
     def load_from_config(self):
         ld = self.config.get("settings1", "lie_detector") or {}
-        self.edit_lie_yolo.setText(ld.get("yolo_model_path", ""))
+        _yolo_path = ld.get("yolo_model_path", "")
+        # 경로가 비어있거나 파일이 없으면 번들 기본 경로로 자동 설정
+        if not _yolo_path or not __import__("os").path.exists(_yolo_path):
+            _yolo_path = "models/lie_detector.pt"
+        self.edit_lie_yolo.setText(_yolo_path)
         self.chk_lie_enabled.setChecked(ld.get("enabled", False))
         self.chk_play_alarm.setChecked(ld.get("play_alarm", False))
         self.chk_tg_enabled.setChecked(ld.get("tg_enabled", False))

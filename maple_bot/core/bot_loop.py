@@ -1466,8 +1466,12 @@ class BotLoop:
                         lie_cfg = self._config.get("settings1", "lie_detector") or {}
                         if lie_cfg.get("enabled"):
                             _lie_yolo_path = (lie_cfg.get("yolo_model_path") or "").strip()
+                            # 경로 미설정 또는 파일 없으면 번들 기본 모델로 폴백
+                            import os as _os
+                            if not _lie_yolo_path or not _os.path.exists(_lie_yolo_path):
+                                _lie_yolo_path = "models/lie_detector.pt"
 
-                            if _lie_yolo_path:
+                            if _lie_yolo_path and _os.path.exists(_lie_yolo_path):
                                 # ── YOLO 전용 감지 ──
                                 if self._lie_yolo is None and not _lie_yolo_init_done:
                                     _lie_yolo_init_done = True
@@ -1603,7 +1607,11 @@ class BotLoop:
         detected_bbox = None    # [x1, y1, x2, y2]
         _bbox_from_yolo = False # True=팝업 전체 bbox, False=헤더 추정값
         yolo_model_path = (cfg.get("yolo_model_path") or "").strip()
-        if yolo_model_path:
+        # 경로 미설정 또는 파일 없으면 번들 기본 모델로 폴백
+        import os as _os
+        if not yolo_model_path or not _os.path.exists(yolo_model_path):
+            yolo_model_path = "models/lie_detector.pt"
+        if yolo_model_path and _os.path.exists(yolo_model_path):
             # lazy init 투명 도형 전용 YOLO (신뢰도 0.25 — 소량 학습 데이터 대응)
             if self._transparent_yolo is None:
                 try:
