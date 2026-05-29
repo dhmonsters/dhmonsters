@@ -814,12 +814,13 @@ class BotLoop:
                             elif (pos is not None
                                     and time.time() - fh_rope_escape_time >= FH_ROPE_ESCAPE_INTERVAL):
                                 # 내려가는 중 밧줄에 걸린 경우 탈출 시도
-                                # 점프 직후 0.8초는 원래 밧줄(fh_rope_x) 제외 (오감지 방지)
-                                # 0.8초 이후엔 몬스터 팅김으로 재포획된 경우도 탈출 대상에 포함
+                                # 오르기: 점프 직후 0.8초 원래 밧줄 제외 (밧줄 위 오감지 방지)
+                                # 내려가기: 0.1초만 제외 (FH_DESCEND_SEC=0.3 안에 탈출 가능하게)
                                 _since_jump = time.time() - fh_climb_start
+                                _skip_window = 0.8 if fh_next_dir > 0 else 0.1
                                 _jk = self._minimap_reader.config.jump_key or "alt"
                                 for _rp in self._map_navigator.ropes:
-                                    if _rp.x == fh_rope_x and _since_jump < 0.8:
+                                    if _rp.x == fh_rope_x and _since_jump < _skip_window:
                                         continue  # 점프 직후에는 원래 밧줄 제외
                                     if abs(pos[0] - _rp.x) <= 8:  # 3→8px (팅김 대응)
                                         _esc = _rp.approach if _rp.approach in ("left", "right") else "left"
