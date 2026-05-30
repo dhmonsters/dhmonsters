@@ -351,6 +351,18 @@ def _contour_center(mask, min_a, max_a):
     return (int(m["m10"] / m["m00"]), int(m["m01"] / m["m00"]))
 
 
+def mask_cursor(img):
+    """분홍 마우스 커서를 HSV로 검출해 주변 픽셀로 inpaint 제거한다."""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    lo = np.array([CURSOR_HUE[0], CURSOR_SAT_MIN, CURSOR_VAL_MIN], np.uint8)
+    hi = np.array([CURSOR_HUE[1], 255, 255], np.uint8)
+    mask = cv2.inRange(hsv, lo, hi)
+    if cv2.countNonZero(mask) == 0:
+        return img
+    mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
+    return cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
+
+
 def find_white(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, WHITE_THRESH, 255, cv2.THRESH_BINARY)
