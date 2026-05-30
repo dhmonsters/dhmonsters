@@ -33,8 +33,25 @@ WHITE_MIN_AREA = 800
 WHITE_MAX_AREA = 40000
 WHITE_KERNEL   = (7, 7)
 
-DIFF_THRESH    = 20
-DIFF_MIN_AREA  = 400
+# 로컬 템플릿 추적기
+MATCH_THRESH   = 0.45    # NCC 매칭 채택 임계
+TMPL_SIZE      = 64      # 초기 템플릿 한 변(px)
+SEARCH_MARGIN  = 40      # 예측위치 ± 검색 윈도우 여유(px)
+TMPL_UPDATE    = 0.10    # 템플릿 갱신 비율(이전 1-값 유지)
+LOST_MAX       = 15      # 연속 미검출 허용 프레임
+VEL_ALPHA      = 0.5     # velocity EMA
+HARD_TIMEOUT   = 35.0    # 하드 타임아웃(초)
+
+# 분홍 커서 HSV 범위 (OpenCV H 0~179)
+CURSOR_HUE     = (140, 175)
+CURSOR_SAT_MIN = 80
+CURSOR_VAL_MIN = 80
+
+# 종료 화면 감지 (밝은 노란 SUCCESS 글자 비율)
+END_YELLOW_HUE = (20, 35)
+END_SAT_MIN    = 120
+END_VAL_MIN    = 180
+END_RATIO_MIN  = 0.02    # 노란 픽셀 비율 임계
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "board_roi.json")
 
