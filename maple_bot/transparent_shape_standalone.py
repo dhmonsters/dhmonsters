@@ -413,8 +413,12 @@ class ShapeTracker:
         self._emitter = emitter
         self._ema_x = None
         self._ema_y = None
-        self._prev  = None
         self._stop  = threading.Event()
+        # 추적 상태
+        self._tmpl  = None          # 현재 템플릿 (BGR)
+        self._pos   = None          # 마지막 도형 위치 (board 상대 px)
+        self._vel   = (0.0, 0.0)    # 속도(px/frame)
+        self._lost  = 0
 
     def stop(self):
         self._stop.set()
@@ -443,31 +447,103 @@ class ShapeTracker:
         except Exception:
             pass
 
+    def _init_template(self, board):
+        """가운데 흰 도형을 찾아 첫 템플릿으로 시드한다. 실패 시 None."""
+        rel = find_white(board)
+        H, W = board.shape[:2]
+        if rel is None:
+            return None
+        half = TMPL_SIZE // 2
+        cx, cy = rel
+        x0 = max(0, cx - half); y0 = max(0, cy - half)
+        x1 = min(W, cx + half); y1 = min(H, cy + half)
+        patch = board[y0:y1, x0:x1].copy()
+        if patch.shape[0] < 8 or patch.shape[1] < 8:
+            return None
+        self._tmpl = patch
+        self._pos  = (cx, cy)
+        return rel
+
+    def _update_template(self, board, cx, cy):
+        """매칭 위치 패치로 템플릿을 느리게 갱신해 흰→투명 변화에 적응한다."""
+        if self._tmpl is None:
+            return
+        th, tw = self._tmpl.shape[:2]
+        H, W = board.shape[:2]
+        x0 = cx - tw // 2; y0 = cy - th // 2
+        if x0 < 0 or y0 < 0 or x0 + tw > W or y0 + th > H:
+            return
+        patch = board[y0:y0 + th, x0:x0 + tw].astype(np.float32)
+        cur   = self._tmpl.astype(np.float32)
+        blended = (1 - TMPL_UPDATE) * cur + TMPL_UPDATE * patch
+        self._tmpl = blended.astype(np.uint8)
+
     def run(self):
         x, y, w, h = self.roi["x"], self.roi["y"], self.roi["w"], self.roi["h"]
         region = {"left": x, "top": y, "width": w, "height": h}
         self._ema_x = x + w / 2.0
         self._ema_y = y + h / 2.0
-        self._prev  = None
-
         self._emitter.log.emit(f"[추적 시작] {w}×{h} @ ({x},{y})")
 
+        start_t = time.time()
         with mss.MSS() as sct:
+            # ── 초기화: 가운데 흰 도형으로 템플릿 시드 ──
+            init_deadline = start_t + 3.0
+            while not self._stop.is_set():
+                raw = sct.grab(region)
+                board = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                board = mask_cursor(board)
+                if self._init_template(board) is not None:
+                    self._emitter.log.emit("[초기화] 흰 도형 템플릿 확보")
+                    break
+                if time.time() > init_deadline:
+                    self._pos = (w // 2, h // 2)
+                    self._emitter.log.emit("[초기화] 흰 도형 미발견 → 중심에서 시작")
+                    break
+                time.sleep(FRAME_INTERVAL)
+
+            # ── 추적 루프 ──
             while not self._stop.is_set():
                 t0 = time.time()
 
-                raw   = sct.grab(region)
+                if t0 - start_t >= HARD_TIMEOUT:
+                    self._emitter.log.emit("[종료] 타임아웃")
+                    break
+
+                raw = sct.grab(region)
                 board = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+                board = mask_cursor(board)
 
-                rel   = find_white(board)
-                if rel is None:
-                    rel = find_diff(board, self._prev)
+                if detect_end_screen(board):
+                    self._emitter.log.emit("[종료] SUCCESS 화면 감지")
+                    break
 
-                self._prev = board
+                pred = (self._pos[0] + self._vel[0], self._pos[1] + self._vel[1])
+                res = None
+                if self._tmpl is not None:
+                    res = match_template_local(board, self._tmpl, pred, SEARCH_MARGIN)
 
-                if rel is not None:
-                    sx, sy = self._ema(x + rel[0], y + rel[1])
-                    self._move(sx, sy)
+                if res is not None and res[2] >= MATCH_THRESH:
+                    nx, ny, score = res
+                    self._vel = (
+                        VEL_ALPHA * (nx - self._pos[0]) + (1 - VEL_ALPHA) * self._vel[0],
+                        VEL_ALPHA * (ny - self._pos[1]) + (1 - VEL_ALPHA) * self._vel[1],
+                    )
+                    self._pos = (nx, ny)
+                    self._lost = 0
+                    self._update_template(board, nx, ny)
+                else:
+                    # 미검출: 예측 위치로 직진 추종
+                    self._lost += 1
+                    self._pos = (
+                        max(0, min(w - 1, pred[0])),
+                        max(0, min(h - 1, pred[1])),
+                    )
+                    if self._lost > LOST_MAX:
+                        self._vel = (0.0, 0.0)
+
+                sx, sy = self._ema(x + self._pos[0], y + self._pos[1])
+                self._move(sx, sy)
 
                 rem = FRAME_INTERVAL - (time.time() - t0)
                 if rem > 0:
