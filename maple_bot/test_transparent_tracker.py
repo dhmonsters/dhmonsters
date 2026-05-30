@@ -22,6 +22,38 @@ def test_mask_cursor_removes_pink():
     print("test_mask_cursor_removes_pink: PASS")
 
 
+def _make_structured_patch():
+    # 어두운 베이스에 밝은 사각형(도형 테두리 구조 모사) — NCC가 의미를 갖도록
+    patch = np.full((64, 64, 3), 90, np.uint8)
+    cv2.rectangle(patch, (16, 16), (48, 48), (230, 230, 230), -1)
+    return patch
+
+
+def test_match_template_local_finds_patch():
+    # 200x200 배경(90)에 구조화 패치를 (120,80) 중심에 끼워넣음
+    img = np.full((200, 200, 3), 90, np.uint8)
+    patch = _make_structured_patch()
+    cx, cy = 120, 80
+    img[cy-32:cy+32, cx-32:cx+32] = patch
+    # 예측 위치를 약간 어긋나게 줘도 윈도우 안에서 찾아야 함
+    res = tst.match_template_local(img, patch, (110, 70), tst.SEARCH_MARGIN)
+    assert res is not None, "매칭 실패"
+    fx, fy, score = res
+    assert abs(fx - cx) <= 3 and abs(fy - cy) <= 3, f"위치 오차 ({fx},{fy})"
+    assert score >= tst.MATCH_THRESH, f"점수 낮음 {score}"
+    print("test_match_template_local_finds_patch: PASS")
+
+
+def test_match_template_local_rejects_noise():
+    img = np.random.randint(0, 60, (200, 200, 3), np.uint8)  # 어두운 노이즈(패치 부재)
+    patch = _make_structured_patch()                         # 구조화 패치
+    res = tst.match_template_local(img, patch, (100, 100), tst.SEARCH_MARGIN)
+    assert res is None or res[2] < tst.MATCH_THRESH, "노이즈 오검출"
+    print("test_match_template_local_rejects_noise: PASS")
+
+
 if __name__ == "__main__":
     test_mask_cursor_removes_pink()
+    test_match_template_local_finds_patch()
+    test_match_template_local_rejects_noise()
     print("ALL PASS")

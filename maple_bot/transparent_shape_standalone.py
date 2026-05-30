@@ -371,15 +371,23 @@ def find_white(img):
     return _contour_center(mask, WHITE_MIN_AREA, WHITE_MAX_AREA)
 
 
-def find_diff(img, prev):
-    if prev is None or prev.shape != img.shape:
+def match_template_local(img, tmpl, pred, margin):
+    """예측 위치 pred 주변 윈도우에서 tmpl을 NCC 매칭. (cx, cy, score) | None."""
+    th, tw = tmpl.shape[:2]
+    H, W = img.shape[:2]
+    px, py = int(pred[0]), int(pred[1])
+    # 검색 윈도우 (템플릿 절반 + margin 여유)
+    half_w, half_h = tw // 2 + margin, th // 2 + margin
+    x0 = max(0, px - half_w); y0 = max(0, py - half_h)
+    x1 = min(W, px + half_w); y1 = min(H, py + half_h)
+    win = img[y0:y1, x0:x1]
+    if win.shape[0] < th or win.shape[1] < tw:
         return None
-    diff = cv2.absdiff(img, prev)
-    gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray, DIFF_THRESH, 255, cv2.THRESH_BINARY)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_DILATE, kernel)
-    return _contour_center(mask, DIFF_MIN_AREA, WHITE_MAX_AREA)
+    res = cv2.matchTemplate(win, tmpl, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, max_loc = cv2.minMaxLoc(res)
+    cx = x0 + max_loc[0] + tw // 2
+    cy = y0 + max_loc[1] + th // 2
+    return (cx, cy, float(max_val))
 
 
 # ── 시그널 브릿지 ─────────────────────────────────────────────────────
