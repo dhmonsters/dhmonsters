@@ -40,18 +40,12 @@ SEARCH_MARGIN  = 40      # 예측위치 ± 검색 윈도우 여유(px)
 TMPL_UPDATE    = 0.10    # 템플릿 갱신 비율(이전 1-값 유지)
 LOST_MAX       = 15      # 연속 미검출 허용 프레임
 VEL_ALPHA      = 0.5     # velocity EMA
-HARD_TIMEOUT   = 35.0    # 하드 타임아웃(초)
+HARD_TIMEOUT   = 30.0    # 하드 타임아웃(초) — 게임 30초 미만
 
 # 분홍 커서 HSV 범위 (OpenCV H 0~179)
 CURSOR_HUE     = (140, 175)
 CURSOR_SAT_MIN = 80
 CURSOR_VAL_MIN = 80
-
-# 종료 화면 감지 (밝은 노란 SUCCESS 글자 비율)
-END_YELLOW_HUE = (20, 35)
-END_SAT_MIN    = 120
-END_VAL_MIN    = 180
-END_RATIO_MIN  = 0.02    # 노란 픽셀 비율 임계
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "board_roi.json")
 
@@ -363,16 +357,6 @@ def mask_cursor(img):
     return cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
 
 
-def detect_end_screen(img):
-    """SUCCESS/종료 화면의 밝은 노란 글자 비율로 게임 종료를 감지한다."""
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    lo = np.array([END_YELLOW_HUE[0], END_SAT_MIN, END_VAL_MIN], np.uint8)
-    hi = np.array([END_YELLOW_HUE[1], 255, 255], np.uint8)
-    mask = cv2.inRange(hsv, lo, hi)
-    ratio = cv2.countNonZero(mask) / float(mask.size)
-    return ratio >= END_RATIO_MIN
-
-
 def find_white(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, WHITE_THRESH, 255, cv2.THRESH_BINARY)
@@ -513,10 +497,6 @@ class ShapeTracker:
                 raw = sct.grab(region)
                 board = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
                 board = mask_cursor(board)
-
-                if detect_end_screen(board):
-                    self._emitter.log.emit("[종료] SUCCESS 화면 감지")
-                    break
 
                 pred = (self._pos[0] + self._vel[0], self._pos[1] + self._vel[1])
                 res = None

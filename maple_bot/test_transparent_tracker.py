@@ -52,24 +52,8 @@ def test_match_template_local_rejects_noise():
     print("test_match_template_local_rejects_noise: PASS")
 
 
-def test_detect_end_screen_true_on_yellow():
-    img = np.full((200, 300, 3), 80, np.uint8)
-    # 밝은 노란 SUCCESS 글자 영역 (BGR에서 노랑 = (0,230,230))
-    cv2.rectangle(img, (40, 80), (260, 130), (0, 230, 230), -1)
-    assert tst.detect_end_screen(img) is True
-    print("test_detect_end_screen_true_on_yellow: PASS")
-
-
-def test_detect_end_screen_false_on_board():
-    img = np.random.randint(60, 110, (200, 300, 3), np.uint8)  # 갈색 보드 근사
-    assert tst.detect_end_screen(img) is False
-    print("test_detect_end_screen_false_on_board: PASS")
-
-
 if __name__ == "__main__":
     test_mask_cursor_removes_pink()
     test_match_template_local_finds_patch()
     test_match_template_local_rejects_noise()
-    test_detect_end_screen_true_on_yellow()
-    test_detect_end_screen_false_on_board()
     print("ALL PASS")
