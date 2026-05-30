@@ -363,6 +363,16 @@ def mask_cursor(img):
     return cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
 
 
+def detect_end_screen(img):
+    """SUCCESS/종료 화면의 밝은 노란 글자 비율로 게임 종료를 감지한다."""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    lo = np.array([END_YELLOW_HUE[0], END_SAT_MIN, END_VAL_MIN], np.uint8)
+    hi = np.array([END_YELLOW_HUE[1], 255, 255], np.uint8)
+    mask = cv2.inRange(hsv, lo, hi)
+    ratio = cv2.countNonZero(mask) / float(mask.size)
+    return ratio >= END_RATIO_MIN
+
+
 def find_white(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, WHITE_THRESH, 255, cv2.THRESH_BINARY)
