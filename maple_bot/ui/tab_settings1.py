@@ -52,6 +52,7 @@ class TabSettings1(QWidget):
         layout.addWidget(self._build_user_detected_group())
         layout.addWidget(self._build_stat_assign_group())
         layout.addWidget(self._build_yolo_group())
+        layout.addWidget(self._build_yolo_capture_group())
         layout.addStretch()
 
         scroll.setWidget(inner)
@@ -301,6 +302,156 @@ class TabSettings1(QWidget):
 
         return group
 
+    # ── YOLO 학습 데이터 캡처 ─────────────────────────────────────────
+    # 저장 경로 고정
+    CAPTURE_SAVE_DIR = r"C:\Users\PC\Desktop\02_work\05_AI\yolo_train\dataset\raw"
+
+    def _build_yolo_capture_group(self):
+        import threading
+        from PyQt6.QtWidgets import QDoubleSpinBox
+        group = QGroupBox("YOLO 학습 데이터 캡처")
+        layout = QVBoxLayout(group)
+
+        # 경로 표시 (고정)
+        path_row = QHBoxLayout()
+        path_row.addWidget(QLabel("저장 경로"))
+        lbl_path = QLabel(self.CAPTURE_SAVE_DIR)
+        lbl_path.setStyleSheet("color: #6bcb77; font-size: 10px;")
+        lbl_path.setWordWrap(True)
+        path_row.addWidget(lbl_path, stretch=1)
+        layout.addLayout(path_row)
+
+        # ── 시작 단축키 ──
+        hk_start_row = QHBoxLayout()
+        hk_start_row.addWidget(QLabel("시작 단축키"))
+        self.edit_capture_key_start = QLineEdit()
+        self.edit_capture_key_start.setPlaceholderText("예: f6, ins")
+        self.edit_capture_key_start.setFixedWidth(90)
+        hk_start_row.addWidget(self.edit_capture_key_start)
+        btn_reg_start = QPushButton("등록")
+        btn_reg_start.setFixedWidth(50)
+        btn_reg_start.clicked.connect(self._register_capture_start_hk)
+        hk_start_row.addWidget(btn_reg_start)
+        self.lbl_capture_start_status = QLabel("")
+        self.lbl_capture_start_status.setStyleSheet("color: #6bcb77; font-size: 10px;")
+        hk_start_row.addWidget(self.lbl_capture_start_status)
+        hk_start_row.addStretch()
+        layout.addLayout(hk_start_row)
+
+        # ── 멈춤 단축키 ──
+        hk_stop_row = QHBoxLayout()
+        hk_stop_row.addWidget(QLabel("멈춤 단축키"))
+        self.edit_capture_key_stop = QLineEdit()
+        self.edit_capture_key_stop.setPlaceholderText("예: f7, del")
+        self.edit_capture_key_stop.setFixedWidth(90)
+        hk_stop_row.addWidget(self.edit_capture_key_stop)
+        btn_reg_stop = QPushButton("등록")
+        btn_reg_stop.setFixedWidth(50)
+        btn_reg_stop.clicked.connect(self._register_capture_stop_hk)
+        hk_stop_row.addWidget(btn_reg_stop)
+        self.lbl_capture_stop_status = QLabel("")
+        self.lbl_capture_stop_status.setStyleSheet("color: #f44336; font-size: 10px;")
+        hk_stop_row.addWidget(self.lbl_capture_stop_status)
+        hk_stop_row.addStretch()
+        layout.addLayout(hk_stop_row)
+
+        # ── 간격 + 상태 ──
+        bottom_row = QHBoxLayout()
+        bottom_row.addWidget(QLabel("간격"))
+        self.spin_auto_interval = QDoubleSpinBox()
+        self.spin_auto_interval.setRange(0.1, 60.0)
+        self.spin_auto_interval.setSingleStep(0.1)
+        self.spin_auto_interval.setDecimals(1)
+        self.spin_auto_interval.setValue(0.5)
+        self.spin_auto_interval.setSuffix(" 초")
+        self.spin_auto_interval.setFixedWidth(75)
+        bottom_row.addWidget(self.spin_auto_interval)
+        bottom_row.addSpacing(12)
+        self.lbl_capture_count = QLabel("캡처: 0장")
+        self.lbl_capture_count.setStyleSheet("font-size: 10px;")
+        bottom_row.addWidget(self.lbl_capture_count)
+        bottom_row.addStretch()
+        layout.addLayout(bottom_row)
+
+        # 내부 상태
+        self._capture_count = 0
+        self._auto_capture_active = False
+        self._auto_capture_thread = None
+        self._auto_capture_stop = threading.Event()
+
+        return group
+
+    def _get_capture_folder(self) -> str:
+        os.makedirs(self.CAPTURE_SAVE_DIR, exist_ok=True)
+        return self.CAPTURE_SAVE_DIR
+
+    def _next_capture_index(self, folder: str) -> int:
+        existing = [f for f in os.listdir(folder) if f.endswith(".png")]
+        return len(existing)
+
+    def _register_capture_start_hk(self) -> None:
+        if self._hk is None:
+            QMessageBox.warning(self, "오류", "HotkeyManager가 초기화되지 않았습니다.")
+            return
+        key = self.edit_capture_key_start.text().strip()
+        if not key:
+            return
+        err = self._hk.register("yolo_capture_start", key, self._start_auto_capture)
+        if err:
+            QMessageBox.warning(self, "단축키 오류", err)
+        else:
+            self.lbl_capture_start_status.setText(f"[{key.upper()}] 등록됨")
+            self.config.set("yolo_capture", "hotkey_start", key)
+            self.config.set("yolo_capture", "auto_interval_sec", self.spin_auto_interval.value())
+            self.config.save()
+
+    def _register_capture_stop_hk(self) -> None:
+        if self._hk is None:
+            QMessageBox.warning(self, "오류", "HotkeyManager가 초기화되지 않았습니다.")
+            return
+        key = self.edit_capture_key_stop.text().strip()
+        if not key:
+            return
+        err = self._hk.register("yolo_capture_stop", key, self._stop_auto_capture)
+        if err:
+            QMessageBox.warning(self, "단축키 오류", err)
+        else:
+            self.lbl_capture_stop_status.setText(f"[{key.upper()}] 등록됨")
+            self.config.set("yolo_capture", "hotkey_stop", key)
+            self.config.save()
+
+    def _do_capture(self) -> None:
+        folder = self._get_capture_folder()
+        idx = self._next_capture_index(folder) + 1
+        path = os.path.join(folder, f"{idx:05d}.png")
+        with mss.mss() as sct:
+            raw = sct.grab(sct.monitors[1])
+            cv2.imwrite(path, cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR))
+        self._capture_count += 1
+        self.lbl_capture_count.setText(f"캡처: {self._capture_count}장  ({os.path.basename(path)})")
+
+    def _start_auto_capture(self) -> None:
+        import threading
+        if self._auto_capture_active:
+            return
+        self._auto_capture_stop.clear()
+        interval = self.spin_auto_interval.value()
+
+        def _loop():
+            while not self._auto_capture_stop.is_set():
+                self._do_capture()
+                self._auto_capture_stop.wait(interval)
+
+        self._auto_capture_thread = threading.Thread(target=_loop, daemon=True)
+        self._auto_capture_thread.start()
+        self._auto_capture_active = True
+        self.lbl_capture_count.setStyleSheet("color: #6bcb77; font-size: 10px;")
+
+    def _stop_auto_capture(self) -> None:
+        self._auto_capture_stop.set()
+        self._auto_capture_active = False
+        self.lbl_capture_count.setStyleSheet("font-size: 10px;")
+
     def _browse_yolo_model(self) -> None:
         from PyQt6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(
@@ -356,6 +507,21 @@ class TabSettings1(QWidget):
         for _w in (self.chk_yolo_enabled, self.spin_yolo_conf,
                    self.spin_yolo_iou, self.spin_yolo_every_n):
             _w.blockSignals(False)
+
+        yolo_cap = self.config.get("yolo_capture") or {}
+        self.spin_auto_interval.setValue(float(yolo_cap.get("auto_interval_sec", 0.5)))
+        _key_start = yolo_cap.get("hotkey_start", "")
+        _key_stop  = yolo_cap.get("hotkey_stop", "")
+        if _key_start:
+            self.edit_capture_key_start.setText(_key_start)
+            if self._hk is not None:
+                self._hk.register("yolo_capture_start", _key_start, self._start_auto_capture)
+                self.lbl_capture_start_status.setText(f"[{_key_start.upper()}] 등록됨")
+        if _key_stop:
+            self.edit_capture_key_stop.setText(_key_stop)
+            if self._hk is not None:
+                self._hk.register("yolo_capture_stop", _key_stop, self._stop_auto_capture)
+                self.lbl_capture_stop_status.setText(f"[{_key_stop.upper()}] 등록됨")
 
     def save_to_config(self):
         self.config.set("settings1", "lie_detector", "enabled",       self.chk_lie_enabled.isChecked())

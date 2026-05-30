@@ -193,7 +193,8 @@ class TransparentShapeGame:
         # ROI 절대 위치를 로그에 표시 (위치 오류 진단용)
         on_status(f"투명 도형 찾기: 추적 시작 (ROI={bw}×{bh}  위치 X={bx} Y={by})")
 
-        _shape_detected_once = False  # 도형이 한 번이라도 감지됐는지 여부
+        _shape_detected_once = False   # 도형이 한 번이라도 감지됐는지 여부
+        _mouse_moved_once    = False   # 첫 마우스 이동 로그용
 
         # standalone과 동일하게 독립 mss 인스턴스 사용
         # (ScreenReader의 공유 인스턴스는 스레드 간 혼용 시 오작동 가능)
@@ -230,6 +231,11 @@ class TransparentShapeGame:
                     abs_x = bx + rel[0]
                     abs_y = by + rel[1]
                     sx, sy = self._update_ema(abs_x, abs_y)
+                    if not _mouse_moved_once:
+                        on_status(
+                            f"투명 도형 찾기: 마우스 이동 시작 → 절대좌표 ({sx:.0f},{sy:.0f})"
+                        )
+                        _mouse_moved_once = True
                     self._move_mouse_toward(sx, sy)
                 else:
                     self._lost_count += 1
