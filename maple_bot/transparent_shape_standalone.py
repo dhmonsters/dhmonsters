@@ -28,11 +28,6 @@ EMA_ALPHA      = 0.35
 MAX_SPEED      = 30
 SPEED_PROP     = 0.4
 
-WHITE_THRESH   = 200
-WHITE_MIN_AREA = 800
-WHITE_MAX_AREA = 40000
-WHITE_KERNEL   = (7, 7)
-
 # 로컬 템플릿 추적기
 MATCH_THRESH   = 0.45    # NCC 매칭 채택 임계
 TMPL_SIZE      = 64      # 초기 템플릿 한 변(px)
@@ -333,18 +328,6 @@ class RoiOverlay(QWidget):
 
 
 # ── 감지 함수 ─────────────────────────────────────────────────────────
-def _contour_center(mask, min_a, max_a):
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    valid = [c for c in contours if min_a <= cv2.contourArea(c) <= max_a]
-    if not valid:
-        return None
-    c = max(valid, key=cv2.contourArea)
-    m = cv2.moments(c)
-    if m["m00"] == 0:
-        return None
-    return (int(m["m10"] / m["m00"]), int(m["m01"] / m["m00"]))
-
-
 def mask_cursor(img):
     """분홍 마우스 커서를 HSV로 검출해 주변 픽셀로 inpaint 제거한다."""
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -355,14 +338,6 @@ def mask_cursor(img):
         return img
     mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
     return cv2.inpaint(img, mask, 3, cv2.INPAINT_TELEA)
-
-
-def find_white(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray, WHITE_THRESH, 255, cv2.THRESH_BINARY)
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, WHITE_KERNEL)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    return _contour_center(mask, WHITE_MIN_AREA, WHITE_MAX_AREA)
 
 
 def match_template_local(img, tmpl, pred, margin):
@@ -431,22 +406,15 @@ class ShapeTracker:
         except Exception:
             pass
 
-    def _init_template(self, board):
-        """가운데 흰 도형을 찾아 첫 템플릿으로 시드한다. 실패 시 None."""
-        rel = find_white(board)
+    def _seed_center_template(self, board):
+        """보드 정중앙 패치를 첫 템플릿으로 시드한다 (도형은 항상 중앙에서 시작)."""
         H, W = board.shape[:2]
-        if rel is None:
-            return None
+        cx, cy = W // 2, H // 2
         half = TMPL_SIZE // 2
-        cx, cy = rel
         x0 = max(0, cx - half); y0 = max(0, cy - half)
         x1 = min(W, cx + half); y1 = min(H, cy + half)
-        patch = board[y0:y1, x0:x1].copy()
-        if patch.shape[0] < 8 or patch.shape[1] < 8:
-            return None
-        self._tmpl = patch
+        self._tmpl = board[y0:y1, x0:x1].copy()
         self._pos  = (cx, cy)
-        return rel
 
     def _update_template(self, board, cx, cy):
         """매칭 위치 패치로 템플릿을 느리게 갱신해 흰→투명 변화에 적응한다."""
@@ -471,20 +439,12 @@ class ShapeTracker:
 
         start_t = time.time()
         with mss.MSS() as sct:
-            # ── 초기화: 가운데 흰 도형으로 템플릿 시드 ──
-            init_deadline = start_t + 3.0
-            while not self._stop.is_set():
-                raw = sct.grab(region)
-                board = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
-                board = mask_cursor(board)
-                if self._init_template(board) is not None:
-                    self._emitter.log.emit("[초기화] 흰 도형 템플릿 확보")
-                    break
-                if time.time() > init_deadline:
-                    self._pos = (w // 2, h // 2)
-                    self._emitter.log.emit("[초기화] 흰 도형 미발견 → 중심에서 시작")
-                    break
-                time.sleep(FRAME_INTERVAL)
+            # ── 초기화: 정중앙 패치를 템플릿으로 시드 (도형은 항상 중앙에서 시작) ──
+            raw = sct.grab(region)
+            board = cv2.cvtColor(np.array(raw), cv2.COLOR_BGRA2BGR)
+            board = mask_cursor(board)
+            self._seed_center_template(board)
+            self._emitter.log.emit("[초기화] 중앙 도형 템플릿 시드")
 
             # ── 추적 루프 ──
             while not self._stop.is_set():
