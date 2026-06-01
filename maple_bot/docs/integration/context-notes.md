@@ -212,3 +212,25 @@
 - 사이드카 프로세스 기동(MmapChannel) 동일
 - JunkSell A 이식도 이때
 ### 다음(M7): UI 6카테고리 + DESIGN.md(Linear) 적용. 마지막 모듈
+
+## 2026-06-01 — M7 착수 (UI 6카테고리 셸 + DESIGN.md)
+### 사용자 결정: 신규 UI 스켈레톤 + DESIGN.md. 기존 A ui/ 병존(점진이행)
+### DESIGN.md(Linear) 토큰
+- canvas #010102, surface-1 #0f1011, surface-2 #141516, hairline #23252a
+- ink #f7f8f8, ink-subtle #8a8f98, primary(라벤더) #5e6ad2, primary-hover #828fff
+- 폰트: Linear Display(=SF Pro Display 폴백), 음수 트래킹. 액센트는 포커스링/CTA만(장식X)
+### 설계 (위치 core_ui/ — 기존 ui/ 와 분리)
+- theme.py: 토큰 상수 + build_qss() Linear 스타일시트 생성
+- shell.py: MainShell — 좌측 6카테고리 내비 + 중앙 스택 + 좌하단 시작/정지 + 우측 로그도크 (도면 4단계 골조)
+- 6카테고리 페이지는 플레이스홀더(실연결은 실기 통합단계)
+### 테스트: 위젯 생성/구조(QApplication offscreen). 렌더링 육안은 실기
+### 서브태스크: M7-1 theme(QSS) / M7-2 MainShell 구조 / M7-3 커밋
+
+## 2026-06-01 — M7 완료 (UI 6카테고리 셸 + DESIGN.md)
+### 구현됨 (core_ui/)
+- theme.py: DESIGN.md(Linear) 토큰 1:1(canvas#010102/primary#5e6ad2/surface#0f1011/hairline#23252a) + build_qss()
+- shell.py: MainShell — 좌측6내비(라벤더 좌보더 선택표시)+중앙스택+좌하단 시작/정지(라벤더CTA)+우측 로그도크. 6카테고리 페이지(플레이스홀더)
+### 검증: tests 96 passed 누계 (M1~M7: theme3/shell5 + 기존88)
+### 육안검증: offscreen 렌더→PNG. 레이아웃·near-black·라벤더액센트·로그도크 전부 도면4단계 골조 일치 확인(한글□는 offscreen폰트, 실기정상)
+### 결정: 기존 ui/(A 10탭) 병존. 6카테고리 페이지 실내용은 실기 통합단계에서 채움
+### ★ 7개 모듈 단위구현 완료. 다음은 실기 통합테스트(실제 게임 결선)
