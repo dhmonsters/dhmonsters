@@ -477,3 +477,10 @@
 ### 검증: tests 166 passed (block_editor 5). 렌더 — move/attack 블록 행 확인
 ### 좌표 동선 사용법: 동선·이동 탭 → 블록추가(이동/공격) → 각 X좌표·스킬키 입력 → 위→아래 순서로 BlockRunner 실행
 ### 남은: 블록 X좌표를 스크린샷/미니맵 클릭으로 찍는 픽커(현재 숫자입력), 블록 순서 드래그, 녹화
+
+## 2026-06-02 — 블록 X좌표 미니맵 클릭 픽커
+### 구현
+- shot_selector.py: display_to_point(클릭 역배율 환산) + ClickPointPicker(이미지 클릭→점 좌표, 십자마커)
+- block_editor.py: move 블록 행에 📍 버튼 → 미니맵 영역 캡처 → 클릭 → 미니맵 상대 X를 target_x로 set
+### 검증: tests 169 passed (click_picker 3). 동선페이지 move블록 📍버튼 확인
+### 좌표 동선 완전 사용법: 동선탭 → 이동블록 추가 → 📍 클릭 → 미니맵에서 목표지점 클릭 → X자동입력 → 공격블록 추가 → 반복

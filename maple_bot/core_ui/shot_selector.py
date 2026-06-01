@@ -26,6 +26,70 @@ def display_to_source_rect(x: int, y: int, w: int, h: int,
     return (int(ox + sx), int(oy + sy), int(sw), int(sh))
 
 
+def display_to_point(x: int, y: int, scale: float) -> tuple:
+    """표시 클릭좌표 → 원본 좌표(역배율). 미니맵 클릭 픽커용."""
+    return (int(round(x / scale)), int(round(y / scale)))
+
+
+class _ClickCanvas(QWidget):
+    """이미지 표시 + 클릭 위치에 십자 마커. 클릭하면 콜백."""
+
+    def __init__(self, pix: QPixmap, on_click):
+        super().__init__()
+        self._pix = pix
+        self._on_click = on_click
+        self.setFixedSize(pix.width(), pix.height())
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self._pt: QPoint | None = None
+
+    def mousePressEvent(self, e):
+        p = e.position().toPoint()
+        self._pt = QPoint(max(0, min(p.x(), self._pix.width())),
+                          max(0, min(p.y(), self._pix.height())))
+        self.update()
+        self._on_click(self._pt)
+
+    def paintEvent(self, e):
+        qp = QPainter(self)
+        qp.drawPixmap(0, 0, self._pix)
+        if self._pt:
+            qp.setPen(QPen(QColor("#5e6ad2"), 2))
+            x, y = self._pt.x(), self._pt.y()
+            qp.drawLine(x - 8, y, x + 8, y)
+            qp.drawLine(x, y - 8, x, y + 8)
+
+
+class ClickPointPicker(QDialog):
+    """이미지에서 한 점을 클릭해 좌표를 얻는다. point_picked(x, y) — 원본 좌표."""
+    point_picked = pyqtSignal(int, int)
+
+    def __init__(self, bgr_image, max_display=900, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("좌표 클릭 (ESC 취소)")
+        import numpy as np
+        h, w = bgr_image.shape[:2]
+        self._scale = min(1.0, max_display / max(w, h))
+        dw, dh = int(w * self._scale), int(h * self._scale)
+        rgb = np.ascontiguousarray(bgr_image[:, :, ::-1])
+        qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(qimg).scaled(
+            dw, dh, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation)
+        self._canvas = _ClickCanvas(pix, self._on_click)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._canvas)
+
+    def _on_click(self, pt: QPoint):
+        x, y = display_to_point(pt.x(), pt.y(), self._scale)
+        self.point_picked.emit(x, y)
+        self.accept()
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.reject()
+
+
 class _Canvas(QWidget):
     """배경 이미지 + 드래그 사각형을 한 표면에 그리는 캔버스.
     QLabel을 쓰면 이미지가 사각형을 가리므로 직접 paint 한다."""

@@ -65,6 +65,28 @@ class BlockEditor(QWidget):
             self._route[idx][field] = value
             self._save()
 
+    def _pick_x(self, idx: int, spin) -> None:
+        """미니맵 영역을 캡처해 클릭 → 미니맵 상대 X를 target_x로 설정."""
+        import mss as _mss
+        import numpy as np
+        from core_ui.shot_selector import ClickPointPicker
+        mm_x = int(self._cfg.get("minimap", "region_x", default=0))
+        mm_y = int(self._cfg.get("minimap", "region_y", default=0))
+        mm_w = int(self._cfg.get("minimap", "width", default=0))
+        mm_h = int(self._cfg.get("minimap", "height", default=0))
+        if mm_w <= 0:
+            return  # 미니맵 미설정
+        with _mss.mss() as sct:
+            shot = np.array(sct.grab(
+                {"left": mm_x, "top": mm_y, "width": mm_w, "height": mm_h}))[:, :, :3]
+        dlg = ClickPointPicker(shot)
+
+        def picked(x, y):
+            self.set_field(idx, "target_x", x)   # 미니맵 상대 X
+            spin.setValue(x)
+        dlg.point_picked.connect(picked)
+        dlg.exec()
+
     # ── 내부 ──────────────────────────────────────────────────────────
     def _save(self) -> None:
         # Block 검증 통과하는 것만 저장(전방호환)
@@ -106,6 +128,10 @@ class BlockEditor(QWidget):
             sx.setValue(int(blk.get("target_x", 0)))
             sx.valueChanged.connect(lambda v, i=idx: self.set_field(i, "target_x", v))
             h.addWidget(sx)
+            pick = QPushButton("📍")  # 미니맵에서 X 클릭으로 찍기
+            pick.setFixedWidth(32)
+            pick.clicked.connect(lambda _=False, i=idx, w=sx: self._pick_x(i, w))
+            h.addWidget(pick)
             mt = QComboBox(); mt.addItems(["walk", "teleport"])
             mt.setCurrentText(blk.get("move_type", "walk"))
             mt.currentTextChanged.connect(lambda v, i=idx: self.set_field(i, "move_type", v))
