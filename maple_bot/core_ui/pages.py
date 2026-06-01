@@ -236,12 +236,24 @@ def build_pages(config) -> list[QWidget]:
     route_lbl = _QLabel("좌표 동선 블록 (위→아래 순서 실행)")
     route_lbl.setObjectName("subtle")
     block_editor = BlockEditor(c, ("floor_hunt", "route"))
+    # 실시간 미니맵 캔버스(보기 전용). 캡처/모니터 폭 획득 실패 시 생략
+    nav_extras = []
+    try:
+        import mss as _mss
+        from core.screen_reader import ScreenReader
+        from core_ui.minimap_canvas import MinimapCanvas
+        with _mss.mss() as _s:
+            _sw = int(_s.monitors[1]["width"])
+        nav_extras.append(MinimapCanvas(c, ScreenReader().capture, screen_w=_sw))
+    except Exception:
+        pass
+    nav_extras += [route_lbl, block_editor]
     pages.append(_page("동선·이동", "구역·사다리·다운점프·텔포·포탈·블록빌더·녹화·프리셋", [
         CheckField("층별 사냥 사용", c, ("floor_hunt", "enabled")),
         CheckField("커스텀 루트 모드", c, ("floor_hunt", "route_mode")),
         TextField("현재 사냥터", c, ("hunt_grounds", "active")),
         ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative"),
-    ], extras=[route_lbl, block_editor]))
+    ], extras=nav_extras))
 
     # 3. 전투 — 공격범위 박스는 드래그 후 색상(●설정됨)으로 확인 (숫자 표시 안 함)
     atk_picker = _make_attack_box_picker(c, None, on_done=lambda: atk_status.refresh())
