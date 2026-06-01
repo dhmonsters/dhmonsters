@@ -16,7 +16,7 @@ from core.navigation.floor_judge import Floor, FloorJudge
 from core.acting.combat import Combat, PotionRule
 from core.acting.buff import BuffManager, Buff
 from core.minigame.registry import SolverRegistry
-from core.minigame.planet_engine import PlanetV2Engine
+from core.minigame.self_transparent_engine import SelfTransparentEngine
 from core.minigame.sidecar import InMemoryChannel, SidecarChannel
 
 
@@ -33,6 +33,10 @@ class RuntimeConfig:
     antimob_templates: dict = field(default_factory=dict)
     antimob_enabled: dict = field(default_factory=dict)
     minigame_type: str = "planet"
+    # 거탐 (자체 ncnn 엔진)
+    transparent_models_dir: str = "models/transparent"
+    board_region: dict | None = None          # 거탐 게임판 화면영역 (None=minimap_region 대용 아님; 실기 설정)
+    transparent_use_gpu: bool = False
 
 
 class BotRuntime:
@@ -77,9 +81,14 @@ class BotRuntime:
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
 
-        # 거탐 계층 (격리)
+        # 거탐 계층 (격리) — 자체 ncnn 엔진 (secure_loader/서버 의존 없음)
         self.registry = SolverRegistry()
-        self.registry.register(PlanetV2Engine(channel=self._sidecar, timeout=2.0))
+        self.registry.register(SelfTransparentEngine(
+            models_dir=config.transparent_models_dir,
+            board_capture_fn=self._capture_board,
+            move_cursor_fn=self._move_cursor,
+            use_gpu=config.transparent_use_gpu,
+        ))
 
         self._frame_id = 0
 
@@ -122,7 +131,7 @@ class BotRuntime:
         if self.orchestrator.mode != "safety":
             return
         self._frame_id += 1
-        # 사이드카에 응답이 와있으면 PlanetV2Engine.solve 가 받아온다
+        # SelfTransparentEngine.solve 가 게임판을 추적해 도형 사라질때까지 푼다(블로킹)
         result = self.registry.solve(
             self._cfg.minigame_type, screenshot=None,
             ctx={"frame_id": self._frame_id},
@@ -131,6 +140,17 @@ class BotRuntime:
             self.orchestrator.clear_safety()
 
     # ── 내부 ──────────────────────────────────────────────────────────
+    def _capture_board(self):
+        """거탐 게임판 영역 캡처 (board_region 설정 시 그 영역, 없으면 전체)."""
+        region = self._cfg.board_region
+        return self._capture(region) if region else self._capture()
+
+    def _move_cursor(self, cx: int, cy: int) -> None:
+        """거탐 도형 추적용 커서 이동. 백엔드에 move_to 있으면 사용(실기 Interception)."""
+        bk = self.humanizer._backend
+        if hasattr(bk, "move_to"):
+            bk.move_to(cx, cy)
+
     def _on_safety_pause(self) -> None:
         """안전 진입 시 진행 중인 이동 방향키 해제(행동 정지)."""
         self.humanizer._backend.key_up("left")

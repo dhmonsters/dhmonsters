@@ -349,3 +349,19 @@
 - secure_loader(서버 AESGCM 코드주입)는 macro(사냥)쪽 보호. 거탐 추론은 detector.py ncnn에 전부 → 자체구현 성공
 - PlanetV2Engine(사이드카/서버의존) 폐기, SelfTransparentEngine 채택. 3.13 사이드카 불필요
 - registry 등록은 실기 결선시(BotRuntime에 capture/move 주입). 비올레타도 동일 패턴 추가
+
+## 2026-06-01 — 거탐 런타임 결선 + 모델 동봉
+### BotRuntime 거탐 교체
+- runtime.py: PlanetV2Engine(서버의존) → SelfTransparentEngine(자체 ncnn) 등록
+- RuntimeConfig에 transparent_models_dir/board_region/transparent_use_gpu 추가
+- _capture_board(board_region 캡처) + _move_cursor(백엔드 move_to 있으면=실기 Interception 마우스)
+- safety_tick: registry.solve("planet") → SelfTransparentEngine이 도형추적 풀이
+### 빌드 설정 (build.bat)
+- --add-data "models;models" (거탐 가중치 동봉) + --collect-all ncnn + --hidden-import ncnn
+- --collect-submodules core / core_ui (신규 8패키지 자동포함: humanize/sensing/navigation/minigame/acting/orchestrator)
+- installer.iss는 SourceDir\* recursesubdirs라 models 자동 포함(수정불요)
+### 검증: tests 111 passed. runtime safety 테스트 Fake엔진으로 교체(실ncnn 30초→1.3초)
+### 실기 잔여 (게임 필수)
+- board_region(거탐 게임판 영역) 실측 설정, 실 mss+Interception 주입
+- main.py 신구조 진입점, UI 6페이지 실위젯, JunkSell A이식
+- ★실게임 거탐 정확도 검증 (자체모델이 실투명도형 잡는지) — 가장 중요

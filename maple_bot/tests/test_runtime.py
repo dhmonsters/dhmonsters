@@ -4,7 +4,7 @@ import pytest
 from core.runtime import BotRuntime, RuntimeConfig
 from core.navigation.block import Block
 from core.navigation.floor_judge import Floor
-from core.minigame.sidecar import InMemoryChannel, SolveReply
+from core.minigame.sidecar import InMemoryChannel
 
 
 class RecordingBackend:
@@ -65,19 +65,24 @@ def test_hunting_tick_moves_and_attacks():
 
 
 def test_safety_event_triggers_solver_then_resume():
-    """거탐 이벤트 → safety 모드 → 사이드카 풀이 → 재개."""
-    ch = InMemoryChannel()
-    # runtime과 가짜 사이드카가 같은 채널을 공유하도록 주입
-    rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75), channel=ch)
+    """거탐 이벤트 → safety 모드 → 거탐엔진 풀이 → 재개."""
+    rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))
+
+    # 실엔진(느린 ncnn) 대신 즉시-성공 Fake 엔진으로 교체 (조율 로직만 검증)
+    from core.minigame.solver import MinigameSolver, SolveResult
+    from core.minigame.registry import SolverRegistry
+
+    class FastEngine(MinigameSolver):
+        def can_handle(self, t): return t == "planet"
+        def solve(self, screenshot, ctx=None):
+            return SolveResult(success=True, note="solved")
+    rt.registry = SolverRegistry()
+    rt.registry.register(FastEngine())
 
     from core.sensing.event import Event
-    # 거탐 이벤트 주입 → safety 모드
     rt.orchestrator._q.put(Event(type="lie", data={}))
     rt.orchestrator.process_pending()
     assert rt.orchestrator.mode == "safety"
 
-    # 가짜 사이드카가 성공 응답을 미리 적재 (frame_id=1: 첫 safety_tick)
-    ch.send_reply(SolveReply(frame_id=1, success=True, note="solved"))
     rt.safety_tick(now=2.0)
-    # 풀이 성공 → 사냥 재개
     assert rt.orchestrator.mode == "hunting"
