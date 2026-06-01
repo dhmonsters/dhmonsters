@@ -56,6 +56,21 @@ class MainShell(QMainWindow):
         self.nav_buttons[0].setChecked(True)
         self.stack.setCurrentIndex(0)
 
+        self._bind_hotkeys()
+
+    def _bind_hotkeys(self) -> None:
+        """전역 단축키: 시작/정지 (config hotkeys, 기본 F1/F2)."""
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        start_key = "F1"
+        stop_key = "F2"
+        if self._config is not None:
+            start_key = str(self._config.get("hotkeys", "start", default="f1")).upper()
+            stop_key = str(self._config.get("hotkeys", "stop", default="f2")).upper()
+        QShortcut(QKeySequence(start_key), self, activated=self.btn_start.click)
+        QShortcut(QKeySequence(stop_key), self, activated=self.btn_stop.click)
+        self.btn_start.setText(f"▶  시작  ({start_key})")
+        self.btn_stop.setText(f"■  정지  ({stop_key})")
+
     # ── 좌측 사이드바: 6 내비 + 시작/정지 ────────────────────────────
     def _build_sidebar(self) -> QWidget:
         bar = QFrame()

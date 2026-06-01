@@ -242,6 +242,8 @@ def build_pages(config) -> list[QWidget]:
     atk_ymn = IntField("공격범위 ↑(px)", c, ("attack", "atk_y_min"), -1000, 0, default=-70)
     atk_ymx = IntField("공격범위 ↓(px)", c, ("attack", "atk_y_max"), 0, 1000, default=70)
     atk_picker = _make_attack_box_picker(c, [atk_xmn, atk_xmx, atk_ymn, atk_ymx])
+    from core_ui.buff_editor import BuffEditor
+    buff_editor = BuffEditor(c, ("attack", "normal_buffs"))
     pages.append(_page("전투", "공격·버프·물약·펫·줍기", [
         TextField("공격 키", c, ("attack", "key"), default="ctrl"),
         atk_xmn, atk_xmx, atk_ymn, atk_ymx,
@@ -254,7 +256,9 @@ def build_pages(config) -> list[QWidget]:
         IntField("MP 물약 임계%", c, ("recovery", "mp_potion", "threshold"), 0, 100, default=50),
         TextField("MP 물약 키", c, ("recovery", "mp_potion", "key")),
         CheckField("펫 먹이 사용", c, ("recovery", "pet_food", "enabled")),
-    ], buttons=[atk_picker]))
+        TextField("펫 먹이 키", c, ("recovery", "pet_food", "key")),
+        IntField("펫 먹이 간격(분)", c, ("recovery", "pet_food", "interval_min"), 1, 120, default=10),
+    ], buttons=[atk_picker], extras=[buff_editor]))
 
     # 4. 안전·안티밴
     pages.append(_page("안전·안티밴", "거탐·방지몹·유저감지·자동응답·채널변경·인간화강도", [
@@ -263,8 +267,6 @@ def build_pages(config) -> list[QWidget]:
         CheckField("투명도형 자동풀이", c, ("settings1", "transparent_shape", "enabled")),
         CheckField("다른 유저 감지", c, ("settings1", "user_detected", "enabled")),
         CheckField("방지몹 해제", c, ("anti_mob", "enabled")),
-        CheckField("레벨 도달 정지", c, ("settings1", "level_stop", "enabled")),
-        IntField("정지 레벨", c, ("settings1", "level_stop", "target_level"), 1, 300, default=50),
     ]))
 
     # 5. 자동화·운영
