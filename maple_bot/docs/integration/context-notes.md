@@ -186,3 +186,29 @@
 - JunkSell은 기존 A junk_seller.py가 동작중 → M5 신규구현 생략, M6 통합시 이식+C탭색/B보호목록 보강
 - charlie 실교환로직 dis 깊이추적 대신 UI확정 명세로 구현(request_scanner는 파티/교환거절 다른기능 확인)
 - 다음(M6): Orchestrator — 이벤트큐 소비+우선순위 상태머신, 모든 모듈 조립, 사이드카 기동, 공유위치 결선
+
+## 2026-06-01 — M6 착수 (Orchestrator)
+### 역할 (도면 5-3/5-4)
+- 이벤트큐 소비 → 우선순위 판단 → 행동 디스패치 (god-loop 대체, 얇게)
+- 상태머신: HUNTING / SAFETY(거탐·방지몹 대응) / SELLING / 우선순위 거탐>방지몹>판매>사냥
+- 공유 위치상태: CharScanner char_pos 이벤트 → shared pos → BlockRunner pos_fn 결선
+- 안전이벤트시 행동 일괄 pause(Humanizer key_up) → 처리 → 재개
+### 설계 핵심
+- Orchestrator는 '조율'만. 실제 일은 각 모듈(Nav/Acting/Solver)이. god-loop처럼 로직 안 가짐
+- 이벤트 핸들러 등록식(type→handler). 새 이벤트타입=핸들러 1개 추가(콘센트)
+### 서브태스크
+- M6-1 SharedState(위치/HP/MP 공유) / M6-2 Orchestrator 이벤트루프+우선순위 / M6-3 안전대응(pause/resume) / M6-4 커밋
+
+## 2026-06-01 — M6 완료 (Orchestrator 조율코어)
+### 구현됨 (core/orchestrator/)
+- shared_state.py: SharedState — 락보호 위치/HP/MP 공유, position_age(노후감지). 스캐너쓰기↔행동읽기 폐루프 매개
+- orchestrator.py: Orchestrator — 이벤트큐 1배치 소비, _PRIORITY 우선순위정렬(거탐/방지몹=0 최우선), 안전이벤트→safety모드+on_pause, clear_safety→hunting+on_resume. 핸들러 등록식(on(type,fn))
+### 검증: tests 88 passed 누계 (M1~M6: shared5/orch6 + 기존77)
+### 핵심: god-loop 대체 입증
+- Orchestrator는 로직 없음, 위임만. 우선순위(안전>사냥) 자동. 새 이벤트=핸들러1개(콘센트)
+- test_priority_safety_over_normal: 같은배치 사냥+거탐 → 거탐 먼저
+### M6 잔여 (실기 통합단계로 이연)
+- 실제 모듈 결선(스캐너 start→큐→orch→Nav/Acting 호출)은 화면캡처/게임 의존 → M7 후 실기 통합테스트시
+- 사이드카 프로세스 기동(MmapChannel) 동일
+- JunkSell A 이식도 이때
+### 다음(M7): UI 6카테고리 + DESIGN.md(Linear) 적용. 마지막 모듈

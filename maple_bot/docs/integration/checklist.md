@@ -9,7 +9,7 @@
 - [x] M3. Navigation (BlockRunner + FloorJudge) ✓ 18 passed
 - [x] M4. MinigameSolver 사이드카 (골격) ✓ 15 passed
 - [x] M5. Acting (Combat/Buff/Charlie) ✓ 14 passed
-- [ ] M6. Orchestrator 통합
+- [x] M6. Orchestrator 통합 (조율코어) ✓ 11 passed
 - [ ] M7. UI 6카테고리 (DESIGN.md 적용)
 
 ---
