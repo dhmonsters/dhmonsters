@@ -34,8 +34,10 @@
 
 `tests/test_minimap_geom.py`:
 ```python
-# 미니맵↔캔버스 좌표 변환 + 범위 환산 순수 함수 검증
-from core_ui.minimap_geom import minimap_to_canvas, screen_px_to_minimap_px
+# 미니맵↔캔버스 좌표 변환 + 범위 환산 + 추적 상태 순수 함수 검증
+from core_ui.minimap_geom import (
+    minimap_to_canvas, screen_px_to_minimap_px, char_track_state,
+)
 
 
 def test_minimap_to_canvas_zoom_and_pan():
@@ -52,18 +54,34 @@ def test_screen_px_to_minimap_px_proportional():
 
 def test_screen_px_to_minimap_px_guards_zero_screen():
     assert screen_px_to_minimap_px(35, 200, 0, 0.5) == 0.0
+
+
+def test_char_track_state_thresholds():
+    # 미검출 경과시간(초) → 추적 상태
+    assert char_track_state(0.0) == "tracking"
+    assert char_track_state(0.9) == "tracking"
+    assert char_track_state(1.0) == "lost"      # 경계: lost_after 이상
+    assert char_track_state(2.5) == "lost"
+    assert char_track_state(3.0) == "stale"     # 경계: stale_after 이상
+    assert char_track_state(10.0) == "stale"
+
+
+def test_char_track_state_custom_thresholds():
+    assert char_track_state(0.4, lost_after=0.5, stale_after=2.0) == "tracking"
+    assert char_track_state(1.0, lost_after=0.5, stale_after=2.0) == "lost"
+    assert char_track_state(2.0, lost_after=0.5, stale_after=2.0) == "stale"
 ```
 
 - [ ] **Step 2: 실패 확인**
 
 Run: `cd /c/Users/PC/Desktop/02_work/05_AI/maple_bot && QT_QPA_PLATFORM=offscreen py -3.14 -m pytest tests/test_minimap_geom.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'core_ui.minimap_geom'`
+Expected: FAIL — `ImportError: cannot import name 'char_track_state'` (또는 모듈 없음)
 
 - [ ] **Step 3: 구현**
 
 `core_ui/minimap_geom.py`:
 ```python
-# 미니맵↔캔버스 좌표 변환 + 화면px→미니맵px 범위 환산 (위젯 의존 없는 순수 함수)
+# 미니맵↔캔버스 좌표 변환 + 화면px→미니맵px 범위 환산 + 캐릭터 추적 상태 (순수 함수)
 from __future__ import annotations
 
 
@@ -75,20 +93,55 @@ def minimap_to_canvas(cx: int, cy: int, zoom: float,
 
 def screen_px_to_minimap_px(screen_px: float, minimap_w: int,
                             screen_w: int, camera_w_ratio: float) -> float:
-    """화면 픽셀 거리를 미니맵 픽셀 거리로 환산.
+    """게임 화면에서의 픽셀 거리를 미니맵 이미지에서의 픽셀 거리로 환산한다.
 
-    미니맵 폭 중 카메라 가시 폭 = camera_w_ratio*minimap_w 이고, 화면 폭(screen_w)이
-    그 폭에 대응하므로 비례 환산한다. screen_w<=0이면 0.0(방어).
+    공격/사냥 범위는 게임 화면(메인 뷰) 기준 픽셀로 설정돼 있지만, 캔버스는 미니맵
+    이미지를 그리므로 같은 물리 거리를 미니맵 축척으로 바꿔야 노란 점 주변에 올바른
+    크기로 그려진다. 미니맵 폭 중 카메라가 실제로 비추는 가시 폭이
+    camera_w_ratio*minimap_w 이고, 그 가시 폭이 게임 화면 폭(screen_w)에 대응하므로
+    `screen_px : screen_w = ? : camera_w_ratio*minimap_w` 비례로 환산한다.
+
+    Args:
+        screen_px: 게임 화면에서의 픽셀 거리(예: 공격박스 반폭 atk_x_max).
+        minimap_w: 현재 캡처된 미니맵 이미지의 폭(px).
+        screen_w: 캡처한 전체 화면(주 모니터)의 폭(px).
+        camera_w_ratio: 게임 화면 폭 대비 미니맵에 보이는 카메라 가시 영역의 비율
+            (기본 0.5 — config attack.camera_w_ratio).
+
+    Returns:
+        미니맵 이미지 기준 픽셀 거리(float). screen_w<=0이면 0.0(0 나눗셈 방어).
     """
     if screen_w <= 0:
         return 0.0
     return screen_px * (camera_w_ratio * minimap_w) / screen_w
+
+
+def char_track_state(elapsed_sec: float,
+                     lost_after: float = 1.0,
+                     stale_after: float = 3.0) -> str:
+    """마지막 캐릭터 검출 이후 경과시간(초)으로 추적 상태를 판정한다.
+
+    UI가 '상황 인지'를 주도록: 정상 추적/일시적 끊김/오래 끊김을 구분한다.
+
+    Args:
+        elapsed_sec: 마지막 성공 검출 이후 흐른 시간(초).
+        lost_after: 이 시간(초) 이상 미검출이면 'lost'(점 깜빡임).
+        stale_after: 이 시간(초) 이상 미검출이면 'stale'(점 숨김 + 배지).
+
+    Returns:
+        "tracking" | "lost" | "stale".
+    """
+    if elapsed_sec < lost_after:
+        return "tracking"
+    if elapsed_sec < stale_after:
+        return "lost"
+    return "stale"
 ```
 
 - [ ] **Step 4: 통과 확인**
 
 Run: `cd /c/Users/PC/Desktop/02_work/05_AI/maple_bot && QT_QPA_PLATFORM=offscreen py -3.14 -m pytest tests/test_minimap_geom.py -q`
-Expected: PASS (3 passed)
+Expected: PASS (5 passed)
 
 - [ ] **Step 5: 커밋**
 
@@ -168,6 +221,30 @@ def test_char_not_found_keeps_last(app):
     cv._tick()                      # (10,20)
     cv._tick()                      # None → 직전 유지
     assert cv._last_char == (10, 20)
+
+
+def test_track_state_transitions_and_stale_renders(app):
+    cfg = _region_cfg()
+    shot = np.zeros((120, 200, 3), dtype=np.uint8)
+    t = {"now": 100.0}
+    cv = MinimapCanvas(cfg, screen_capture=lambda r: shot,
+                       char_finder=lambda *a, **k: (50, 60), interval_ms=99999,
+                       clock=lambda: t["now"])
+    cv.resize(300, 200)
+    cv._tick()                      # 검출 @100.0
+    assert cv.track_state() == "tracking"
+    t["now"] = 102.0
+    assert cv.track_state() == "lost"
+    t["now"] = 105.0
+    assert cv.track_state() == "stale"
+    cv.grab()                       # stale에서도 예외 없이 렌더
+
+
+def test_track_state_stale_before_any_detection(app):
+    cfg = _region_cfg()
+    cv = MinimapCanvas(cfg, screen_capture=lambda r: None,
+                       char_finder=lambda *a, **k: None, interval_ms=99999)
+    assert cv.track_state() == "stale"   # 한 번도 검출 전이면 stale
 ```
 
 - [ ] **Step 2: 실패 확인**
@@ -182,28 +259,36 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'core_ui.minimap_canvas
 # 미니맵을 실시간 캡처해 배경으로 깔고 캐릭터·공격/사냥 범위를 투영하는 캔버스 위젯
 from __future__ import annotations
 
+import math
+import time
+
 import numpy as np
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import QTimer, Qt, QRectF
 from PyQt6.QtGui import QImage, QPainter, QPen, QColor
 
 from core.sensing.char_scanner import find_char_in_hsv
-from core_ui.minimap_geom import minimap_to_canvas, screen_px_to_minimap_px
+from core_ui.minimap_geom import (
+    minimap_to_canvas, screen_px_to_minimap_px, char_track_state,
+)
 
 
 class MinimapCanvas(QWidget):
     """미니맵 영역을 주기 캡처해 배경(흐리게)·캐릭터(노란 점)·공격/사냥 범위를 그린다.
-    좌표는 미니맵 픽셀 기준, 화면 표시 시 줌 배율을 곱한다(범위도 줌 비례)."""
+    좌표는 미니맵 픽셀 기준, 화면 표시 시 줌 배율을 곱한다(범위도 줌 비례).
+    캐릭터 검출 끊김은 tracking→lost(깜빡임)→stale(점 숨김+배지) 상태로 표현한다."""
 
     def __init__(self, config, screen_capture, char_finder=find_char_in_hsv,
-                 interval_ms: int = 80, screen_w: int = 1920):
+                 interval_ms: int = 80, screen_w: int = 1920, clock=time.time):
         super().__init__()
         self._cfg = config
         self._capture = screen_capture
         self._find = char_finder
         self._screen_w = screen_w
+        self._clock = clock
         self._zoom = 1.0
         self._last_char: tuple[int, int] | None = None
+        self._last_seen: float | None = None    # 마지막 성공 검출 시각
         self._shot: QImage | None = None
         self._mm_size = (0, 0)        # (W_mm, H_mm)
         self.setMinimumHeight(220)
@@ -217,6 +302,12 @@ class MinimapCanvas(QWidget):
                 "top": int(c.get("minimap", "region_y", default=0)),
                 "width": int(c.get("minimap", "width", default=0)),
                 "height": int(c.get("minimap", "height", default=0))}
+
+    def track_state(self) -> str:
+        """현재 캐릭터 추적 상태: tracking | lost | stale (한 번도 검출 전이면 stale)."""
+        if self._last_seen is None:
+            return "stale"
+        return char_track_state(self._clock() - self._last_seen)
 
     def _tick(self) -> None:
         r = self._region()
@@ -233,6 +324,7 @@ class MinimapCanvas(QWidget):
         pos = self._find(bgr, (20, 100, 200), (40, 255, 255), 6, 4000)
         if pos is not None:
             self._last_char = pos
+            self._last_seen = self._clock()
         h, w = bgr.shape[:2]
         self._mm_size = (w, h)
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
@@ -250,14 +342,20 @@ class MinimapCanvas(QWidget):
         p.setOpacity(0.30)
         p.drawImage(QRectF(0, 0, W * self._zoom, H * self._zoom), self._shot)
         p.setOpacity(1.0)
-        if self._last_char is None:
+        state = self.track_state()
+        if self._last_char is None or state == "stale":
             self._hint(p, "캐릭터 미검출")
             return
         cx, cy = minimap_to_canvas(self._last_char[0], self._last_char[1], self._zoom)
         self._draw_ranges(p, cx, cy)
+        if state == "lost":
+            # 천천히 깜빡임(0.8초 주기) — '일시적 끊김' 상황 인지
+            phase = (self._clock() % 0.8) / 0.8
+            p.setOpacity(0.35 + 0.45 * abs(math.sin(phase * math.pi)))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor("#ffd33d"))
         p.drawEllipse(cx - 7, cy - 7, 14, 14)
+        p.setOpacity(1.0)
 
     def _draw_ranges(self, p: QPainter, cx: int, cy: int) -> None:
         c = self._cfg
@@ -287,13 +385,13 @@ class MinimapCanvas(QWidget):
 - [ ] **Step 4: 통과 확인**
 
 Run: `cd /c/Users/PC/Desktop/02_work/05_AI/maple_bot && QT_QPA_PLATFORM=offscreen py -3.14 -m pytest tests/test_minimap_canvas.py -q`
-Expected: PASS (3 passed)
+Expected: PASS (5 passed)
 
 - [ ] **Step 5: 커밋**
 
 ```bash
 git add core_ui/minimap_canvas.py tests/test_minimap_canvas.py
-git commit -m "feat(minimap): 실시간 캡처·캐릭터 투영·범위 캔버스 위젯"
+git commit -m "feat(minimap): 실시간 캡처·캐릭터 투영·범위 캔버스 + 추적상태(tracking/lost/stale)"
 ```
 
 ---
@@ -418,7 +516,7 @@ Run:
 ```bash
 cd /c/Users/PC/Desktop/02_work/05_AI/maple_bot && QT_QPA_PLATFORM=offscreen py -3.14 -m pytest tests/ -q
 ```
-Expected: PASS (기존 210 + 신규 8 = 218 passed)
+Expected: PASS (기존 210 + 신규 12 = 222 passed)  ※ geom 5 + canvas 5 + zoom 2
 
 Run (셸 렌더 — 예외 없이 동선 페이지가 뜨는지):
 ```bash
@@ -438,6 +536,8 @@ git commit -m "feat(minimap): 동선·이동 페이지에 실시간 미니맵 �
 ## Self-Review (작성자 확인)
 
 **Spec coverage:** 미니맵 배경(Task2 paintEvent)·캐릭터 투영(Task1+2)·공격/사냥 범위 줌비례(Task1 conv+Task2 _draw_ranges)·줌/맞춤(Task3)·미설정/미검출 에러(Task2 _hint, char_not_found 테스트)·통합(Task4)·순수함수 테스트(Task1)·offscreen 스모크(Task2)= 스펙 항목 전부 매핑됨. 팬(pan)은 스펙에서 #1 범위 외로 명시(미니맵 전부 보임 가정) — minimap_to_canvas는 pan 인자만 보유(미사용, #4 대비).
+
+**보강(리뷰 반영):** 추적 상태 머신 `char_track_state`(Task1 순수함수+테스트)와 위젯 `track_state()`/`_last_seen`/clock 주입(Task2)로 tracking→lost(0.8초 주기 깜빡임)→stale(점 숨김+배지) 구현. `screen_px_to_minimap_px` docstring을 파라미터 물리의미까지 상세화.
 
 **Placeholder scan:** TBD/TODO/"적절히" 없음. 모든 코드 스텝에 완성 코드 포함.
 
