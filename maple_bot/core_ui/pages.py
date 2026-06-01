@@ -4,7 +4,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton
 
 from core_ui.theme import SPACING
-from core_ui.widgets import CheckField, TextField, IntField, ComboField
+from core_ui.widgets import CheckField, TextField, IntField, ComboField, FloatField
 
 
 def _make_region_picker(config, keys_xywh, fields_xywh, label: str) -> QPushButton:
@@ -33,6 +33,42 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str) -> QPushButt
                 fld.widget.setValue(val)   # IntField 위젯 갱신
             config.save()
         dlg.region_selected.connect(apply)
+        dlg.exec()
+
+    btn.clicked.connect(on_click)
+    return btn
+
+
+def _make_template_capture(config, save_path, config_key, label: str) -> QPushButton:
+    """'이미지 캡처' 버튼 — 스크린샷에서 영역 드래그 → 그 부분을 잘라 png 저장 + config에 경로.
+
+    save_path: 저장할 png 경로(templates/...). config_key: 경로 저장할 config 키.
+    """
+    btn = QPushButton(f"📷 {label} 캡처 (스크린샷에서 드래그)")
+
+    def on_click():
+        import os
+        import mss as _mss
+        import numpy as np
+        import cv2
+        from core_ui.shot_selector import ScreenshotRegionSelector
+        with _mss.mss() as sct:
+            mon = sct.monitors[1]
+            shot = np.array(sct.grab(mon))[:, :, :3]   # BGR
+            origin = (mon["left"], mon["top"])
+        dlg = ScreenshotRegionSelector(shot, src_origin=origin)
+
+        def crop_save(x, y, w, h):
+            # 원본 절대좌표 → shot 내부 상대좌표
+            rx, ry = x - origin[0], y - origin[1]
+            crop = shot[ry:ry + h, rx:rx + w]
+            if crop.size == 0:
+                return
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            cv2.imwrite(save_path, crop)
+            config.set(*config_key, save_path)
+            config.save()
+        dlg.region_selected.connect(crop_save)
         dlg.exec()
 
     btn.clicked.connect(on_click)
@@ -83,12 +119,25 @@ def build_pages(config) -> list[QWidget]:
         [mm_x, mm_y, mm_w, mm_h],
         "미니맵",
     )
+    monster_cap = _make_template_capture(
+        c, "templates/monster_capture.png", ("attack", "monster_template"), "몬스터",
+    )
+    name_cap = _make_template_capture(
+        c, "templates/name_tag.png", ("attack", "name_template"), "닉네임",
+    )
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
-        ComboField("사냥 모드", c, ("hunt_mode",), ["key", "coord"]),
+        ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"]),
         mm_x, mm_y, mm_w, mm_h,
         IntField("색 허용오차", c, ("minimap", "tolerance"), 0, 255, default=30),
         TextField("점프 키", c, ("minimap", "jump_key"), default="alt"),
-    ], buttons=[minimap_picker]))
+        # 사냥 영역 (몬스터 탐색 범위)
+        IntField("공격 범위(px)", c, ("attack", "range_px"), 0, 2000, default=350),
+        FloatField("카메라 폭 비율", c, ("attack", "camera_w_ratio"), 0.1, 1.0, default=0.5),
+        FloatField("캐릭터 Y 비율", c, ("attack", "char_y_ratio"), 0.1, 1.0, default=0.6),
+        # 닉네임 인식 (이미지 모드에서 본인 식별)
+        FloatField("닉네임 임계값", c, ("attack", "name_tag_threshold"), 0.1, 1.0, default=0.7),
+        IntField("닉네임 Y 오프셋", c, ("attack", "name_tag_y_offset"), -500, 500, default=138),
+    ], buttons=[minimap_picker, monster_cap, name_cap]))
 
     # 2. 동선·이동
     pages.append(_page("동선·이동", "구역·사다리·다운점프·텔포·포탈·블록빌더·녹화·프리셋", [

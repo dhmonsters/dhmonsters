@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QCheckBox, QLineEdit, QSpinBox, QComboBox,
+    QDoubleSpinBox,
 )
 
 from core_ui.theme import SPACING
@@ -73,6 +74,20 @@ class IntField(_Field):
         self.widget.setValue(int(self._cfg.get(*self._keys, default=self._default)))
     def _connect(self):
         self.widget.valueChanged.connect(lambda v: self._save(int(v)))
+
+
+class FloatField(_Field):
+    def __init__(self, label, config, keys, lo=0.0, hi=1.0, step=0.05, default=0.0, **kw):
+        self._lo, self._hi, self._step, self._default = lo, hi, step, default
+        super().__init__(label, config, keys, **kw)
+
+    def _build(self):
+        s = QDoubleSpinBox(); s.setRange(self._lo, self._hi)
+        s.setSingleStep(self._step); s.setDecimals(2); s.setFixedWidth(120); return s
+    def _load(self):
+        self.widget.setValue(float(self._cfg.get(*self._keys, default=self._default)))
+    def _connect(self):
+        self.widget.valueChanged.connect(lambda v: self._save(float(v)))
 
 
 class ComboField(_Field):

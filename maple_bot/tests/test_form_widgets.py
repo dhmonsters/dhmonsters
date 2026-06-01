@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication
-from core_ui.widgets import CheckField, TextField, IntField, ComboField
+from core_ui.widgets import CheckField, TextField, IntField, ComboField, FloatField
 
 
 @pytest.fixture(scope="module")
@@ -55,6 +55,14 @@ def test_int_field_roundtrip(app):
     assert f.widget.value() == 65
     f.widget.setValue(80)
     assert cfg.get("recovery", "hp_potion", "threshold") == 80
+
+
+def test_float_field_roundtrip(app):
+    cfg = FakeConfig({"attack": {"camera_w_ratio": 0.5}})
+    f = FloatField("카메라폭", cfg, ("attack", "camera_w_ratio"), 0.0, 1.0, step=0.05)
+    assert abs(f.widget.value() - 0.5) < 1e-6
+    f.widget.setValue(0.7)
+    assert abs(cfg.get("attack", "camera_w_ratio") - 0.7) < 1e-6
 
 
 def test_combo_field_roundtrip(app):
