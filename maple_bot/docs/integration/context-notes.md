@@ -422,3 +422,21 @@
 - 채널변경(C ChannelFinder): 복잡+좌표 일부 실측 → 실기
 - 자동응답 채팅 메시지 입력: enter만 누름, 실제 텍스트입력은 백엔드 문자열 입력 확장 필요
 ### 남은 실기: board_region/lie_detect_region 실측, 자동판매 안전지대이동, 다층순찰, 실게임 검증
+
+## 2026-06-01 — ★ 코드 이식 완료 선언 (게임 실측 제외)
+### 결정
+- 몬스터 YOLO: A 학습데이터 없음 → 모델 생길때까지 보류(YOLO캡처 도구로 데이터 모은 뒤)
+- 자동응답 텍스트입력: 진행 안 함(사용자 결정)
+### → 게임 실측 제외, 코드로 옮길 수 있는 것 전부 완료
+### 신구조 최종 (tests 149 passed, 커밋 60+)
+- core/humanize (M1) / sensing (M2,거탐,유저) / navigation (M3,순찰) / minigame (M4,자체ncnn거탐)
+  / acting (M5,전투/버프/펫/찰리/판매) / orchestrator (M6) / notify (텔레그램) / runtime (결선) / core_ui (UI6페이지)
+- 진입점 run_integrated.py: ConfigManager→어댑터→실캡처/interception→BotRuntime→UI
+- 동작: 시작→순찰사냥+공격+버프+펫+물약 / 거탐 감지→자체ncnn풀이→재개 / 유저감지→텔레그램+자동응답 / 잡템판매
+### 남은 것 = 100% 게임 실측 (코드 아님)
+- board_region(거탐 게임판) / lie_detect_region(타이틀 탐색영역) 실측
+- 자동판매 안전지대 이동 좌표, 다층순찰 층간 밧줄 이동(좌표)
+- 채널변경 ChannelFinder(C 복잡로직+좌표)
+- 몬스터 YOLO 학습데이터 수집→모델
+- 실게임 종합 검증(감지율/거탐정확도/안티밴)
+### config.json은 로컬 설정값(UI편집/실행갱신) → 커밋 보류(이전 관례)
