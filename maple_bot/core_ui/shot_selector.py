@@ -82,13 +82,14 @@ class ClickPointPicker(QDialog):
         self.setWindowTitle("좌표 클릭 (ESC 취소)")
         import numpy as np
         h, w = bgr_image.shape[:2]
-        self._scale = min(1.0, max_display / max(w, h))
+        # 작은 미니맵은 확대 표시(최대 6배). display_to_point가 역배율로 환산
+        self._scale = min(6.0, max_display / max(w, h))
         dw, dh = int(w * self._scale), int(h * self._scale)
         rgb = np.ascontiguousarray(bgr_image[:, :, ::-1])
         qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         pix = QPixmap.fromImage(qimg).scaled(
             dw, dh, Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation)
+            Qt.TransformationMode.FastTransformation)   # 도트 미니맵 선명 확대
         self._canvas = _ClickCanvas(pix, self._on_click)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -152,13 +153,14 @@ class LinePointPicker(QDialog):
         self.setWindowTitle("시작→끝 드래그 (ESC 취소)")
         import numpy as np
         h, w = bgr_image.shape[:2]
-        self._scale = min(1.0, max_display / max(w, h))
+        # 작은 미니맵은 확대 표시(최대 6배). display_to_point가 역배율로 환산
+        self._scale = min(6.0, max_display / max(w, h))
         dw, dh = int(w * self._scale), int(h * self._scale)
         rgb = np.ascontiguousarray(bgr_image[:, :, ::-1])
         qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
         pix = QPixmap.fromImage(qimg).scaled(
             dw, dh, Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation)
+            Qt.TransformationMode.FastTransformation)   # 도트 미니맵 선명 확대
         self._canvas = _LineCanvas(pix, self._on_release)
         lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._canvas)
