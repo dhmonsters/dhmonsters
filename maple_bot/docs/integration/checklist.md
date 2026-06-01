@@ -6,7 +6,7 @@
 ## 전체 구현 순서 (도면 5-3 기준)
 - [x] **M1. Humanizer + InputBackend** ✓ 14 passed (모든 행동의 기반)
 - [x] M2. Scanner 프레임워크 + 이벤트큐 ✓ 16 passed
-- [ ] M3. Navigation (BlockRunner + FloorJudge)
+- [x] M3. Navigation (BlockRunner + FloorJudge) ✓ 18 passed
 - [ ] M4. MinigameSolver 사이드카 (Planet v2, 3.13 IPC)
 - [ ] M5. Acting (Combat/Buff/Potion/JunkSell/Charlie)
 - [ ] M6. Orchestrator 통합
@@ -49,6 +49,20 @@
 - [x] M2-5. 커밋 ← 진행 중
 
 **성공 기준.** Scanner를 start하면 독립 스레드가 돌며 감지 시 Event를 큐에 push, stop하면 깔끔히 종료. AntiMobScanner는 config의 유형별 on/off를 따름.
+
+## M3. Navigation (BlockRunner + FloorJudge)
+
+**목표.** 사용자 최대 불만(동선 부자연) 해결. C 데이터기반 동선 + 도착확인 폐루프.
+**위치.** `core/navigation/`
+**계약 (도면 5-4).** Navigation.set_route(blocks)/step(pos)/is_arrived(). Block{type,target_x,move_type,direction}.
+
+### 태스크
+- [x] M3-1. Block 데이터클래스 + dict직렬화 ✓ 7 passed
+- [x] M3-2. FloorJudge (Y층판별+도착확인 폐루프) ✓ 6 passed
+- [x] M3-3. BlockRunner (walk/teleport 거리폴백, Humanizer 경유, 끼임감지) ✓ 5 passed
+- [x] M3-4. 커밋 ← 진행 중
+
+**성공 기준.** target_x로 walk/teleport(>15px) 분기 이동, 3px 이내 도착판정, 모든 키는 Humanizer 경유. FloorJudge가 Y로 현재층·도착여부 판정.
 
 ## 헌법 (도면 0번 — 전 모듈 불변)
 - 화면인식 + Interception + Humanizer만. 메모리조작(pymem/ReadProcessMemory) 전면 배제

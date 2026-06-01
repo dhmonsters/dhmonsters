@@ -77,3 +77,39 @@
 - B 방식 확정: macro_mob 유형별(lulu/rich/monster) 다중템플릿, config lulumo/rich/auto_guard_enabled로 on/off
 - Scanner는 capture를 callable로 주입받음(테스트 용이, screen_reader 의존 역전)
 - 다음(M3): Navigation BlockRunner — C routine_runner 스키마 + 도착확인 폐루프. Humanizer(M1) 소비 시작
+
+## 2026-06-01 — M3 착수 (Navigation: BlockRunner + FloorJudge)
+
+### 설계 (도면 5-2 동선 결론 + C 코드 기반)
+- Block 데이터클래스: type(move/attack/ladder/jump) + 필드. C routine_runner 스키마 채택
+  - move: target_x, move_type(walk/teleport), direction
+  - attack: skill_key, attack_mode(duration/count), attack_value, direction
+  - ladder: ladder_x, y_top, y_bot, exit_side
+- BlockRunner: 블록 시퀀스 순차 실행. 모든 입력은 Humanizer(M1) 경유 ★첫 소비
+  - C CoordScriptRunner 검증값: TOLERANCE=3px(도착판정), TELEPORT_MIN_DIST=15px(거리>15 텔포, 이하 walk 폴백)
+- FloorJudge: Y좌표로 층 판별 + is_arrived 도착확인 폐루프 (A "2초 무조건 등반" 문제 해결)
+  - 현재위치 콜백 주입(공유 위치상태, CharScanner가 갱신)
+
+### A 대비 개선점 (사용자 불만 해결)
+- A: walk+밧줄만, 도착확인 없음, 이중엔진 경합 → C 방식 단일엔진+텔포+폐루프로
+
+## 2026-06-01 — M3 완료 (Navigation: BlockRunner + FloorJudge)
+
+### 구현됨 (core/navigation/)
+- block.py: Block 데이터클래스(move/attack/ladder/jump) + from_dict/to_dict(config 직렬화, 전방호환)
+- floor_judge.py: Floor + FloorJudge.floor_at(Y층판별)/is_arrived(목표층 ±tol 도착확인). A "2초 무조건등반→오판정" 해결
+- block_runner.py: BlockRunner — TOLERANCE=3 폐루프 + TELEPORT_MIN_DIST=15 거리폴백(>15 텔포, 이하 walk). ★M1 Humanizer 첫 소비. 끼임감지(5회 미변화→포기)
+
+### 검증
+- tests 48 passed 누계 (M1 14 + M2 16 + M3 18: block7/floor6/runner5)
+
+### 핵심: 헌법 준수 입증
+- test_all_input_goes_through_humanizer: runner가 _backend 직접 안 들고 humanizer만 경유 → 모든 입력 단일통제점 통과 확인
+
+### 디버깅 기록
+- BlockRunner 테스트 1개 실패 → 진단: 픽스처 MovingChar가 pos()호출=이동이라 시작거리10/speed10이면 첫 체크에서 즉시 도착(입력0). 코드정상, 픽스처를 거리12/speed5로 수정
+
+### 결정/주의
+- attack/ladder/jump 블록은 run_block에서 아직 pass(move만 구현). M5 Acting/후속에서 채움
+- BlockRunner는 pos_fn 콜백 주입(CharScanner 공유위치와 결합은 M6 Orchestrator에서)
+- 다음(M4): MinigameSolver 사이드카 (Planet v2 3.13 + mmap IPC) — 기술리스크 최대 구간
