@@ -266,3 +266,20 @@
 - MmapChannel 실구현 + 3.13 사이드카 프로세스 기동 + Planet_solver .pyd
 - 실제 screen(mss)+InterceptionBackend 주입, start_scanners 스레드 메인루프
 - JunkSell A 이식, UI 6페이지 실위젯, main.py 진입점 신구조 연결
+
+## 2026-06-01 — M9 완료 (config 어댑터)
+### 구현됨 (core/config_adapter.py)
+- to_runtime_config(config.json dict) → RuntimeConfig
+  - minimap → minimap_region(left/top/width/height)
+  - recovery.hp_potion/mp_potion → PotionRule(threshold %→비율, cooldown)
+  - attack.normal_buffs/toggle_buffs → Buff(활성+키 있는것만)
+  - zones → Floor(Y범위), floor_hunt.route → Block
+  - attack.key → attack_key
+### 검증: tests 107 passed 누계 (M1~M9). 실제 config.json 스모크 통과
+### E2E 스모크: 실제 config → 어댑터 → BotRuntime 조립 성공
+  (minimap 13/136/256×104, floors1, buffs3, ctrl, hp=pgup0.65/mp=pgdn)
+### ★ 순수코드로 가능한 결선 전부 완료. 남은건 100% 실기:
+  - MmapChannel + 3.13 사이드카 + Planet v2 .pyd (실바이너리)
+  - 실 mss캡처 + InterceptionBackend 주입 + start_scanners 메인루프 (실드라이버/게임)
+  - lie/transparent→planet/lona 이벤트매핑, UI 6페이지 실위젯, main.py 진입점
+  - JunkSell A이식, 실게임 사냥 검증
