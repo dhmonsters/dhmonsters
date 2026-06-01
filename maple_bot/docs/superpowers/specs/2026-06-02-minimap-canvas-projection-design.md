@@ -51,7 +51,7 @@ MinimapCanvas(config, screen_capture, char_finder=find_char_in_hsv, interval_ms=
 4. BGR → `QImage`(RGB) 변환해 `_shot` 갱신, `update()` 호출(→ paintEvent)
 
 `paintEvent`:
-1. 배경: `_shot`을 캔버스에 `_zoom` 배율로 그림. 투명도 ~0.30(은은하게)
+1. 배경: `_shot`을 캔버스에 `_zoom` 배율로 그림. **은은하게 = QPainter opacity ~0.30** (가우시안 블러 아님, 단순 투명도로 처리)
 2. 캐릭터 점: `_last_char`가 있으면 `(cx*_zoom + panX, cy*_zoom + panY)`에 노란 원(반경 7px 고정, 줌 무관). 미검출 상태면 알파 낮춤
 3. 범위 박스(아래 #3): 점 중심으로 공격(빨강 점선)·사냥(파랑 점선) 사각형
 4. 빈 상태/미검출 안내 텍스트
@@ -106,7 +106,7 @@ QTimer(_tick)
   → QImage 변환 + _last_char 갱신
   → update()
 paintEvent
-  → 배경(_shot × zoom, 흐리게)
+  → 배경(_shot × zoom, opacity 0.30)
   → minimap_to_canvas(cx,cy,zoom) → 노란 점
   → screen_px_to_minimap_px(범위) × zoom → 공격/사냥 박스
 ```
