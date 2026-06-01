@@ -122,3 +122,18 @@ class MinimapCanvas(QWidget):
     def _hint(self, p: QPainter, text: str) -> None:
         p.setPen(QColor("#8a8f98"))
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
+
+    def set_zoom(self, zoom: float) -> None:
+        """줌 배율 설정(0.5~4.0 클램프)."""
+        self._zoom = max(0.5, min(4.0, zoom))
+        self.update()
+
+    def fit(self) -> None:
+        """미니맵 전체가 캔버스에 들어오도록 줌 맞춤."""
+        W, H = self._mm_size
+        if W > 0 and H > 0 and self.width() > 0 and self.height() > 0:
+            self.set_zoom(min(self.width() / W, self.height() / H))
+
+    def wheelEvent(self, ev) -> None:
+        step = 1.1 if ev.angleDelta().y() > 0 else 0.9
+        self.set_zoom(self._zoom * step)

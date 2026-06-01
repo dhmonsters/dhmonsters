@@ -81,3 +81,25 @@ def test_track_state_stale_before_any_detection(app):
     cv = MinimapCanvas(cfg, screen_capture=lambda r: None,
                        char_finder=lambda *a, **k: None, interval_ms=99999)
     assert cv.track_state() == "stale"   # 한 번도 검출 전이면 stale
+
+
+def test_fit_sets_zoom_to_show_whole_minimap(app):
+    cfg = _region_cfg()
+    shot = np.zeros((120, 200, 3), dtype=np.uint8)
+    cv = MinimapCanvas(cfg, screen_capture=lambda r: shot,
+                       char_finder=lambda *a, **k: (50, 60), interval_ms=99999)
+    cv.resize(400, 240)
+    cv._tick()                      # _mm_size=(200,120)
+    cv.fit()
+    # min(400/200, 240/120) = min(2.0, 2.0) = 2.0
+    assert abs(cv._zoom - 2.0) < 1e-6
+
+
+def test_zoom_clamped(app):
+    cfg = _region_cfg()
+    cv = MinimapCanvas(cfg, screen_capture=lambda r: None,
+                       char_finder=lambda *a, **k: None, interval_ms=99999)
+    cv.set_zoom(99)
+    assert cv._zoom == 4.0          # 상한
+    cv.set_zoom(0.01)
+    assert cv._zoom == 0.5          # 하한
