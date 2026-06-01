@@ -39,6 +39,10 @@ class BlockRunner:
         self._stop = stop_fn or (lambda: False)
         self._poll = poll_sec
 
+    def _jsleep(self, base: float) -> None:
+        """고정 타이밍을 Humanizer로 ±0.05 지터해 대기(어떤 고정 수치도 매번 다르게)."""
+        self._sleep(self._h.jitter_sec(base))
+
     def run_route(self, blocks: list[Block], max_steps: int = 200) -> bool:
         """블록 리스트를 순서대로 실행. 모두 성공하면 True."""
         for b in blocks:
@@ -160,7 +164,7 @@ class BlockRunner:
                 _x, y = self._pos()
                 if y is not None and y <= y_top + Y_ARRIVE_TOL:
                     return True   # 층 도착 확인
-                self._sleep(self._poll)
+                self._jsleep(self._poll)
             return False
         finally:
             self._h.release("up")
@@ -178,15 +182,15 @@ class BlockRunner:
             if x is not None and abs(x - ladder_x) <= LADDER_X_TOL:
                 reached = True
                 break
-            self._sleep(self._poll)
+            self._jsleep(self._poll)
         if not reached:
             self._h.release_all()
             return False
         # 2) 점프 + ↑ 잡기 (C: press jump → 0.05 → keyDown up → 0.5 매달림 → keyUp side)
         self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
-        self._sleep(0.05)
+        self._jsleep(0.05)
         self._h.hold("up")
-        self._sleep(LADDER_HANG_SEC)
+        self._jsleep(LADDER_HANG_SEC)
         self._h.release_dir()
         # 3) y_top 까지 등반 + 도착 확인
         try:
@@ -196,7 +200,7 @@ class BlockRunner:
                 _x, y = self._pos()
                 if y is not None and y <= y_top + Y_ARRIVE_TOL:
                     return True
-                self._sleep(self._poll)
+                self._jsleep(self._poll)
             return False
         finally:
             self._h.release("up")
@@ -205,10 +209,10 @@ class BlockRunner:
         """지정 X에서 ↓ 1초 + 좌/우 + 점프 → 사다리에서 뛰어내림(C _descend_ladder_jump).
         y가 y_bot 근처(아래 발판)로 내려오면 도착."""
         self._h.hold("down")
-        self._sleep(DESCEND_DOWN_SEC)
+        self._jsleep(DESCEND_DOWN_SEC)
         self._h.hold_dir(exit_side)
         self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
-        self._sleep(0.1)
+        self._jsleep(0.1)
         self._h.release("down")
         self._h.release_dir()
         for _ in range(max_steps):
@@ -217,7 +221,7 @@ class BlockRunner:
             _x, y = self._pos()
             if y is not None and abs(y - y_bot) <= Y_ARRIVE_TOL:
                 return True   # 아래 발판 도착
-            self._sleep(self._poll)
+            self._jsleep(self._poll)
         return True   # 하강은 도착 확인 약해도 완료 처리(C와 동일 성향)
 
     def _do_jump(self, block: Block) -> bool:

@@ -574,3 +574,10 @@
 - BlockEditor: 2줄 카드(오버플로우 해결) — 윗줄 타입·모드/dir·옵션·✕, 아랫줄 좌표+긋기. move mode콤보, ladder dir콤보 노출.
 ### 검증: tests 188 passed (ladder 3, move모드 2). LadderWorld(키홀드 반응 물리)로 등반/점프잡기/하강 검증. 1024폭 무오버플로우 렌더 확인.
 ### 미결: 전체 route(사다리포함) 실행을 봇 루프에 결선 — 현재 hunting_tick은 patrol/route[0] max_steps=1 틱모델. 사다리는 블로킹(최대 35s)이라 floor-hunt route 전용 실행경로 필요(다음).
+
+## 2026-06-02 — 고정 타이밍 랜덤화 (사람같은 움직임)
+- 요청: 0.5초 매달림 등 고정 수치 전부 ±0.05 소수점 둘째자리 랜덤.
+- Humanizer.jitter_sec(base, spread=0.05) = round(max(0, base+uniform(-spread,spread)), 2). sleep_jittered도 추가.
+- BlockRunner._jsleep(base)=self._sleep(self._h.jitter_sec(base))로 모든 고정 sleep 교체: 매달림0.5/하강1.0/점프후0.05/하강후0.1/폴링0.05.
+- perform 경로(공격·텔포·점프 키홀드)는 기존 hold_jitter(0.8~1.4배)로 이미 랜덤이라 유지.
+- 검증: tests 190 passed (jitter 범위/음수방지/비고정 2개).

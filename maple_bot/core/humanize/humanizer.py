@@ -82,6 +82,16 @@ class Humanizer:
         for k in list(self._held_keys):
             self.release(k)
 
+    # ── 고정 타이밍 랜덤화 (헌법: 어떤 고정 수치도 매번 미세하게 다르게) ──
+    def jitter_sec(self, base: float, spread: float = 0.05) -> float:
+        """고정 시간값을 ±spread(기본 0.05초) 범위로 소수점 둘째 자리 랜덤화(음수 방지).
+        사람은 같은 동작(0.5초 매달림 등)도 매번 조금씩 다른 시간이 걸린다."""
+        return round(max(0.0, base + self._rng.uniform(-spread, spread)), 2)
+
+    def sleep_jittered(self, base: float, spread: float = 0.05) -> None:
+        """jitter_sec 만큼 대기."""
+        self._sleep(self.jitter_sec(base, spread))
+
     # ── 공개 API ──────────────────────────────────────────────────────
     def perform(self, intent: Intent) -> None:
         """의도를 변형해 실제 입력으로 송출."""

@@ -103,3 +103,18 @@ def test_release_dir_releases_held(rec):
     assert h.held_dir() is None
     h.release_dir()                 # 이미 뗀 상태
     assert rec.ups == ["right"]     # 변화 없음
+
+
+def test_jitter_sec_within_spread_and_varies(rec):
+    """고정 타이밍 → ±0.05 범위, 소수점 둘째자리, 매번 다름(고정 아님)."""
+    h = Humanizer(backend=rec, sleep_fn=lambda s: None)
+    vals = [h.jitter_sec(0.5) for _ in range(60)]
+    assert all(0.45 <= v <= 0.55 for v in vals)   # ±0.05 범위
+    assert len(set(vals)) >= 5                     # 고정값 아님
+    assert all(abs(v * 100 - round(v * 100)) < 1e-9 for v in vals)  # 둘째자리
+
+
+def test_jitter_sec_no_negative(rec):
+    """작은 base(0.02)에 ±0.05여도 음수로 안 감."""
+    h = Humanizer(backend=rec, sleep_fn=lambda s: None)
+    assert all(h.jitter_sec(0.02) >= 0.0 for _ in range(60))
