@@ -440,3 +440,16 @@
 - 몬스터 YOLO 학습데이터 수집→모델
 - 실게임 종합 검증(감지율/거탐정확도/안티밴)
 ### config.json은 로컬 설정값(UI편집/실행갱신) → 커밋 보류(이전 관례)
+
+## 2026-06-01 — 사냥 영역(B training 방식) 추가 — 누락 정정
+### 사용자 지적: A에 없다고 사냥영역 생략한 것 오류. B는 training 영역 안에서만 감지(전체화면 느림)
+### B 설계 (config.ini 확정, Themida라 코드는 못보지만 키로 역추론)
+- training_x/y/w/h: 사냥 영역 절대 사각형 (이 안에서만 닉네임/몬스터 감지)
+- atk_x/y_min/max: 닉네임 위치 기준 공격 테두리(상대 오프셋)
+- monster_accuracy: 영역내 템플릿 임계
+### 이식
+- config: attack.hunt_area{x,y,w,h} + atk_x/y_min/max + monster_accuracy
+- pages.py 1번: 사냥영역 드래그버튼(미니맵 패턴) + hunt_area 필드 + atk테두리 필드 + 몬스터임계
+- RuntimeConfig.hunt_area_region + adapter 매핑(w>0이면 region, 아니면 None=전체화면)
+### 검증: tests 155 passed. 4버튼(미니맵/사냥영역/몬스터/닉네임) 렌더 확인
+### TODO 실기: 몬스터 감지가 hunt_area_region 안에서만 동작하도록 결선(YOLO데이터 생기면). 닉네임주변 테두리 공격 로직

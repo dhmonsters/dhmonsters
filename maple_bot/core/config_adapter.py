@@ -56,6 +56,15 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     attack = d.get("attack", {})
     attack_key = attack.get("key", "") or d.get("minimap", {}).get("attack_key", "")
 
+    # 사냥 영역 (B training) — w>0이면 region dict, 아니면 None(전체화면)
+    ha = attack.get("hunt_area", {})
+    hunt_area_region = None
+    if int(ha.get("w", 0)) > 0:
+        hunt_area_region = {
+            "left": int(ha.get("x", 0)), "top": int(ha.get("y", 0)),
+            "width": int(ha.get("w", 0)), "height": int(ha.get("h", 0)),
+        }
+
     # 순찰: 첫 zone의 좌우 경계 + 랜덤 마진
     zones = d.get("zones", [])
     z0 = zones[0] if zones else {}
@@ -91,4 +100,5 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         tg_chat_id=lie.get("tg_chat_id", ""),
         user_detect_enabled=bool(user.get("enabled", False)),
         auto_reply_messages=list(user.get("messages", [])),
+        hunt_area_region=hunt_area_region,
     )

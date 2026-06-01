@@ -65,6 +65,8 @@ class RuntimeConfig:
     user_detect_enabled: bool = False
     user_min_red: int = 15
     auto_reply_messages: list = field(default_factory=list)
+    # 사냥 영역 (B training: 이 영역 안에서만 몬스터/닉네임 감지)
+    hunt_area_region: dict | None = None
 
 
 class BotRuntime:

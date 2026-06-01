@@ -125,19 +125,34 @@ def build_pages(config) -> list[QWidget]:
     name_cap = _make_template_capture(
         c, "templates/name_tag.png", ("attack", "name_template"), "닉네임",
     )
+    # 사냥 영역 (B training 방식) — 이 사각형 안에서만 닉네임/몬스터 감지 (전체화면 대비 빠름)
+    ha_x = IntField("사냥영역 X", c, ("attack", "hunt_area", "x"), 0, 4000)
+    ha_y = IntField("사냥영역 Y", c, ("attack", "hunt_area", "y"), 0, 4000)
+    ha_w = IntField("사냥영역 W", c, ("attack", "hunt_area", "w"), 0, 4000)
+    ha_h = IntField("사냥영역 H", c, ("attack", "hunt_area", "h"), 0, 4000)
+    hunt_area_picker = _make_region_picker(
+        c,
+        [("attack", "hunt_area", "x"), ("attack", "hunt_area", "y"),
+         ("attack", "hunt_area", "w"), ("attack", "hunt_area", "h")],
+        [ha_x, ha_y, ha_w, ha_h],
+        "사냥",
+    )
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
         ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"]),
         mm_x, mm_y, mm_w, mm_h,
         IntField("색 허용오차", c, ("minimap", "tolerance"), 0, 255, default=30),
         TextField("점프 키", c, ("minimap", "jump_key"), default="alt"),
-        # 사냥 영역 (몬스터 탐색 범위)
-        IntField("공격 범위(px)", c, ("attack", "range_px"), 0, 2000, default=350),
-        FloatField("카메라 폭 비율", c, ("attack", "camera_w_ratio"), 0.1, 1.0, default=0.5),
-        FloatField("캐릭터 Y 비율", c, ("attack", "char_y_ratio"), 0.1, 1.0, default=0.6),
-        # 닉네임 인식 (이미지 모드에서 본인 식별)
+        # 사냥 영역 (B training: 이 영역 안에서만 감지)
+        ha_x, ha_y, ha_w, ha_h,
+        FloatField("몬스터 임계값", c, ("attack", "monster_accuracy"), 0.1, 1.0, default=0.9),
+        # 닉네임 주변 공격 테두리 (B atk_x/y_min/max — 닉네임 기준 상대 오프셋)
+        IntField("공격범위 ←", c, ("attack", "atk_x_min"), -1000, 0, default=-35),
+        IntField("공격범위 →", c, ("attack", "atk_x_max"), 0, 1000, default=35),
+        IntField("공격범위 ↑", c, ("attack", "atk_y_min"), -1000, 0, default=-70),
+        IntField("공격범위 ↓", c, ("attack", "atk_y_max"), 0, 1000, default=70),
+        # 닉네임 인식 임계
         FloatField("닉네임 임계값", c, ("attack", "name_tag_threshold"), 0.1, 1.0, default=0.7),
-        IntField("닉네임 Y 오프셋", c, ("attack", "name_tag_y_offset"), -500, 500, default=138),
-    ], buttons=[minimap_picker, monster_cap, name_cap]))
+    ], buttons=[minimap_picker, hunt_area_picker, monster_cap, name_cap]))
 
     # 2. 동선·이동
     pages.append(_page("동선·이동", "구역·사다리·다운점프·텔포·포탈·블록빌더·녹화·프리셋", [
