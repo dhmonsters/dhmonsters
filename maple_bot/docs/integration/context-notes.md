@@ -283,3 +283,23 @@
   - 실 mss캡처 + InterceptionBackend 주입 + start_scanners 메인루프 (실드라이버/게임)
   - lie/transparent→planet/lona 이벤트매핑, UI 6페이지 실위젯, main.py 진입점
   - JunkSell A이식, 실게임 사냥 검증
+
+## 2026-06-01 — ★중요 방향전환: 거탐 = exe 통째 방식 (사용자 확인)
+### 결정 배경
+- 우구에게서 Planet v2를 "exe 통째로만" 받음. .pyd 단독/호출법은 못 받음
+- → .pyd import 방식 폐기. 3.13 사이드카 불필요. Python 3.13 설치 불필요
+### 새 방식: ExternalProcessEngine (B·C 실제 방식)
+- Planet v2.exe(우구)를 본체가 옆에 띄워둠. exe가 자체적으로 화면보고 거탐 감지+풀이(독립)
+- 본체는 거탐 감지시 "내 사냥만 일시정지→재개". exe와 직접 통신 안함(느슨)
+- M4 MinigameSolver 인터페이스 뒤에 ExternalProcessEngine 끼움(콘센트 격리 그대로 작동)
+  - can_handle("planet") / solve(): exe 살아있는지 확인 + 사냥 pause 유지하며 거탐화면 사라질때까지 대기
+  - SidecarChannel/PlanetV2Engine(mmap)는 미사용으로 보존(나중 .pyd 받으면 부활 가능)
+### 사용자 준비물 (간소화 최종)
+1. Interception 드라이버: 하드키바인딩_꼭설치.bat + 재부팅 + pip install interception-python (진행중)
+2. Planet v2.exe 경로 확보 (봇과 함께 둘 폴더)
+3. 테스트계정+게임 1920x1080/100%/단일모니터
+### 다음 세션 실기 작업
+1. ExternalProcessEngine 구현(exe 기동/종료 관리 + 거탐화면 감지로 pause/resume)
+2. 실 mss + InterceptionBackend 주입 BotRuntime
+3. main.py 신구조 진입점 + UI 6페이지 결선
+4. JunkSell A이식, 실게임 검증
