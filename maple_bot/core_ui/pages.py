@@ -75,8 +75,9 @@ def _make_template_capture(config, save_path, config_key, label: str) -> QPushBu
     return btn
 
 
-def _page(title: str, desc: str, fields: list, buttons: list | None = None) -> QWidget:
-    """제목 + 설명 + (버튼들) + 폼 필드들을 담은 스크롤 페이지."""
+def _page(title: str, desc: str, fields: list, buttons: list | None = None,
+          extras: list | None = None) -> QWidget:
+    """제목 + 설명 + (버튼들) + 폼 필드들 + (임의 위젯 extras)를 담은 스크롤 페이지."""
     inner = QWidget()
     v = QVBoxLayout(inner)
     v.setContentsMargins(SPACING["xl"], SPACING["xl"], SPACING["xl"], SPACING["xl"])
@@ -92,6 +93,8 @@ def _page(title: str, desc: str, fields: list, buttons: list | None = None) -> Q
         v.addSpacing(SPACING["sm"])
     for f in fields:
         v.addWidget(f.row)
+    for w in (extras or []):
+        v.addWidget(w)
     v.addStretch(1)
 
     scroll = QScrollArea()
@@ -154,13 +157,18 @@ def build_pages(config) -> list[QWidget]:
         FloatField("닉네임 임계값", c, ("attack", "name_tag_threshold"), 0.1, 1.0, default=0.7),
     ], buttons=[minimap_picker, hunt_area_picker, monster_cap, name_cap]))
 
-    # 2. 동선·이동
+    # 2. 동선·이동 — 좌표 동선은 블록 빌더로 (이동/공격/사다리 순차)
+    from core_ui.block_editor import BlockEditor
+    from PyQt6.QtWidgets import QLabel as _QLabel
+    route_lbl = _QLabel("좌표 동선 블록 (위→아래 순서 실행)")
+    route_lbl.setObjectName("subtle")
+    block_editor = BlockEditor(c, ("floor_hunt", "route"))
     pages.append(_page("동선·이동", "구역·사다리·다운점프·텔포·포탈·블록빌더·녹화·프리셋", [
         CheckField("층별 사냥 사용", c, ("floor_hunt", "enabled")),
         CheckField("커스텀 루트 모드", c, ("floor_hunt", "route_mode")),
         TextField("현재 사냥터", c, ("hunt_grounds", "active")),
-        ComboField("좌표 모드", c, ("coord_mode",), ["off", "on"], default="off"),
-    ]))
+        ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative"),
+    ], extras=[route_lbl, block_editor]))
 
     # 3. 전투
     pages.append(_page("전투", "공격·버프·물약·펫·줍기", [

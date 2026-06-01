@@ -465,3 +465,15 @@
 ### 검증: tests 161 passed (monster_vision 6). 스모크 — 닉네임박스 안 몬스터 감지→공격 동작
 ### read-errors: 스모크 첫 실패 → 닉네임 위에 몬스터 겹쳐그린 픽스처 문제(코드정상), 비겹침 재확인 통과
 ### 남은 실기: YOLO데이터 모이면 image모드를 YOLO로 교체가능(monster_vision은 OpenCV 폴백 유지). 실게임 닉네임/몬스터 템플릿 품질 검증
+
+## 2026-06-02 — 동선 좌표 설정 = 블록 빌더 (BlockEditor)
+### 버그 정정: coord_mode 콤보 off/on → absolute/relative (config 정의 일치. 좌표 기준점이지 on/off 아님)
+### 좌표 동선의 실체: floor_hunt.route = Block 리스트(C routine_runner 스키마). M3 Block 그대로
+### 구현 (core_ui/block_editor.py)
+- BlockEditor: route 블록 리스트 편집. add_block(move/attack/ladder/jump)/remove_row/set_field/row_count
+- 행별 타입 필드(move:target_x+walk/teleport, attack:skill_key, ladder:ladder_x) + ✕삭제. config 즉시저장
+- Block.from_dict 검증 통과분만 저장
+- _page에 extras 인자 추가 → 동선페이지에 BlockEditor 끼움
+### 검증: tests 166 passed (block_editor 5). 렌더 — move/attack 블록 행 확인
+### 좌표 동선 사용법: 동선·이동 탭 → 블록추가(이동/공격) → 각 X좌표·스킬키 입력 → 위→아래 순서로 BlockRunner 실행
+### 남은: 블록 X좌표를 스크린샷/미니맵 클릭으로 찍는 픽커(현재 숫자입력), 블록 순서 드래그, 녹화
