@@ -115,6 +115,15 @@ def test_jitter_sec_within_spread_and_varies(rec):
 
 
 def test_jitter_sec_no_negative(rec):
-    """작은 base(0.02)에 ±0.05여도 음수로 안 감."""
+    """작은 base여도 음수로 안 감."""
     h = Humanizer(backend=rec, sleep_fn=lambda s: None)
     assert all(h.jitter_sec(0.02) >= 0.0 for _ in range(60))
+
+
+def test_jitter_sec_small_value_fine_grained(rec):
+    """폴링처럼 작은 값(0.05)은 ±0.005 넷째자리 랜덤 — 0이나 2배로 튀지 않음."""
+    h = Humanizer(backend=rec, sleep_fn=lambda s: None)
+    vals = [h.jitter_sec(0.05) for _ in range(80)]
+    assert all(0.045 <= v <= 0.055 for v in vals)   # ±0.005 (둘째단위 값 → 넷째자리 범위)
+    assert len(set(vals)) >= 5                        # 고정 아님
+    assert all(abs(v * 10000 - round(v * 10000)) < 1e-6 for v in vals)  # 넷째자리

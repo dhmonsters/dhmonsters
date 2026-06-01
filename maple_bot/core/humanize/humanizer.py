@@ -83,12 +83,23 @@ class Humanizer:
             self.release(k)
 
     # ── 고정 타이밍 랜덤화 (헌법: 어떤 고정 수치도 매번 미세하게 다르게) ──
-    def jitter_sec(self, base: float, spread: float = 0.05) -> float:
-        """고정 시간값을 ±spread(기본 0.05초) 범위로 소수점 둘째 자리 랜덤화(음수 방지).
-        사람은 같은 동작(0.5초 매달림 등)도 매번 조금씩 다른 시간이 걸린다."""
-        return round(max(0.0, base + self._rng.uniform(-spread, spread)), 2)
+    def jitter_sec(self, base: float, spread: float | None = None) -> float:
+        """고정 시간값을 크기에 맞춰 랜덤화(음수 방지).
 
-    def sleep_jittered(self, base: float, spread: float = 0.05) -> None:
+        - base ≥ 0.1 (0.5초 매달림 등): ±0.05 범위, 소수점 둘째 자리.
+        - base < 0.1 (폴링 0.05 등 둘째 단위 수치): ±0.005 범위, 소수점 넷째 자리.
+        spread를 명시하면 그 값을 쓰고 둘째 자리로 반올림한다.
+        """
+        if spread is None:
+            if base >= 0.1:
+                spread, ndigits = 0.05, 2
+            else:
+                spread, ndigits = 0.005, 4   # 작은 값은 넷째 자리에서 미세 랜덤
+        else:
+            ndigits = 2
+        return round(max(0.0, base + self._rng.uniform(-spread, spread)), ndigits)
+
+    def sleep_jittered(self, base: float, spread: float | None = None) -> None:
         """jitter_sec 만큼 대기."""
         self._sleep(self.jitter_sec(base, spread))
 
