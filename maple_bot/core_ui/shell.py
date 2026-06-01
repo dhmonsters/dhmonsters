@@ -50,15 +50,17 @@ class MainShell(QMainWindow):
 
     # ── 좌측 사이드바: 6 내비 + 시작/정지 ────────────────────────────
     def _build_sidebar(self) -> QWidget:
+        from core_ui.theme import TOKENS
         bar = QWidget()
         bar.setFixedWidth(220)
-        bar.setObjectName("card")
+        # House Green 딥그린 배경 — 흰 nav 글씨 대비 (Starbucks 색블록 리듬)
+        bar.setStyleSheet(f"background-color: {TOKENS['house_green']};")
         v = QVBoxLayout(bar)
         v.setContentsMargins(10, 14, 10, 14)
         v.setSpacing(4)
 
         title = QLabel("DHMONSTERS")
-        title.setObjectName("h1")
+        title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: 700;")
         v.addWidget(title)
         v.addSpacing(12)
 

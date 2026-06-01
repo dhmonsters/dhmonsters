@@ -49,5 +49,5 @@ def test_log_dock_exists(app):
 
 def test_qss_applied(app):
     shell = MainShell()
-    # 스타일시트가 셸에 적용됐는지(canvas 색 포함)
-    assert "#010102" in shell.styleSheet()
+    # 스타일시트가 셸에 적용됐는지(Starbucks 크림 캔버스 색 포함)
+    assert "#f2f0eb" in shell.styleSheet()
