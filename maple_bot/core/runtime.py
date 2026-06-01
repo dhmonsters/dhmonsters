@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from core.humanize.humanizer import Humanizer
 from core.sensing.char_scanner import CharScanner
 from core.sensing.antimob_scanner import AntiMobScanner
+from core.sensing.lie_scanner import LieScanner
 from core.sensing.event import Event
 from core.orchestrator.orchestrator import Orchestrator
 from core.navigation.block import Block
@@ -37,6 +38,11 @@ class RuntimeConfig:
     transparent_models_dir: str = "models/transparent"
     board_region: dict | None = None          # 거탐 게임판 화면영역 (None=minimap_region 대용 아님; 실기 설정)
     transparent_use_gpu: bool = False
+    # 거탐 감지 (LieScanner)
+    lie_enabled: bool = True
+    lie_title_template: str = "templates/transparent_shape_title.png"
+    lie_threshold: float = 0.65
+    lie_detect_region: dict | None = None      # 타이틀 탐색 영역 (None=전체화면)
 
 
 class BotRuntime:
@@ -64,6 +70,16 @@ class BotRuntime:
                 screen_capture, config.antimob_templates,
                 config.antimob_enabled, region=config.minimap_region,
             )
+        # 거탐 감지 — 타이틀 출현 → "lie" 이벤트 → Orchestrator가 safety 모드 전환
+        self.lie_scanner = None
+        if config.lie_enabled:
+            import os as _os
+            if _os.path.exists(config.lie_title_template):
+                self.lie_scanner = LieScanner(
+                    screen_capture, config.lie_title_template,
+                    threshold=config.lie_threshold,
+                    region=config.lie_detect_region,
+                )
 
         # 조율 계층
         self.orchestrator = Orchestrator(
@@ -95,7 +111,7 @@ class BotRuntime:
     # ── 감지 펌프 (테스트: 수동 / 실기: 스레드) ──────────────────────
     def pump_scanners_once(self) -> None:
         """스캐너 scan_once 를 직접 1회 호출해 이벤트큐를 채운다(테스트용)."""
-        for sc in (self.char_scanner, self.antimob_scanner):
+        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner):
             if sc is None:
                 continue
             ev = sc.scan_once()
@@ -104,14 +120,14 @@ class BotRuntime:
 
     def start_scanners(self) -> None:
         """실기: 스캐너 스레드 시작."""
-        self.char_scanner.start(self.event_queue)
-        if self.antimob_scanner:
-            self.antimob_scanner.start(self.event_queue)
+        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner):
+            if sc is not None:
+                sc.start(self.event_queue)
 
     def stop_scanners(self) -> None:
-        self.char_scanner.stop()
-        if self.antimob_scanner:
-            self.antimob_scanner.stop()
+        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner):
+            if sc is not None:
+                sc.stop()
 
     # ── 틱 ────────────────────────────────────────────────────────────
     def hunting_tick(self, now: float | None = None) -> None:

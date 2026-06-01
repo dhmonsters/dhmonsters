@@ -382,3 +382,16 @@
 ### 검증: tests 123 passed 누계. 실 config 렌더 확인 — 전투페이지 ctrl/350/HP65 pgup/MP50 pgdn 바인딩
 ### 동작: 페이지 입력 변경 → 즉시 config.json 저장(cm.set+save). 플레이스홀더→실설정폼 완성
 ### 남은 UI: 미니맵 영역 드래그 설정, 좌표 캡처 버튼 등 인터랙티브 위젯은 실기 연동 필요
+
+## 2026-06-01 — 거탐 감지 스캐너 메인루프 결선
+### 구현됨
+- core/sensing/lie_scanner.py: LieScanner — 타이틀 템플릿 매칭(transparent_shape_title.png, 임계0.65)으로 거탐 출현 감지 → "lie" 이벤트. C MinigameWatcher 방식(_on_appear 1회발행 + _on_disappear 리셋 → 재출현시 재발행). 중복 방지
+- runtime.py: RuntimeConfig에 lie_enabled/lie_title_template/lie_threshold/lie_detect_region 추가. lie_scanner 초기화(템플릿 파일 존재시). pump/start/stop_scanners 3곳 모두 포함
+### 흐름 완성 (코드 입증)
+- LieScanner "lie" → 이벤트큐 → Orchestrator(우선순위0, safety모드+on_pause로 사냥정지) → safety_tick(SelfTransparentEngine.solve 자체ncnn 풀이) → 성공시 clear_safety → 사냥재개
+- 스모크: 실 타이틀 템플릿 화면에 심으니 감지→safety 전환 확인
+### 검증: tests 127 passed 누계 (LieScanner +4)
+### 실기 잔여 (게임 필수)
+- lie_detect_region: 타이틀 탐색영역 좁히면 빠름(현재 전체화면). 실측 권장
+- board_region: 거탐 게임판 영역(SelfTransparentEngine이 추적할). 실측 필수
+- 실게임: 거탐 떴을때 실제 감지율 + 자체모델 풀이 정확도 검증
