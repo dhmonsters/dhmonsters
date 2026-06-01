@@ -29,6 +29,7 @@ class MainShell(QMainWindow):
         self._config = config
         self.setWindowTitle("DHMONSTERS")
         self.resize(1180, 720)
+        self.setMinimumSize(1024, 640)   # 이보다 작아지면 중앙 내용이 잘리므로 하한
         self.setStyleSheet(build_qss())
 
         self.nav_buttons: list[QPushButton] = []
@@ -59,7 +60,8 @@ class MainShell(QMainWindow):
     def _build_sidebar(self) -> QWidget:
         bar = QFrame()
         bar.setObjectName("card")          # surface_1 차콜 패널 + hairline
-        bar.setFixedWidth(232)
+        bar.setMinimumWidth(208)           # 고정 대신 약간 유연 (창 리사이즈 반응)
+        bar.setMaximumWidth(248)
         v = QVBoxLayout(bar)
         v.setContentsMargins(SPACING["sm"], SPACING["lg"], SPACING["sm"], SPACING["lg"])
         v.setSpacing(SPACING["xxs"])
@@ -92,7 +94,8 @@ class MainShell(QMainWindow):
     # ── 우측 로그 도크 ────────────────────────────────────────────────
     def _build_log_dock(self) -> QWidget:
         dock = QWidget()
-        dock.setFixedWidth(320)
+        dock.setMinimumWidth(220)          # 고정 대신 유연 — 창 줄이면 로그도크도 함께 양보
+        dock.setMaximumWidth(380)
         v = QVBoxLayout(dock)
         v.setContentsMargins(SPACING["xs"], SPACING["lg"], SPACING["md"], SPACING["lg"])
         v.setSpacing(SPACING["sm"])

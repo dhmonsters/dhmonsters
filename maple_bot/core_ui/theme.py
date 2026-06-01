@@ -40,29 +40,33 @@ TYPOGRAPHY = {
     "caption":    {"size": 11, "weight": 400, "tracking": 0.0},
 }
 
-# ── 폰트 패밀리 (DESIGN.md: Linear Display→Inter, Linear Mono→JetBrains Mono) ──
-FONT_SANS = '"Inter", "SF Pro Display", -apple-system, "Segoe UI", sans-serif'
+# ── 폰트 패밀리 (DESIGN.md: Linear Display→Pretendard(한글판 Inter), Mono→JetBrains Mono) ──
+#   Inter는 한글 글리프가 없어 □(tofu)로 깨짐 → Latin/한글 모두 커버하는 Pretendard로 통일.
+FONT_SANS = '"Pretendard Variable", "Pretendard", "Malgun Gothic", "Segoe UI", sans-serif'
 FONT_MONO = '"JetBrains Mono", ui-monospace, "Consolas", monospace'
 LETTER_SPACING_PX = -0.2   # body 기준 기본 트래킹
 
 
 def apply_font(app, base_pt: int = 10):
-    """번들 Inter+JetBrains Mono 런타임 로드(시스템 설치 불필요) + 전역 폰트/트래킹."""
+    """번들 Pretendard+JetBrains Mono 런타임 로드(시스템 설치 불필요) + 전역 폰트/트래킹.
+    Pretendard는 한글+Latin 모두 포함 → 한글 깨짐 없음. 폴백으로 맑은 고딕도 지정."""
     from pathlib import Path
     from PyQt6.QtGui import QFont, QFontDatabase
 
     fonts_dir = Path(__file__).resolve().parent.parent / "assets" / "fonts"
-    family = "Inter"
-    for fn, fam in [("Inter-Variable.ttf", "Inter"),
+    family = "Pretendard Variable"
+    for fn, fam in [("PretendardVariable.ttf", "Pretendard"),   # 가변폰트 1개로 전 굵기 커버
                     ("JetBrainsMono-Regular.ttf", "JetBrains Mono")]:
         p = fonts_dir / fn
         if p.exists():
             fid = QFontDatabase.addApplicationFont(str(p))
             fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
-            if fams and fam == "Inter":
-                family = fams[0]
+            if fams and fam == "Pretendard":
+                family = fams[0]   # 'Pretendard Variable'
 
     f = QFont(family)
+    # 글리프 누락 시 맑은 고딕→Segoe UI 순으로 글자단위 폴백 (한글 보장)
+    f.setFamilies([family, "Malgun Gothic", "Segoe UI"])
     f.setStyleHint(QFont.StyleHint.SansSerif)
     f.setPointSize(base_pt)
     f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, LETTER_SPACING_PX)
@@ -124,6 +128,21 @@ def build_qss() -> str:
         background-color: {t['surface_2']};
         color: {t['ink']};
         border-left: 2px solid {t['primary']};
+    }}
+    QListWidget#blockList {{
+        background-color: transparent;
+        border: none;
+        outline: none;
+    }}
+    QListWidget#blockList::item {{
+        background-color: {t['surface_1']};
+        border: 1px solid {t['hairline']};
+        border-radius: {r['md']}px;
+        margin: 2px 0;
+    }}
+    QListWidget#blockList::item:selected {{
+        border: 1px solid {t['primary']};
+        background-color: {t['surface_2']};
     }}
     QTextEdit#log {{
         background-color: {t['surface_1']};

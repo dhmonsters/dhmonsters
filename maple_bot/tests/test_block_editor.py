@@ -67,3 +67,24 @@ def test_edit_target_x_persists(app):
     ed.add_block("move")
     ed.set_field(0, "target_x", 120)
     assert cfg.get("floor_hunt", "route")[0]["target_x"] == 120
+
+
+def test_move_row_reorders_and_saves(app):
+    cfg = FakeConfig({"floor_hunt": {"route": [
+        {"type": "move", "target_x": 10},
+        {"type": "attack", "skill_key": "a"},
+        {"type": "ladder", "ladder_x": 5},
+    ]}})
+    ed = BlockEditor(cfg, ("floor_hunt", "route"))
+    ed.move_row(0, 2)   # 첫 블록(move)을 맨 끝으로
+    route = cfg.get("floor_hunt", "route")
+    assert [b["type"] for b in route] == ["attack", "ladder", "move"]
+    assert cfg.saved >= 1
+
+
+def test_move_row_noop_same_index(app):
+    cfg = FakeConfig({"floor_hunt": {"route": [
+        {"type": "move", "target_x": 10}, {"type": "attack", "skill_key": "a"}]}})
+    ed = BlockEditor(cfg, ("floor_hunt", "route"))
+    ed.move_row(1, 1)
+    assert [b["type"] for b in cfg.get("floor_hunt", "route")] == ["move", "attack"]

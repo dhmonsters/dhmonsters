@@ -532,3 +532,14 @@
 - block_editor: move 행 📍시작/📍끝 2버튼 → 📏구간긋기 1버튼. _pick_line: 미니맵 드래그→start_x/end_x 동시set(좌→우 정규화)
 ### 검증: tests 176 passed (line_picker 2). 라인 직선 렌더 + move 구간긋기 버튼 확인
 ### 사용: move블록 📏구간긋기 → 미니맵에서 시작점부터 끝점까지 한번 드래그 → 시작/끝 X 자동
+
+## 2026-06-02 — UI/UX 3대 결함 수정 (오프스크린 렌더로 실증 진단)
+### 진단 (실제 PNG 렌더 확인)
+- **한글 전부 □(tofu)**: 번들 Inter 폰트에 한글 글리프 없음. Latin만 정상.
+- **창 리사이즈 무반응 + 내용 잘림**: 사이드바/로그도크 setFixedWidth → 중앙만 찌부러져 내용이 도크 밑으로 깔림. 최소 창크기 없음.
+- **블록 행 가로 오버플로우**: 한 행 위젯 과다 → 하단 가로 스크롤.
+### 수정
+- theme.py: 본문폰트 Inter→**Pretendard**(한글판 Inter, 사용자제공 1.3.9). 가변폰트 1개(PretendardVariable.ttf)만 동봉. 등록명 'Pretendard Variable'. setFamilies로 맑은고딕 폴백. 정적 Regular/SemiBold는 중복이라 제외.
+- shell.py: 사이드바 208~248, 로그도크 220~380 (min/max), 창 최소 1024x640.
+- block_editor.py: QVBoxLayout→**QListWidget InternalMove**로 드래그 재정렬. dict참조 아닌 인덱스API 유지(set_field/remove_row), 드롭시 _on_rows_moved가 UserRole 순서로 self._route 재구성. move_row(src,dst) 추가. ≡ 핸들 + 안내문. 위젯 폭 축소(1024폭서 teleport콤보까지 안잘림), 📏이모지 제거(오프스크린 비표시 → "긋기" 텍스트).
+### 검증: tests 178 passed (block_editor move_row 2). 1024 최소폭 렌더 무잘림, 한글 정상, 드래그핸들 표시 확인.
