@@ -65,8 +65,9 @@ class BlockEditor(QWidget):
             self._route[idx][field] = value
             self._save()
 
-    def _pick_x(self, idx: int, field: str, spin) -> None:
-        """미니맵 영역을 캡처해 클릭 → 미니맵 상대 X를 지정 field(start_x/end_x)로 설정."""
+    def _pick_x(self, idx: int, field: str, spin,
+                y_field: str | None = None, y_spin=None) -> None:
+        """미니맵 클릭 → 상대 X를 field로 설정. y_field 주면 Y도 함께(사다리 시작/끝점)."""
         import mss as _mss
         import numpy as np
         from core_ui.shot_selector import ClickPointPicker
@@ -82,8 +83,12 @@ class BlockEditor(QWidget):
         dlg = ClickPointPicker(shot)
 
         def picked(x, y):
-            self.set_field(idx, field, x)   # 미니맵 상대 X → start_x/end_x
+            self.set_field(idx, field, x)   # 미니맵 상대 X
             spin.setValue(x)
+            if y_field is not None:
+                self.set_field(idx, y_field, y)   # 미니맵 상대 Y (사다리 발판 높이)
+                if y_spin is not None:
+                    y_spin.setValue(y)
         dlg.point_picked.connect(picked)
         dlg.exec()
 
@@ -156,10 +161,32 @@ class BlockEditor(QWidget):
             sk.textChanged.connect(lambda v, i=idx: self.set_field(i, "skill_key", v))
             h.addWidget(sk)
         elif blk["type"] == "ladder":
-            lx = QSpinBox(); lx.setRange(0, 4000); lx.setPrefix("사다리X ")
+            # 사다리: 시작점(아래 발판 X,Y) 📍 + 끝점(위 발판 Y) 📍 + 내릴 방향
+            lx = QSpinBox(); lx.setRange(0, 4000); lx.setPrefix("X ")
             lx.setValue(int(blk.get("ladder_x", 0)))
             lx.valueChanged.connect(lambda v, i=idx: self.set_field(i, "ladder_x", v))
             h.addWidget(lx)
+            yb = QSpinBox(); yb.setRange(0, 4000); yb.setPrefix("아래Y ")
+            yb.setValue(int(blk.get("y_bot", 0)))
+            yb.valueChanged.connect(lambda v, i=idx: self.set_field(i, "y_bot", v))
+            h.addWidget(yb)
+            sp = QPushButton("📍시작"); sp.setFixedWidth(56)
+            sp.clicked.connect(lambda _=False, i=idx, xw=lx, yw=yb:
+                               self._pick_x(i, "ladder_x", xw, "y_bot", yw))
+            h.addWidget(sp)
+            yt = QSpinBox(); yt.setRange(0, 4000); yt.setPrefix("위Y ")
+            yt.setValue(int(blk.get("y_top", 0)))
+            yt.valueChanged.connect(lambda v, i=idx: self.set_field(i, "y_top", v))
+            h.addWidget(yt)
+            tp = QPushButton("📍끝"); tp.setFixedWidth(48)
+            # 끝점(위 발판): 같은 사다리라 X 갱신 + 위 Y 갱신
+            tp.clicked.connect(lambda _=False, i=idx, xw=lx, yw=yt:
+                               self._pick_x(i, "ladder_x", xw, "y_top", yw))
+            h.addWidget(tp)
+            es = QComboBox(); es.addItems(["left", "right"])
+            es.setCurrentText(blk.get("exit_side", "left"))
+            es.currentTextChanged.connect(lambda v, i=idx: self.set_field(i, "exit_side", v))
+            h.addWidget(es)
 
         h.addStretch()
         rm = QPushButton("✕"); rm.setFixedWidth(28)
