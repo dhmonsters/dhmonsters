@@ -78,8 +78,11 @@ class BotController:
 def main():
     from PyQt6.QtWidgets import QApplication
     from core_ui.shell import MainShell
+    from core_ui.theme import apply_font
 
     app = QApplication(sys.argv)
+    fam = apply_font(app)            # DESIGN.md Inter + 자간 -0.16px
+    print(f"[폰트] {fam} 적용")
     shell = MainShell()
 
     rt, rc = build_runtime()

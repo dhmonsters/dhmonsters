@@ -24,6 +24,35 @@ RADIUS = 12
 PILL = 22
 PAD = 10
 
+# DESIGN.md 폰트 명세
+#   Primary: SoDoSans(독점,미설치) → Inter(권장대체) → Helvetica Neue → Arial
+#   letter-spacing: -0.01em ≈ -0.16px (거의 전 표면)
+FONT_STACK = '"Inter", "SoDoSans", "Helvetica Neue", Helvetica, Arial, sans-serif'
+LETTER_SPACING_PX = -0.16   # DESIGN.md 트래킹
+
+
+def apply_font(app, base_pt: int = 10):
+    """QApplication 전역 폰트 + DESIGN.md 트래킹(-0.16px) 적용.
+    번들된 Inter ttf 를 런타임 로드(시스템 설치 불필요) → QFont 자간 적용.
+    QSS는 letter-spacing 미지원이라 QFont 로 처리."""
+    from pathlib import Path
+    from PyQt6.QtGui import QFont, QFontDatabase
+
+    family = "Inter"
+    ttf = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "Inter-Variable.ttf"
+    if ttf.exists():
+        fid = QFontDatabase.addApplicationFont(str(ttf))
+        fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+        if fams:
+            family = fams[0]   # "Inter"
+
+    f = QFont(family)
+    f.setStyleHint(QFont.StyleHint.SansSerif)
+    f.setPointSize(base_pt)
+    f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, LETTER_SPACING_PX)
+    app.setFont(f)
+    return family
+
 
 def build_qss() -> str:
     """현재 토큰으로 전역 QSS 문자열 생성 (Starbucks 톤)."""
