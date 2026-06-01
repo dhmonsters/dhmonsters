@@ -151,8 +151,17 @@ class BlockRunner:
         # up: 같은 층(사다리 밑)이면 ↑만, 아니면 점프 잡기
         if abs(y - block.y_bot) <= SAME_LEVEL_TOL:
             return self._climb_up_until(block.y_top, max_steps)
-        side = "left" if block.ladder_x < x else "right"
+        side = self._grab_side(block, x)
         return self._jump_grab(block.ladder_x, side, block.y_top, max_steps)
+
+    def _grab_side(self, block: Block, char_x: int) -> str:
+        """밧줄 잡을 때 누를 좌우 방향. auto=가까운쪽(C방식)/left/right/random=좌우랜덤."""
+        gs = getattr(block, "grab_side", "auto")
+        if gs in ("left", "right"):
+            return gs
+        if gs == "random":
+            return self._h.random_side()
+        return "left" if block.ladder_x < char_x else "right"   # auto
 
     def _climb_up_until(self, y_top: int, max_steps: int) -> bool:
         """↑ 키를 누른 채 유지 → y ≤ y_top+2 도달까지 등반(C _climb_ladder_up_until)."""

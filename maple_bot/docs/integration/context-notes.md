@@ -586,3 +586,10 @@
 - 0.05 같은 작은 값에 ±0.05는 0~0.10으로 과함(0/2배 위험).
 - jitter_sec: base≥0.1 → ±0.05 둘째자리 / base<0.1(폴링 0.05 등) → ±0.005 넷째자리.
 - 검증: tests 191 (작은값 0.045~0.055 넷째자리 테스트 추가).
+
+## 2026-06-02 — 밧줄 좌우 랜덤(grab_side)
+- Block.grab_side: auto(가까운쪽=C방식)/left/right/random. ladder 검증 추가.
+- Humanizer.random_side()=rng.choice(left/right).
+- BlockRunner._grab_side(block,char_x)로 _jump_grab side 결정.
+- BlockEditor 사다리 윗줄에 grab_side 콤보.
+- 검증: tests 194 (random_side, grab_side fixed/random 3개).

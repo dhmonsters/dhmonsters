@@ -103,6 +103,10 @@ class Humanizer:
         """jitter_sec 만큼 대기."""
         self._sleep(self.jitter_sec(base, spread))
 
+    def random_side(self) -> str:
+        """좌/우 무작위 선택 (밧줄 잡기 방향 랜덤화 등)."""
+        return self._rng.choice(["left", "right"])
+
     # ── 공개 API ──────────────────────────────────────────────────────
     def perform(self, intent: Intent) -> None:
         """의도를 변형해 실제 입력으로 송출."""

@@ -8,6 +8,7 @@ _VALID_TYPES = {"move", "attack", "ladder", "jump"}
 _VALID_MOVE_TYPES = {"walk", "teleport"}
 _VALID_MOVE_MODES = {"count", "infinite", "pass"}  # 구간왕복 횟수 / 무한왕복 / 한방향 통과
 _VALID_LADDER_DIRS = {"up", "down"}                # 사다리 등반 / 하강
+_VALID_GRAB_SIDES = {"auto", "left", "right", "random"}  # 밧줄 잡는 좌우 방향
 
 
 @dataclass
@@ -40,6 +41,7 @@ class Block:
     y_bot: int = 0
     exit_side: str = "left"
     ladder_dir: str = "up"       # up=등반(y_top까지) / down=하강(점프 내림)
+    grab_side: str = "auto"      # 밧줄 잡기 방향: auto(가까운쪽)/left/right/random(좌우 랜덤)
 
     def __post_init__(self) -> None:
         if self.type not in _VALID_TYPES:
@@ -50,6 +52,8 @@ class Block:
             raise ValueError(f"알 수 없는 move mode: {self.mode!r} (허용: {sorted(_VALID_MOVE_MODES)})")
         if self.type == "ladder" and self.ladder_dir not in _VALID_LADDER_DIRS:
             raise ValueError(f"알 수 없는 ladder_dir: {self.ladder_dir!r}")
+        if self.type == "ladder" and self.grab_side not in _VALID_GRAB_SIDES:
+            raise ValueError(f"알 수 없는 grab_side: {self.grab_side!r}")
 
     def to_dict(self) -> dict:
         return asdict(self)

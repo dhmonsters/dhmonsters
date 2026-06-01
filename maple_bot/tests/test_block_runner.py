@@ -32,6 +32,8 @@ class FakeHumanizer:
         self.held_keys.clear()
     def jitter_sec(self, base, spread=0.05):
         return base   # 테스트는 결정적으로(지터 없이)
+    def random_side(self):
+        return "left"   # 테스트는 결정적으로
 
 
 class MovingChar:
@@ -244,3 +246,23 @@ def test_move_mode_infinite_stops_on_stop_fn():
                           step_fn=lambda tx: moved.append(tx))
     assert ok is True
     assert len(moved) >= 2           # 최소 한 왕복 이상 돌고 멈춤
+
+
+def test_ladder_grab_side_fixed_right():
+    """grab_side=right면 점프잡기 시 오른쪽 접근."""
+    w = LadderWorld(x=100, y=60); h = WorldHumanizer(w)
+    _runner(h, w).run_block(
+        Block(type="ladder", ladder_x=100, y_top=10, y_bot=300,
+              ladder_dir="up", grab_side="right"),
+        max_steps=300)
+    assert "right" in h.holds   # 오른쪽으로 접근
+
+
+def test_ladder_grab_side_random_uses_random_side():
+    """grab_side=random이면 Humanizer.random_side로 방향 결정(Fakeは left)."""
+    w = LadderWorld(x=100, y=60); h = WorldHumanizer(w)
+    _runner(h, w).run_block(
+        Block(type="ladder", ladder_x=100, y_top=10, y_bot=300,
+              ladder_dir="up", grab_side="random"),
+        max_steps=300)
+    assert "left" in h.holds    # WorldHumanizer.random_side()=left

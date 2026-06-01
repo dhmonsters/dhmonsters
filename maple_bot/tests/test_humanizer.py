@@ -127,3 +127,11 @@ def test_jitter_sec_small_value_fine_grained(rec):
     assert all(0.045 <= v <= 0.055 for v in vals)   # ±0.005 (둘째단위 값 → 넷째자리 범위)
     assert len(set(vals)) >= 5                        # 고정 아님
     assert all(abs(v * 10000 - round(v * 10000)) < 1e-6 for v in vals)  # 넷째자리
+
+
+def test_random_side_returns_left_or_right(rec):
+    """밧줄 좌우 랜덤 — left/right 중 하나, 양쪽 다 나옴."""
+    h = Humanizer(backend=rec, sleep_fn=lambda s: None)
+    sides = {h.random_side() for _ in range(40)}
+    assert sides <= {"left", "right"}
+    assert len(sides) == 2     # 양쪽 모두 등장
