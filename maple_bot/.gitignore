@@ -41,3 +41,4 @@ models/
 
 # 데이터셋
 dataset/
+.superpowers/
