@@ -84,11 +84,10 @@ class BlockRunner:
             direction = "right" if dist > 0 else "left"
             use_tele = (block.move_type == "teleport" and abs(dist) > TELEPORT_MIN_DIST)
 
+            # 좌우 이동키는 '한 번 누르고 계속 유지'(C _walk_to_x). 방향이 바뀌면
+            # hold_dir가 기존 키를 떼고 새 키를 누른다. 도착 전까진 떼지 않는다.
+            self._h.hold_dir(direction)
             if use_tele:
-                # 방향을 향한 뒤 텔포 키 (C _teleport_to_x)
-                self._h.perform(Intent(action="move_dir", key=direction))
+                # 방향 유지한 채 텔포 키 (C _teleport_to_x)
                 self._h.perform(Intent(action="key", key=self._tele_key, base_hold_sec=0.05))
-            else:
-                # walk: 방향키 입력 (C _walk_to_x)
-                self._h.perform(Intent(action="key", key=direction, base_hold_sec=0.08))
         return False

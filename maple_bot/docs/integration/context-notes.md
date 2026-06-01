@@ -543,3 +543,16 @@
 - shell.py: 사이드바 208~248, 로그도크 220~380 (min/max), 창 최소 1024x640.
 - block_editor.py: QVBoxLayout→**QListWidget InternalMove**로 드래그 재정렬. dict참조 아닌 인덱스API 유지(set_field/remove_row), 드롭시 _on_rows_moved가 UserRole 순서로 self._route 재구성. move_row(src,dst) 추가. ≡ 핸들 + 안내문. 위젯 폭 축소(1024폭서 teleport콤보까지 안잘림), 📏이모지 제거(오프스크린 비표시 → "긋기" 텍스트).
 ### 검증: tests 178 passed (block_editor move_row 2). 1024 최소폭 렌더 무잘림, 한글 정상, 드래그핸들 표시 확인.
+
+## 2026-06-02 — 좌우 이동 키다운 유지 모델 (C _walk_to_x 대조 확인 후 결선)
+### 검증
+- C 원본 coord_script_runner.pyc dis: `_walk_to_x`=pyautogui.keyDown+time.sleep+_xy폴링+_release_move_keys(keyUp). **방향키 누른 채 유지→도착시 뗌**.
+- 우리 기존 _exec_move: action="key" press(0.08s)를 틱당 반복 = **탭 연타(틀림)**. + Humanizer move_dir/hold는 key_down만이고 key_up 경로 없음(누수 버그).
+### 사용자 확정 모델
+좌우 이동키는 항상 keyDown 유지. 뗌은 ①방향 전환 ②제자리 공격 둘뿐. 그 외 유지.
+### 구현
+- Humanizer: 상태 `_held` + hold_dir(같은방향 no-op유지 / 다른방향 key_up후 key_down) / release_dir(멱등) / held_dir.
+- BlockRunner._exec_move: tap→**hold_dir(direction)**. 도착해도 안 뗌(유지). 텔포 facing도 hold_dir로(누수 해결), space는 perform.
+- runtime.hunting_tick: **이동 XOR 제자리공격**으로 재구성. attacking이면 release_dir→attack, 아니면 순찰 hold_dir. ※key모드는 항상 attacking→제자리 사냥(이동 안함). image모드는 박스내 몬스터 있을때만 멈춰 공격, 없으면 이동.
+- _on_safety_pause: 직접 key_up→**release_dir**+up키 해제로 통일(상태 동기화).
+### 검증: tests 183 passed (humanizer hold/release 3, block_runner hold 2, runtime attack-release 1).

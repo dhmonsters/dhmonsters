@@ -70,3 +70,36 @@ def test_hold_intent_uses_key_down_up(rec):
     h = Humanizer(backend=rec, sleep_fn=lambda s: None)
     h.perform(Intent(action="hold", key="right"))
     assert rec.downs == ["right"]
+
+
+# ── 이동키 유지/해제 (좌우 이동은 항상 키다운, 전환·공격때만 뗌) ──────────
+def test_hold_dir_presses_once_and_maintains(rec):
+    """같은 방향 hold_dir 여러 번 → key_down 1회뿐, 유지(중간 key_up/press 없음)."""
+    h = Humanizer(backend=rec, sleep_fn=lambda s: None)
+    for _ in range(5):
+        h.hold_dir("right")
+    assert rec.downs == ["right"]   # 딱 한 번만 누름
+    assert rec.ups == []            # 유지 중엔 안 뗌
+    assert rec.presses == []        # 톡톡 탭 아님
+    assert h.held_dir() == "right"
+
+
+def test_hold_dir_flip_releases_old_presses_new(rec):
+    """방향 전환 → 기존 키 떼고(key_up) 새 키 누름(key_down)."""
+    h = Humanizer(backend=rec, sleep_fn=lambda s: None)
+    h.hold_dir("right")
+    h.hold_dir("left")
+    assert rec.downs == ["right", "left"]
+    assert rec.ups == ["right"]     # 전환 때 기존 방향만 뗌
+    assert h.held_dir() == "left"
+
+
+def test_release_dir_releases_held(rec):
+    """release_dir → 유지 키 뗌. 다시 호출해도 추가 key_up 없음(멱등)."""
+    h = Humanizer(backend=rec, sleep_fn=lambda s: None)
+    h.hold_dir("right")
+    h.release_dir()
+    assert rec.ups == ["right"]
+    assert h.held_dir() is None
+    h.release_dir()                 # 이미 뗀 상태
+    assert rec.ups == ["right"]     # 변화 없음

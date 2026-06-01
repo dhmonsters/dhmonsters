@@ -35,6 +35,33 @@ class Humanizer:
         self._backend = backend
         self._sleep = sleep_fn or time.sleep
         self._rng = rng or random.Random()
+        self._held: str | None = None   # 현재 누른 채 유지 중인 이동키(left/right)
+
+    # ── 이동키 유지/해제 (C _walk_to_x 방식) ──────────────────────────
+    # 좌우 이동키는 '한 번 누르고 계속 유지'한다. 매 틱 톡톡 누르지 않는다.
+    # 떼는 경우는 둘뿐 — 방향이 바뀔 때(hold_dir로 자동), 제자리 공격 등(release_dir).
+    def hold_dir(self, key: str,
+                 risk_profile: RiskProfile = RiskProfile.NORMAL) -> None:
+        """좌우 이동키를 누른 채 유지. 같은 방향이면 그대로(no-op),
+        다른 방향이면 기존 키를 떼고 새 키를 누른다(방향 전환)."""
+        if self._held == key:
+            return                          # 이미 같은 방향 유지 중 → 계속 누름 유지
+        p = _PROFILE[risk_profile]
+        if self._held is not None:
+            self._backend.key_up(self._held)   # 방향 전환: 기존 키 떼기
+            self._sleep(self._uniform(*p["reaction"]))  # 전환 사이 사람같은 미세 지연
+        self._backend.key_down(key)
+        self._held = key
+
+    def release_dir(self) -> None:
+        """유지 중인 이동키를 뗀다(제자리 공격/정지/안전 진입 시)."""
+        if self._held is not None:
+            self._backend.key_up(self._held)
+            self._held = None
+
+    def held_dir(self) -> str | None:
+        """현재 유지 중인 이동키(없으면 None)."""
+        return self._held
 
     # ── 공개 API ──────────────────────────────────────────────────────
     def perform(self, intent: Intent) -> None:

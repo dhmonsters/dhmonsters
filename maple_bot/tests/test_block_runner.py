@@ -5,11 +5,23 @@ from core.navigation.block_runner import BlockRunner, TOLERANCE, TELEPORT_MIN_DI
 
 
 class FakeHumanizer:
-    """perform(Intent) 호출을 기록 — 모든 입력이 Humanizer 경유하는지 검증."""
+    """perform/hold_dir/release_dir 호출 기록 — 입력이 Humanizer 경유하는지 검증."""
     def __init__(self):
         self.intents = []
+        self.holds = []        # hold_dir(key) 호출 방향 순서
+        self.releases = 0      # release_dir 호출 횟수
+        self._held = None
     def perform(self, intent):
         self.intents.append(intent)
+    def hold_dir(self, key, risk_profile=None):
+        self.holds.append(key)
+        self._held = key
+    def release_dir(self):
+        if self._held is not None:
+            self.releases += 1
+            self._held = None
+    def held_dir(self):
+        return self._held
 
 
 class MovingChar:
@@ -57,18 +69,27 @@ def test_sweep_zone_round_trips():
     assert char.x in (10, 100)
 
 
-def test_walk_to_near_target_uses_humanizer():
-    """가까운 목표(≤15px)는 walk — Humanizer로 방향키 입력.
-    speed보다 큰 거리로 시작해 최소 1회 이동(입력)이 일어나게 한다."""
+def test_walk_holds_direction_not_taps():
+    """walk는 방향키를 '누른 채 유지'(hold_dir) — 톡톡 탭(perform key) 아님.
+    같은 방향 이동이면 매 스텝 hold_dir('right')만 호출(실제 Humanizer가 1회 누름 유지)."""
     h = FakeHumanizer()
     char = MovingChar(start_x=18, speed=5); char.target = 30  # 거리 12 → walk, 여러스텝
     runner = BlockRunner(humanizer=h, pos_fn=char.pos)
     runner.run_block(Block(type="move", target_x=30), max_steps=50)
-    # 도착했고, Humanizer를 통해 입력이 나갔다
     assert abs(char.x - 30) <= TOLERANCE
-    assert len(h.intents) > 0
-    # walk면 방향키(left/right) intent가 있어야
-    assert any(i.key in ("left", "right") for i in h.intents)
+    # 방향키는 hold_dir로 유지 (오른쪽으로 이동)
+    assert "right" in h.holds
+    # 방향키를 perform(tap)으로 쏘지 않음
+    assert not any(i.key in ("left", "right") for i in h.intents)
+
+
+def test_walk_reverse_direction_handled_by_hold_dir():
+    """목표가 왼쪽이면 hold_dir('left') — 방향 전환은 Humanizer.hold_dir가 처리."""
+    h = FakeHumanizer()
+    char = MovingChar(start_x=50, speed=5); char.target = 30   # 왼쪽으로
+    runner = BlockRunner(humanizer=h, pos_fn=char.pos)
+    runner.run_block(Block(type="move", target_x=30), max_steps=50)
+    assert "left" in h.holds
 
 
 def test_teleport_for_far_target():
@@ -77,8 +98,9 @@ def test_teleport_for_far_target():
     char = MovingChar(start_x=10, speed=20); char.target = 80  # 거리 70 → teleport
     runner = BlockRunner(humanizer=h, pos_fn=char.pos)
     runner.run_block(Block(type="move", target_x=80, move_type="teleport"), max_steps=50)
-    # teleport 키(space 등)가 입력됐는지
+    # teleport 키(space 등)가 입력됐는지 + 방향은 hold_dir로 유지
     assert any(i.key == "space" for i in h.intents)
+    assert "right" in h.holds
 
 
 def test_arrives_within_tolerance():

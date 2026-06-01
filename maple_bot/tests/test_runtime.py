@@ -64,6 +64,19 @@ def test_hunting_tick_moves_and_attacks():
     assert backend.presses or backend.downs
 
 
+def test_attack_releases_held_move_key():
+    """제자리 공격 시 유지 중인 좌우 이동키를 뗀다(key 모드는 항상 공격)."""
+    rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))
+    rt.pump_scanners_once()
+    rt.orchestrator.process_pending()
+    rt.humanizer.hold_dir("right")          # 이동 중(오른쪽 유지) 가정
+    assert rt.humanizer.held_dir() == "right"
+    rt.hunting_tick(now=1.0)                 # key 모드 → 공격
+    assert "right" in backend.ups            # 이동키 떼짐
+    assert rt.humanizer.held_dir() is None
+    assert "a" in backend.presses            # 공격 입력
+
+
 def test_safety_event_triggers_solver_then_resume():
     """거탐 이벤트 → safety 모드 → 거탐엔진 풀이 → 재개."""
     rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))

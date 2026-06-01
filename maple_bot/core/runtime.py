@@ -211,26 +211,32 @@ class BotRuntime:
         if self.orchestrator.mode != "hunting":
             return
 
-        # 순찰: 현재 위치로 방향 결정 → 목표 경계로 1스텝 이동 (Humanizer 경유)
-        if self.patrol is not None:
-            pos = self.orchestrator.state.get_position()
-            if pos is not None:
-                self.patrol.next_direction(pos[0])
-                target = self.patrol.target_x()
-                self.block_runner.run_block(
-                    Block(type="move", target_x=target, move_type="walk"),
-                    max_steps=1,
-                )
-        elif self._cfg.route:
-            self.block_runner.run_block(self._cfg.route[0], max_steps=1)
-
-        # 공격: image 모드는 닉네임 박스 안 몬스터 있을 때만(B 메커니즘), key 모드는 무조건
+        # 공격할지 판정: image 모드는 공격박스 안 몬스터 있을 때만(B), 그 외(key)는 항상
+        attacking = False
         if self._cfg.attack_key:
             if self._cfg.hunt_mode == "image":
-                if self._monster_in_range():
-                    self.combat.attack(self._cfg.attack_key, mode="duration")
+                attacking = self._monster_in_range()
             else:
-                self.combat.attack(self._cfg.attack_key, mode="duration")
+                attacking = True
+
+        # 이동 XOR 제자리공격 — 좌우 이동키는 누른 채 유지하고, 공격할 땐 뗀다.
+        if attacking:
+            self.humanizer.release_dir()   # 제자리 공격: 유지 중인 이동키 해제
+            self.combat.attack(self._cfg.attack_key, mode="duration")
+        else:
+            # 순찰: 현재 위치로 방향 결정 → 목표 경계로 이동(hold_dir로 키 유지)
+            if self.patrol is not None:
+                pos = self.orchestrator.state.get_position()
+                if pos is not None:
+                    self.patrol.next_direction(pos[0])
+                    target = self.patrol.target_x()
+                    self.block_runner.run_block(
+                        Block(type="move", target_x=target, move_type="walk"),
+                        max_steps=1,
+                    )
+            elif self._cfg.route:
+                self.block_runner.run_block(self._cfg.route[0], max_steps=1)
+
         self.buffs.tick(now)
         self.pet.tick(now)
 
@@ -278,10 +284,9 @@ class BotRuntime:
             bk.move_to(cx, cy)
 
     def _on_safety_pause(self) -> None:
-        """안전 진입 시 진행 중인 이동 방향키 해제(행동 정지)."""
-        self.humanizer._backend.key_up("left")
-        self.humanizer._backend.key_up("right")
-        self.humanizer._backend.key_up("up")
+        """안전 진입 시 유지 중인 이동 방향키 해제(행동 정지)."""
+        self.humanizer.release_dir()           # 좌우 유지키 해제(상태 동기화)
+        self.humanizer._backend.key_up("up")   # 위(사다리 등) 키도 안전 해제
 
     def _handle_user_detected(self, ev) -> None:
         """다른 유저 감지 → 텔레그램 알림 + 자동응답 채팅(메시지 순환)."""
