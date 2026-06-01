@@ -35,8 +35,30 @@ class BlockRunner:
 
     def run_block(self, block: Block, max_steps: int = 200) -> bool:
         if block.type == "move":
+            # 구간 왕복 모드: start_x < end_x 이고 sweeps>=1
+            if block.end_x > block.start_x and block.sweeps >= 1:
+                return self.run_sweep(block.start_x, block.end_x, block.sweeps,
+                                      block.move_type, max_steps=max_steps)
             return self._exec_move(block, max_steps)
         # attack/ladder/jump 는 후속 태스크에서 — 지금은 move 만
+        return True
+
+    def run_sweep(self, start_x: int, end_x: int, sweeps: int,
+                  move_type: str = "walk", max_steps: int = 200,
+                  step_fn=None) -> bool:
+        """start_x ~ end_x 사이를 sweeps회 왕복. 한 sweep = 끝→시작 1회.
+
+        step_fn: 테스트용 위치 강제 콜백(실기에선 None=실제 이동).
+        """
+        targets = []
+        for _ in range(sweeps):
+            targets += [end_x, start_x]   # 끝으로 갔다 시작으로 = 1왕복
+        for tx in targets:
+            blk = Block(type="move", target_x=tx, move_type=move_type)
+            if step_fn is not None:
+                step_fn(tx)               # 테스트: 즉시 도달
+            elif not self._exec_move(blk, max_steps):
+                return False
         return True
 
     # ── 이동 ──────────────────────────────────────────────────────────

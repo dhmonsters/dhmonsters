@@ -13,6 +13,7 @@ class Block:
     """동선 시퀀스의 한 스텝. type별로 사용하는 필드가 다르다.
 
     move:   target_x, move_type(walk|teleport), direction
+            또는 구간 왕복: start_x ~ end_x 사이를 sweeps회 왕복 (start_x<end_x 이면 구간모드)
     attack: skill_key, attack_mode(duration|count), attack_value, direction
     ladder: ladder_x, y_top, y_bot, exit_side
     jump:   direction
@@ -22,6 +23,10 @@ class Block:
     target_x: int = 0
     move_type: str = "walk"
     direction: str = "right"
+    # move 구간 왕복 (start_x < end_x 이면 구간 모드)
+    start_x: int = 0
+    end_x: int = 0
+    sweeps: int = 1
     # attack
     skill_key: str = ""
     attack_mode: str = "duration"

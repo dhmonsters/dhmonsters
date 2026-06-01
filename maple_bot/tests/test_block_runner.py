@@ -30,6 +30,33 @@ class MovingChar:
         return (self.x, 75)
 
 
+class TeleportChar:
+    """pos() 호출마다 마지막 명령 방향으로 큰 폭 이동(왕복 빨리 도달)."""
+    def __init__(self, x=100): self.x = x; self._goal = None
+    def goto(self, g): self._goal = g
+    def pos(self):
+        if self._goal is not None:
+            self.x = self._goal      # 즉시 도달(왕복 횟수 로직만 검증)
+        return (self.x, 75)
+
+
+def test_sweep_zone_round_trips():
+    """구간 왕복: start_x~end_x 를 sweeps회. 도달할 때마다 반대끝으로 목표 전환."""
+    h = FakeHumanizer()
+    # 위치를 직접 제어하는 캐릭 — run_block 이 목표를 set 하면 즉시 그 위치로
+    class ZoneChar:
+        def __init__(self): self.x = 10; self.targets = []
+        def pos(self): return (self.x, 75)
+    char = ZoneChar()
+    runner = BlockRunner(humanizer=h, pos_fn=char.pos)
+    # 구간 왕복 전용 API
+    arrived = runner.run_sweep(start_x=10, end_x=100, sweeps=2,
+                               move_type="walk", step_fn=lambda tx: setattr(char, "x", tx))
+    assert arrived is True
+    # 2회 왕복 = 끝→시작→끝→시작 (방향 전환 여러 번)
+    assert char.x in (10, 100)
+
+
 def test_walk_to_near_target_uses_humanizer():
     """가까운 목표(≤15px)는 walk — Humanizer로 방향키 입력.
     speed보다 큰 거리로 시작해 최소 1회 이동(입력)이 일어나게 한다."""

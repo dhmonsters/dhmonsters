@@ -484,3 +484,12 @@
 - block_editor.py: move 블록 행에 📍 버튼 → 미니맵 영역 캡처 → 클릭 → 미니맵 상대 X를 target_x로 set
 ### 검증: tests 169 passed (click_picker 3). 동선페이지 move블록 📍버튼 확인
 ### 좌표 동선 완전 사용법: 동선탭 → 이동블록 추가 → 📍 클릭 → 미니맵에서 목표지점 클릭 → X자동입력 → 공격블록 추가 → 반복
+
+## 2026-06-02 — move 블록 구간 왕복(시작/끝/횟수) + 용어정정
+### 용어 정정: 몬스터 감지는 "닉네임 박스"가 아니라 "공격 박스(atk 오프셋 범위)" 안에서. 닉네임은 위치기준일뿐
+### move 블록 = 구간 왕복 (사용자 결정: 시작~끝 N회 왕복)
+- Block에 start_x/end_x/sweeps 추가. start_x<end_x면 구간모드(아니면 단일 target_x 호환)
+- BlockRunner.run_sweep(start,end,sweeps): 끝→시작 = 1왕복, sweeps회 반복. run_block이 구간모드 분기
+- block_editor move행: 시작X(📍)+끝X(📍)+왕복횟수+walk/teleport. _pick_x(field) 일반화로 시작/끝 둘다 미니맵클릭
+### 검증: tests 170 passed (block_runner sweep 추가). 렌더 — 시작/끝/왕복 필드 확인
+### 좌표동선 사용: 이동블록→시작📍클릭→끝📍클릭→왕복횟수→공격블록. 위→아래 순서 실행

@@ -65,8 +65,8 @@ class BlockEditor(QWidget):
             self._route[idx][field] = value
             self._save()
 
-    def _pick_x(self, idx: int, spin) -> None:
-        """미니맵 영역을 캡처해 클릭 → 미니맵 상대 X를 target_x로 설정."""
+    def _pick_x(self, idx: int, field: str, spin) -> None:
+        """미니맵 영역을 캡처해 클릭 → 미니맵 상대 X를 지정 field(start_x/end_x)로 설정."""
         import mss as _mss
         import numpy as np
         from core_ui.shot_selector import ClickPointPicker
@@ -82,7 +82,7 @@ class BlockEditor(QWidget):
         dlg = ClickPointPicker(shot)
 
         def picked(x, y):
-            self.set_field(idx, "target_x", x)   # 미니맵 상대 X
+            self.set_field(idx, field, x)   # 미니맵 상대 X → start_x/end_x
             spin.setValue(x)
         dlg.point_picked.connect(picked)
         dlg.exec()
@@ -124,14 +124,28 @@ class BlockEditor(QWidget):
         h.addWidget(QLabel(f"{idx+1}. {blk['type']}"))
 
         if blk["type"] == "move":
-            sx = QSpinBox(); sx.setRange(0, 4000); sx.setPrefix("X ")
-            sx.setValue(int(blk.get("target_x", 0)))
-            sx.valueChanged.connect(lambda v, i=idx: self.set_field(i, "target_x", v))
-            h.addWidget(sx)
-            pick = QPushButton("📍")  # 미니맵에서 X 클릭으로 찍기
-            pick.setFixedWidth(32)
-            pick.clicked.connect(lambda _=False, i=idx, w=sx: self._pick_x(i, w))
-            h.addWidget(pick)
+            # 구간 왕복: 시작 X(📍) ~ 끝 X(📍) + 왕복 횟수
+            s_sx = QSpinBox(); s_sx.setRange(0, 4000); s_sx.setPrefix("시작 ")
+            s_sx.setValue(int(blk.get("start_x", 0)))
+            s_sx.valueChanged.connect(lambda v, i=idx: self.set_field(i, "start_x", v))
+            h.addWidget(s_sx)
+            sp = QPushButton("📍"); sp.setFixedWidth(30)
+            sp.clicked.connect(lambda _=False, i=idx, w=s_sx: self._pick_x(i, "start_x", w))
+            h.addWidget(sp)
+
+            e_sx = QSpinBox(); e_sx.setRange(0, 4000); e_sx.setPrefix("끝 ")
+            e_sx.setValue(int(blk.get("end_x", 0)))
+            e_sx.valueChanged.connect(lambda v, i=idx: self.set_field(i, "end_x", v))
+            h.addWidget(e_sx)
+            ep = QPushButton("📍"); ep.setFixedWidth(30)
+            ep.clicked.connect(lambda _=False, i=idx, w=e_sx: self._pick_x(i, "end_x", w))
+            h.addWidget(ep)
+
+            sw = QSpinBox(); sw.setRange(1, 99); sw.setPrefix("왕복 ")
+            sw.setValue(int(blk.get("sweeps", 1)))
+            sw.valueChanged.connect(lambda v, i=idx: self.set_field(i, "sweeps", v))
+            h.addWidget(sw)
+
             mt = QComboBox(); mt.addItems(["walk", "teleport"])
             mt.setCurrentText(blk.get("move_type", "walk"))
             mt.currentTextChanged.connect(lambda v, i=idx: self.set_field(i, "move_type", v))
