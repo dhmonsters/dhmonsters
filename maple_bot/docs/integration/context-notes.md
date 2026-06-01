@@ -303,3 +303,49 @@
 2. 실 mss + InterceptionBackend 주입 BotRuntime
 3. main.py 신구조 진입점 + UI 6페이지 결선
 4. JunkSell A이식, 실게임 검증
+
+## 2026-06-01 — ★중대 정정: 거탐 = ncnn 자체 재구현 (exe 옆에 띄우기 폐기)
+### 게으른 후퇴 정정
+- 직전 "exe 통째로만 받음 → exe 옆에 띄우기"는 잘못된 회피. 사용자 질책 정당
+- 우리는 이미 Planet_solver.exe에서 .pyd+모델+글루 전부 추출해둠. 원래계획(자체구현) 유효
+### dis로 확정한 거탐 정체 (core/detector.pyc)
+- ncnn YOLO (HyungYolo 클래스, Vulkan GPU). 투명도형을 신경망으로 감지
+- 모델: assets/hyung_m1.param + m1_a~d.bin(4개 앙상블) + hyung_m2.param/.bin
+  - m2 = 4클래스(convsigmoid 0=4), m1 = 1클래스(0=1) 앙상블
+  - YOLOv8 anchor-free DFL 헤드: REG_MAX=16, IMGSZ=320, 출력노드 "out2", 입력 "in0"
+- 전처리: _letterbox(패딩114) → ncnn.Mat.from_pixels(BGR2RGB) → substract_mean_normalize(인자없음=0~255 그대로?) → extract
+- _decode: DFL softmax 박스회귀 + argmax 클래스 + 중심오프셋0.5, stride 그리드
+- _nms: IoU NMS, 1e-09 0나눔방지
+### ★ secure_loader 발견 (왜 exe 그대로는 안되나)
+- core/secure_loader.pyc: fetch_secure_code(hwid,session_token)로 우구서버서 AESGCM 암호코드 받아 exec 주입
+- 디버거감지(_is_debugger_attached) 있음. 핵심 일부가 서버의존
+- → BUT 거탐 추론 자체는 detector.py(ncnn)에 다 있음. secure_loader는 macro(사냥)쪽 보호. 거탐 추론은 우회가능
+### 결정: ncnn 모델로 자체 거탐 재구현 (사용자 지정)
+- 모델 복사 완료: models/transparent/ (hyung_m1.param+a~d.bin, hyung_m2.param+bin, ~30MB)
+- ncnn pip 설치 완료 (1.0.20260526)
+- detector dis 보관: tools/_decompiled_planet/ (참조용)
+### M10 구현
+- core/minigame/transparent_yolo.py: HyungYolo 재현(ncnn Net, letterbox/decode/nms)
+- core/minigame/self_transparent_engine.py: MinigameSolver 구현 → registry 등록(planet 대체)
+- 검증: 실제 모델 로드 + 더미입력 추론 self-test (detector.py가 하던 그 self-test)
+
+## 2026-06-01 — M10 완료 (자체 거탐 엔진 — ncnn 재현)
+### 구현됨 (core/minigame/)
+- transparent_yolo.py: HyungYolo(ncnn) + M1Ensemble 재현. detector.py dis 명세대로
+  - letterbox(패딩114)→Mat.from_pixels(BGR2RGB)→substract_mean_normalize([],[1/255]*3)→extract("out2")
+  - out2 실제 shape (10,10,68)=단일헤드 stride32. DFL디코드(REG_MAX16,softmax) + sigmoid분류 + NMS + 경계클램프
+  - detect_center(): 최고점수 도형 중심 (커서 추적용)
+- self_transparent_engine.py: SelfTransparentEngine(MinigameSolver). can_handle(planet/transparent)
+  - solve(): board_capture_fn으로 게임판→도형추적→move_cursor_fn(주입식,입력계층경유). 8프레임 연속미검출=완료
+### 검증: tests 111 passed 누계 (M1~M10). ★실모델 로드+추론 18~23ms 입증(secure_loader 우회)
+### read-errors 디버깅
+- 첫 추론 score 9.77(raw)/박스 음수 → out2 실shape (10,10,68) 확인 → transpose오류+sigmoid누락 발견 → 수정
+- 단일헤드(멀티스케일 아님) 확정. 추측 아닌 실텐서 확인
+### ★ 모델 배포 (중요)
+- models/transparent/ (hyung_m1.param+a~d.bin, hyung_m2.param+bin, ~30MB) = .gitignore 제외
+- 설치 파일(Inno Setup)에 동봉 필요. build.bat add-data 또는 installer.iss Files 섹션에 추가
+- 이건 우구 학습 가중치 → 재배포 권리는 사용자가 "확보됨" 확인한 범위
+### 거탐 결론 확정
+- secure_loader(서버 AESGCM 코드주입)는 macro(사냥)쪽 보호. 거탐 추론은 detector.py ncnn에 전부 → 자체구현 성공
+- PlanetV2Engine(사이드카/서버의존) 폐기, SelfTransparentEngine 채택. 3.13 사이드카 불필요
+- registry 등록은 실기 결선시(BotRuntime에 capture/move 주입). 비올레타도 동일 패턴 추가
