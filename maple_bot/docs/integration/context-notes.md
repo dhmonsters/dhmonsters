@@ -159,3 +159,30 @@
 - 골격은 channel 주입식 → 게임/드라이버 없이 전 로직 테스트 가능
 - screenshot은 현재 미사용(실구현서 공유메모리/핸들로 전달). ctx로 frame_id 전달
 - 다음(M5): Acting (Combat/Buff/Potion/JunkSell/Charlie) — Humanizer 두번째 소비처
+
+## 2026-06-01 — M5~M7 연속 진행 방침 (사용자 승인)
+- 설계도 탄탄 → M5/M6/M7 연속 진행, 중간 승인 없이. 각 모듈 끝 커밋(롤백지점)
+- 단위 TDD는 유지(부품 검증), 실기 통합테스트는 M7 후 한번에
+- 자동업데이트: A updater.py + version.json(GitHub Release) 계승 확정. 본체 OK
+  - 주의: 거탐 사이드카(.pyd 우구저작물) 배포·버전관리는 M6에서 설계
+
+## 2026-06-01 — M5 착수 (Acting)
+### 설계 (도면 5-2 전투결론: A 전반우위)
+- combat.py: 게이지물약(A hp_ratio<threshold 방식) + 공격(skill_key, duration/count). Humanizer 경유
+- buff.py: 일반/토글 버프 + 모션캔슬 대기(A hold0.8/sleep0.7)
+- junk_sell.py: 인벤→상점 템플릿 시퀀스(A) + 탭색구분(C) + 보호목록(B). ※판매로직은 A junk_seller.py 이식+개선
+- charlie.py: 찰리중사 교환 시퀀스(C, 구매제외). NPC키→대화→아래15회→키시퀀스, Humanizer+지터
+### 서브태스크
+- M5-1 Combat(물약+공격) / M5-2 Buff / M5-3 Charlie교환 / M5-4 커밋
+- ※ JunkSell은 기존 A junk_seller.py가 동작중이라 M5에선 인터페이스 정리만, 실이식은 M6 통합시
+
+## 2026-06-01 — M5 완료 (Acting)
+### 구현됨 (core/acting/)
+- combat.py: Combat + PotionRule. 게이지비율 물약(A방식, hp_ratio<threshold, HP/MP독립, 쿨다운) + attack(duration/count). Humanizer 경유
+- buff.py: BuffManager + Buff. 주기버프, hold0.8(A 캔슬방지), 키없음=비활성
+- charlie.py: CharlieExchange. 교환시퀀스(NPC→NPC→down15→NPC→left→NPC→NPC), repeat=보유//200, 구매제외(사용자지정). Humanizer 경유
+### 검증: tests 77 passed 누계 (M1~M5)
+### 결정
+- JunkSell은 기존 A junk_seller.py가 동작중 → M5 신규구현 생략, M6 통합시 이식+C탭색/B보호목록 보강
+- charlie 실교환로직 dis 깊이추적 대신 UI확정 명세로 구현(request_scanner는 파티/교환거절 다른기능 확인)
+- 다음(M6): Orchestrator — 이벤트큐 소비+우선순위 상태머신, 모든 모듈 조립, 사이드카 기동, 공유위치 결선

@@ -8,7 +8,7 @@
 - [x] M2. Scanner 프레임워크 + 이벤트큐 ✓ 16 passed
 - [x] M3. Navigation (BlockRunner + FloorJudge) ✓ 18 passed
 - [x] M4. MinigameSolver 사이드카 (골격) ✓ 15 passed
-- [ ] M5. Acting (Combat/Buff/Potion/JunkSell/Charlie)
+- [x] M5. Acting (Combat/Buff/Charlie) ✓ 14 passed
 - [ ] M6. Orchestrator 통합
 - [ ] M7. UI 6카테고리 (DESIGN.md 적용)
 
@@ -78,6 +78,17 @@
 - [x] M4-5. 커밋 ← 진행 중
 
 **성공 기준.** 본체는 registry.solve(type, ...)만 호출하고 어느 엔진인지 모름. 새 엔진 등록 1줄로 추가되며 기존 코드 무수정(콘센트 격리 테스트로 입증).
+
+## M5. Acting
+
+**목표.** 전투/버프/찰리. Humanizer 두번째 소비처. A 전투우위 + C 찰리 + B 보호목록.
+**위치.** `core/acting/`
+
+### 태스크
+- [x] M5-1. Combat (게이지물약+공격) ✓ 5 passed
+- [x] M5-2. BuffManager (주기버프+캔슬대기) ✓ 4 passed
+- [x] M5-3. CharlieExchange (교환시퀀스, 구매제외) ✓ 5 passed
+- [x] M5-4. 커밋 (JunkSell은 M6 통합시 A junk_seller 이식)
 
 ## 헌법 (도면 0번 — 전 모듈 불변)
 - 화면인식 + Interception + Humanizer만. 메모리조작(pymem/ReadProcessMemory) 전면 배제
