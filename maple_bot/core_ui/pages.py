@@ -39,6 +39,46 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str) -> QPushButt
     return btn
 
 
+def _make_attack_box_picker(config, fields4) -> QPushButton:
+    """공격범위 박스 픽커 — 스크린샷 위에 기존범위 미리보기 + 드래그로 갱신.
+    화면 중앙을 캐릭(앵커) 기준점으로 가정해 상대 오프셋(atk_x/y_min/max) 환산.
+    fields4: 갱신할 IntField [x_min, x_max, y_min, y_max]."""
+    btn = QPushButton("🎯 공격 범위 박스 (스크린샷 드래그, 기존범위 표시)")
+    btn.setObjectName("primary")
+
+    def on_click():
+        import mss as _mss
+        import numpy as np
+        from core_ui.shot_selector import (
+            ScreenshotRegionSelector, rect_to_offsets, offsets_to_rect,
+        )
+        with _mss.mss() as sct:
+            mon = sct.monitors[1]
+            raw = np.array(sct.grab(mon))[:, :, :3]
+            origin = (mon["left"], mon["top"])
+            anchor = (mon["width"] // 2, mon["height"] // 2)   # 화면 중앙=캐릭 기준
+        xmn = int(config.get("attack", "atk_x_min", default=-35))
+        xmx = int(config.get("attack", "atk_x_max", default=35))
+        ymn = int(config.get("attack", "atk_y_min", default=-70))
+        ymx = int(config.get("attack", "atk_y_max", default=70))
+        init_rect = offsets_to_rect(xmn, xmx, ymn, ymx, anchor)
+        dlg = ScreenshotRegionSelector(raw, src_origin=origin,
+                                       initial_rect=init_rect, anchor=anchor)
+
+        def apply(x, y, w, h):
+            o = rect_to_offsets(x - origin[0], y - origin[1], w, h, anchor)
+            for key, fld, val in zip(
+                ["atk_x_min", "atk_x_max", "atk_y_min", "atk_y_max"], fields4, o):
+                config.set("attack", key, val)
+                fld.widget.setValue(val)
+            config.save()
+        dlg.region_selected.connect(apply)
+        dlg.exec()
+
+    btn.clicked.connect(on_click)
+    return btn
+
+
 def _make_template_capture(config, save_path, config_key, label: str) -> QPushButton:
     """'이미지 캡처' 버튼 — 스크린샷에서 영역 드래그 → 그 부분을 잘라 png 저장 + config에 경로.
 
@@ -148,12 +188,6 @@ def build_pages(config) -> list[QWidget]:
         # 사냥 영역 (B training: 이 영역 안에서만 감지)
         ha_x, ha_y, ha_w, ha_h,
         FloatField("몬스터 임계값", c, ("attack", "monster_accuracy"), 0.1, 1.0, default=0.9),
-        # 닉네임 주변 공격 테두리 (B atk_x/y_min/max — 닉네임 기준 상대 오프셋)
-        IntField("공격범위 ←", c, ("attack", "atk_x_min"), -1000, 0, default=-35),
-        IntField("공격범위 →", c, ("attack", "atk_x_max"), 0, 1000, default=35),
-        IntField("공격범위 ↑", c, ("attack", "atk_y_min"), -1000, 0, default=-70),
-        IntField("공격범위 ↓", c, ("attack", "atk_y_max"), 0, 1000, default=70),
-        # 닉네임 인식 임계
         FloatField("닉네임 임계값", c, ("attack", "name_tag_threshold"), 0.1, 1.0, default=0.7),
     ], buttons=[minimap_picker, hunt_area_picker, monster_cap, name_cap]))
 
@@ -170,9 +204,15 @@ def build_pages(config) -> list[QWidget]:
         ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative"),
     ], extras=[route_lbl, block_editor]))
 
-    # 3. 전투
+    # 3. 전투 — 공격범위 박스(닉네임 기준 상대 오프셋, 드래그로 설정)
+    atk_xmn = IntField("공격범위 ←(px)", c, ("attack", "atk_x_min"), -1000, 0, default=-35)
+    atk_xmx = IntField("공격범위 →(px)", c, ("attack", "atk_x_max"), 0, 1000, default=35)
+    atk_ymn = IntField("공격범위 ↑(px)", c, ("attack", "atk_y_min"), -1000, 0, default=-70)
+    atk_ymx = IntField("공격범위 ↓(px)", c, ("attack", "atk_y_max"), 0, 1000, default=70)
+    atk_picker = _make_attack_box_picker(c, [atk_xmn, atk_xmx, atk_ymn, atk_ymx])
     pages.append(_page("전투", "공격·버프·물약·펫·줍기", [
         TextField("공격 키", c, ("attack", "key"), default="ctrl"),
+        atk_xmn, atk_xmx, atk_ymn, atk_ymx,
         IntField("공격 범위(px)", c, ("attack", "range_px"), 0, 2000, default=350),
         CheckField("공격 전 점프", c, ("attack", "jump_before_attack")),
         CheckField("HP 물약 사용", c, ("recovery", "hp_potion", "enabled")),
@@ -182,7 +222,7 @@ def build_pages(config) -> list[QWidget]:
         IntField("MP 물약 임계%", c, ("recovery", "mp_potion", "threshold"), 0, 100, default=50),
         TextField("MP 물약 키", c, ("recovery", "mp_potion", "key")),
         CheckField("펫 먹이 사용", c, ("recovery", "pet_food", "enabled")),
-    ]))
+    ], buttons=[atk_picker]))
 
     # 4. 안전·안티밴
     pages.append(_page("안전·안티밴", "거탐·방지몹·유저감지·자동응답·채널변경·인간화강도", [

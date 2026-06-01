@@ -31,6 +31,20 @@ def display_to_point(x: int, y: int, scale: float) -> tuple:
     return (int(round(x / scale)), int(round(y / scale)))
 
 
+def rect_to_offsets(left: int, top: int, w: int, h: int,
+                    anchor: tuple[int, int]) -> tuple:
+    """원본 박스 → 앵커(캐릭) 기준 상대 오프셋 (x_min, x_max, y_min, y_max)."""
+    ax, ay = anchor
+    return (left - ax, left + w - ax, top - ay, top + h - ay)
+
+
+def offsets_to_rect(x_min: int, x_max: int, y_min: int, y_max: int,
+                    anchor: tuple[int, int]) -> tuple:
+    """앵커 기준 오프셋 → 원본 박스 (left, top, w, h). 기존 범위 미리보기용."""
+    ax, ay = anchor
+    return (ax + x_min, ay + y_min, x_max - x_min, y_max - y_min)
+
+
 class _ClickCanvas(QWidget):
     """이미지 표시 + 클릭 위치에 십자 마커. 클릭하면 콜백."""
 
@@ -94,10 +108,13 @@ class _Canvas(QWidget):
     """배경 이미지 + 드래그 사각형을 한 표면에 그리는 캔버스.
     QLabel을 쓰면 이미지가 사각형을 가리므로 직접 paint 한다."""
 
-    def __init__(self, pix: QPixmap, on_release):
+    def __init__(self, pix: QPixmap, on_release,
+                 initial_rect: QRect | None = None, anchor: QPoint | None = None):
         super().__init__()
         self._pix = pix
         self._on_release = on_release
+        self._initial = initial_rect   # 기존 범위(표시좌표) 미리보기
+        self._anchor = anchor          # 기준점(캐릭) 십자 표시
         self.setFixedSize(pix.width(), pix.height())
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -125,7 +142,18 @@ class _Canvas(QWidget):
     def paintEvent(self, e):
         qp = QPainter(self)
         qp.drawPixmap(0, 0, self._pix)
+        # 앵커(캐릭 기준점) 십자
+        if self._anchor is not None:
+            qp.setPen(QPen(QColor("#27a644"), 1, Qt.PenStyle.DashLine))
+            ax, ay = self._anchor.x(), self._anchor.y()
+            qp.drawLine(ax - 10, ay, ax + 10, ay)
+            qp.drawLine(ax, ay - 10, ax, ay + 10)
+        # 드래그 전이면 기존 범위(점선) 미리보기
         if not (self.start and self.cur):
+            if self._initial is not None:
+                qp.setPen(QPen(QColor("#828fff"), 2, Qt.PenStyle.DashLine))
+                qp.setBrush(Qt.BrushStyle.NoBrush)
+                qp.drawRect(self._initial)
             return
         rect = QRect(self.start, self.cur).normalized()
         # 선택 영역 밖을 어둡게 (선택 부분 도드라지게)
@@ -153,10 +181,14 @@ class ScreenshotRegionSelector(QDialog):
     """
     region_selected = pyqtSignal(int, int, int, int)
 
-    def __init__(self, bgr_image, src_origin=(0, 0), max_display=1100, parent=None):
+    def __init__(self, bgr_image, src_origin=(0, 0), max_display=1100, parent=None,
+                 initial_rect=None, anchor=None):
+        """initial_rect: 기존 범위 (left,top,w,h) 원본좌표(미리보기). anchor: 기준점(x,y) 원본."""
         super().__init__(parent)
         self.setWindowTitle("영역 선택 — 드래그하세요 (ESC 취소)")
         self._origin = src_origin
+        self._initial_rect = initial_rect
+        self._anchor = anchor
 
         import numpy as np
         h, w = bgr_image.shape[:2]
@@ -170,7 +202,19 @@ class ScreenshotRegionSelector(QDialog):
             Qt.TransformationMode.SmoothTransformation,
         )
 
-        self._canvas = _Canvas(pix, self._on_release)
+        # 기존 범위/앵커를 표시좌표로 환산해 미리보기
+        init_disp = None
+        if self._initial_rect:
+            l, t, ww, hh = self._initial_rect
+            s = self._scale
+            init_disp = QRect(int(l * s), int(t * s), int(ww * s), int(hh * s))
+        anchor_disp = None
+        if self._anchor:
+            anchor_disp = QPoint(int(self._anchor[0] * self._scale),
+                                 int(self._anchor[1] * self._scale))
+
+        self._canvas = _Canvas(pix, self._on_release,
+                               initial_rect=init_disp, anchor=anchor_disp)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._canvas)

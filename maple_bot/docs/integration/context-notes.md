@@ -493,3 +493,13 @@
 - block_editor move행: 시작X(📍)+끝X(📍)+왕복횟수+walk/teleport. _pick_x(field) 일반화로 시작/끝 둘다 미니맵클릭
 ### 검증: tests 170 passed (block_runner sweep 추가). 렌더 — 시작/끝/왕복 필드 확인
 ### 좌표동선 사용: 이동블록→시작📍클릭→끝📍클릭→왕복횟수→공격블록. 위→아래 순서 실행
+
+## 2026-06-02 — 공격범위 박스 픽커(기존범위 미리보기 + 드래그)
+### 사용자 요청: 스크린샷 드래그로 공격범위 설정, 기존 범위 테두리 표시
+### 구현
+- shot_selector: rect_to_offsets/offsets_to_rect(앵커 기준 박스↔오프셋 환산) + _Canvas initial_rect(점선 미리보기)+anchor(십자) 표시 + Selector initial_rect/anchor 인자
+- pages.py: _make_attack_box_picker — 전체캡처, 화면중앙=앵커, 기존 atk오프셋→미리보기박스, 드래그→rect_to_offsets→atk 4키 저장
+- 공격범위 4필드 연결·인식→전투 탭 이동 + 🎯박스픽커 버튼(위치 직관화)
+### 검증: tests 173 passed (attack_box_picker 3). 전투페이지 렌더 — 박스버튼+오프셋필드 확인
+### 사용: 전투탭 🎯버튼 → 스샷에 기존범위 점선+중앙 앵커십자 → 캐릭 주변 공격범위 드래그 → atk오프셋 자동저장
+### 주의: 앵커=화면중앙 가정(실제 캐릭은 닉네임 위치). 실기서 닉네임 기준과 차이나면 보정 필요
