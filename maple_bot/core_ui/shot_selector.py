@@ -104,6 +104,76 @@ class ClickPointPicker(QDialog):
             self.reject()
 
 
+class _LineCanvas(QWidget):
+    """이미지 위 드래그로 시작→끝 직선. 양끝 점 + 라벤더 직선 표시."""
+
+    def __init__(self, pix: QPixmap, on_release):
+        super().__init__()
+        self._pix = pix
+        self._on_release = on_release
+        self.setFixedSize(pix.width(), pix.height())
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.start: QPoint | None = None
+        self.cur: QPoint | None = None
+
+    def _clamp(self, p: QPoint) -> QPoint:
+        return QPoint(max(0, min(p.x(), self._pix.width())),
+                      max(0, min(p.y(), self._pix.height())))
+
+    def mousePressEvent(self, e):
+        self.start = self._clamp(e.position().toPoint()); self.cur = self.start; self.update()
+
+    def mouseMoveEvent(self, e):
+        if self.start is not None:
+            self.cur = self._clamp(e.position().toPoint()); self.update()
+
+    def mouseReleaseEvent(self, e):
+        if self.start and self.cur:
+            self._on_release(self.start, self.cur)
+
+    def paintEvent(self, e):
+        qp = QPainter(self)
+        qp.drawPixmap(0, 0, self._pix)
+        if self.start and self.cur:
+            qp.setPen(QPen(QColor("#5e6ad2"), 3))
+            qp.drawLine(self.start, self.cur)
+            for pt, col in [(self.start, "#27a644"), (self.cur, "#f04452")]:
+                qp.setPen(QPen(QColor(col), 2))
+                qp.drawEllipse(pt, 5, 5)
+
+
+class LinePointPicker(QDialog):
+    """이미지 위 시작→끝 드래그로 직선의 양 끝점 좌표를 얻는다.
+    line_picked(sx, sy, ex, ey) — 원본 좌표."""
+    line_picked = pyqtSignal(int, int, int, int)
+
+    def __init__(self, bgr_image, max_display=900, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("시작→끝 드래그 (ESC 취소)")
+        import numpy as np
+        h, w = bgr_image.shape[:2]
+        self._scale = min(1.0, max_display / max(w, h))
+        dw, dh = int(w * self._scale), int(h * self._scale)
+        rgb = np.ascontiguousarray(bgr_image[:, :, ::-1])
+        qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(qimg).scaled(
+            dw, dh, Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation)
+        self._canvas = _LineCanvas(pix, self._on_release)
+        lay = QVBoxLayout(self); lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self._canvas)
+
+    def _on_release(self, s: QPoint, c: QPoint):
+        sx, sy = display_to_point(s.x(), s.y(), self._scale)
+        ex, ey = display_to_point(c.x(), c.y(), self._scale)
+        self.line_picked.emit(sx, sy, ex, ey)
+        self.accept()
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.reject()
+
+
 class _Canvas(QWidget):
     """배경 이미지 + 드래그 사각형을 한 표면에 그리는 캔버스.
     QLabel을 쓰면 이미지가 사각형을 가리므로 직접 paint 한다."""

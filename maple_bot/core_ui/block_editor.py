@@ -92,6 +92,31 @@ class BlockEditor(QWidget):
         dlg.point_picked.connect(picked)
         dlg.exec()
 
+    def _pick_line(self, idx: int, start_spin, end_spin) -> None:
+        """미니맵에서 시작→끝 한 번 드래그 → start_x/end_x 동시 설정(직선 표시)."""
+        import mss as _mss
+        import numpy as np
+        from core_ui.shot_selector import LinePointPicker
+        mm_x = int(self._cfg.get("minimap", "region_x", default=0))
+        mm_y = int(self._cfg.get("minimap", "region_y", default=0))
+        mm_w = int(self._cfg.get("minimap", "width", default=0))
+        mm_h = int(self._cfg.get("minimap", "height", default=0))
+        if mm_w <= 0:
+            return
+        with _mss.mss() as sct:
+            shot = np.array(sct.grab(
+                {"left": mm_x, "top": mm_y, "width": mm_w, "height": mm_h}))[:, :, :3]
+        dlg = LinePointPicker(shot)
+
+        def picked(sx, sy, ex, ey):
+            # start_x < end_x 정규화 (구간 왕복은 좌→우 기준)
+            lo, hi = (sx, ex) if sx <= ex else (ex, sx)
+            self.set_field(idx, "start_x", lo)
+            self.set_field(idx, "end_x", hi)
+            start_spin.setValue(lo); end_spin.setValue(hi)
+        dlg.line_picked.connect(picked)
+        dlg.exec()
+
     # ── 내부 ──────────────────────────────────────────────────────────
     def _save(self) -> None:
         # Block 검증 통과하는 것만 저장(전방호환)
@@ -129,22 +154,19 @@ class BlockEditor(QWidget):
         h.addWidget(QLabel(f"{idx+1}. {blk['type']}"))
 
         if blk["type"] == "move":
-            # 구간 왕복: 시작 X(📍) ~ 끝 X(📍) + 왕복 횟수
+            # 구간 왕복: 시작~끝을 한 번에 드래그(📏) + 왕복 횟수
             s_sx = QSpinBox(); s_sx.setRange(0, 4000); s_sx.setPrefix("시작 ")
             s_sx.setValue(int(blk.get("start_x", 0)))
             s_sx.valueChanged.connect(lambda v, i=idx: self.set_field(i, "start_x", v))
             h.addWidget(s_sx)
-            sp = QPushButton("📍"); sp.setFixedWidth(30)
-            sp.clicked.connect(lambda _=False, i=idx, w=s_sx: self._pick_x(i, "start_x", w))
-            h.addWidget(sp)
-
             e_sx = QSpinBox(); e_sx.setRange(0, 4000); e_sx.setPrefix("끝 ")
             e_sx.setValue(int(blk.get("end_x", 0)))
             e_sx.valueChanged.connect(lambda v, i=idx: self.set_field(i, "end_x", v))
             h.addWidget(e_sx)
-            ep = QPushButton("📍"); ep.setFixedWidth(30)
-            ep.clicked.connect(lambda _=False, i=idx, w=e_sx: self._pick_x(i, "end_x", w))
-            h.addWidget(ep)
+            ln = QPushButton("📏 구간 긋기"); ln.setFixedWidth(90)
+            ln.clicked.connect(lambda _=False, i=idx, sw_=s_sx, ew_=e_sx:
+                               self._pick_line(i, sw_, ew_))
+            h.addWidget(ln)
 
             sw = QSpinBox(); sw.setRange(1, 99); sw.setPrefix("왕복 ")
             sw.setValue(int(blk.get("sweeps", 1)))

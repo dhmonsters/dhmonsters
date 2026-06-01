@@ -524,3 +524,11 @@
 ### 검증: tests 174 passed. 렌더 — 사다리 X/아래Y/시작/위Y/끝/방향 확인
 ### 사다리 체크법: 동선탭 사다리블록 추가 → 📍시작(미니맵 아래발판 클릭) → 📍끝(위발판 클릭) → 방향
 ### 남은: BlockRunner ladder 실행(현재 move만, ladder는 pass) — 실기 결선시
+
+## 2026-06-02 — move 구간 한번에 긋기(라인 드래그)
+### 사용자 요청: 시작/끝 따로 찍기 귀찮음 → 한번 드래그로 시작→끝 직선 색상표시
+### 구현
+- shot_selector: LinePointPicker + _LineCanvas — 드래그로 시작(초록원)→끝(빨강원) 라벤더 직선. line_picked(sx,sy,ex,ey)
+- block_editor: move 행 📍시작/📍끝 2버튼 → 📏구간긋기 1버튼. _pick_line: 미니맵 드래그→start_x/end_x 동시set(좌→우 정규화)
+### 검증: tests 176 passed (line_picker 2). 라인 직선 렌더 + move 구간긋기 버튼 확인
+### 사용: move블록 📏구간긋기 → 미니맵에서 시작점부터 끝점까지 한번 드래그 → 시작/끝 X 자동
