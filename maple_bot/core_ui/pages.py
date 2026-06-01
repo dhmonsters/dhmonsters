@@ -4,16 +4,19 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton
 
 from core_ui.theme import SPACING
-from core_ui.widgets import CheckField, TextField, IntField, ComboField, FloatField
+from core_ui.widgets import (
+    CheckField, TextField, IntField, ComboField, FloatField, StatusField,
+)
 
 
-def _make_region_picker(config, keys_xywh, fields_xywh, label: str) -> QPushButton:
-    """'영역 선택' 버튼 — 전체화면 캡처 → 스크린샷 위 드래그 → config 4키 저장 + 필드 갱신.
+def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
+                        on_done=None) -> QPushButton:
+    """'영역 선택' 버튼 — 전체화면 캡처 → 스크린샷 위 드래그 → config 4키 저장.
 
     keys_xywh: ((sec,..,'region_x'), y키, w키, h키)
-    fields_xywh: 갱신할 IntField 4개 (드래그 결과를 위젯에 반영)
+    fields_xywh: 갱신할 IntField 4개(없으면 None) / on_done: 완료 후 콜백(상태 갱신)
     """
-    btn = QPushButton(f"📐 {label} 영역 선택 (게임 스크린샷에서 드래그)")
+    btn = QPushButton(f"📐 {label} 영역 드래그")
     btn.setObjectName("primary")
 
     def on_click():
@@ -28,10 +31,13 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str) -> QPushButt
         dlg = ScreenshotRegionSelector(raw, src_origin=origin)
 
         def apply(x, y, w, h):
-            for key, fld, val in zip(keys_xywh, fields_xywh, (x, y, w, h)):
+            for i, (key, val) in enumerate(zip(keys_xywh, (x, y, w, h))):
                 config.set(*key, val)
-                fld.widget.setValue(val)   # IntField 위젯 갱신
+                if fields_xywh and i < len(fields_xywh) and fields_xywh[i] is not None:
+                    fields_xywh[i].widget.setValue(val)
             config.save()
+            if on_done:
+                on_done()
         dlg.region_selected.connect(apply)
         dlg.exec()
 
@@ -39,11 +45,11 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str) -> QPushButt
     return btn
 
 
-def _make_attack_box_picker(config, fields4) -> QPushButton:
+def _make_attack_box_picker(config, fields4, on_done=None) -> QPushButton:
     """공격범위 박스 픽커 — 스크린샷 위에 기존범위 미리보기 + 드래그로 갱신.
     화면 중앙을 캐릭(앵커) 기준점으로 가정해 상대 오프셋(atk_x/y_min/max) 환산.
-    fields4: 갱신할 IntField [x_min, x_max, y_min, y_max]."""
-    btn = QPushButton("🎯 공격 범위 박스 (스크린샷 드래그, 기존범위 표시)")
+    fields4: 갱신할 IntField [x_min, x_max, y_min, y_max](없으면 None) / on_done: 완료 콜백."""
+    btn = QPushButton("🎯 공격 범위 박스 드래그 (기존범위 표시)")
     btn.setObjectName("primary")
 
     def on_click():
@@ -99,11 +105,14 @@ def _make_attack_box_picker(config, fields4) -> QPushButton:
         def apply(x, y, w, h):
             # 닉네임 감지됐으면 그 위치 기준, 아니면 화면중앙 기준 오프셋
             o = rect_to_offsets(x - origin[0], y - origin[1], w, h, name_anchor)
-            for key, fld, val in zip(
-                ["atk_x_min", "atk_x_max", "atk_y_min", "atk_y_max"], fields4, o):
+            for i, (key, val) in enumerate(zip(
+                    ["atk_x_min", "atk_x_max", "atk_y_min", "atk_y_max"], o)):
                 config.set("attack", key, val)
-                fld.widget.setValue(val)
+                if fields4 and i < len(fields4) and fields4[i] is not None:
+                    fields4[i].widget.setValue(val)
             config.save()
+            if on_done:
+                on_done()
         dlg.region_selected.connect(apply)
         dlg.exec()
 
@@ -111,12 +120,13 @@ def _make_attack_box_picker(config, fields4) -> QPushButton:
     return btn
 
 
-def _make_template_capture(config, save_path, config_key, label: str) -> QPushButton:
+def _make_template_capture(config, save_path, config_key, label: str,
+                           on_done=None) -> QPushButton:
     """'이미지 캡처' 버튼 — 스크린샷에서 영역 드래그 → 그 부분을 잘라 png 저장 + config에 경로.
 
-    save_path: 저장할 png 경로(templates/...). config_key: 경로 저장할 config 키.
+    save_path: 저장할 png 경로(templates/...). config_key: 경로 저장할 config 키. on_done: 완료 콜백.
     """
-    btn = QPushButton(f"📷 {label} 캡처 (스크린샷에서 드래그)")
+    btn = QPushButton(f"📷 {label} 캡처 드래그")
 
     def on_click():
         import os
@@ -140,6 +150,8 @@ def _make_template_capture(config, save_path, config_key, label: str) -> QPushBu
             cv2.imwrite(save_path, crop)
             config.set(*config_key, save_path)
             config.save()
+            if on_done:
+                on_done()
         dlg.region_selected.connect(crop_save)
         dlg.exec()
 
@@ -182,46 +194,41 @@ def build_pages(config) -> list[QWidget]:
     c = config
     pages = []
 
-    # 1. 연결·인식 — 미니맵 영역은 스크린샷 드래그로 실측
-    mm_x = IntField("미니맵 X", c, ("minimap", "region_x"), 0, 4000)
-    mm_y = IntField("미니맵 Y", c, ("minimap", "region_y"), 0, 4000)
-    mm_w = IntField("미니맵 W", c, ("minimap", "width"), 0, 4000)
-    mm_h = IntField("미니맵 H", c, ("minimap", "height"), 0, 4000)
+    # 1. 연결·인식 — 영역/캡처는 드래그 후 색상(●설정됨)으로 완료 확인 (숫자 표시 안 함)
     minimap_picker = _make_region_picker(
-        c,
-        [("minimap", "region_x"), ("minimap", "region_y"),
-         ("minimap", "width"), ("minimap", "height")],
-        [mm_x, mm_y, mm_w, mm_h],
-        "미니맵",
-    )
+        c, [("minimap", "region_x"), ("minimap", "region_y"),
+            ("minimap", "width"), ("minimap", "height")],
+        None, "미니맵", on_done=lambda: mm_status.refresh())
+    mm_status = StatusField("미니맵 영역",
+                            lambda: int(c.get("minimap", "width", default=0)) > 0,
+                            [minimap_picker])
+    hunt_area_picker = _make_region_picker(
+        c, [("attack", "hunt_area", "x"), ("attack", "hunt_area", "y"),
+            ("attack", "hunt_area", "w"), ("attack", "hunt_area", "h")],
+        None, "사냥", on_done=lambda: ha_status.refresh())
+    ha_status = StatusField("사냥 영역",
+                            lambda: int(c.get("attack", "hunt_area", "w", default=0)) > 0,
+                            [hunt_area_picker])
     monster_cap = _make_template_capture(
         c, "templates/monster_capture.png", ("attack", "monster_template"), "몬스터",
-    )
+        on_done=lambda: mon_status.refresh())
+    mon_status = StatusField("몬스터 캡처",
+                             lambda: bool(c.get("attack", "monster_template", default="")),
+                             [monster_cap])
     name_cap = _make_template_capture(
         c, "templates/name_tag.png", ("attack", "name_template"), "닉네임",
-    )
-    # 사냥 영역 (B training 방식) — 이 사각형 안에서만 닉네임/몬스터 감지 (전체화면 대비 빠름)
-    ha_x = IntField("사냥영역 X", c, ("attack", "hunt_area", "x"), 0, 4000)
-    ha_y = IntField("사냥영역 Y", c, ("attack", "hunt_area", "y"), 0, 4000)
-    ha_w = IntField("사냥영역 W", c, ("attack", "hunt_area", "w"), 0, 4000)
-    ha_h = IntField("사냥영역 H", c, ("attack", "hunt_area", "h"), 0, 4000)
-    hunt_area_picker = _make_region_picker(
-        c,
-        [("attack", "hunt_area", "x"), ("attack", "hunt_area", "y"),
-         ("attack", "hunt_area", "w"), ("attack", "hunt_area", "h")],
-        [ha_x, ha_y, ha_w, ha_h],
-        "사냥",
-    )
+        on_done=lambda: name_status.refresh())
+    name_status = StatusField("닉네임 캡처",
+                              lambda: bool(c.get("attack", "name_template", default="")),
+                              [name_cap])
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
         ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"]),
-        mm_x, mm_y, mm_w, mm_h,
+        mm_status, ha_status, mon_status, name_status,
         IntField("색 허용오차", c, ("minimap", "tolerance"), 0, 255, default=30),
         TextField("점프 키", c, ("minimap", "jump_key"), default="alt"),
-        # 사냥 영역 (B training: 이 영역 안에서만 감지)
-        ha_x, ha_y, ha_w, ha_h,
         FloatField("몬스터 임계값", c, ("attack", "monster_accuracy"), 0.1, 1.0, default=0.9),
         FloatField("닉네임 임계값", c, ("attack", "name_tag_threshold"), 0.1, 1.0, default=0.7),
-    ], buttons=[minimap_picker, hunt_area_picker, monster_cap, name_cap]))
+    ]))
 
     # 2. 동선·이동 — 좌표 동선은 블록 빌더로 (이동/공격/사다리 순차)
     from core_ui.block_editor import BlockEditor
@@ -236,17 +243,17 @@ def build_pages(config) -> list[QWidget]:
         ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative"),
     ], extras=[route_lbl, block_editor]))
 
-    # 3. 전투 — 공격범위 박스(닉네임 기준 상대 오프셋, 드래그로 설정)
-    atk_xmn = IntField("공격범위 ←(px)", c, ("attack", "atk_x_min"), -1000, 0, default=-35)
-    atk_xmx = IntField("공격범위 →(px)", c, ("attack", "atk_x_max"), 0, 1000, default=35)
-    atk_ymn = IntField("공격범위 ↑(px)", c, ("attack", "atk_y_min"), -1000, 0, default=-70)
-    atk_ymx = IntField("공격범위 ↓(px)", c, ("attack", "atk_y_max"), 0, 1000, default=70)
-    atk_picker = _make_attack_box_picker(c, [atk_xmn, atk_xmx, atk_ymn, atk_ymx])
+    # 3. 전투 — 공격범위 박스는 드래그 후 색상(●설정됨)으로 확인 (숫자 표시 안 함)
+    atk_picker = _make_attack_box_picker(c, None, on_done=lambda: atk_status.refresh())
+    atk_status = StatusField(
+        "공격 범위 박스",
+        lambda: c.get("attack", "atk_x_max", default=None) is not None,
+        [atk_picker])
     from core_ui.buff_editor import BuffEditor
     buff_editor = BuffEditor(c, ("attack", "normal_buffs"))
     pages.append(_page("전투", "공격·버프·물약·펫·줍기", [
         TextField("공격 키", c, ("attack", "key"), default="ctrl"),
-        atk_xmn, atk_xmx, atk_ymn, atk_ymx,
+        atk_status,
         IntField("공격 범위(px)", c, ("attack", "range_px"), 0, 2000, default=350),
         CheckField("공격 전 점프", c, ("attack", "jump_before_attack")),
         CheckField("HP 물약 사용", c, ("recovery", "hp_potion", "enabled")),
@@ -258,7 +265,7 @@ def build_pages(config) -> list[QWidget]:
         CheckField("펫 먹이 사용", c, ("recovery", "pet_food", "enabled")),
         TextField("펫 먹이 키", c, ("recovery", "pet_food", "key")),
         IntField("펫 먹이 간격(분)", c, ("recovery", "pet_food", "interval_min"), 1, 120, default=10),
-    ], buttons=[atk_picker], extras=[buff_editor]))
+    ], extras=[buff_editor]))
 
     # 4. 안전·안티밴
     pages.append(_page("안전·안티밴", "거탐·방지몹·유저감지·자동응답·채널변경·인간화강도", [
@@ -269,15 +276,22 @@ def build_pages(config) -> list[QWidget]:
         CheckField("방지몹 해제", c, ("anti_mob", "enabled")),
     ]))
 
-    # 5. 자동화·운영
-    pages.append(_page("자동화·운영", "자동판매·마을귀환·예약종료·레벨정지·텔레그램·찰리중사", [
+    # 5. 자동화·운영 — 맵이탈 감지영역은 드래그 후 색상으로 확인
+    mapexit_picker = _make_region_picker(
+        c, [("map_exit", "region_x"), ("map_exit", "region_y"),
+            ("map_exit", "width"), ("map_exit", "height")],
+        None, "맵이탈 감지", on_done=lambda: mapexit_status.refresh())
+    mapexit_status = StatusField(
+        "맵이탈 영역", lambda: int(c.get("map_exit", "width", default=0)) > 0,
+        [mapexit_picker])
+    pages.append(_page("자동화·운영", "자동판매·마을귀환·예약종료·픽업·텔레그램·찰리중사", [
         CheckField("맵 이탈 감지", c, ("map_exit", "enabled")),
+        mapexit_status,
         CheckField("긴급 마을귀환", c, ("town_scroll", "enabled")),
         TextField("마을귀환 키", c, ("town_scroll", "key"), default="9"),
         CheckField("픽업 타이머", c, ("pickup_timer", "enabled")),
         IntField("픽업 간격(초)", c, ("pickup_timer", "interval_sec"), 1, 3600, default=60),
         TextField("픽업 키", c, ("pickup_timer", "pickup_key")),
-        CheckField("텔레그램 알림", c, ("settings1", "lie_detector", "tg_enabled")),
     ]))
 
     # 6. 시스템

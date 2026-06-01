@@ -9,6 +9,39 @@ from PyQt6.QtWidgets import (
 from core_ui.theme import SPACING
 
 
+class StatusField:
+    """라벨 + 상태표시(● 설정됨 / ○ 미설정 색상) + 액션 버튼들.
+    숫자 대신 색으로 입력 완료를 확인한다. refresh()로 상태 갱신, self.row=QWidget."""
+
+    def __init__(self, label: str, is_set_fn, buttons: list, label_w: int = 130):
+        self._is_set = is_set_fn
+        self.row = QWidget()
+        h = QHBoxLayout(self.row)
+        h.setContentsMargins(0, SPACING["xxs"], 0, SPACING["xxs"])
+        h.setSpacing(SPACING["sm"])
+        lbl = QLabel(label); lbl.setFixedWidth(label_w); lbl.setObjectName("subtle")
+        h.addWidget(lbl)
+        self.status = QLabel(); self.status.setFixedWidth(82)
+        h.addWidget(self.status)
+        for b in buttons:
+            h.addWidget(b)
+        h.addStretch()
+        self.refresh()
+
+    def refresh(self) -> None:
+        ok = False
+        try:
+            ok = bool(self._is_set())
+        except Exception:
+            ok = False
+        if ok:
+            self.status.setText("● 설정됨")
+            self.status.setStyleSheet("color:#27a644; font-weight:600;")  # 초록
+        else:
+            self.status.setText("○ 미설정")
+            self.status.setStyleSheet("color:#8a8f98;")                   # 회색
+
+
 class _Field:
     """라벨 + 입력위젯 한 행. config 키에 양방향 바인딩.
     self.row = QWidget(레이아웃 포함), self.widget = 입력위젯."""
