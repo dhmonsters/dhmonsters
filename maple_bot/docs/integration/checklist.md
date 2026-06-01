@@ -11,6 +11,7 @@
 - [x] M5. Acting (Combat/Buff/Charlie) ✓ 14 passed
 - [x] M6. Orchestrator 통합 (조율코어) ✓ 11 passed
 - [x] M7. UI 6카테고리 셸 (DESIGN.md 적용) ✓ 8 passed
+- [x] M8. 런타임 결선 (BotRuntime — 7모듈 조립) ✓ 4 passed
 
 ---
 

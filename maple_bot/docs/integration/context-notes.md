@@ -234,3 +234,35 @@
 ### 육안검증: offscreen 렌더→PNG. 레이아웃·near-black·라벤더액센트·로그도크 전부 도면4단계 골조 일치 확인(한글□는 offscreen폰트, 실기정상)
 ### 결정: 기존 ui/(A 10탭) 병존. 6카테고리 페이지 실내용은 실기 통합단계에서 채움
 ### ★ 7개 모듈 단위구현 완료. 다음은 실기 통합테스트(실제 게임 결선)
+
+## 2026-06-01 — M8 착수 (런타임 결선 BotRuntime)
+### 목표: 7모듈을 실제로 묶어 한 틱이 도는 파이프라인. 게임없이 Fake(가짜 캡처/백엔드)로 검증
+### 설계 (core/runtime.py)
+- BotRuntime: 조립 책임. 의존성 주입(screen_capture, input_backend, config)
+  - Humanizer(backend) / CharScanner+AntiMobScanner(capture) → 이벤트큐
+  - Orchestrator(큐, on_pause=행동정지, on_resume) + 핸들러 결선
+  - BlockRunner(humanizer, pos_fn=state.get_position) / Combat / Buff
+  - SolverRegistry(PlanetV2Engine)
+- tick(): 스캐너 1회 수동 펌프(테스트) or 스레드(실기). orch.process_pending → 모드별 행동
+  - hunting: 현재구역 순찰(BlockRunner) + 공격/버프
+  - safety: 거탐 풀이(registry.solve) → clear_safety
+- start()/stop(): 스캐너 스레드 + 메인루프
+### 검증: Fake capture(노란블록 위치) + RecordingBackend → 위치갱신·이동·거탐대응 한틱 확인
+### 이게 실기 테스트의 골격. 실기는 Fake자리에 실제 screen/interception 주입만
+
+## 2026-06-01 — M8 완료 (런타임 결선 BotRuntime)
+### 구현됨 (core/runtime.py)
+- BotRuntime: 7모듈 조립. 의존성 주입(screen_capture/input_backend/sidecar_channel)
+  - Humanizer ← backend / CharScanner+AntiMobScanner → event_queue
+  - Orchestrator(큐, on_pause=방향키해제) + BlockRunner(pos_fn=state.get_position) + Combat + Buff
+  - SolverRegistry(PlanetV2Engine, 같은 사이드카 채널)
+- pump_scanners_once(테스트)/start_scanners(실기 스레드)
+- hunting_tick: 순찰이동+공격+버프 / safety_tick: registry.solve→성공시 clear_safety
+### 검증: tests 100 passed 누계 (M1~M8). Fake capture(노란블록)+RecordingBackend로 위치흐름·사냥틱·거탐대응 한틱 검증
+### 디버깅: safety 테스트 실패 → runtime과 가짜사이드카가 다른 채널 봄. channel 주입식으로 수정(2초 타임아웃도 해소)
+### ★ 실기 통합 잔여 디테일 (다음 세션)
+- lie/transparent 이벤트 → minigame_type "planet"/"lona" 매핑 (현재 runtime은 cfg.minigame_type 고정)
+- config.json → RuntimeConfig 매핑 어댑터 (미니맵region/floors/route/buffs/antimob)
+- MmapChannel 실구현 + 3.13 사이드카 프로세스 기동 + Planet_solver .pyd
+- 실제 screen(mss)+InterceptionBackend 주입, start_scanners 스레드 메인루프
+- JunkSell A 이식, UI 6페이지 실위젯, main.py 진입점 신구조 연결
