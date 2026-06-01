@@ -113,3 +113,49 @@
 - attack/ladder/jump 블록은 run_block에서 아직 pass(move만 구현). M5 Acting/후속에서 채움
 - BlockRunner는 pos_fn 콜백 주입(CharScanner 공유위치와 결합은 M6 Orchestrator에서)
 - 다음(M4): MinigameSolver 사이드카 (Planet v2 3.13 + mmap IPC) — 기술리스크 최대 구간
+
+## 2026-06-01 — M4 착수 (MinigameSolver 사이드카)
+
+### 사용자 확인
+- 비올레타 미출시 → 인터페이스에 자리만 마련(준비중). 현재는 Planet v2(planet)/Lona(옵션) 등록
+- 출시되면 VioletaEngine 1파일 추가로 꽂기(도면 5-5 콘센트테스트1)
+
+### 설계 (도면 5-4 계약 + 5-5 격리)
+- MinigameSolver 인터페이스: can_handle(type)->bool / solve(screenshot,ctx)->SolveResult
+- SolveResult{success, elapsed, note}
+- 레지스트리: SolverRegistry — 등록된 엔진 중 can_handle 매칭으로 위임. 새 엔진=등록 1줄
+- 사이드카 IPC: 본체3.14 ↔ 거탐3.13. C가 검증한 mmap("LonaHunter_SharedData") 패턴 참고
+  - 단 M4 골격에선 IPC 추상화(SidecarChannel)만. 실제 Planet v2 .pyd 연결은 실기 검증 별도
+
+### 이번 M4 범위 (게임 없이 테스트 가능한 골격)
+- MinigameSolver 추상 + SolveResult
+- SolverRegistry (can_handle 위임, 우선순위)
+- StubEngine (테스트용) + PlanetV2Engine 스텁(실코어 연결 지점 표시)
+- 실제 .pyd import/mmap/사이드카 프로세스는 실기 환경에서 (TODO 주석으로 연결점 명시)
+
+### 헌법 준수
+- 거탐 블랙박스는 인터페이스 뒤 격리. 본체는 can_handle/solve만 호출, 어느 엔진인지 모름
+
+## 2026-06-01 — M4 완료 (MinigameSolver 사이드카 골격)
+
+### 구현됨 (core/minigame/)
+- solver.py: SolveResult{success,elapsed,note} + MinigameSolver 추상(can_handle/solve)
+- registry.py: SolverRegistry — can_handle 위임, 등록순 우선. solve(type)→없으면 None
+- sidecar.py: SolveRequest/SolveReply + SidecarChannel 추상 + InMemoryChannel(큐 Fake)
+- planet_engine.py: PlanetV2Engine — 채널로 요청/응답 왕복, timeout시 실패반환(봇 안멈춤). 실코어 연결은 TODO 주석
+
+### 검증
+- tests 63 passed 누계 (M1 14 + M2 16 + M3 18 + M4 15: solver4/registry4/sidecar4/planet3)
+- ★ 콘센트테스트1(도면5-5) 코드 입증: test_consent_test_add_violeta_no_modification
+  비올레타 엔진 register 1줄 추가 → 기존 planet/lona 라우팅 무수정, violeta 처리됨
+
+### 실기 환경에서 할 일 (TODO 명시됨)
+- MmapChannel: 실제 3.13 사이드카 프로세스 + mmap(C LonaHunter_SharedData 패턴)
+- sidecar_main.py: 3.13 임베드로 Planet_solver __mypyc.cp313.pyd import해 toss 코어 호출
+- 사이드카 기동/연결은 M6 Orchestrator 또는 런처가 담당
+- 비올레타 출시시 VioletaEngine 1파일 + register 1줄 (골격 검증 완료)
+
+### 결정/주의
+- 골격은 channel 주입식 → 게임/드라이버 없이 전 로직 테스트 가능
+- screenshot은 현재 미사용(실구현서 공유메모리/핸들로 전달). ctx로 frame_id 전달
+- 다음(M5): Acting (Combat/Buff/Potion/JunkSell/Charlie) — Humanizer 두번째 소비처

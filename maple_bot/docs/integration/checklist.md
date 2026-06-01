@@ -7,7 +7,7 @@
 - [x] **M1. Humanizer + InputBackend** ✓ 14 passed (모든 행동의 기반)
 - [x] M2. Scanner 프레임워크 + 이벤트큐 ✓ 16 passed
 - [x] M3. Navigation (BlockRunner + FloorJudge) ✓ 18 passed
-- [ ] M4. MinigameSolver 사이드카 (Planet v2, 3.13 IPC)
+- [x] M4. MinigameSolver 사이드카 (골격) ✓ 15 passed
 - [ ] M5. Acting (Combat/Buff/Potion/JunkSell/Charlie)
 - [ ] M6. Orchestrator 통합
 - [ ] M7. UI 6카테고리 (DESIGN.md 적용)
@@ -63,6 +63,21 @@
 - [x] M3-4. 커밋 ← 진행 중
 
 **성공 기준.** target_x로 walk/teleport(>15px) 분기 이동, 3px 이내 도착판정, 모든 키는 Humanizer 경유. FloorJudge가 Y로 현재층·도착여부 판정.
+
+## M4. MinigameSolver 사이드카
+
+**목표.** 거탐 엔진 격리. 새 엔진(비올레타) 꽂기식. 도면 5-5 콘센트테스트1 실현.
+**위치.** `core/minigame/`
+**계약 (도면 5-4).** can_handle(type)/solve(screenshot,ctx)→SolveResult. 사이드카 IPC 격리.
+
+### 태스크
+- [x] M4-1. SolveResult + MinigameSolver 추상 ✓ 4 passed
+- [x] M4-2. SolverRegistry (콘센트 격리 입증) ✓ 4 passed
+- [x] M4-3. SidecarChannel IPC 추상 + InMemory Fake ✓ 4 passed
+- [x] M4-4. PlanetV2Engine (채널왕복+타임아웃안전) ✓ 3 passed
+- [x] M4-5. 커밋 ← 진행 중
+
+**성공 기준.** 본체는 registry.solve(type, ...)만 호출하고 어느 엔진인지 모름. 새 엔진 등록 1줄로 추가되며 기존 코드 무수정(콘센트 격리 테스트로 입증).
 
 ## 헌법 (도면 0번 — 전 모듈 불변)
 - 화면인식 + Interception + Humanizer만. 메모리조작(pymem/ReadProcessMemory) 전면 배제
