@@ -100,7 +100,7 @@
   },
   "hunt_mode": "key",
   "hunt_grounds": {
-    "active": "요괴의 숲 2",
+    "active": "초급 수련장",
     "presets": {
       "헤네시스": {
         "minimap": {
@@ -324,10 +324,10 @@
       },
       "초급 수련장": {
         "minimap": {
-          "region_x": 19,
-          "region_y": 186,
-          "width": 346,
-          "height": 141,
+          "region_x": 13,
+          "region_y": 136,
+          "width": 256,
+          "height": 104,
           "char_r": 225,
           "char_g": 225,
           "char_b": 0,
@@ -335,27 +335,27 @@
           "jump_key": "alt",
           "hotkey_region": "f11",
           "hotkey_zone": "f12",
-          "region_x_ratio": 0.007421875,
-          "region_y_ratio": 0.1358655953250548,
-          "width_ratio": 0.13515625,
-          "height_ratio": 0.10299488677867057
+          "region_x_ratio": 0.0067708333333333336,
+          "region_y_ratio": 0.13478691774033696,
+          "width_ratio": 0.13333333333333333,
+          "height_ratio": 0.10307234886025768
         },
         "zones": [
           {
             "name": "1층",
-            "left_x": 81,
-            "right_x": 270,
-            "y_min": 91,
-            "y_max": 109,
+            "left_x": 60,
+            "right_x": 202,
+            "y_min": 66,
+            "y_max": 79,
             "rope_x": -1,
             "random_margin_min": 0,
             "random_margin_max": 1,
             "sweeps": 2.0,
             "key_pattern": "",
-            "left_x_ratio": 0.23410404624277456,
-            "right_x_ratio": 0.7803468208092486,
-            "y_min_ratio": 0.6453900709219859,
-            "y_max_ratio": 0.7730496453900709,
+            "left_x_ratio": 0.234375,
+            "right_x_ratio": 0.7890625,
+            "y_min_ratio": 0.6346153846153846,
+            "y_max_ratio": 0.7596153846153846,
             "rope_x_ratio": -1.0
           }
         ],
@@ -363,10 +363,10 @@
       },
       "요괴의 숲 2": {
         "minimap": {
-          "region_x": 33,
-          "region_y": 186,
-          "width": 295,
-          "height": 194,
+          "region_x": 24,
+          "region_y": 137,
+          "width": 221,
+          "height": 142,
           "char_r": 225,
           "char_g": 225,
           "char_b": 0,
@@ -382,47 +382,47 @@
         "zones": [
           {
             "name": "1층",
-            "left_x": 99,
-            "right_x": 193,
-            "y_min": 122,
-            "y_max": 141,
+            "left_x": 73,
+            "right_x": 143,
+            "y_min": 83,
+            "y_max": 98,
             "rope_x": -1,
             "random_margin_min": 0,
             "random_margin_max": 1,
             "sweeps": 2.5,
             "key_pattern": "많이때리기 패턴",
-            "left_x_ratio": 0.33559322033898303,
-            "right_x_ratio": 0.6542372881355932,
-            "y_min_ratio": 0.6288659793814433,
-            "y_max_ratio": 0.7268041237113402,
+            "left_x_ratio": 0.33031674208144796,
+            "right_x_ratio": 0.6470588235294118,
+            "y_min_ratio": 0.5845070422535211,
+            "y_max_ratio": 0.6901408450704225,
             "rope_x_ratio": -1.0
           },
           {
             "name": "2층",
-            "left_x": 120,
-            "right_x": 149,
-            "y_min": 72,
-            "y_max": 89,
+            "left_x": 88,
+            "right_x": 110,
+            "y_min": 47,
+            "y_max": 60,
             "rope_x": -1,
             "random_margin_min": 0,
             "random_margin_max": 0,
             "sweeps": 2.0,
             "key_pattern": "많이때리기 패턴",
-            "left_x_ratio": 0.4067796610169492,
-            "right_x_ratio": 0.5050847457627119,
-            "y_min_ratio": 0.3711340206185567,
-            "y_max_ratio": 0.4587628865979381,
+            "left_x_ratio": 0.39819004524886875,
+            "right_x_ratio": 0.497737556561086,
+            "y_min_ratio": 0.33098591549295775,
+            "y_max_ratio": 0.4225352112676056,
             "rope_x_ratio": -1.0
           }
         ],
         "ropes": [
           {
             "name": "밧줄1",
-            "x": 111,
+            "x": 81,
             "approach": "both",
-            "jump_offset": 4,
-            "climb_sec": 3.1,
-            "x_ratio": 0.376271186440678
+            "jump_offset": 3,
+            "climb_sec": 3.1000000000000005,
+            "x_ratio": 0.3665158371040724
           }
         ]
       },
@@ -573,10 +573,10 @@
     }
   },
   "minimap": {
-    "region_x": 33,
-    "region_y": 186,
-    "width": 295,
-    "height": 194,
+    "region_x": 13,
+    "region_y": 136,
+    "width": 256,
+    "height": 104,
     "char_r": 225,
     "char_g": 225,
     "char_b": 0,
@@ -586,44 +586,27 @@
     "jump_key": "alt",
     "hotkey_region": "f11",
     "hotkey_zone": "f12",
-    "region_x_ratio": 0.012890625,
-    "region_y_ratio": 0.1358655953250548,
-    "width_ratio": 0.115234375,
-    "height_ratio": 0.14170927684441198
+    "region_x_ratio": 0.0067708333333333336,
+    "region_y_ratio": 0.13478691774033696,
+    "width_ratio": 0.13333333333333333,
+    "height_ratio": 0.10307234886025768
   },
   "zones": [
     {
       "name": "1층",
-      "left_x": 99,
-      "right_x": 193,
-      "y_min": 122,
-      "y_max": 141,
+      "left_x": 60,
+      "right_x": 202,
+      "y_min": 66,
+      "y_max": 79,
       "rope_x": -1,
       "random_margin_min": 0,
       "random_margin_max": 1,
-      "sweeps": 2.5,
-      "key_pattern": "많이때리기 패턴",
-      "left_x_ratio": 0.33559322033898303,
-      "right_x_ratio": 0.6542372881355932,
-      "y_min_ratio": 0.6288659793814433,
-      "y_max_ratio": 0.7268041237113402,
-      "rope_x_ratio": -1.0
-    },
-    {
-      "name": "2층",
-      "left_x": 120,
-      "right_x": 149,
-      "y_min": 72,
-      "y_max": 89,
-      "rope_x": -1,
-      "random_margin_min": 0,
-      "random_margin_max": 0,
       "sweeps": 2.0,
-      "key_pattern": "많이때리기 패턴",
-      "left_x_ratio": 0.4067796610169492,
-      "right_x_ratio": 0.5050847457627119,
-      "y_min_ratio": 0.3711340206185567,
-      "y_max_ratio": 0.4587628865979381,
+      "key_pattern": "",
+      "left_x_ratio": 0.234375,
+      "right_x_ratio": 0.7890625,
+      "y_min_ratio": 0.6346153846153846,
+      "y_max_ratio": 0.7596153846153846,
       "rope_x_ratio": -1.0
     }
   ],
@@ -755,17 +738,17 @@
       "x": 0,
       "y": 0,
       "width": 0,
-      "x_ratio": 0.216015625,
-      "y_ratio": 1.127100073046019,
-      "width_ratio": 0.105078125
+      "x_ratio": 0.2125,
+      "y_ratio": 1.1833498513379583,
+      "width_ratio": 0.10208333333333333
     },
     "mp": {
       "x": 0,
       "y": 0,
       "width": 0,
-      "x_ratio": 0.3234375,
-      "y_ratio": 1.127100073046019,
-      "width_ratio": 0.105078125
+      "x_ratio": 0.3177083333333333,
+      "y_ratio": 1.184340931615461,
+      "width_ratio": 0.103125
     }
   },
   "recovery": {
@@ -808,7 +791,7 @@
     }
   },
   "map_exit": {
-    "enabled": true,
+    "enabled": false,
     "action": "both",
     "name_region": {
       "x_ratio": 0.049609375,
@@ -956,7 +939,7 @@
     "game_window_title": "MapleStory Worlds-메이플 플래닛"
   },
   "yolo": {
-    "enabled": true,
+    "enabled": false,
     "model_path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\yolo_train\\runs\\transparent_game_v1-28\\weights\\best.pt",
     "confidence": 0.1,
     "iou": 0.1,
@@ -981,21 +964,17 @@
     "move": true,
     "potion": true,
     "lie_notify": true,
-    "lie_solve": true
+    "lie_solve": false
   },
-  "ropes": [
-    {
-      "name": "밧줄1",
-      "x": 111,
-      "approach": "both",
-      "jump_offset": 4,
-      "climb_sec": 3.1,
-      "x_ratio": 0.376271186440678
-    }
-  ],
+  "ropes": [],
   "floor_hunt": {
     "enabled": true,
     "route_mode": false,
     "route": []
+  },
+  "yolo_capture": {
+    "hotkey_start": "f9",
+    "auto_interval_sec": 0.5,
+    "hotkey_stop": "f10"
   }
 }
