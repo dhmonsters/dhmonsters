@@ -48,6 +48,8 @@ class RuntimeConfig:
     patrol_left_x: int = 0
     patrol_right_x: int = 0
     patrol_margin: int = 0
+    # 잡템 판매 — ConfigManager(get 인터페이스) 주입 시 활성. 없으면 비활성
+    junk_config: object = None
 
 
 class BotRuntime:
@@ -101,6 +103,13 @@ class BotRuntime:
         self.floor_judge = FloorJudge(config.floors) if config.floors else None
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
+        # 잡템 자동판매 (A sell_junk 래핑 + B 보호목록). 실판매는 게임 필요 → 인스턴스만 준비
+        self.junk_seller = None
+        if config.junk_config is not None:
+            from core.acting.junk_seller import JunkSeller
+            self.junk_seller = JunkSeller(
+                config.junk_config, screen_capture, input_backend,
+            )
         # 순찰 — 구역 좌우 왕복 (경계 도달시 방향전환, 랜덤마진)
         self.patrol = None
         if config.patrol_right_x > config.patrol_left_x:

@@ -395,3 +395,15 @@
 - lie_detect_region: 타이틀 탐색영역 좁히면 빠름(현재 전체화면). 실측 권장
 - board_region: 거탐 게임판 영역(SelfTransparentEngine이 추적할). 실측 필수
 - 실게임: 거탐 떴을때 실제 감지율 + 자체모델 풀이 정확도 검증
+
+## 2026-06-01 — 순찰 완성 + JunkSell 이식
+### 순찰 (core/navigation/patrol.py)
+- Patrol+PatrolZone: 경계 도달시 방향전환 + 랜덤마진(A _update_direction/_pick_target 재현)
+- runtime hunting_tick: 위치→patrol.next_direction→target_x로 walk블록+공격. config_adapter 첫zone 경계 매핑
+### JunkSell (core/acting/junk_seller.py)
+- JunkSeller: A core/junk_seller.sell_junk 위임(검증된 인벤→상점 템플릿판매) + B 보호목록(is_protected 부분매칭)
+- config settings2.junk_sell.protect_items 에서 보호목록 로드
+- runtime junk_config(ConfigManager 주입)시 활성. run_integrated에서 rc.junk_config=cm
+- ※ A sell_junk는 기타탭 일괄판매라 아이템단위 필터없음 → 보호목록은 슬롯단위 판매확장시 적용(실기 확장지점)
+### 검증: tests 137 passed 누계 (patrol5 + junk5)
+### 남은 실기: 자동판매 주기타이머+안전지대이동(게임필요), 순찰 다층 확장(층간 이동)

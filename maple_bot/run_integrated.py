@@ -23,6 +23,7 @@ def build_runtime():
     # 1) 설정 로드 (ConfigManager — UI 편집/저장과 공유)
     cm = ConfigManager()
     rc = to_runtime_config(cm._data)
+    rc.junk_config = cm          # 잡템 판매는 ConfigManager get 인터페이스 사용
 
     # 2) 실제 화면 캡처 (mss 기반 ScreenReader 재사용)
     screen = ScreenReader()
