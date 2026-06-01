@@ -4,8 +4,8 @@
 > 진행 방식: 모듈 단위. 각 모듈 = 인터페이스 계약 구현 + 테스트 + 커밋.
 
 ## 전체 구현 순서 (도면 5-3 기준)
-- [ ] **M1. Humanizer + InputBackend** ← 진행 중 (모든 행동의 기반)
-- [ ] M2. Scanner 프레임워크 + 이벤트큐
+- [x] **M1. Humanizer + InputBackend** ✓ 14 passed (모든 행동의 기반)
+- [x] M2. Scanner 프레임워크 + 이벤트큐 ✓ 16 passed
 - [ ] M3. Navigation (BlockRunner + FloorJudge)
 - [ ] M4. MinigameSolver 사이드카 (Planet v2, 3.13 IPC)
 - [ ] M5. Acting (Combat/Buff/Potion/JunkSell/Charlie)
@@ -34,6 +34,21 @@
 **성공 기준.** Humanizer.perform(Intent) 호출 시 ①risk_profile에 따라 타이밍 분포가 바뀌고 ②동일 키 연타가 통계적으로 비균일하며 ③백엔드 유무와 무관하게 동작.
 
 ---
+
+## M2. Scanner 프레임워크 + 이벤트큐
+
+**목표.** god-loop 해체 토대. C "전용 스캐너 스레드 + 이벤트큐" 패턴.
+**위치.** `core/sensing/`
+**계약 (도면 5-4).** Scanner.start(event_queue)/stop. Event{type, data, ts}.
+
+### 태스크
+- [x] M2-1. Event 데이터클래스 ✓ 4 passed
+- [x] M2-2. Scanner 추상 + 스레드 생명주기(예외견고성 포함) ✓ 4 passed
+- [x] M2-3. CharScanner (C HSV+면적필터) ✓ 4 passed
+- [x] M2-4. AntiMobScanner (B 유형별 다중템플릿) ✓ 4 passed
+- [x] M2-5. 커밋 ← 진행 중
+
+**성공 기준.** Scanner를 start하면 독립 스레드가 돌며 감지 시 Event를 큐에 push, stop하면 깔끔히 종료. AntiMobScanner는 config의 유형별 on/off를 따름.
 
 ## 헌법 (도면 0번 — 전 모듈 불변)
 - 화면인식 + Interception + Humanizer만. 메모리조작(pymem/ReadProcessMemory) 전면 배제

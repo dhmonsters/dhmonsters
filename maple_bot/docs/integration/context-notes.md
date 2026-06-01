@@ -42,3 +42,38 @@
 - 백엔드는 lazy: select_backend가 is_available() 호출 시점에 드라이버 캡처 시도
 - _PROFILE 파라미터는 출발점(careful reaction 0.22~0.45 등). 실기 안티밴 데이터로 추후 튜닝
 - 다음(M2): Scanner 프레임워크 + 이벤트큐. Humanizer는 M3(Navigation)/M5(Acting)에서 소비됨
+
+## 2026-06-01 — M2 착수 (Scanner 프레임워크 + 이벤트큐)
+
+### 사용자 결정
+- 매크로 방지몹 = B 방식 채택 (카테고리4 재확정)
+  - B: macro_mob/ 에 몹 유형별 다중 템플릿 (lulu1~2 루루모, rich1~13 리치, monster1~9)
+  - config 키: lulumo_enabled / rich_enabled / auto_guard_enabled (유형별 on/off)
+  - → AntiMobScanner 는 "유형별 템플릿 세트"를 돌며 감지. A anti_mob 단일방식 대신 B 다중템플릿
+
+### M2 설계
+- Event{type, data, ts} 데이터클래스 (도면 5-4)
+- Scanner 추상: start(event_queue)/stop, 독립 스레드, 큐에 push만
+- 이벤트큐: thread-safe (queue.Queue)
+- 첫 구현체: CharScanner(C vision.py HSV 방식 — 카테고리1 채택). AntiMobScanner는 M2 후반 or M5
+
+## 2026-06-01 — M2 완료 (Scanner 프레임워크 + 이벤트큐)
+
+### 구현됨 (core/sensing/)
+- event.py: Event{type,data,ts} 자동 타임스탬프 + type 검증
+- scanner.py: Scanner 추상 — 독립 스레드(start/stop/is_running), scan_once 예외 삼킴(견고성), None반환시 push안함
+- char_scanner.py: find_char_in_hsv 순수함수(inRange→contour→면적필터→moments, C vision.py 방식) + CharScanner. set_hsv 오버라이드
+- antimob_scanner.py: match_any_template(B 다중템플릿) + AntiMobScanner. enabled_types로 유형별 on/off
+
+### 검증
+- tests 30 passed 누계 (M1 14 + M2 16: event4/scanner4/char4/antimob4)
+
+### 디버깅 기록 (read-errors 원칙)
+- AntiMob 테스트 2개 실패 → 추측않고 실제 점수 출력으로 진단
+- 원인: 균일색(분산0) 템플릿이 TM_CCOEFF_NORMED에서 모든 위치 1.0 (정규화 분모0). 코드 아닌 테스트 픽스처 문제
+- 수정: 텍스처(랜덤) 패치 + 노이즈 배경으로 픽스처 현실화 → 통과. 실제 몬스터 템플릿은 텍스처 있어 무문제
+
+### 결정/주의
+- B 방식 확정: macro_mob 유형별(lulu/rich/monster) 다중템플릿, config lulumo/rich/auto_guard_enabled로 on/off
+- Scanner는 capture를 callable로 주입받음(테스트 용이, screen_reader 의존 역전)
+- 다음(M3): Navigation BlockRunner — C routine_runner 스키마 + 도착확인 폐루프. Humanizer(M1) 소비 시작
