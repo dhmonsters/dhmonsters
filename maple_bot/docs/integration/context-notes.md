@@ -365,3 +365,20 @@
 - board_region(거탐 게임판 영역) 실측 설정, 실 mss+Interception 주입
 - main.py 신구조 진입점, UI 6페이지 실위젯, JunkSell A이식
 - ★실게임 거탐 정확도 검증 (자체모델이 실투명도형 잡는지) — 가장 중요
+
+## 2026-06-01 — interception 백엔드 활성화 (실행 환경)
+- 증상: 봇 실행시 "No module named 'interception'" → sendinput 폴백
+- 원인: 패키지가 Python 3.13에 설치됨(그냥 pip install). 봇은 3.14로 실행 → 버전 불일치
+- 해결: py -3.14 -m pip install interception-python → 3.14에 설치 → "드라이버 활성화 - 스텔스 입력" 확인
+- ★규칙: 봇용 패키지는 반드시 `py -3.14 -m pip install` (그냥 pip는 PATH상 3.13에 깔릴 수 있음)
+- 현재 select_backend() → interception 정상 선택됨
+
+## 2026-06-01 — UI 6페이지 실위젯 (config 편집 폼)
+### 구현됨 (core_ui/)
+- widgets.py: _Field 베이스 + CheckField/TextField/IntField/ComboField. config 양방향 바인딩(로드+변경시 set+save 자동). DESIGN.md spacing 토큰
+- pages.py: build_pages(config) → 6 카테고리 페이지. 각 config 실키 매핑(공격키/물약/거탐/방지몹/픽업 등). QScrollArea 래핑
+- shell.py: MainShell(config=None) — config 있으면 build_pages, 없으면 플레이스홀더(테스트 호환)
+- run_integrated.py: ConfigManager 로드 → shell(config=cm). build_runtime이 (rt,rc,cm) 반환
+### 검증: tests 123 passed 누계. 실 config 렌더 확인 — 전투페이지 ctrl/350/HP65 pgup/MP50 pgdn 바인딩
+### 동작: 페이지 입력 변경 → 즉시 config.json 저장(cm.set+save). 플레이스홀더→실설정폼 완성
+### 남은 UI: 미니맵 영역 드래그 설정, 좌표 캡처 버튼 등 인터랙티브 위젯은 실기 연동 필요

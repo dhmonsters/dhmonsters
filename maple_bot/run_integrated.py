@@ -12,17 +12,17 @@ ROOT = Path(__file__).resolve().parent
 
 
 def build_runtime():
-    """config.json → 어댑터 → 실 캡처/백엔드 주입 → BotRuntime 조립."""
+    """ConfigManager → 어댑터 → 실 캡처/백엔드 주입 → BotRuntime 조립.
+    반환: (runtime, RuntimeConfig, ConfigManager)."""
     from core.screen_reader import ScreenReader
+    from core.config_manager import ConfigManager
     from core.humanize.backend import select_backend
     from core.config_adapter import to_runtime_config
     from core.runtime import BotRuntime
 
-    # 1) 설정 로드
-    cfg_path = ROOT / "config.json"
-    with open(cfg_path, encoding="utf-8") as f:
-        cfg_dict = json.load(f)
-    rc = to_runtime_config(cfg_dict)
+    # 1) 설정 로드 (ConfigManager — UI 편집/저장과 공유)
+    cm = ConfigManager()
+    rc = to_runtime_config(cm._data)
 
     # 2) 실제 화면 캡처 (mss 기반 ScreenReader 재사용)
     screen = ScreenReader()
@@ -35,7 +35,7 @@ def build_runtime():
 
     # 4) 런타임 조립
     rt = BotRuntime(screen_capture=capture, input_backend=backend, config=rc)
-    return rt, rc
+    return rt, rc, cm
 
 
 class BotController:
@@ -83,9 +83,9 @@ def main():
     app = QApplication(sys.argv)
     fam = apply_font(app)            # DESIGN.md Inter + 자간 -0.16px
     print(f"[폰트] {fam} 적용")
-    shell = MainShell()
 
-    rt, rc = build_runtime()
+    rt, rc, cm = build_runtime()
+    shell = MainShell(config=cm)     # 실제 설정 페이지 바인딩
     shell.append_log(f"설정 로드: 미니맵 {rc.minimap_region}, 층 {len(rc.floors)}개, 버프 {len(rc.buffs)}개")
 
     controller = BotController(rt, log_fn=shell.append_log)

@@ -24,8 +24,9 @@ class MainShell(QMainWindow):
     """통합 봇의 메인 셸. 페이지 내용은 플레이스홀더(실연결은 통합단계).
     레이아웃·간격은 DESIGN.md(Linear) spacing 토큰을 따른다."""
 
-    def __init__(self):
+    def __init__(self, config=None):
         super().__init__()
+        self._config = config
         self.setWindowTitle("DHMONSTERS")
         self.resize(1180, 720)
         self.setStyleSheet(build_qss())
@@ -43,8 +44,14 @@ class MainShell(QMainWindow):
         root_l.addWidget(self._build_log_dock(), 0)
         self.setCentralWidget(root)
 
-        for name, desc in CATEGORIES:
-            self.stack.addWidget(self._build_page(name, desc))
+        # config 있으면 실제 설정 페이지, 없으면 플레이스홀더(테스트 호환)
+        if config is not None:
+            from core_ui.pages import build_pages
+            for page in build_pages(config):
+                self.stack.addWidget(page)
+        else:
+            for name, desc in CATEGORIES:
+                self.stack.addWidget(self._build_page(name, desc))
         self.nav_buttons[0].setChecked(True)
         self.stack.setCurrentIndex(0)
 
