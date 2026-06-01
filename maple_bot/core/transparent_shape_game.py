@@ -52,6 +52,13 @@ class TransparentShapeGame:
         self._prev_frame: Optional[np.ndarray] = None
         self._lost_count = 0
 
+        # YOLO 감지기 (모델 없으면 자동 비활성 → 흰색/차분 휴리스틱 폴백)
+        try:
+            from core.shape_yolo import ShapeYolo
+            self._yolo = ShapeYolo()
+        except Exception:
+            self._yolo = None
+
     # ── 타이틀 감지 ──────────────────────────────────────────────────
     def detect_title(self, screenshot) -> Optional[tuple]:
         return self._screen.find_template(screenshot, TITLE_TEMPLATE, TITLE_THRESHOLD)
@@ -66,9 +73,16 @@ class TransparentShapeGame:
 
     # ── 감지 파이프라인 ──────────────────────────────────────────────
     def find_shape_in_board(self, board_img: np.ndarray) -> Optional[tuple]:
-        # Stage 1: 흰색 도형 직접 감지
-        pos = self._find_white_region(board_img)
-        # Stage 2: 흰색이 안 잡히면(투명해짐) 프레임 차분으로 이동 추적
+        # Stage 0: YOLO (모델 활성 시 최우선 — 투명해져도 추적)
+        pos = None
+        if self._yolo is not None and self._yolo.enabled:
+            r = self._yolo.detect(board_img)
+            if r is not None:
+                pos = (r[0], r[1])
+        # Stage 1: 흰색 도형 직접 감지 (폴백)
+        if pos is None:
+            pos = self._find_white_region(board_img)
+        # Stage 2: 흰색이 안 잡히면(투명해짐) 프레임 차분으로 이동 추적 (폴백)
         if pos is None:
             pos = self._find_via_frame_diff(board_img)
         self._prev_frame = board_img.copy()

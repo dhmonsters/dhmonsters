@@ -4,6 +4,8 @@ from __future__ import annotations
 import ctypes
 import time
 
+from core import interception_backend as _ic
+
 
 # ── Win32 SendInput 상수 ────────────────────────────────────────────────
 INPUT_KEYBOARD = 1
@@ -164,6 +166,9 @@ class InputController:
     # ── 키보드 ───────────────────────────────────────────────────────
     def press_key(self, key: str, hold_sec: float = 0.05) -> None:
         """키를 hold_sec초 동안 누른 뒤 뗀다."""
+        if _ic.is_active():
+            _ic.press(key, hold_sec)
+            return
         vk = _vk(key)
         if not vk:
             return
@@ -173,12 +178,18 @@ class InputController:
 
     def key_down(self, key: str) -> None:
         """키를 누른 상태로 유지한다."""
+        if _ic.is_active():
+            _ic.key_down(key)
+            return
         vk = _vk(key)
         if vk:
             _send_key(vk)
 
     def key_up(self, key: str) -> None:
         """누르고 있던 키를 뗀다."""
+        if _ic.is_active():
+            _ic.key_up(key)
+            return
         vk = _vk(key)
         if vk:
             _send_key(vk, KEYEVENTF_KEYUP)
@@ -186,6 +197,9 @@ class InputController:
     # ── 마우스 ───────────────────────────────────────────────────────
     def click(self, x: int, y: int) -> None:
         """(x, y) 화면 절대 좌표를 좌클릭한다."""
+        if _ic.is_active():
+            _ic.click(x, y)
+            return
         _move_mouse(x, y)
         time.sleep(0.03)
         _click_mouse(True)
