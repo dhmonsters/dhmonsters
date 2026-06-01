@@ -105,6 +105,17 @@ def test_no_route_mode_keeps_tick_path():
     assert rt.floor_hunt_runner is None
 
 
+def test_pickup_timer_presses_key_on_interval():
+    """픽업 타이머: 활성 시 hunting_tick에서 줍기 키 입력."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+                        pickup_key="z", pickup_interval=0.0)
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel())
+    rt.hunting_tick(now=1.0)
+    assert "z" in backend.presses        # 줍기 키 송출
+
+
 def test_transparent_disabled_skips_solver():
     """투명도형 자동풀이 꺼지면 safety_tick이 풀이 시도 안 함(일시정지 유지)."""
     rt, _ = _make_runtime(lambda r=None: _yellow_at(50, 75))

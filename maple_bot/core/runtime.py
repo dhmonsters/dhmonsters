@@ -62,6 +62,9 @@ class RuntimeConfig:
     # 펫 먹이
     pet_key: str = ""
     pet_interval: float = 600.0
+    # 픽업 타이머 — 주기적으로 줍기 키 입력(바닥 아이템 자동 줍기)
+    pickup_key: str = ""
+    pickup_interval: float = 60.0
     # 텔레그램 알림
     tg_enabled: bool = False
     tg_token: str = ""
@@ -150,6 +153,9 @@ class BotRuntime:
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
         self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval)
+        # 픽업 타이머 — PetFeeder 패턴 재사용(주기 줍기 키)
+        self.pickup = PetFeeder(self.humanizer, key=config.pickup_key,
+                                interval=config.pickup_interval)
         # 몬스터 감지(image 모드) — 닉네임/몬스터 템플릿 로드 (B 메커니즘)
         self._name_tpl = None
         self._monster_tpls = {}
@@ -243,6 +249,7 @@ class BotRuntime:
         if self.floor_hunt_runner is not None:
             self.buffs.tick(now)
             self.pet.tick(now)
+            self.pickup.tick(now)
             return
 
         # 공격할지 판정: image 모드는 공격박스 안 몬스터 있을 때만(B), 그 외(key)는 항상
@@ -273,6 +280,7 @@ class BotRuntime:
 
         self.buffs.tick(now)
         self.pet.tick(now)
+        self.pickup.tick(now)
 
     def _monster_in_range(self) -> bool:
         """B 메커니즘: 사냥영역 캡처 → 닉네임 위치 → atk 박스 → 박스 안 몬스터 매칭."""

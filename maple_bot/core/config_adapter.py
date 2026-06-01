@@ -106,6 +106,9 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         patrol_margin=patrol_margin,
         pet_key=pet_key,
         pet_interval=pet_interval,
+        pickup_key=(d.get("pickup_timer", {}).get("pickup_key", "")
+                    if d.get("pickup_timer", {}).get("enabled") else ""),
+        pickup_interval=float(d.get("pickup_timer", {}).get("interval_sec", 60)),
         lie_enabled=bool(lie.get("enabled", True)),
         lie_alert=bool(lie.get("alert_enabled",
                                lie.get("play_alarm", False) or lie.get("tg_enabled", False))),

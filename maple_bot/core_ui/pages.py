@@ -251,6 +251,16 @@ def build_pages(config) -> list[QWidget]:
         [atk_picker])
     from core_ui.buff_editor import BuffEditor
     buff_editor = BuffEditor(c, ("attack", "normal_buffs"))
+    # HP/MP 실시간 % 미리보기 (A Detector 고정 상대좌표). 게임 없거나 실패 시 생략
+    combat_extras = []
+    try:
+        from core.detector import Detector
+        from core.screen_reader import ScreenReader
+        from core_ui.gauge_preview import GaugePreview
+        combat_extras.append(GaugePreview(Detector(ScreenReader(), c)))
+    except Exception:
+        pass
+    combat_extras.append(buff_editor)
     pages.append(_page("전투", "공격·버프·물약·펫·줍기", [
         TextField("공격 키", c, ("attack", "key"), default="ctrl"),
         atk_status,
@@ -265,7 +275,7 @@ def build_pages(config) -> list[QWidget]:
         CheckField("펫 먹이 사용", c, ("recovery", "pet_food", "enabled")),
         TextField("펫 먹이 키", c, ("recovery", "pet_food", "key")),
         IntField("펫 먹이 간격(분)", c, ("recovery", "pet_food", "interval_min"), 1, 120, default=10),
-    ], extras=[buff_editor]))
+    ], extras=combat_extras))
 
     # 4. 안전·안티밴 — 거탐 알림(소리+텔레그램) 통합
     pages.append(_page("안전·안티밴", "거탐·방지몹·유저감지·자동응답·채널변경·인간화강도", [

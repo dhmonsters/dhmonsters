@@ -608,3 +608,10 @@
 - BotController: start→set_running(True)+runner.start(), stop→set_running(False)+runner.stop().
 - 검증: tests 206 (FloorHuntRunner 5, runtime route_mode 게이팅 2).
 - 남은 ②결선: 자동하강(층 x데이터·밧줄zones·아래몬스터 스캔·route에 자동 down 삽입) + 구간 sweep 중 공격(백그라운드 or attack블록 인터리브).
+
+## 2026-06-02 — UI/UX 12개 배치 (사용자 요청)
+그룹A(UI): 펫 키/간격+BuffEditor 추가, 레벨정지 삭제, F1/F2 단축키, 영역/캡처를 StatusField(●설정됨 색상)로, 맵이탈 드래그.
+그룹B(결선): 거탐 알림 통합(소리+텔레그램 한 토글, _handle_lie), 투명도형 자동풀이 게이팅(transparent_enabled), board_roi 비율→region, lie_enabled 버그수정(체크박스 미반영).
+그룹C(신규): HP/MP 실시간 % GaugePreview(A Detector 고정 상대좌표 coordinate.hp/mp), 픽업타이머 결선(PetFeeder 재사용).
+- 확인답변: 픽업=주기 줍기키. 텔레그램=기존엔 유저감지만. 거탐영역=board_roi{0.286,0.183,0.428,0.575}. HP/MP·픽업은 신규 runtime에 미결선이던 것 연결.
+- 검증: tests 210 passed.
