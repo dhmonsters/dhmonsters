@@ -95,6 +95,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         floors=_floors(zones),
         route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
                if isinstance(b, dict) and "type" in b],
+        route_mode=bool(d.get("floor_hunt", {}).get("route_mode", False)),
         attack_key=attack_key,
         hp_rule=hp_rule,
         mp_rule=mp_rule,

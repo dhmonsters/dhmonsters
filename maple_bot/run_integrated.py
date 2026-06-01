@@ -52,18 +52,27 @@ class BotController:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self._rt.set_running(True)
         self._rt.start_scanners()
+        # 층별 반복 사냥 루트는 별도 스레드로(블로킹 사다리 등반 중 메인루프 선점 유지)
+        if self._rt.floor_hunt_runner is not None:
+            self._rt.floor_hunt_runner.start()
+            self._log("▶ 봇 시작 (층별 루트 실행기)")
+        else:
+            self._log("▶ 봇 시작")
         self._thread = threading.Thread(target=self._loop, daemon=True, name="BotMainLoop")
         self._thread.start()
-        self._log("▶ 봇 시작")
 
     def stop(self):
         self._stop.set()
+        self._rt.set_running(False)
+        if self._rt.floor_hunt_runner is not None:
+            self._rt.floor_hunt_runner.stop()
         self._rt.stop_scanners()
         self._log("■ 봇 정지")
 
     def _loop(self):
-        """메인 루프: 이벤트 처리 → 모드별 틱."""
+        """메인 루프: 이벤트 처리 → 모드별 틱(루트 모드면 이동·공격은 루트 스레드 담당)."""
         while not self._stop.is_set():
             try:
                 self._rt.orchestrator.process_pending()

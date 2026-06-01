@@ -77,6 +77,34 @@ def test_attack_releases_held_move_key():
     assert "a" in backend.presses            # 공격 입력
 
 
+def test_route_mode_builds_floor_hunt_runner_and_gates():
+    """route_mode면 FloorHuntRunner 생성 + 활성조건(_bot_running & hunting) 게이팅."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        floors=[Floor("1층", 70, 80)],
+        route=[Block(type="move", target_x=0, move_type="walk")],
+        route_mode=True, attack_key="a",
+    )
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg,
+                    sidecar_channel=InMemoryChannel())
+    assert rt.floor_hunt_runner is not None
+    assert rt._route_can_run() is False          # 아직 정지 상태
+    assert rt.floor_hunt_runner.run_once() is False
+    rt.set_running(True)
+    assert rt._route_can_run() is True            # 켜짐 + hunting
+    assert rt.floor_hunt_runner.run_once() is True
+    rt.orchestrator.mode = "safety"
+    assert rt._route_can_run() is False           # 안전모드 → 루트 멈춤
+
+
+def test_no_route_mode_keeps_tick_path():
+    """route_mode 아니면 FloorHuntRunner 없음(기존 틱 경로 유지)."""
+    rt, _ = _make_runtime(lambda r=None: _yellow_at(50, 75))
+    assert rt.floor_hunt_runner is None
+
+
 def test_safety_event_triggers_solver_then_resume():
     """거탐 이벤트 → safety 모드 → 거탐엔진 풀이 → 재개."""
     rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))

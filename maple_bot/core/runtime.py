@@ -33,6 +33,7 @@ class RuntimeConfig:
     minimap_region: dict
     floors: list[Floor] = field(default_factory=list)
     route: list[Block] = field(default_factory=list)
+    route_mode: bool = False     # True면 route를 floor-hunt 루트 실행기로 반복 실행(사다리/모드)
     attack_key: str = ""
     hp_rule: PotionRule | None = None
     mp_rule: PotionRule | None = None
@@ -135,9 +136,11 @@ class BotRuntime:
         )
 
         # 행동/동선 계층
+        self._bot_running = False    # 컨트롤러 start/stop로 토글 (루트 실행 활성 조건)
         self.block_runner = BlockRunner(
             humanizer=self.humanizer,
             pos_fn=lambda: self.orchestrator.state.get_position() or (0, 0),
+            stop_fn=lambda: not self._route_can_run(),   # 안전모드·정지 시 루트 폴링루프 즉시 이탈
         )
         self.floor_judge = FloorJudge(config.floors) if config.floors else None
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
@@ -166,6 +169,16 @@ class BotRuntime:
             self.patrol = Patrol(
                 PatrolZone(config.patrol_left_x, config.patrol_right_x),
                 margin=config.patrol_margin,
+            )
+
+        # 층별 반복 사냥 루트 실행기 — route_mode + route 있으면 별도 스레드로 반복 실행
+        self.floor_hunt_runner = None
+        if config.route_mode and config.route:
+            from core.navigation.floor_hunt_runner import FloorHuntRunner
+            self.floor_hunt_runner = FloorHuntRunner(
+                self.block_runner,
+                get_blocks=lambda: self._cfg.route,
+                is_active=self._route_can_run,
             )
 
         # 거탐 계층 (격리) — 자체 ncnn 엔진 (secure_loader/서버 의존 없음)
@@ -204,11 +217,26 @@ class BotRuntime:
             if sc is not None:
                 sc.stop()
 
+    # ── 루트 실행 활성 조건 ───────────────────────────────────────────
+    def set_running(self, flag: bool) -> None:
+        """컨트롤러 start/stop가 호출 — 루트 실행기 활성/정지 토글."""
+        self._bot_running = flag
+
+    def _route_can_run(self) -> bool:
+        """봇이 켜져 있고 사냥 모드일 때만 루트 실행(안전모드·정지 시 즉시 이탈)."""
+        return self._bot_running and self.orchestrator.mode == "hunting"
+
     # ── 틱 ────────────────────────────────────────────────────────────
     def hunting_tick(self, now: float | None = None) -> None:
         """정상 사냥 1틱: 구역 좌우 왕복 순찰 + 공격 + 버프."""
         now = now if now is not None else time.time()
         if self.orchestrator.mode != "hunting":
+            return
+
+        # 루트 실행기 모드: 이동·공격은 루트 스레드가 수행 → 여기선 버프/펫만
+        if self.floor_hunt_runner is not None:
+            self.buffs.tick(now)
+            self.pet.tick(now)
             return
 
         # 공격할지 판정: image 모드는 공격박스 안 몬스터 있을 때만(B), 그 외(key)는 항상

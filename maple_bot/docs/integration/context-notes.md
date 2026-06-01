@@ -599,3 +599,12 @@
 - 층 x구간 ∩ 밧줄구간 제외 ∩ 몬스터 가장 밀집한 버킷 평균 X. 후보없으면 None.
 - 검증: tests 199 (밀집/밧줄제외/층밖제외/None/뒤집힘 5개).
 - 미결(결선 결정 필요): ①층 x구간 출처(Floor에 x추가 vs patrol zone) ②밧줄 zones(route ladder_x±margin) ③"아래" 몬스터 캡처영역 정의 ④floor-hunt 루트 실행기(블로킹)에서 하강 미설정시 호출. → floor-hunt 루트 실행 결선이 선행 필요.
+
+## 2026-06-02 — floor-hunt 루트 실행기(토대 결선)
+- 블로킹 run_route를 메인루프와 분리: 별도 스레드 FloorHuntRunner(core/navigation/floor_hunt_runner.py). 사다리 등반(수초) 중에도 메인루프 process_pending이 돌아 거탐 선점 가능.
+- 중단: BlockRunner.stop_fn = not _route_can_run() (안전모드/정지 시 폴링루프 즉시 이탈).
+- RuntimeConfig.route_mode 추가(adapter: floor_hunt.route_mode). route_mode+route 있으면 rt.floor_hunt_runner 생성, is_active=_route_can_run(=_bot_running & mode==hunting).
+- runtime.set_running()/_route_can_run(). hunting_tick은 루트모드면 버프/펫만(이동·공격은 루트스레드).
+- BotController: start→set_running(True)+runner.start(), stop→set_running(False)+runner.stop().
+- 검증: tests 206 (FloorHuntRunner 5, runtime route_mode 게이팅 2).
+- 남은 ②결선: 자동하강(층 x데이터·밧줄zones·아래몬스터 스캔·route에 자동 down 삽입) + 구간 sweep 중 공격(백그라운드 or attack블록 인터리브).
