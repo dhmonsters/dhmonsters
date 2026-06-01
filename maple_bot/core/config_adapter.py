@@ -106,6 +106,12 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         patrol_margin=patrol_margin,
         pet_key=pet_key,
         pet_interval=pet_interval,
+        lie_enabled=bool(lie.get("enabled", True)),
+        lie_alert=bool(lie.get("alert_enabled",
+                               lie.get("play_alarm", False) or lie.get("tg_enabled", False))),
+        board_roi=lie.get("board_roi"),
+        transparent_enabled=bool(
+            d.get("settings1", {}).get("transparent_shape", {}).get("enabled", True)),
         tg_enabled=bool(lie.get("tg_enabled", False)),
         tg_token=lie.get("tg_token", ""),
         tg_chat_id=lie.get("tg_chat_id", ""),

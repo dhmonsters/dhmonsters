@@ -267,10 +267,12 @@ def build_pages(config) -> list[QWidget]:
         IntField("펫 먹이 간격(분)", c, ("recovery", "pet_food", "interval_min"), 1, 120, default=10),
     ], extras=[buff_editor]))
 
-    # 4. 안전·안티밴
+    # 4. 안전·안티밴 — 거탐 알림(소리+텔레그램) 통합
     pages.append(_page("안전·안티밴", "거탐·방지몹·유저감지·자동응답·채널변경·인간화강도", [
         CheckField("거탐 감지", c, ("settings1", "lie_detector", "enabled")),
-        CheckField("거탐 알림음", c, ("settings1", "lie_detector", "play_alarm")),
+        CheckField("거탐 알림 (소리+텔레그램)", c, ("settings1", "lie_detector", "alert_enabled")),
+        TextField("텔레그램 토큰", c, ("settings1", "lie_detector", "tg_token")),
+        TextField("텔레그램 챗ID", c, ("settings1", "lie_detector", "tg_chat_id")),
         CheckField("투명도형 자동풀이", c, ("settings1", "transparent_shape", "enabled")),
         CheckField("다른 유저 감지", c, ("settings1", "user_detected", "enabled")),
         CheckField("방지몹 해제", c, ("anti_mob", "enabled")),

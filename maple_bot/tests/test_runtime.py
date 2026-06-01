@@ -105,6 +105,55 @@ def test_no_route_mode_keeps_tick_path():
     assert rt.floor_hunt_runner is None
 
 
+def test_transparent_disabled_skips_solver():
+    """투명도형 자동풀이 꺼지면 safety_tick이 풀이 시도 안 함(일시정지 유지)."""
+    rt, _ = _make_runtime(lambda r=None: _yellow_at(50, 75))
+    rt._cfg.transparent_enabled = False
+    from core.sensing.event import Event
+    rt.orchestrator._q.put(Event(type="lie", data={}))
+    rt.orchestrator.process_pending()
+    assert rt.orchestrator.mode == "safety"
+
+    called = {"n": 0}
+    rt.registry.solve = lambda *a, **k: called.__setitem__("n", called["n"] + 1)
+    rt.safety_tick(now=2.0)
+    assert called["n"] == 0            # 풀이 안 함
+    assert rt.orchestrator.mode == "safety"   # 계속 일시정지
+
+
+def test_lie_alert_sends_telegram_when_enabled():
+    """거탐 알림 켜짐 + 텔레그램 자격 있으면 거탐 시 텔레그램 전송."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        lie_alert=True, tg_token="t", tg_chat_id="c",
+    )
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg,
+                    sidecar_channel=InMemoryChannel())
+    sent = []
+    rt.telegram.send = lambda msg: sent.append(msg)
+    from core.sensing.event import Event
+    rt.orchestrator._q.put(Event(type="lie", data={}))
+    rt.orchestrator.process_pending()
+    assert any("거탐" in m for m in sent)
+
+
+def test_lie_alert_off_no_telegram():
+    """거탐 알림 꺼지면 텔레그램 안 보냄."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+                        lie_alert=False, tg_token="t", tg_chat_id="c")
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel())
+    sent = []
+    rt.telegram.send = lambda msg: sent.append(msg)
+    from core.sensing.event import Event
+    rt.orchestrator._q.put(Event(type="lie", data={}))
+    rt.orchestrator.process_pending()
+    assert sent == []
+
+
 def test_safety_event_triggers_solver_then_resume():
     """거탐 이벤트 → safety 모드 → 거탐엔진 풀이 → 재개."""
     rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))

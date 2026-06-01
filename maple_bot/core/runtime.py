@@ -43,10 +43,13 @@ class RuntimeConfig:
     minigame_type: str = "planet"
     # 거탐 (자체 ncnn 엔진)
     transparent_models_dir: str = "models/transparent"
-    board_region: dict | None = None          # 거탐 게임판 화면영역 (None=minimap_region 대용 아님; 실기 설정)
+    board_region: dict | None = None          # 거탐 게임판 화면영역 (None=board_roi 비율 사용)
+    board_roi: dict | None = None              # A 고정 상대좌표 {x_ratio,y_ratio,w_ratio,h_ratio}
     transparent_use_gpu: bool = False
+    transparent_enabled: bool = True           # 투명도형 자동풀이 on/off (체크박스 게이팅)
     # 거탐 감지 (LieScanner)
     lie_enabled: bool = True
+    lie_alert: bool = False                     # 거탐 알림(소리+텔레그램) 통합 토글
     lie_title_template: str = "templates/transparent_shape_title.png"
     lie_threshold: float = 0.65
     lie_detect_region: dict | None = None      # 타이틀 탐색 영역 (None=전체화면)
@@ -123,9 +126,10 @@ class BotRuntime:
                 screen_capture, min_red=config.user_min_red,
                 region=config.minimap_region,
             )
-        # 텔레그램 알림
+        # 텔레그램 알림 — 토큰·챗ID 있으면 활성(거탐 알림 통합 토글이 발동 시점 결정)
         self.telegram = TelegramNotifier(
-            token=config.tg_token, chat_id=config.tg_chat_id, enabled=config.tg_enabled,
+            token=config.tg_token, chat_id=config.tg_chat_id,
+            enabled=bool(config.tg_token and config.tg_chat_id),
         )
 
         # 조율 계층
@@ -195,6 +199,8 @@ class BotRuntime:
 
         # 다른 유저 감지 → 자동응답(채팅) + 텔레그램 알림
         self.orchestrator.on("user_detected", self._handle_user_detected)
+        # 거탐 감지 → 알림(소리+텔레그램) 통합. 자동풀이는 safety_tick이 담당
+        self.orchestrator.on("lie", self._handle_lie)
 
     # ── 감지 펌프 (테스트: 수동 / 실기: 스레드) ──────────────────────
     def pump_scanners_once(self) -> None:
@@ -287,9 +293,11 @@ class BotRuntime:
             scene, self._monster_tpls, box, threshold=self._cfg.monster_accuracy) > 0
 
     def safety_tick(self, now: float | None = None) -> None:
-        """안전 모드 1틱: 거탐 풀이 시도 → 성공 시 사냥 재개."""
+        """안전 모드 1틱: (자동풀이 켜졌을 때만) 거탐 풀이 시도 → 성공 시 사냥 재개."""
         if self.orchestrator.mode != "safety":
             return
+        if not self._cfg.transparent_enabled:
+            return   # 투명도형 자동풀이 꺼짐 → 일시정지 유지(사용자 수동 처리)
         self._frame_id += 1
         # SelfTransparentEngine.solve 가 게임판을 추적해 도형 사라질때까지 푼다(블로킹)
         result = self.registry.solve(
@@ -300,10 +308,46 @@ class BotRuntime:
             self.orchestrator.clear_safety()
 
     # ── 내부 ──────────────────────────────────────────────────────────
+    def _handle_lie(self, ev) -> None:
+        """거탐 감지 → 알림(소리+텔레그램) 통합 발동. lie_alert 켜졌을 때만."""
+        if not self._cfg.lie_alert:
+            return
+        import threading as _th
+
+        def _beep():
+            try:
+                import winsound
+                for _ in range(3):
+                    winsound.Beep(1000, 300)
+            except Exception:
+                pass
+        _th.Thread(target=_beep, daemon=True).start()
+        try:
+            self.telegram.send("거탐 감지됨 — 봇 일시정지")
+        except Exception:
+            pass
+
     def _capture_board(self):
-        """거탐 게임판 영역 캡처 (board_region 설정 시 그 영역, 없으면 전체)."""
+        """거탐 게임판 영역 캡처. board_region 우선, 없으면 board_roi 비율(A 고정값)로 환산, 둘 다 없으면 전체."""
         region = self._cfg.board_region
+        if region is None and self._cfg.board_roi:
+            region = self._board_roi_to_region(self._cfg.board_roi)
         return self._capture(region) if region else self._capture()
+
+    def _board_roi_to_region(self, roi: dict):
+        """A 고정 상대좌표(x/y/w/h_ratio)를 주모니터 기준 픽셀 영역으로 환산."""
+        try:
+            import mss as _mss
+            with _mss.mss() as sct:
+                mon = sct.monitors[1]
+            return {
+                "left": mon["left"] + int(roi["x_ratio"] * mon["width"]),
+                "top": mon["top"] + int(roi["y_ratio"] * mon["height"]),
+                "width": max(1, int(roi["w_ratio"] * mon["width"])),
+                "height": max(1, int(roi["h_ratio"] * mon["height"])),
+            }
+        except Exception:
+            return None
 
     def _move_cursor(self, cx: int, cy: int) -> None:
         """거탐 도형 추적용 커서 이동. 백엔드에 move_to 있으면 사용(실기 Interception)."""
