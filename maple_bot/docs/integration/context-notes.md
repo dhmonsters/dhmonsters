@@ -407,3 +407,18 @@
 - ※ A sell_junk는 기타탭 일괄판매라 아이템단위 필터없음 → 보호목록은 슬롯단위 판매확장시 적용(실기 확장지점)
 ### 검증: tests 137 passed 누계 (patrol5 + junk5)
 ### 남은 실기: 자동판매 주기타이머+안전지대이동(게임필요), 순찰 다층 확장(층간 이동)
+
+## 2026-06-01 — 누락 기능 점검 + 이식 (펫/텔레그램/유저감지/자동응답)
+### 점검 결과: 핵심 사냥루프는 완성됐으나 부가기능 6개 누락 발견 → 코드가능 5개 이식
+### 이식됨
+- core/acting/pet.py: PetFeeder 주기 펫먹이(Humanizer). hunting_tick에 pet.tick 결선
+- core/notify/telegram.py: TelegramNotifier(requests POST, 예외삼킴=봇안멈춤). 토큰/chatid/enabled
+- core/sensing/user_scanner.py: UserScanner HSV 빨강(타유저) 감지 + appear패턴
+- runtime: pet/telegram/user_scanner 결선 + user_detected 핸들러(텔레그램알림+자동응답 enter)
+- config_adapter: recovery.pet_food / settings1.lie_detector.tg_* / settings1.user_detected 매핑
+### 검증: tests 149 passed. 실config 결선 스모크 — pet/telegram/junk/lie/patrol 전부 확인
+### 남은 누락 (코드)
+- 몬스터 감지(YOLO): A detector.py 래핑 필요 (현재 위치만, 몬스터 유무 판정 미연결)
+- 채널변경(C ChannelFinder): 복잡+좌표 일부 실측 → 실기
+- 자동응답 채팅 메시지 입력: enter만 누름, 실제 텍스트입력은 백엔드 문자열 입력 확장 필요
+### 남은 실기: board_region/lie_detect_region 실측, 자동판매 안전지대이동, 다층순찰, 실게임 검증

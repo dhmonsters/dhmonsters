@@ -63,6 +63,14 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     patrol_right = int(z0.get("right_x", 0))
     patrol_margin = int(z0.get("random_margin_max", 0))
 
+    # 펫 먹이 / 텔레그램 / 유저감지
+    pet = recovery.get("pet_food", {})
+    pet_key = pet.get("key", "") if pet.get("enabled") else ""
+    pet_interval = float(pet.get("interval_min", 10)) * 60
+
+    lie = d.get("settings1", {}).get("lie_detector", {})
+    user = d.get("settings1", {}).get("user_detected", {})
+
     return RuntimeConfig(
         minimap_region=minimap_region,
         floors=_floors(zones),
@@ -76,4 +84,11 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         patrol_left_x=patrol_left,
         patrol_right_x=patrol_right,
         patrol_margin=patrol_margin,
+        pet_key=pet_key,
+        pet_interval=pet_interval,
+        tg_enabled=bool(lie.get("tg_enabled", False)),
+        tg_token=lie.get("tg_token", ""),
+        tg_chat_id=lie.get("tg_chat_id", ""),
+        user_detect_enabled=bool(user.get("enabled", False)),
+        auto_reply_messages=list(user.get("messages", [])),
     )

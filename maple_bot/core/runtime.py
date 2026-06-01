@@ -17,6 +17,10 @@ from core.navigation.floor_judge import Floor, FloorJudge
 from core.navigation.patrol import Patrol, PatrolZone
 from core.acting.combat import Combat, PotionRule
 from core.acting.buff import BuffManager, Buff
+from core.acting.pet import PetFeeder
+from core.sensing.user_scanner import UserScanner
+from core.notify.telegram import TelegramNotifier
+from core.humanize.intent import Intent
 from core.minigame.registry import SolverRegistry
 from core.minigame.self_transparent_engine import SelfTransparentEngine
 from core.minigame.sidecar import InMemoryChannel, SidecarChannel
@@ -50,6 +54,17 @@ class RuntimeConfig:
     patrol_margin: int = 0
     # 잡템 판매 — ConfigManager(get 인터페이스) 주입 시 활성. 없으면 비활성
     junk_config: object = None
+    # 펫 먹이
+    pet_key: str = ""
+    pet_interval: float = 600.0
+    # 텔레그램 알림
+    tg_enabled: bool = False
+    tg_token: str = ""
+    tg_chat_id: str = ""
+    # 다른 유저 감지 + 자동응답
+    user_detect_enabled: bool = False
+    user_min_red: int = 15
+    auto_reply_messages: list = field(default_factory=list)
 
 
 class BotRuntime:
@@ -87,6 +102,17 @@ class BotRuntime:
                     threshold=config.lie_threshold,
                     region=config.lie_detect_region,
                 )
+        # 다른 유저 감지 (빨강 픽셀)
+        self.user_scanner = None
+        if config.user_detect_enabled:
+            self.user_scanner = UserScanner(
+                screen_capture, min_red=config.user_min_red,
+                region=config.minimap_region,
+            )
+        # 텔레그램 알림
+        self.telegram = TelegramNotifier(
+            token=config.tg_token, chat_id=config.tg_chat_id, enabled=config.tg_enabled,
+        )
 
         # 조율 계층
         self.orchestrator = Orchestrator(
@@ -103,6 +129,7 @@ class BotRuntime:
         self.floor_judge = FloorJudge(config.floors) if config.floors else None
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
+        self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval)
         # 잡템 자동판매 (A sell_junk 래핑 + B 보호목록). 실판매는 게임 필요 → 인스턴스만 준비
         self.junk_seller = None
         if config.junk_config is not None:
@@ -128,11 +155,15 @@ class BotRuntime:
         ))
 
         self._frame_id = 0
+        self._reply_idx = 0
+
+        # 다른 유저 감지 → 자동응답(채팅) + 텔레그램 알림
+        self.orchestrator.on("user_detected", self._handle_user_detected)
 
     # ── 감지 펌프 (테스트: 수동 / 실기: 스레드) ──────────────────────
     def pump_scanners_once(self) -> None:
         """스캐너 scan_once 를 직접 1회 호출해 이벤트큐를 채운다(테스트용)."""
-        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner):
+        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner, self.user_scanner):
             if sc is None:
                 continue
             ev = sc.scan_once()
@@ -141,12 +172,12 @@ class BotRuntime:
 
     def start_scanners(self) -> None:
         """실기: 스캐너 스레드 시작."""
-        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner):
+        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner, self.user_scanner):
             if sc is not None:
                 sc.start(self.event_queue)
 
     def stop_scanners(self) -> None:
-        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner):
+        for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner, self.user_scanner):
             if sc is not None:
                 sc.stop()
 
@@ -170,10 +201,11 @@ class BotRuntime:
         elif self._cfg.route:
             self.block_runner.run_block(self._cfg.route[0], max_steps=1)
 
-        # 공격 + 버프
+        # 공격 + 버프 + 펫
         if self._cfg.attack_key:
             self.combat.attack(self._cfg.attack_key, mode="duration")
         self.buffs.tick(now)
+        self.pet.tick(now)
 
     def safety_tick(self, now: float | None = None) -> None:
         """안전 모드 1틱: 거탐 풀이 시도 → 성공 시 사냥 재개."""
@@ -205,3 +237,14 @@ class BotRuntime:
         self.humanizer._backend.key_up("left")
         self.humanizer._backend.key_up("right")
         self.humanizer._backend.key_up("up")
+
+    def _handle_user_detected(self, ev) -> None:
+        """다른 유저 감지 → 텔레그램 알림 + 자동응답 채팅(메시지 순환)."""
+        self.telegram.send("다른 유저 감지됨")
+        msgs = self._cfg.auto_reply_messages
+        if not msgs:
+            return
+        msg = msgs[self._reply_idx % len(msgs)]
+        self._reply_idx += 1
+        # 채팅: enter → 메시지 입력 → enter (실기 입력은 백엔드 통해)
+        self.humanizer.perform(Intent(action="key", key="enter", base_hold_sec=0.05))
