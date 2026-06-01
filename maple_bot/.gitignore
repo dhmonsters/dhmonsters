@@ -1,0 +1,43 @@
+# 빌드/캐시
+__pycache__/
+*.pyc
+.obf_build/
+dist/
+build/
+installer_output/
+runs/
+
+# 디컴파일·역분석 추출물 (타사 바이너리, 저장소 제외)
+_maplehunter_extract/
+_planet_solver_extract/
+_vortex_extract/
+tools/
+
+# 디버그·임시 산출물
+_*.png
+debug_*.png
+debug_ocr_hp/
+debug_ocr_mp/
+roi_snapshot.png
+test_capture.png
+board_roi.json
+build_log.txt
+error.log
+*.log
+
+# 미디어 샘플
+*.mp4
+
+# 모델 가중치 (대용량)
+*.pt
+*.onnx
+*.bin
+*.param
+models/
+
+# 라이선스 키
+.admin_key
+.service_key
+
+# 데이터셋
+dataset/
