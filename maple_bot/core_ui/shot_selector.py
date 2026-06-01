@@ -109,12 +109,14 @@ class _Canvas(QWidget):
     QLabel을 쓰면 이미지가 사각형을 가리므로 직접 paint 한다."""
 
     def __init__(self, pix: QPixmap, on_release,
-                 initial_rect: QRect | None = None, anchor: QPoint | None = None):
+                 initial_rect: QRect | None = None, anchor: QPoint | None = None,
+                 overlays: list | None = None):
         super().__init__()
         self._pix = pix
         self._on_release = on_release
         self._initial = initial_rect   # 기존 범위(표시좌표) 미리보기
         self._anchor = anchor          # 기준점(캐릭) 십자 표시
+        self._overlays = overlays or []  # [(QRect, "#hex", "label"), ...] 닉네임/몬스터
         self.setFixedSize(pix.width(), pix.height())
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -142,6 +144,14 @@ class _Canvas(QWidget):
     def paintEvent(self, e):
         qp = QPainter(self)
         qp.drawPixmap(0, 0, self._pix)
+        # 감지 오버레이 (닉네임=노랑, 몬스터=빨강 등) — 항상 표시
+        for rect, color, label in self._overlays:
+            qp.setBrush(Qt.BrushStyle.NoBrush)
+            qp.setPen(QPen(QColor(color), 2))
+            qp.drawRect(rect)
+            if label:
+                qp.setFont(QFont("Inter", 9))
+                qp.drawText(rect.left(), rect.top() - 3, label)
         # 앵커(캐릭 기준점) 십자
         if self._anchor is not None:
             qp.setPen(QPen(QColor("#27a644"), 1, Qt.PenStyle.DashLine))
@@ -182,13 +192,15 @@ class ScreenshotRegionSelector(QDialog):
     region_selected = pyqtSignal(int, int, int, int)
 
     def __init__(self, bgr_image, src_origin=(0, 0), max_display=1100, parent=None,
-                 initial_rect=None, anchor=None):
-        """initial_rect: 기존 범위 (left,top,w,h) 원본좌표(미리보기). anchor: 기준점(x,y) 원본."""
+                 initial_rect=None, anchor=None, overlays=None):
+        """initial_rect: 기존 범위 (left,top,w,h) 원본. anchor: 기준점(x,y) 원본.
+        overlays: [(left,top,w,h,color,label), ...] 원본좌표 — 닉네임/몬스터 표시."""
         super().__init__(parent)
         self.setWindowTitle("영역 선택 — 드래그하세요 (ESC 취소)")
         self._origin = src_origin
         self._initial_rect = initial_rect
         self._anchor = anchor
+        self._overlays_src = overlays or []
 
         import numpy as np
         h, w = bgr_image.shape[:2]
@@ -212,9 +224,16 @@ class ScreenshotRegionSelector(QDialog):
         if self._anchor:
             anchor_disp = QPoint(int(self._anchor[0] * self._scale),
                                  int(self._anchor[1] * self._scale))
+        # 오버레이(닉네임/몬스터) 표시좌표 환산
+        s = self._scale
+        overlays_disp = [
+            (QRect(int(l * s), int(t * s), int(ww * s), int(hh * s)), col, lab)
+            for (l, t, ww, hh, col, lab) in self._overlays_src
+        ]
 
         self._canvas = _Canvas(pix, self._on_release,
-                               initial_rect=init_disp, anchor=anchor_disp)
+                               initial_rect=init_disp, anchor=anchor_disp,
+                               overlays=overlays_disp)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self._canvas)

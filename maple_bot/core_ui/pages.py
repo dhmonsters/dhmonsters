@@ -62,11 +62,43 @@ def _make_attack_box_picker(config, fields4) -> QPushButton:
         ymn = int(config.get("attack", "atk_y_min", default=-70))
         ymx = int(config.get("attack", "atk_y_max", default=70))
         init_rect = offsets_to_rect(xmn, xmx, ymn, ymx, anchor)
+
+        # 닉네임/몬스터 감지 → 오버레이 박스 (실제 뭐가 잡히는지 보면서 조정)
+        from core.sensing import monster_vision as _mv
+        overlays = []
+        name_path = config.get("attack", "name_template", default="")
+        name_anchor = anchor
+        if name_path:
+            nt = _mv.load_template(name_path)
+            if nt is not None:
+                npos = _mv.find_template_pos(raw, nt, threshold=0.6)
+                if npos:
+                    nh, nw = nt.shape[:2]
+                    overlays.append((npos[0]-nw//2, npos[1]-nh//2, nw, nh,
+                                     "#cba258", "닉네임"))
+                    name_anchor = npos   # 닉네임 위치를 실제 앵커로
+                    init_rect = offsets_to_rect(xmn, xmx, ymn, ymx, name_anchor)
+        # 몬스터 (현재 공격박스 안)
+        mon_tpls = {}
+        mt = config.get("attack", "monster_template", default="")
+        if mt:
+            t = _mv.load_template(mt)
+            if t is not None:
+                mon_tpls["m"] = t
+        if mon_tpls:
+            cur_box = (name_anchor[0]+xmn, name_anchor[1]+ymn, xmx-xmn, ymx-ymn)
+            for (mx_, my_, mw_, mh_) in _mv.monster_boxes_in_box(
+                    raw, mon_tpls, cur_box, threshold=float(
+                        config.get("attack", "monster_accuracy", default=0.9))):
+                overlays.append((mx_, my_, mw_, mh_, "#f04452", "몬스터"))
+
         dlg = ScreenshotRegionSelector(raw, src_origin=origin,
-                                       initial_rect=init_rect, anchor=anchor)
+                                       initial_rect=init_rect, anchor=name_anchor,
+                                       overlays=overlays)
 
         def apply(x, y, w, h):
-            o = rect_to_offsets(x - origin[0], y - origin[1], w, h, anchor)
+            # 닉네임 감지됐으면 그 위치 기준, 아니면 화면중앙 기준 오프셋
+            o = rect_to_offsets(x - origin[0], y - origin[1], w, h, name_anchor)
             for key, fld, val in zip(
                 ["atk_x_min", "atk_x_max", "atk_y_min", "atk_y_max"], fields4, o):
                 config.set("attack", key, val)

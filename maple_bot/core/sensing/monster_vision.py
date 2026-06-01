@@ -66,3 +66,34 @@ def monsters_in_box(scene: np.ndarray, templates: dict[str, np.ndarray],
         if mx >= threshold:
             count += 1
     return count
+
+
+def monster_boxes_in_box(scene: np.ndarray, templates: dict[str, np.ndarray],
+                         box: tuple, threshold: float = 0.9) -> list[tuple]:
+    """박스 안 몬스터들의 원본좌표 박스 [(x,y,w,h), ...] 반환 (오버레이 표시용).
+    같은 위치 중복은 간단 거리필터로 제거."""
+    bx, by, bw, bh = box
+    h, w = scene.shape[:2]
+    x1 = max(0, bx); y1 = max(0, by)
+    x2 = min(w, bx + bw); y2 = min(h, by + bh)
+    if x2 <= x1 or y2 <= y1:
+        return []
+    roi = scene[y1:y2, x1:x2]
+
+    found: list[tuple] = []
+    for tpl in templates.values():
+        if tpl is None or tpl.size == 0:
+            continue
+        th, tw = tpl.shape[:2]
+        if th > roi.shape[0] or tw > roi.shape[1]:
+            continue
+        res = cv2.matchTemplate(roi, tpl, cv2.TM_CCOEFF_NORMED)
+        ys, xs = np.where(res >= threshold)
+        for ry, rx in zip(ys, xs):
+            ox, oy = x1 + int(rx), y1 + int(ry)   # 원본좌표
+            # 근접 중복 제거 (이미 가까운 박스 있으면 skip)
+            if any(abs(ox - fx) < tw // 2 and abs(oy - fy) < th // 2
+                   for fx, fy, _, _ in found):
+                continue
+            found.append((ox, oy, tw, th))
+    return found

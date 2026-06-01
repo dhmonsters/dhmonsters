@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 from core.sensing.monster_vision import (
-    find_template_pos, monsters_in_box, attack_box,
+    find_template_pos, monsters_in_box, attack_box, monster_boxes_in_box,
 )
 
 _RNG = np.random.default_rng(11)
@@ -60,6 +60,19 @@ def test_monsters_in_box_none_outside():
     box = (200, 150, 100, 100)               # (200~300, 150~250)
     found = monsters_in_box(scene, {"m": mob}, box, threshold=0.9)
     assert found == 0
+
+
+def test_monster_boxes_returns_positions():
+    """박스 안 몬스터들의 원본좌표 박스 리스트 반환 (오버레이 표시용)."""
+    mob = _textured(2)
+    scene = _scene([(mob, 220, 170)])
+    box = (200, 150, 120, 120)
+    boxes = monster_boxes_in_box(scene, {"m": mob}, box, threshold=0.9)
+    assert len(boxes) >= 1
+    bx, by, bw, bh = boxes[0]
+    # 원본좌표로 환산됐는지 (박스 내부 220,170 근처)
+    assert 200 <= bx <= 260 and 150 <= by <= 220
+    assert bw > 0 and bh > 0
 
 
 def test_multi_template_any_matches():
