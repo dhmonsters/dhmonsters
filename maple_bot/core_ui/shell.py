@@ -1,13 +1,13 @@
-# MainShell — 6카테고리 셸. 좌측 내비 + 중앙 스택 + 좌하단 시작/정지 + 우측 로그도크 (도면 4단계)
+# MainShell — 6카테고리 셸. 좌측 내비 + 중앙 스택 + 우측 로그도크 (도면 4단계, DESIGN.md Linear 토큰)
 from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
-    QStackedWidget, QLabel, QTextEdit, QButtonGroup,
+    QStackedWidget, QLabel, QTextEdit, QButtonGroup, QFrame,
 )
 from PyQt6.QtCore import Qt
 
-from core_ui.theme import build_qss
+from core_ui.theme import build_qss, TOKENS, SPACING
 
 # 6 카테고리 (도면 4단계)
 CATEGORIES = [
@@ -21,12 +21,13 @@ CATEGORIES = [
 
 
 class MainShell(QMainWindow):
-    """통합 봇의 메인 셸. 페이지 내용은 플레이스홀더(실연결은 통합단계)."""
+    """통합 봇의 메인 셸. 페이지 내용은 플레이스홀더(실연결은 통합단계).
+    레이아웃·간격은 DESIGN.md(Linear) spacing 토큰을 따른다."""
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DHMONSTERS")
-        self.resize(1100, 680)
+        self.resize(1180, 720)
         self.setStyleSheet(build_qss())
 
         self.nav_buttons: list[QPushButton] = []
@@ -42,7 +43,6 @@ class MainShell(QMainWindow):
         root_l.addWidget(self._build_log_dock(), 0)
         self.setCentralWidget(root)
 
-        # 카테고리 페이지(플레이스홀더)
         for name, desc in CATEGORIES:
             self.stack.addWidget(self._build_page(name, desc))
         self.nav_buttons[0].setChecked(True)
@@ -50,19 +50,17 @@ class MainShell(QMainWindow):
 
     # ── 좌측 사이드바: 6 내비 + 시작/정지 ────────────────────────────
     def _build_sidebar(self) -> QWidget:
-        from core_ui.theme import TOKENS
-        bar = QWidget()
-        bar.setFixedWidth(220)
-        # House Green 딥그린 배경 — 흰 nav 글씨 대비 (Starbucks 색블록 리듬)
-        bar.setStyleSheet(f"background-color: {TOKENS['house_green']};")
+        bar = QFrame()
+        bar.setObjectName("card")          # surface_1 차콜 패널 + hairline
+        bar.setFixedWidth(232)
         v = QVBoxLayout(bar)
-        v.setContentsMargins(10, 14, 10, 14)
-        v.setSpacing(4)
+        v.setContentsMargins(SPACING["sm"], SPACING["lg"], SPACING["sm"], SPACING["lg"])
+        v.setSpacing(SPACING["xxs"])
 
         title = QLabel("DHMONSTERS")
-        title.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: 700;")
+        title.setObjectName("h1")
         v.addWidget(title)
-        v.addSpacing(12)
+        v.addSpacing(SPACING["md"])
 
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -76,19 +74,21 @@ class MainShell(QMainWindow):
             v.addWidget(b)
 
         v.addStretch(1)
-        self.btn_start = QPushButton("▶ 시작 (F1)")
+        self.btn_start = QPushButton("▶  시작  (F1)")
         self.btn_start.setObjectName("primary")
-        self.btn_stop = QPushButton("■ 정지")
+        self.btn_stop = QPushButton("■  정지")
         v.addWidget(self.btn_start)
+        v.addSpacing(SPACING["xxs"])
         v.addWidget(self.btn_stop)
         return bar
 
     # ── 우측 로그 도크 ────────────────────────────────────────────────
     def _build_log_dock(self) -> QWidget:
         dock = QWidget()
-        dock.setFixedWidth(300)
+        dock.setFixedWidth(320)
         v = QVBoxLayout(dock)
-        v.setContentsMargins(8, 14, 10, 14)
+        v.setContentsMargins(SPACING["xs"], SPACING["lg"], SPACING["md"], SPACING["lg"])
+        v.setSpacing(SPACING["sm"])
         lbl = QLabel("실시간 로그")
         lbl.setObjectName("subtle")
         v.addWidget(lbl)
@@ -101,7 +101,8 @@ class MainShell(QMainWindow):
     def _build_page(self, name: str, desc: str) -> QWidget:
         page = QWidget()
         v = QVBoxLayout(page)
-        v.setContentsMargins(20, 20, 20, 20)
+        v.setContentsMargins(SPACING["xl"], SPACING["xl"], SPACING["xl"], SPACING["xl"])
+        v.setSpacing(SPACING["sm"])
         h = QLabel(name)
         h.setObjectName("h1")
         sub = QLabel(desc)

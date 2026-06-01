@@ -1,50 +1,66 @@
-# Starbucks 디자인 토큰 → PyQt6 QSS 변환. DESIGN.md(starbucks) 를 단일 출처로 한다
+# Linear 디자인 토큰 → PyQt6 QSS/QFont. DESIGN.md(Linear)를 단일 출처로 — 색·폰트·간격·반경·타이포 전부
 from __future__ import annotations
 
-# DESIGN.md(Starbucks) 토큰 — 따뜻한 크림 캔버스 + 4단계 그린
+# ── 색 (DESIGN.md Linear 1:1) ─────────────────────────────────────
 TOKENS = {
-    "canvas":        "#f2f0eb",   # 따뜻한 크림 (café 종이/벽 질감)
-    "surface_1":     "#ffffff",   # 카드/모달 흰 표면
-    "surface_2":     "#edebe9",   # 세라믹 오프화이트 (존 구분)
-    "surface_3":     "#f9f9f9",   # 쿨그레이 유틸리티
-    "hairline":      "#e0ddd6",   # 크림톤 경계선
-    "hairline_strong": "#cba258", # 골드 (Rewards 강조)
-    "ink":           "#1e3932",   # House Green = 딥 텍스트
-    "ink_muted":     "#33433d",   # Rewards 슬레이트 그린
-    "ink_subtle":    "rgba(0,0,0,0.58)",  # 메타 텍스트
-    "primary":       "#00754a",   # Green Accent = 주 CTA
-    "primary_hover": "#006241",   # Starbucks Green
-    "on_primary":    "#ffffff",
-    "house_green":   "#1e3932",   # 사이드바/피처밴드 딥그린
-    "success":       "#006241",
+    "canvas":          "#010102",   # near-black 배경
+    "surface_1":       "#0f1011",   # 차콜 패널 (카드)
+    "surface_2":       "#141516",
+    "surface_3":       "#18191a",
+    "surface_4":       "#191a1b",
+    "hairline":        "#23252a",
+    "hairline_strong": "#34343a",
+    "ink":             "#f7f8f8",   # 본문
+    "ink_muted":       "#d0d6e0",
+    "ink_subtle":      "#8a8f98",
+    "ink_tertiary":    "#62666d",
+    "primary":         "#5e6ad2",   # 라벤더 액센트 (포커스/CTA만)
+    "primary_hover":   "#828fff",
+    "primary_focus":   "#5e69d1",
+    "on_primary":      "#ffffff",
+    "success":         "#27a644",
 }
 
-# 간격/반경 — Starbucks: 카드 12px 라운드, 버튼은 풀-pill(50px)
-RADIUS = 12
-PILL = 22
-PAD = 10
+# ── 간격 (DESIGN.md spacing 토큰, px) ─────────────────────────────
+SPACING = {
+    "xxs": 4, "xs": 8, "sm": 12, "md": 16,
+    "lg": 24, "xl": 32, "xxl": 48, "section": 96,
+}
 
-# DESIGN.md 폰트 명세
-#   Primary: SoDoSans(독점,미설치) → Inter(권장대체) → Helvetica Neue → Arial
-#   letter-spacing: -0.01em ≈ -0.16px (거의 전 표면)
-FONT_STACK = '"Inter", "SoDoSans", "Helvetica Neue", Helvetica, Arial, sans-serif'
-LETTER_SPACING_PX = -0.16   # DESIGN.md 트래킹
+# ── 반경 (DESIGN.md radius) ───────────────────────────────────────
+RADIUS = {"sm": 6, "md": 8, "xl": 16}
+
+# ── 타이포 스케일 (DESIGN.md typography: size/weight/tracking) ────
+#   음수 트래킹: 큰 글씨일수록 강하게. QFont는 px 자간이라 letterSpacing 그대로 사용.
+TYPOGRAPHY = {
+    "h1":         {"size": 28, "weight": 600, "tracking": -0.6},   # 봇 UI 스케일(웹 80px→데스크탑 28px)
+    "card_title": {"size": 20, "weight": 600, "tracking": -0.4},
+    "subhead":    {"size": 16, "weight": 500, "tracking": -0.2},
+    "body":       {"size": 13, "weight": 400, "tracking": -0.05},
+    "caption":    {"size": 11, "weight": 400, "tracking": 0.0},
+}
+
+# ── 폰트 패밀리 (DESIGN.md: Linear Display→Inter, Linear Mono→JetBrains Mono) ──
+FONT_SANS = '"Inter", "SF Pro Display", -apple-system, "Segoe UI", sans-serif'
+FONT_MONO = '"JetBrains Mono", ui-monospace, "Consolas", monospace'
+LETTER_SPACING_PX = -0.2   # body 기준 기본 트래킹
 
 
 def apply_font(app, base_pt: int = 10):
-    """QApplication 전역 폰트 + DESIGN.md 트래킹(-0.16px) 적용.
-    번들된 Inter ttf 를 런타임 로드(시스템 설치 불필요) → QFont 자간 적용.
-    QSS는 letter-spacing 미지원이라 QFont 로 처리."""
+    """번들 Inter+JetBrains Mono 런타임 로드(시스템 설치 불필요) + 전역 폰트/트래킹."""
     from pathlib import Path
     from PyQt6.QtGui import QFont, QFontDatabase
 
+    fonts_dir = Path(__file__).resolve().parent.parent / "assets" / "fonts"
     family = "Inter"
-    ttf = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "Inter-Variable.ttf"
-    if ttf.exists():
-        fid = QFontDatabase.addApplicationFont(str(ttf))
-        fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
-        if fams:
-            family = fams[0]   # "Inter"
+    for fn, fam in [("Inter-Variable.ttf", "Inter"),
+                    ("JetBrainsMono-Regular.ttf", "JetBrains Mono")]:
+        p = fonts_dir / fn
+        if p.exists():
+            fid = QFontDatabase.addApplicationFont(str(p))
+            fams = QFontDatabase.applicationFontFamilies(fid) if fid >= 0 else []
+            if fams and fam == "Inter":
+                family = fams[0]
 
     f = QFont(family)
     f.setStyleHint(QFont.StyleHint.SansSerif)
@@ -55,57 +71,66 @@ def apply_font(app, base_pt: int = 10):
 
 
 def build_qss() -> str:
-    """현재 토큰으로 전역 QSS 문자열 생성 (Starbucks 톤)."""
+    """Linear 토큰으로 전역 QSS 생성 — surface 사다리·hairline·spacing·radius 반영."""
     t = TOKENS
+    s, r = SPACING, RADIUS
+    h1, ct, bd = TYPOGRAPHY["h1"], TYPOGRAPHY["card_title"], TYPOGRAPHY["body"]
     return f"""
     QWidget {{
         background-color: {t['canvas']};
         color: {t['ink']};
-        font-family: "Segoe UI", "SoDoSans", sans-serif;
-        font-size: 13px;
+        font-family: {FONT_SANS};
+        font-size: {bd['size']}px;
     }}
     QFrame#card, QWidget#card {{
         background-color: {t['surface_1']};
         border: 1px solid {t['hairline']};
-        border-radius: {RADIUS}px;
+        border-radius: {r['xl']}px;
     }}
-    QLabel#h1 {{ font-size: 20px; font-weight: 700; color: {t['primary_hover']}; }}
+    QLabel#h1 {{
+        font-size: {h1['size']}px; font-weight: {h1['weight']}; color: {t['ink']};
+    }}
+    QLabel#cardTitle {{ font-size: {ct['size']}px; font-weight: {ct['weight']}; color: {t['ink']}; }}
     QLabel#subtle {{ color: {t['ink_subtle']}; }}
     QPushButton {{
-        background-color: {t['surface_1']};
+        background-color: {t['surface_2']};
         color: {t['ink']};
         border: 1px solid {t['hairline']};
-        border-radius: {PILL}px;
-        padding: {PAD}px 18px;
+        border-radius: {r['md']}px;
+        padding: {s['xs']}px {s['md']}px;
     }}
-    QPushButton:hover {{ border-color: {t['primary']}; }}
+    QPushButton:hover {{ border-color: {t['hairline_strong']}; background-color: {t['surface_3']}; }}
+    QPushButton:pressed {{ background-color: {t['surface_4']}; }}
     QPushButton#primary {{
         background-color: {t['primary']};
         color: {t['on_primary']};
         border: none;
-        border-radius: {PILL}px;
-        font-weight: 700;
+        border-radius: {r['md']}px;
+        font-weight: 600;
+        padding: {s['xs']}px {s['md']}px;
     }}
     QPushButton#primary:hover {{ background-color: {t['primary_hover']}; }}
+    QPushButton#primary:pressed {{ background-color: {t['primary_focus']}; }}
     QPushButton#nav {{
         background-color: transparent;
         border: none;
         text-align: left;
-        padding: {PAD}px 12px;
-        color: rgba(255,255,255,0.70);
-        border-radius: 0px;
+        padding: {s['sm']}px {s['sm']}px;
+        color: {t['ink_subtle']};
+        border-radius: {r['sm']}px;
     }}
+    QPushButton#nav:hover {{ color: {t['ink_muted']}; background-color: {t['surface_2']}; }}
     QPushButton#nav:checked {{
-        background-color: {t['primary']};
-        color: {t['on_primary']};
-        border-left: 3px solid {t['hairline_strong']};
+        background-color: {t['surface_2']};
+        color: {t['ink']};
+        border-left: 2px solid {t['primary']};
     }}
     QTextEdit#log {{
         background-color: {t['surface_1']};
         border: 1px solid {t['hairline']};
-        border-radius: {RADIUS}px;
+        border-radius: {r['md']}px;
         color: {t['ink_muted']};
-        font-family: "Consolas", monospace;
-        font-size: 12px;
+        font-family: {FONT_MONO};
+        font-size: {bd['size']}px;
     }}
     """
