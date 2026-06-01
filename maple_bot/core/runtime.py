@@ -19,6 +19,7 @@ from core.acting.combat import Combat, PotionRule
 from core.acting.buff import BuffManager, Buff
 from core.acting.pet import PetFeeder
 from core.sensing.user_scanner import UserScanner
+from core.sensing import monster_vision
 from core.notify.telegram import TelegramNotifier
 from core.humanize.intent import Intent
 from core.minigame.registry import SolverRegistry
@@ -67,6 +68,16 @@ class RuntimeConfig:
     auto_reply_messages: list = field(default_factory=list)
     # 사냥 영역 (B training: 이 영역 안에서만 몬스터/닉네임 감지)
     hunt_area_region: dict | None = None
+    # 몬스터 감지(image 모드, B 메커니즘: 닉네임 박스 안 몬스터)
+    hunt_mode: str = "key"
+    name_template: str = ""        # 닉네임 템플릿 경로
+    monster_templates: list = field(default_factory=list)  # 몬스터 템플릿 경로들
+    monster_accuracy: float = 0.9
+    atk_x_min: int = -35
+    atk_x_max: int = 35
+    atk_y_min: int = -70
+    atk_y_max: int = 70
+    name_threshold: float = 0.7
 
 
 class BotRuntime:
@@ -132,6 +143,16 @@ class BotRuntime:
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
         self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval)
+        # 몬스터 감지(image 모드) — 닉네임/몬스터 템플릿 로드 (B 메커니즘)
+        self._name_tpl = None
+        self._monster_tpls = {}
+        if config.hunt_mode == "image":
+            if config.name_template:
+                self._name_tpl = monster_vision.load_template(config.name_template)
+            for i, p in enumerate(config.monster_templates):
+                t = monster_vision.load_template(p)
+                if t is not None:
+                    self._monster_tpls[f"m{i}"] = t
         # 잡템 자동판매 (A sell_junk 래핑 + B 보호목록). 실판매는 게임 필요 → 인스턴스만 준비
         self.junk_seller = None
         if config.junk_config is not None:
@@ -203,11 +224,33 @@ class BotRuntime:
         elif self._cfg.route:
             self.block_runner.run_block(self._cfg.route[0], max_steps=1)
 
-        # 공격 + 버프 + 펫
+        # 공격: image 모드는 닉네임 박스 안 몬스터 있을 때만(B 메커니즘), key 모드는 무조건
         if self._cfg.attack_key:
-            self.combat.attack(self._cfg.attack_key, mode="duration")
+            if self._cfg.hunt_mode == "image":
+                if self._monster_in_range():
+                    self.combat.attack(self._cfg.attack_key, mode="duration")
+            else:
+                self.combat.attack(self._cfg.attack_key, mode="duration")
         self.buffs.tick(now)
         self.pet.tick(now)
+
+    def _monster_in_range(self) -> bool:
+        """B 메커니즘: 사냥영역 캡처 → 닉네임 위치 → atk 박스 → 박스 안 몬스터 매칭."""
+        if self._name_tpl is None or not self._monster_tpls:
+            return False
+        region = self._cfg.hunt_area_region
+        scene = self._capture(region) if region else self._capture()
+        if scene is None:
+            return False
+        name_pos = monster_vision.find_template_pos(
+            scene, self._name_tpl, threshold=self._cfg.name_threshold)
+        if name_pos is None:
+            return False
+        box = monster_vision.attack_box(
+            name_pos, self._cfg.atk_x_min, self._cfg.atk_x_max,
+            self._cfg.atk_y_min, self._cfg.atk_y_max)
+        return monster_vision.monsters_in_box(
+            scene, self._monster_tpls, box, threshold=self._cfg.monster_accuracy) > 0
 
     def safety_tick(self, now: float | None = None) -> None:
         """안전 모드 1틱: 거탐 풀이 시도 → 성공 시 사냥 재개."""

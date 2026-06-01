@@ -65,6 +65,16 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
             "width": int(ha.get("w", 0)), "height": int(ha.get("h", 0)),
         }
 
+    # 몬스터 템플릿 수집 (단일 monster_template + monster_folder 내 png들 = B 다중방식)
+    import os, glob as _glob
+    monster_tpls = []
+    mt = attack.get("monster_template", "")
+    if mt and os.path.exists(mt):
+        monster_tpls.append(mt)
+    mf = attack.get("monster_folder", "")
+    if mf and os.path.isdir(mf):
+        monster_tpls += sorted(_glob.glob(os.path.join(mf, "*.png")))
+
     # 순찰: 첫 zone의 좌우 경계 + 랜덤 마진
     zones = d.get("zones", [])
     z0 = zones[0] if zones else {}
@@ -101,4 +111,13 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         user_detect_enabled=bool(user.get("enabled", False)),
         auto_reply_messages=list(user.get("messages", [])),
         hunt_area_region=hunt_area_region,
+        hunt_mode=d.get("hunt_mode", "key"),
+        name_template=attack.get("name_template", ""),
+        monster_templates=monster_tpls,
+        monster_accuracy=float(attack.get("monster_accuracy", 0.9)),
+        atk_x_min=int(attack.get("atk_x_min", -35)),
+        atk_x_max=int(attack.get("atk_x_max", 35)),
+        atk_y_min=int(attack.get("atk_y_min", -70)),
+        atk_y_max=int(attack.get("atk_y_max", 70)),
+        name_threshold=float(attack.get("name_tag_threshold", 0.7)),
     )

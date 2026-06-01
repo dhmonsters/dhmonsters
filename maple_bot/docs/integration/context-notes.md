@@ -453,3 +453,15 @@
 - RuntimeConfig.hunt_area_region + adapter 매핑(w>0이면 region, 아니면 None=전체화면)
 ### 검증: tests 155 passed. 4버튼(미니맵/사냥영역/몬스터/닉네임) 렌더 확인
 ### TODO 실기: 몬스터 감지가 hunt_area_region 안에서만 동작하도록 결선(YOLO데이터 생기면). 닉네임주변 테두리 공격 로직
+
+## 2026-06-02 — 몬스터 감지(OpenCV, B 메커니즘) 구현
+### B 메커니즘 (Themida 봉인 → config 역추론으로 확정)
+- training 영역 안만 캡처(전체화면 느림) → 닉네임 템플릿으로 본인 위치 → atk_x/y_min/max 오프셋 박스 → 박스 안 monster1~9 매칭(0.94) → 있으면 공격
+- C는 몬스터 감지 없음(좌표스크립트 난사) 확인 / A detector.py matchTemplate가 유일 코드베이스
+### 구현 (core/sensing/monster_vision.py)
+- load_template(한글경로 fromfile+imdecode) / find_template_pos(닉네임 위치) / attack_box(닉네임+오프셋) / monsters_in_box(박스ROI만 다중템플릿 매칭, B방식)
+- runtime: hunt_mode=="image"시 _monster_in_range()(닉네임→박스→몬스터) True일때만 공격. key모드는 무조건
+- config_adapter: hunt_mode/name_template/monster_templates(단일+folder glob)/atk오프셋/monster_accuracy 매핑
+### 검증: tests 161 passed (monster_vision 6). 스모크 — 닉네임박스 안 몬스터 감지→공격 동작
+### read-errors: 스모크 첫 실패 → 닉네임 위에 몬스터 겹쳐그린 픽스처 문제(코드정상), 비겹침 재확인 통과
+### 남은 실기: YOLO데이터 모이면 image모드를 YOLO로 교체가능(monster_vision은 OpenCV 폴백 유지). 실게임 닉네임/몬스터 템플릿 품질 검증
