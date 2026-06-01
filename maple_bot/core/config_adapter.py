@@ -56,9 +56,16 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     attack = d.get("attack", {})
     attack_key = attack.get("key", "") or d.get("minimap", {}).get("attack_key", "")
 
+    # 순찰: 첫 zone의 좌우 경계 + 랜덤 마진
+    zones = d.get("zones", [])
+    z0 = zones[0] if zones else {}
+    patrol_left = int(z0.get("left_x", 0))
+    patrol_right = int(z0.get("right_x", 0))
+    patrol_margin = int(z0.get("random_margin_max", 0))
+
     return RuntimeConfig(
         minimap_region=minimap_region,
-        floors=_floors(d.get("zones", [])),
+        floors=_floors(zones),
         route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
                if isinstance(b, dict) and "type" in b],
         attack_key=attack_key,
@@ -66,4 +73,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         mp_rule=mp_rule,
         buffs=_buffs(attack),
         minigame_type="planet",
+        patrol_left_x=patrol_left,
+        patrol_right_x=patrol_right,
+        patrol_margin=patrol_margin,
     )

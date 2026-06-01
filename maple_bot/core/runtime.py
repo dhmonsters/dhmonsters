@@ -14,6 +14,7 @@ from core.orchestrator.orchestrator import Orchestrator
 from core.navigation.block import Block
 from core.navigation.block_runner import BlockRunner
 from core.navigation.floor_judge import Floor, FloorJudge
+from core.navigation.patrol import Patrol, PatrolZone
 from core.acting.combat import Combat, PotionRule
 from core.acting.buff import BuffManager, Buff
 from core.minigame.registry import SolverRegistry
@@ -43,6 +44,10 @@ class RuntimeConfig:
     lie_title_template: str = "templates/transparent_shape_title.png"
     lie_threshold: float = 0.65
     lie_detect_region: dict | None = None      # 타이틀 탐색 영역 (None=전체화면)
+    # 순찰 (Patrol) — 첫 구역 좌우 경계
+    patrol_left_x: int = 0
+    patrol_right_x: int = 0
+    patrol_margin: int = 0
 
 
 class BotRuntime:
@@ -96,6 +101,13 @@ class BotRuntime:
         self.floor_judge = FloorJudge(config.floors) if config.floors else None
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
+        # 순찰 — 구역 좌우 왕복 (경계 도달시 방향전환, 랜덤마진)
+        self.patrol = None
+        if config.patrol_right_x > config.patrol_left_x:
+            self.patrol = Patrol(
+                PatrolZone(config.patrol_left_x, config.patrol_right_x),
+                margin=config.patrol_margin,
+            )
 
         # 거탐 계층 (격리) — 자체 ncnn 엔진 (secure_loader/서버 의존 없음)
         self.registry = SolverRegistry()
@@ -131,13 +143,25 @@ class BotRuntime:
 
     # ── 틱 ────────────────────────────────────────────────────────────
     def hunting_tick(self, now: float | None = None) -> None:
-        """정상 사냥 1틱: 순찰 이동 + 공격 + 버프."""
+        """정상 사냥 1틱: 구역 좌우 왕복 순찰 + 공격 + 버프."""
         now = now if now is not None else time.time()
         if self.orchestrator.mode != "hunting":
             return
-        if self._cfg.route:
-            # 라우트 첫 블록을 한 스텝 진행(실기는 전체 순찰, 여기선 1블록 1회)
+
+        # 순찰: 현재 위치로 방향 결정 → 목표 경계로 1스텝 이동 (Humanizer 경유)
+        if self.patrol is not None:
+            pos = self.orchestrator.state.get_position()
+            if pos is not None:
+                self.patrol.next_direction(pos[0])
+                target = self.patrol.target_x()
+                self.block_runner.run_block(
+                    Block(type="move", target_x=target, move_type="walk"),
+                    max_steps=1,
+                )
+        elif self._cfg.route:
             self.block_runner.run_block(self._cfg.route[0], max_steps=1)
+
+        # 공격 + 버프
         if self._cfg.attack_key:
             self.combat.attack(self._cfg.attack_key, mode="duration")
         self.buffs.tick(now)
