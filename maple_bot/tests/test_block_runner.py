@@ -11,6 +11,7 @@ class FakeHumanizer:
         self.holds = []        # hold_dir(key) 호출 방향 순서
         self.releases = 0      # release_dir 호출 횟수
         self._held = None
+        self.held_keys = set()      # hold/release (↑/↓) 추적
     def perform(self, intent):
         self.intents.append(intent)
     def hold_dir(self, key, risk_profile=None):
@@ -22,6 +23,13 @@ class FakeHumanizer:
             self._held = None
     def held_dir(self):
         return self._held
+    def hold(self, key):
+        self.held_keys.add(key)
+    def release(self, key):
+        self.held_keys.discard(key)
+    def release_all(self):
+        self.release_dir()
+        self.held_keys.clear()
 
 
 class MovingChar:
@@ -131,3 +139,106 @@ def test_all_input_goes_through_humanizer():
     runner.run_block(Block(type="move", target_x=30), max_steps=50)
     # runner가 backend를 직접 들고있지 않음(humanizer만)
     assert not hasattr(runner, "_backend")
+
+
+# ── 사다리: 키 홀드에 반응하는 모의 월드(물리) ──────────────────────────
+class LadderWorld:
+    """held 키에 반응해 pos()마다 물리 적용. up=↑이동(y↓), down=↓(y↑), dir=좌우."""
+    def __init__(self, x, y, x_speed=8, y_speed=5):
+        self.x = x; self.y = y; self.dir = None; self.up = False; self.down = False
+        self.xs = x_speed; self.ys = y_speed
+    def pos(self):
+        if self.dir == "right": self.x += self.xs
+        elif self.dir == "left": self.x -= self.xs
+        if self.up: self.y = max(0, self.y - self.ys)
+        if self.down: self.y += self.ys
+        return (self.x, self.y)
+
+
+class WorldHumanizer(FakeHumanizer):
+    """FakeHumanizer + 월드 물리 연동(hold/release가 월드 상태를 바꿈)."""
+    def __init__(self, world):
+        super().__init__(); self.w = world
+    def hold_dir(self, key, risk_profile=None):
+        super().hold_dir(key); self.w.dir = key
+    def release_dir(self):
+        if self._held is not None: self.w.dir = None
+        super().release_dir()
+    def hold(self, key):
+        super().hold(key)
+        if key == "up": self.w.up = True
+        if key == "down": self.w.down = True
+    def release(self, key):
+        super().release(key)
+        if key == "up": self.w.up = False
+        if key == "down": self.w.down = False
+    def release_all(self):
+        self.w.dir = None; self.w.up = False; self.w.down = False
+        super().release_all()
+
+
+def _runner(h, world):
+    return BlockRunner(humanizer=h, pos_fn=world.pos, sleep_fn=lambda s: None)
+
+
+def test_ladder_same_level_climbs_to_y_top():
+    """사다리 밑(같은 층)에서 ↑ 홀드로 y_top까지 등반 + 도착 확인."""
+    w = LadderWorld(x=100, y=200); h = WorldHumanizer(w)
+    ok = _runner(h, w).run_block(
+        Block(type="ladder", ladder_x=100, y_top=10, y_bot=200, ladder_dir="up"),
+        max_steps=200)
+    assert ok is True
+    assert w.y <= 10 + 2          # 층 도착(y_top+2 이내)
+    assert "up" not in h.held_keys  # 등반 후 ↑ 떼짐
+
+
+def test_ladder_jump_grab_then_climb():
+    """사다리에서 떨어진 위치 → 접근+점프+↑ 잡기 → 등반."""
+    w = LadderWorld(x=40, y=60); h = WorldHumanizer(w)
+    ok = _runner(h, w).run_block(
+        Block(type="ladder", ladder_x=100, y_top=10, y_bot=300, ladder_dir="up"),
+        max_steps=300)
+    assert ok is True
+    assert any(i.key == "alt" for i in h.intents)  # 점프키 입력됨
+    assert w.y <= 10 + 2                           # 층 도착
+    assert "up" not in h.held_keys
+
+
+def test_ladder_descend_uses_down_side_jump():
+    """하강: ↓ + 좌/우 + 점프 키 시퀀스 (지정 X에서 뛰어내림)."""
+    w = LadderWorld(x=100, y=10); h = WorldHumanizer(w)
+    ok = _runner(h, w).run_block(
+        Block(type="ladder", ladder_x=100, y_top=10, y_bot=200,
+              ladder_dir="down", exit_side="right"),
+        max_steps=20)
+    assert ok is True
+    assert any(i.key == "alt" for i in h.intents)  # 점프
+    assert "down" not in h.held_keys               # 정리됨
+    assert h.held_dir() is None
+
+
+def test_move_mode_pass_one_direction_only():
+    """통과 모드: 구간을 한 방향(오른쪽)으로 1회만 지나감 — 되돌아오지 않음."""
+    h = FakeHumanizer()
+    char = MovingChar(start_x=10, speed=8); char.target = 100
+    runner = BlockRunner(humanizer=h, pos_fn=char.pos)
+    ok = runner.run_block(Block(type="move", start_x=10, end_x=100, mode="pass"),
+                          max_steps=100)
+    assert ok is True
+    assert abs(char.x - 100) <= TOLERANCE
+    assert "left" not in h.holds      # 한 방향(오른쪽)만
+
+
+def test_move_mode_infinite_stops_on_stop_fn():
+    """무한 왕복: stop_fn이 True 되면 종료(무한루프 방지)."""
+    h = FakeHumanizer()
+    counter = {"n": 0}
+    def stop():
+        counter["n"] += 1
+        return counter["n"] > 6      # 몇 번 돈 뒤 정지
+    moved = []
+    runner = BlockRunner(humanizer=h, pos_fn=lambda: (0, 75), stop_fn=stop)
+    ok = runner.run_sweep(10, 100, sweeps=1, infinite=True,
+                          step_fn=lambda tx: moved.append(tx))
+    assert ok is True
+    assert len(moved) >= 2           # 최소 한 왕복 이상 돌고 멈춤

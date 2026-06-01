@@ -6,6 +6,8 @@ from dataclasses import dataclass, asdict, field
 
 _VALID_TYPES = {"move", "attack", "ladder", "jump"}
 _VALID_MOVE_TYPES = {"walk", "teleport"}
+_VALID_MOVE_MODES = {"count", "infinite", "pass"}  # 구간왕복 횟수 / 무한왕복 / 한방향 통과
+_VALID_LADDER_DIRS = {"up", "down"}                # 사다리 등반 / 하강
 
 
 @dataclass
@@ -27,6 +29,7 @@ class Block:
     start_x: int = 0
     end_x: int = 0
     sweeps: int = 1
+    mode: str = "count"          # count=sweeps회 왕복 / infinite=무한왕복 / pass=한방향 1회 통과
     # attack
     skill_key: str = ""
     attack_mode: str = "duration"
@@ -36,12 +39,17 @@ class Block:
     y_top: int = 0
     y_bot: int = 0
     exit_side: str = "left"
+    ladder_dir: str = "up"       # up=등반(y_top까지) / down=하강(점프 내림)
 
     def __post_init__(self) -> None:
         if self.type not in _VALID_TYPES:
             raise ValueError(f"알 수 없는 Block.type: {self.type!r} (허용: {sorted(_VALID_TYPES)})")
         if self.type == "move" and self.move_type not in _VALID_MOVE_TYPES:
             raise ValueError(f"알 수 없는 move_type: {self.move_type!r}")
+        if self.type == "move" and self.mode not in _VALID_MOVE_MODES:
+            raise ValueError(f"알 수 없는 move mode: {self.mode!r} (허용: {sorted(_VALID_MOVE_MODES)})")
+        if self.type == "ladder" and self.ladder_dir not in _VALID_LADDER_DIRS:
+            raise ValueError(f"알 수 없는 ladder_dir: {self.ladder_dir!r}")
 
     def to_dict(self) -> dict:
         return asdict(self)

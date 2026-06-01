@@ -36,6 +36,7 @@ class Humanizer:
         self._sleep = sleep_fn or time.sleep
         self._rng = rng or random.Random()
         self._held: str | None = None   # 현재 누른 채 유지 중인 이동키(left/right)
+        self._held_keys: set[str] = set()   # 좌우 외 유지키(사다리 ↑/↓ 등)
 
     # ── 이동키 유지/해제 (C _walk_to_x 방식) ──────────────────────────
     # 좌우 이동키는 '한 번 누르고 계속 유지'한다. 매 틱 톡톡 누르지 않는다.
@@ -62,6 +63,24 @@ class Humanizer:
     def held_dir(self) -> str | None:
         """현재 유지 중인 이동키(없으면 None)."""
         return self._held
+
+    def hold(self, key: str) -> None:
+        """좌우 외 임의 키를 누른 채 유지(사다리 ↑/↓ 등)."""
+        if key not in self._held_keys:
+            self._backend.key_down(key)
+            self._held_keys.add(key)
+
+    def release(self, key: str) -> None:
+        """hold로 누른 키를 뗀다(멱등)."""
+        if key in self._held_keys:
+            self._backend.key_up(key)
+            self._held_keys.discard(key)
+
+    def release_all(self) -> None:
+        """유지 중인 모든 키(좌우+↑/↓)를 뗀다(정지/안전 진입 시)."""
+        self.release_dir()
+        for k in list(self._held_keys):
+            self.release(k)
 
     # ── 공개 API ──────────────────────────────────────────────────────
     def perform(self, intent: Intent) -> None:

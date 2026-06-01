@@ -556,3 +556,21 @@
 - runtime.hunting_tick: **이동 XOR 제자리공격**으로 재구성. attacking이면 release_dir→attack, 아니면 순찰 hold_dir. ※key모드는 항상 attacking→제자리 사냥(이동 안함). image모드는 박스내 몬스터 있을때만 멈춰 공격, 없으면 이동.
 - _on_safety_pause: 직접 key_up→**release_dir**+up키 해제로 통일(상태 동기화).
 ### 검증: tests 183 passed (humanizer hold/release 3, block_runner hold 2, runtime attack-release 1).
+
+## 2026-06-02 — 사다리 층이동 + 구간 3모드 (B/C 층이동 로직 대조)
+### B/C 확인
+- B(planet) maps_planet/*.py = **메모리 기반**(memory_reader, 정규화 y≤-0.77) → 헌법위반, 채택불가. 사다리개념만 동일(우+아래hold→탑승감지→↑).
+- C(MapleHunter) routine_runner.pyc dis 분석 = **비전 기반**(_curr_x/_curr_y), 채택. 전체 사다리 로직 확보.
+### C 사다리 메커니즘 (dis 확인)
+- routine_blocks 스키마: ladder{x,y_top,y_bot,direction(up/down),exit_side}, move{x,method}, patrol{x_start,x_end,attack_hold_sec}.
+- _do_ladder: 사다리X로 _do_move→좌표인식(실패스킵)→케이스. Case1 같은층(|y-y_bot|≤2)=↑등반, Case2 위층(y<y_top+2)=점프하강, Case3=점프잡기.
+- _climb_ladder_up_until: keyDown('up')홀드→0.05s폴링 y≤y_top+2 도달(30s타임아웃).
+- _jump_grab_ladder: keyDown(side)→|x-ladder_x|≤4(5s)→press(jump)→0.05→keyDown('up')→0.5매달림→keyUp(side)→y_top까지등반.
+- _descend_ladder_jump: keyDown('down')1초+좌우+점프.
+### 우리 구현
+- Block: move에 mode(count/infinite/pass), ladder에 ladder_dir(up/down) 추가 + 검증.
+- Humanizer: hold/release/release_all (좌우 외 ↑↓ 유지키, _held_keys set).
+- BlockRunner: 상수 LADDER_X_TOL=4,Y_ARRIVE_TOL=2,SAME_LEVEL_TOL=2,HANG=0.5,DESCEND=1.0. sleep_fn/stop_fn/poll 주입. run_block ladder/jump 분기. move 모드: pass=_exec_move(end_x), infinite=run_sweep(infinite,stop_fn까지), count=sweeps. _do_ladder/_climb_up_until/_jump_grab/_descend_ladder/_do_jump 구현(전부 Humanizer hold/release 경유).
+- BlockEditor: 2줄 카드(오버플로우 해결) — 윗줄 타입·모드/dir·옵션·✕, 아랫줄 좌표+긋기. move mode콤보, ladder dir콤보 노출.
+### 검증: tests 188 passed (ladder 3, move모드 2). LadderWorld(키홀드 반응 물리)로 등반/점프잡기/하강 검증. 1024폭 무오버플로우 렌더 확인.
+### 미결: 전체 route(사다리포함) 실행을 봇 루프에 결선 — 현재 hunting_tick은 patrol/route[0] max_steps=1 틱모델. 사다리는 블로킹(최대 35s)이라 floor-hunt route 전용 실행경로 필요(다음).
