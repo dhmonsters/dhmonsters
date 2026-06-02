@@ -3,10 +3,39 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QCheckBox, QLineEdit, QSpinBox, QComboBox,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QSlider,
 )
+from PyQt6.QtCore import Qt
 
 from core_ui.theme import SPACING
+
+
+class SliderField:
+    """라벨 + 드래그 슬라이더(0.1~1.0) + % 값. config 양방향. self.row=QWidget."""
+
+    def __init__(self, label: str, config, keys: tuple,
+                 lo: float = 0.1, hi: float = 1.0, default: float = 0.9, label_w: int = 130):
+        self._cfg = config
+        self._keys = keys
+        self.row = QWidget()
+        h = QHBoxLayout(self.row)
+        h.setContentsMargins(0, SPACING["xxs"], 0, SPACING["xxs"])
+        h.setSpacing(SPACING["sm"])
+        lbl = QLabel(label); lbl.setFixedWidth(label_w); lbl.setObjectName("subtle")
+        h.addWidget(lbl)
+        self.widget = QSlider(Qt.Orientation.Horizontal)
+        self.widget.setRange(int(lo * 100), int(hi * 100))
+        cur = float(config.get(*keys, default=default))
+        self.widget.setValue(int(round(cur * 100)))
+        h.addWidget(self.widget, 1)
+        self._val = QLabel(f"{int(round(cur * 100))}%"); self._val.setFixedWidth(46)
+        h.addWidget(self._val)
+        self.widget.valueChanged.connect(self._changed)
+
+    def _changed(self, v: int) -> None:
+        self._val.setText(f"{v}%")
+        self._cfg.set(*self._keys, round(v / 100.0, 2))
+        self._cfg.save()
 
 
 class StatusField:

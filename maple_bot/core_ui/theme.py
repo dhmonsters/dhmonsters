@@ -193,6 +193,14 @@ def build_qss() -> str:
     }}
     QCheckBox {{ color: {t['ink']}; }}
 
+    /* 슬라이더(임계값 바) — 둥근 트랙 + 네온 핸들 */
+    QSlider::groove:horizontal {{ height: 6px; background: {t['surface_4']}; border-radius: 3px; }}
+    QSlider::sub-page:horizontal {{ background: {t['primary']}; border-radius: 3px; }}
+    QSlider::handle:horizontal {{
+        background: {t['ink']}; width: 14px; height: 14px; margin: -5px 0; border-radius: 7px;
+    }}
+    QSlider::handle:horizontal:hover {{ background: {t['primary_hover']}; }}
+
     /* 블록 리스트 카드 */
     QListWidget#blockList {{ background-color: transparent; border: none; outline: none; }}
     QListWidget#blockList::item {{

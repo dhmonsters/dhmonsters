@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButt
 
 from core_ui.theme import SPACING
 from core_ui.widgets import (
-    CheckField, TextField, IntField, ComboField, FloatField, StatusField,
+    CheckField, TextField, IntField, ComboField, FloatField, StatusField, SliderField,
 )
 
 
@@ -227,11 +227,13 @@ def build_pages(config) -> list[QWidget]:
                               [name_cap])
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
         ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"]),
-        mm_status, ha_status, mon_status, name_status,
+        mm_status, ha_status,
+        # 캡처 바로 아래에 해당 임계값 슬라이더(드래그 바)
+        mon_status,
+        SliderField("몬스터 임계값", c, ("attack", "monster_accuracy"), default=0.9),
+        name_status,
+        SliderField("닉네임 임계값", c, ("attack", "name_tag_threshold"), default=0.7),
         IntField("색 허용오차", c, ("minimap", "tolerance"), 0, 255, default=30),
-        TextField("점프 키", c, ("minimap", "jump_key"), default="alt"),
-        FloatField("몬스터 임계값", c, ("attack", "monster_accuracy"), 0.1, 1.0, default=0.9),
-        FloatField("닉네임 임계값", c, ("attack", "name_tag_threshold"), 0.1, 1.0, default=0.7),
     ]))
 
     # 2. 동선·이동 — 좌표 동선은 블록 빌더로 (이동/공격/사다리 순차)
@@ -299,6 +301,7 @@ def build_pages(config) -> list[QWidget]:
         atk_status,
         IntField("공격 범위(px)", c, ("attack", "range_px"), 0, 2000, default=350),
         CheckField("공격 전 점프", c, ("attack", "jump_before_attack")),
+        TextField("점프 키", c, ("minimap", "jump_key"), default="alt"),
         CheckField("HP 물약 사용", c, ("recovery", "hp_potion", "enabled")),
         IntField("HP 물약 임계%", c, ("recovery", "hp_potion", "threshold"), 0, 100, default=65),
         TextField("HP 물약 키", c, ("recovery", "hp_potion", "key")),
