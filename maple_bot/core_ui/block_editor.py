@@ -57,6 +57,7 @@ class BlockEditor(QWidget):
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.setSpacing(SPACING["xxs"])
+        self._list.setMinimumHeight(360)   # 한 번에 ~6블록 보이게(캔버스가 커도 충분한 높이)
         self._list.model().rowsMoved.connect(self._on_rows_moved)
         self._v.addWidget(self._list, 1)
         self._render()
