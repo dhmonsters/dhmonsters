@@ -33,7 +33,8 @@ class MinimapCanvas(QWidget):
         self._last_seen: float | None = None    # 마지막 성공 검출 시각
         self._shot: QImage | None = None
         self._mm_size = (0, 0)        # (W_mm, H_mm)
-        self.setMinimumHeight(220)
+        self.setMinimumHeight(340)
+        self._auto_fit = True         # 가로폭 자동맞춤(배경 확대), 휠 줌 시 해제
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(interval_ms)
@@ -74,6 +75,8 @@ class MinimapCanvas(QWidget):
             self._last_seen = self._clock()
         h, w = bgr.shape[:2]
         self._mm_size = (w, h)
+        if self._auto_fit:
+            self.fit_width()          # 캡처 폭 기준 가로 꽉 채우기(배경 확대)
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
         self._shot = QImage(rgb.data, w, h, 3 * w,
                             QImage.Format.Format_RGB888).copy()
@@ -129,8 +132,8 @@ class MinimapCanvas(QWidget):
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
 
     def set_zoom(self, zoom: float) -> None:
-        """줌 배율 설정(0.5~4.0 클램프)."""
-        self._zoom = max(0.5, min(4.0, zoom))
+        """줌 배율 설정(0.5~8.0 클램프)."""
+        self._zoom = max(0.5, min(8.0, zoom))
         self.update()
 
     def fit(self) -> None:
@@ -139,7 +142,19 @@ class MinimapCanvas(QWidget):
         if W > 0 and H > 0 and self.width() > 0 and self.height() > 0:
             self.set_zoom(min(self.width() / W, self.height() / H))
 
+    def fit_width(self) -> None:
+        """미니맵을 캔버스 가로폭에 꽉 차게 확대(배경 크게)."""
+        W = self._region()["width"] or self._mm_size[0]
+        if W > 0 and self.width() > 0:
+            self.set_zoom(self.width() / W)
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        if getattr(self, "_auto_fit", True):
+            self.fit_width()
+
     def wheelEvent(self, ev) -> None:
+        self._auto_fit = False        # 수동 줌 시작 → 자동 가로맞춤 해제
         step = 1.1 if ev.angleDelta().y() > 0 else 0.9
         self.set_zoom(self._zoom * step)
 
@@ -263,14 +278,25 @@ class RouteCanvas(MinimapCanvas):
             p.setPen(pen)
             for i in range(len(pts) - 1):
                 p.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
-        # 2) 블록 — 이동 구간은 길쭉한 캡슐 바, 그 외는 둥근 점
+        # 2) 블록 — 이동=가로 캡슐, 사다리=세로 선, 그 외=둥근 점
         for i, b in enumerate(route):
             a = block_anchor(b)
             if a is None:
                 continue
             cx, cy = minimap_to_canvas(a[0], a[1], self._zoom)
-            p.setPen(QPen(QColor("#ffffff"), 2) if i == self._dragging else Qt.PenStyle.NoPen)
-            p.setBrush(QColor(block_color(b)))
+            col = QColor(block_color(b))
+            sel = (i == self._dragging)
+            if b.get("type") == "ladder" and int(b.get("y_top", 0)) < int(b.get("y_bot", 0)):
+                # 사다리: ladder_x에서 y_top↔y_bot 세로 선
+                tx, ty = minimap_to_canvas(int(b["ladder_x"]), int(b["y_top"]), self._zoom)
+                _bx, by = minimap_to_canvas(int(b["ladder_x"]), int(b["y_bot"]), self._zoom)
+                pen2 = QPen(QColor("#ffffff") if sel else col, 7)
+                pen2.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(pen2)
+                p.drawLine(tx, ty, tx, by)
+                continue
+            p.setPen(QPen(QColor("#ffffff"), 2) if sel else Qt.PenStyle.NoPen)
+            p.setBrush(col)
             if b.get("type") == "move" and int(b.get("end_x", 0)) > int(b.get("start_x", 0)):
                 sx = minimap_to_canvas(int(b["start_x"]), a[1], self._zoom)[0]
                 ex = minimap_to_canvas(int(b["end_x"]), a[1], self._zoom)[0]

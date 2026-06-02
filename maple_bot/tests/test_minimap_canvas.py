@@ -100,7 +100,7 @@ def test_zoom_clamped(app):
     cv = MinimapCanvas(cfg, screen_capture=lambda r: None,
                        char_finder=lambda *a, **k: None, interval_ms=99999)
     cv.set_zoom(99)
-    assert cv._zoom == 4.0          # 상한
+    assert cv._zoom == 8.0          # 상한
     cv.set_zoom(0.01)
     assert cv._zoom == 0.5          # 하한
 
