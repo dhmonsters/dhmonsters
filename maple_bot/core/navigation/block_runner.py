@@ -241,9 +241,10 @@ class BlockRunner:
     def _descend_ladder(self, exit_side: str, y_bot: int, max_steps: int) -> bool:
         """지정 X에서 ↓ 1초 + 좌/우 + 점프 → 사다리에서 뛰어내림(C _descend_ladder_jump).
         y가 y_bot 근처(아래 발판)로 내려오면 도착."""
+        side = self._h.random_side() if exit_side not in ("left", "right") else exit_side
         self._h.hold("down")
         self._jsleep(DESCEND_DOWN_SEC)
-        self._h.hold_dir(exit_side)
+        self._h.hold_dir(side)
         self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
         self._jsleep(0.1)
         self._h.release("down")
