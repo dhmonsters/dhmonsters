@@ -236,15 +236,32 @@ def build_pages(config) -> list[QWidget]:
     route_lbl = _QLabel("좌표 동선 블록 (위→아래 순서 실행)")
     route_lbl.setObjectName("subtle")
     block_editor = BlockEditor(c, ("floor_hunt", "route"))
-    # 실시간 미니맵 캔버스(보기 전용). 캡처/모니터 폭 획득 실패 시 생략
+    # 미니맵 편집 캔버스(RouteCanvas) + 블록타입 툴바. 캡처/모니터 폭 실패 시 캔버스 생략
     nav_extras = []
     try:
         import mss as _mss
+        from PyQt6.QtWidgets import QWidget as _QWidget, QHBoxLayout as _QHBox, \
+            QPushButton as _QBtn, QButtonGroup as _QBtnGroup
         from core.screen_reader import ScreenReader
-        from core_ui.minimap_canvas import MinimapCanvas
+        from core_ui.minimap_canvas import RouteCanvas
         with _mss.mss() as _s:
             _sw = int(_s.monitors[1]["width"])
-        nav_extras.append(MinimapCanvas(c, ScreenReader().capture, screen_w=_sw))
+        route_canvas = RouteCanvas(c, ScreenReader().capture, screen_w=_sw,
+                                   on_route_changed=block_editor.reload)
+        block_editor._on_change = route_canvas.update   # 리스트→캔버스 이벤트
+        # 블록타입 툴바 (선택 안 함 기본)
+        bar = _QWidget(); bl = _QHBox(bar)
+        bl.setContentsMargins(0, 0, 0, 0)
+        grp = _QBtnGroup(bar); grp.setExclusive(True)
+        for label, typ in [("선택 안 함", None), ("이동", "move"), ("공격", "attack"),
+                           ("사다리", "ladder"), ("점프", "jump"), ("텔포", "teleport")]:
+            btn = _QBtn(label); btn.setCheckable(True)
+            btn.clicked.connect(lambda _=False, t=typ: route_canvas.set_active_type(t))
+            grp.addButton(btn); bl.addWidget(btn)
+            if typ is None:
+                btn.setChecked(True)
+        bl.addStretch()
+        nav_extras += [bar, route_canvas]
     except Exception:
         pass
     nav_extras += [route_lbl, block_editor]
