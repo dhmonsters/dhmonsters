@@ -16,7 +16,7 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
     keys_xywh: ((sec,..,'region_x'), y키, w키, h키)
     fields_xywh: 갱신할 IntField 4개(없으면 None) / on_done: 완료 후 콜백(상태 갱신)
     """
-    btn = QPushButton("📐 지정"); btn.setFixedWidth(82)
+    btn = QPushButton("영역 지정"); btn.setMinimumWidth(78)
     btn.setObjectName("primary")
     btn.setToolTip(f"{label} 영역을 스크린샷에서 드래그")
 
@@ -127,7 +127,7 @@ def _make_template_capture(config, save_path, config_key, label: str,
 
     save_path: 저장할 png 경로(templates/...). config_key: 경로 저장할 config 키. on_done: 완료 콜백.
     """
-    btn = QPushButton("📷 캡처"); btn.setFixedWidth(82)
+    btn = QPushButton("캡처"); btn.setMinimumWidth(64)
     btn.setToolTip(f"{label} 이미지를 스크린샷에서 드래그로 캡처")
 
     def on_click():

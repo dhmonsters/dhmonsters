@@ -257,10 +257,10 @@ class BlockEditor(QWidget):
             e_sx.setValue(int(blk.get("end_x", 0)))
             e_sx.valueChanged.connect(lambda val, i=idx: self.set_field(i, "end_x", val))
             bot.addWidget(g(e_sx, 88), 1)
-            ln = QPushButton("구간 긋기")
+            ln = QPushButton("구간 긋기")   # 글자 크기에 맞춰 자동(스핀박스만 늘어남)
             ln.clicked.connect(lambda _=False, i=idx, sw_=s_sx, ew_=e_sx:
                                self._pick_line(i, sw_, ew_))
-            bot.addWidget(g(ln, 96), 1)
+            bot.addWidget(ln)
         elif blk["type"] == "attack":
             sk = QLineEdit(blk.get("skill_key", "")); sk.setPlaceholderText("스킬키")
             sk.textChanged.connect(lambda val, i=idx: self.set_field(i, "skill_key", val))
@@ -294,10 +294,10 @@ class BlockEditor(QWidget):
             yt.setValue(int(blk.get("y_top", 0)))
             yt.valueChanged.connect(lambda val, i=idx: self.set_field(i, "y_top", val))
             bot.addWidget(g(yt, 92), 1)
-            ln = QPushButton("사다리 긋기")
+            ln = QPushButton("사다리 긋기")   # 글자 크기에 맞춰 자동
             ln.clicked.connect(lambda _=False, i=idx, xw=lx, ybw=yb, ytw=yt:
                                self._pick_ladder(i, xw, ybw, ytw))
-            bot.addWidget(g(ln, 100), 1)
+            bot.addWidget(ln)
 
         rm = QPushButton("✕"); rm.setFixedWidth(28)
         rm.clicked.connect(lambda _=False, i=idx: self.remove_row(i))
