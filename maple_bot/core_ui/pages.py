@@ -160,8 +160,9 @@ def _make_template_capture(config, save_path, config_key, label: str,
 
 
 def _page(title: str, desc: str, fields: list, buttons: list | None = None,
-          extras: list | None = None) -> QWidget:
-    """제목 + 설명 + (버튼들) + 폼 필드들 + (임의 위젯 extras)를 담은 스크롤 페이지."""
+          extras: list | None = None, fill_last: bool = False) -> QWidget:
+    """제목 + 설명 + (버튼들) + 폼 필드들 + (임의 위젯 extras)를 담은 스크롤 페이지.
+    fill_last=True면 마지막 extra가 남은 세로 공간을 채운다(블록 리스트가 창에 꽉 차게)."""
     inner = QWidget()
     v = QVBoxLayout(inner)
     v.setContentsMargins(SPACING["xl"], SPACING["xl"], SPACING["xl"], SPACING["xl"])
@@ -177,9 +178,12 @@ def _page(title: str, desc: str, fields: list, buttons: list | None = None,
         v.addSpacing(SPACING["sm"])
     for f in fields:
         v.addWidget(f.row)
-    for w in (extras or []):
-        v.addWidget(w)
-    v.addStretch(1)
+    ex = extras or []
+    for i, w in enumerate(ex):
+        # fill_last면 마지막 extra에 stretch=1 부여(빈공간 채움), 나머지/일반 페이지는 0
+        v.addWidget(w, 1 if (fill_last and i == len(ex) - 1) else 0)
+    if not fill_last:
+        v.addStretch(1)
 
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
@@ -270,7 +274,7 @@ def build_pages(config) -> list[QWidget]:
         CheckField("커스텀 루트 모드", c, ("floor_hunt", "route_mode")),
         TextField("현재 사냥터", c, ("hunt_grounds", "active")),
         ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative"),
-    ], extras=nav_extras))
+    ], extras=nav_extras, fill_last=True))
 
     # 3. 전투 — 공격범위 박스는 드래그 후 색상(●설정됨)으로 확인 (숫자 표시 안 함)
     atk_picker = _make_attack_box_picker(c, None, on_done=lambda: atk_status.refresh())
