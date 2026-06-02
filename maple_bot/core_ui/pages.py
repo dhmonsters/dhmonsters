@@ -248,7 +248,7 @@ def build_pages(config) -> list[QWidget]:
             _sw = int(_s.monitors[1]["width"])
         route_canvas = RouteCanvas(c, ScreenReader().capture, screen_w=_sw,
                                    on_route_changed=block_editor.reload)
-        block_editor._on_change = route_canvas.update   # 리스트→캔버스 이벤트
+        block_editor._on_change = route_canvas.sync_unplaced   # 리스트 변경→캔버스 노출/갱신
         # 블록타입 툴바 (선택 안 함 기본)
         bar = _QWidget(); bl = _QHBox(bar)
         bl.setContentsMargins(0, 0, 0, 0)

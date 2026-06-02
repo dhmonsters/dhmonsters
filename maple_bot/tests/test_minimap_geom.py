@@ -90,3 +90,23 @@ def test_translate_block_moves_pos_and_type_fields_immutable():
                            "ladder_x": 100, "y_top": 10, "y_bot": 50}, 5, 3)
     assert lad["ladder_x"] == 105 and lad["y_top"] == 13 and lad["y_bot"] == 53
     assert lad["pos_x"] == -1                                # 미배치 pos는 그대로
+
+
+def test_autoplace_unplaced_assigns_anchors():
+    from core_ui.minimap_geom import autoplace_unplaced, block_anchor
+    route = [
+        {"type": "attack", "pos_x": 50, "pos_y": 50},     # 이미 배치 → 유지
+        {"type": "attack", "pos_x": -1, "pos_y": -1},      # 미배치 → staging
+        {"type": "ladder", "ladder_x": 0, "y_bot": 0},     # 미배치 사다리 → staging
+    ]
+    changed = autoplace_unplaced(route, 256, 104)
+    assert changed == 2
+    assert route[0]["pos_x"] == 50                         # 기존 유지
+    assert block_anchor(route[1]) is not None              # 배치됨
+    assert block_anchor(route[2]) is not None              # 사다리도 배치됨
+
+
+def test_autoplace_skips_when_no_minimap():
+    from core_ui.minimap_geom import autoplace_unplaced
+    route = [{"type": "attack", "pos_x": -1, "pos_y": -1}]
+    assert autoplace_unplaced(route, 0, 0) == 0            # 미니맵 미설정 → 배치 안 함

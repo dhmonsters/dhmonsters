@@ -139,3 +139,30 @@ def translate_block(block: dict, dx: int, dy: int) -> dict:
         b["y_top"] = int(b.get("y_top", 0)) + dy
         b["y_bot"] = int(b.get("y_bot", 0)) + dy
     return b
+
+
+def autoplace_unplaced(route: list[dict], mm_w: int, mm_h: int) -> int:
+    """캔버스에 안 그려지는 미배치 블록(anchor None)에 좌상단 staging 좌표를 부여한다.
+    리스트로만 만든 블록을 캔버스로 끌어와 맵핑할 수 있게 한다. 변경한 개수 반환.
+    mm_w<=0(미니맵 미설정)이면 0(배치 불가)."""
+    if mm_w <= 0:
+        return 0
+    cols = max(1, (mm_w - 16) // 22)
+    changed = 0
+    k = 0
+    for b in route:
+        if block_anchor(b) is not None:
+            continue
+        sx = 10 + (k % cols) * 22
+        sy = 10 + (k // cols) * 18
+        if b.get("type") == "ladder":
+            b["ladder_x"] = sx
+            b["y_bot"] = sy
+            if int(b.get("y_top", 0)) <= 0:
+                b["y_top"] = max(0, sy - 20)
+        else:
+            b["pos_x"] = sx
+            b["pos_y"] = sy
+        k += 1
+        changed += 1
+    return changed

@@ -156,9 +156,20 @@ class RouteCanvas(MinimapCanvas):
         self._active_type: str | None = None
         self._dragging: int | None = None
         self._drag_last: tuple[int, int] | None = None
+        self.sync_unplaced()   # 리스트로만 만든 미배치 블록을 캔버스에 끌어다 놓을 수 있게 staging
 
     def set_active_type(self, t: str | None) -> None:
         self._active_type = t
+
+    def sync_unplaced(self) -> None:
+        """미배치 블록(리스트로만 만든 것)을 좌상단 staging 좌표로 올려 캔버스에서 끌 수 있게 한다.
+        리스트 변경(on_change) 시에도 호출 — 새로 추가된 미배치 블록을 자동 노출."""
+        from core_ui.minimap_geom import autoplace_unplaced
+        w, h = self.minimap_size()
+        route = self._route()
+        if autoplace_unplaced(route, w, h) > 0:
+            self._save_route(route)
+        self.update()
 
     # ── route 입출력 ──────────────────────────────────────────────────
     def _route(self) -> list[dict]:
