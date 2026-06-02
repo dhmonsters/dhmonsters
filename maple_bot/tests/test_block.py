@@ -45,3 +45,15 @@ def test_from_dict_roundtrip():
     b = Block.from_dict(d)
     assert b.target_x == 50
     assert b.to_dict()["move_type"] == "teleport"
+
+
+def test_block_has_canvas_anchor_default_unplaced():
+    from core.navigation.block import Block
+    b = Block(type="attack")
+    assert b.pos_x == -1 and b.pos_y == -1        # 기본 미배치
+
+
+def test_block_from_dict_preserves_pos():
+    from core.navigation.block import Block
+    b = Block.from_dict({"type": "attack", "pos_x": 30, "pos_y": 40})
+    assert (b.pos_x, b.pos_y) == (30, 40)
