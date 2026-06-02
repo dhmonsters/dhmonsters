@@ -144,12 +144,19 @@ class BotRuntime:
 
         # 행동/동선 계층
         self._bot_running = False    # 컨트롤러 start/stop로 토글 (루트 실행 활성 조건)
+        self.floor_judge = FloorJudge(config.floors) if config.floors else None
+        # 층 이탈 복귀 그래프 — route의 사다리에서 자동 구성
+        _recovery_graph = None
+        if self.floor_judge is not None and config.route:
+            from core.navigation.map_graph import build_graph
+            _recovery_graph = build_graph(
+                config.floors, [b.to_dict() for b in config.route], self.floor_judge)
         self.block_runner = BlockRunner(
             humanizer=self.humanizer,
             pos_fn=lambda: self.orchestrator.state.get_position() or (0, 0),
             stop_fn=lambda: not self._route_can_run(),   # 안전모드·정지 시 루트 폴링루프 즉시 이탈
+            floor_judge=self.floor_judge, recovery_graph=_recovery_graph,
         )
-        self.floor_judge = FloorJudge(config.floors) if config.floors else None
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
         self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval)

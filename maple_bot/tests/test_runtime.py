@@ -187,3 +187,19 @@ def test_safety_event_triggers_solver_then_resume():
 
     rt.safety_tick(now=2.0)
     assert rt.orchestrator.mode == "hunting"
+
+
+def test_runtime_builds_recovery_graph_and_injects():
+    """floors+route(사다리)면 BlockRunner에 복귀 그래프가 주입된다."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        floors=[Floor("2층", 100, 149), Floor("1층", 150, 199)],
+        route=[Block(type="ladder", ladder_x=40, y_bot=170, y_top=120)],
+    )
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel())
+    assert rt.block_runner._judge is not None
+    g = rt.block_runner._graph
+    assert g is not None and "1층" in g and "2층" in g
+    assert any(e["to"] == "2층" for e in g["1층"])   # 사다리 간선
