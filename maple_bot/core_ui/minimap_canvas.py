@@ -235,25 +235,36 @@ class RouteCanvas(MinimapCanvas):
         if self._shot is None:
             return
         from core_ui.minimap_geom import block_anchor, minimap_to_canvas, block_color
+        from PyQt6.QtCore import QRectF
         route = self._route()
         p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        # 1) 굵은 라운드 커넥터(체인) — 실행 순서대로 배치된 앵커를 잇는다
         pts = []
         for b in route:
             a = block_anchor(b)
             if a is not None:
                 pts.append(minimap_to_canvas(a[0], a[1], self._zoom))
         if len(pts) >= 2:
-            p.setPen(QPen(QColor("#5e6ad2"), 1.5, Qt.PenStyle.DashLine))
+            pen = QPen(QColor("#5865f2"), 6)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            p.setPen(pen)
             for i in range(len(pts) - 1):
                 p.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+        # 2) 블록 — 이동 구간은 길쭉한 캡슐 바, 그 외는 둥근 점
         for i, b in enumerate(route):
             a = block_anchor(b)
             if a is None:
                 continue
             cx, cy = minimap_to_canvas(a[0], a[1], self._zoom)
-            if i == self._dragging:
-                p.setPen(QPen(QColor("#ffffff"), 2))
-            else:
-                p.setPen(Qt.PenStyle.NoPen)
+            p.setPen(QPen(QColor("#ffffff"), 2) if i == self._dragging else Qt.PenStyle.NoPen)
             p.setBrush(QColor(block_color(b)))
-            p.drawEllipse(cx - 6, cy - 6, 12, 12)
+            if b.get("type") == "move" and int(b.get("end_x", 0)) > int(b.get("start_x", 0)):
+                sx = minimap_to_canvas(int(b["start_x"]), a[1], self._zoom)[0]
+                ex = minimap_to_canvas(int(b["end_x"]), a[1], self._zoom)[0]
+                h = 16
+                p.drawRoundedRect(QRectF(sx, cy - h / 2, max(float(h), ex - sx), h),
+                                  h / 2, h / 2)
+            else:
+                p.drawEllipse(cx - 8, cy - 8, 16, 16)
