@@ -266,3 +266,61 @@ def test_ladder_grab_side_random_uses_random_side():
               ladder_dir="up", grab_side="random"),
         max_steps=300)
     assert "left" in h.holds    # WorldHumanizer.random_side()=left
+
+
+class FakeFloorObj:
+    def __init__(self, name): self.name = name
+
+
+class BandJudge:
+    def __init__(self, bands): self.bands = bands   # [(name,ymin,ymax)]
+    def floor_at(self, y):
+        for name, lo, hi in self.bands:
+            if lo <= y <= hi:
+                return FakeFloorObj(name)
+        return None
+
+
+def test_run_block_recovers_when_on_wrong_floor():
+    """기대층(블록 pos_y=2층)과 실제층(1층)이 다르면 복귀 사다리를 타고 올라간다."""
+    h = FakeHumanizer()
+    state = {"y": 170}
+
+    class WorldChar:
+        def pos(self): return (40, state["y"])
+    judge = BandJudge([("2층", 100, 149), ("1층", 150, 199)])
+    graph = {
+        "1층": [{"to": "2층", "via": {"type": "ladder", "ladder_x": 40,
+                                     "y_bot": 170, "y_top": 120, "ladder_dir": "up"}}],
+        "2층": [],
+    }
+    runner = BlockRunner(humanizer=h, pos_fn=WorldChar().pos,
+                         floor_judge=judge, recovery_graph=graph)
+    climbed = {"n": 0}
+    def fake_climb(block, max_steps=200):
+        climbed["n"] += 1; state["y"] = 120   # 2층 도달
+        return True
+    runner._do_ladder = fake_climb
+    ok = runner.run_block(Block(type="attack", skill_key="z", pos_y=120), max_steps=5)
+    assert climbed["n"] >= 1            # 복귀 사다리 실행됨
+    assert ok is True
+
+
+def test_run_block_no_recovery_when_same_floor():
+    h = FakeHumanizer()
+    judge = BandJudge([("2층", 100, 149), ("1층", 150, 199)])
+    graph = {"1층": [], "2층": []}
+    runner = BlockRunner(humanizer=h, pos_fn=lambda: (40, 120),  # 이미 2층
+                         floor_judge=judge, recovery_graph=graph)
+    called = {"n": 0}
+    runner._do_ladder = lambda *a, **k: called.__setitem__("n", called["n"] + 1)
+    runner.run_block(Block(type="attack", skill_key="z", pos_y=120), max_steps=5)
+    assert called["n"] == 0             # 복귀 없음
+
+
+def test_run_block_recovery_noop_without_judge():
+    """judge/graph 미주입이면 기존 동작 그대로(복귀 비활성)."""
+    h = FakeHumanizer()
+    char = MovingChar(start_x=20); char.target = 30
+    runner = BlockRunner(humanizer=h, pos_fn=char.pos)   # judge 없음
+    assert runner.run_block(Block(type="move", target_x=30), max_steps=50) is True

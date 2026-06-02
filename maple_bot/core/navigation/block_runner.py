@@ -30,7 +30,8 @@ class BlockRunner:
                  jump_key: str = "alt", teleport_key: str = "space",
                  sleep_fn: Callable[[float], None] | None = None,
                  stop_fn: Callable[[], bool] | None = None,
-                 poll_sec: float = 0.05):
+                 poll_sec: float = 0.05,
+                 floor_judge=None, recovery_graph=None, max_recover: int = 3):
         self._h = humanizer
         self._pos = pos_fn
         self._jump_key = jump_key
@@ -38,6 +39,9 @@ class BlockRunner:
         self._sleep = sleep_fn or time.sleep
         self._stop = stop_fn or (lambda: False)
         self._poll = poll_sec
+        self._judge = floor_judge
+        self._graph = recovery_graph
+        self._max_recover = max_recover
 
     def _jsleep(self, base: float) -> None:
         """고정 타이밍을 Humanizer로 ±0.05 지터해 대기(어떤 고정 수치도 매번 다르게)."""
@@ -52,7 +56,27 @@ class BlockRunner:
                 return False
         return True
 
+    def _recover_if_needed(self, block: Block, max_steps: int) -> None:
+        """현재 층이 블록의 기대 층과 다르면 그래프 최단경로의 사다리를 타고 복귀.
+        judge/graph 미주입이거나 기대층 None이면 아무것도 안 함."""
+        if self._judge is None or not self._graph:
+            return
+        from core.navigation.map_graph import expected_floor, shortest_path
+        want = expected_floor(block.to_dict(), self._judge)
+        if want is None:
+            return
+        for _ in range(self._max_recover):
+            _x, y = self._pos()
+            cur = self._judge.floor_at(y)
+            if cur is None or cur.name == want:
+                return
+            path = shortest_path(self._graph, cur.name, want)
+            if not path:
+                return                       # 복구 불가 → 그냥 진행
+            self._do_ladder(Block.from_dict(path[0]), max_steps)
+
     def run_block(self, block: Block, max_steps: int = 200) -> bool:
+        self._recover_if_needed(block, max_steps)
         if block.type == "move":
             # 구간 모드: start_x < end_x 이면 mode(count/infinite/pass)에 따라 왕복/통과
             if block.end_x > block.start_x:
