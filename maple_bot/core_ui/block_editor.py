@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QSpinBox, QLineEdit, QListWidget, QListWidgetItem, QAbstractItemView,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt
 
@@ -206,8 +207,16 @@ class BlockEditor(QWidget):
             self._list.setItemWidget(item, row)
         self._reordering = False
 
+    @staticmethod
+    def _grow(w, min_w: int):
+        """창 크기에 따라 늘고/줄도록: 최소폭 + 가로 Expanding. (고정폭 대신)"""
+        w.setMinimumWidth(min_w)
+        w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return w
+
     def _build_row(self, idx: int, blk: dict) -> QWidget:
-        # 2줄 카드: 윗줄=핸들·타입·옵션콤보·버튼·삭제 / 아랫줄=좌표 숫자(드래그로 채워짐)
+        # 2줄 카드: 윗줄=핸들·타입·옵션콤보·삭제 / 아랫줄=좌표 숫자+긋기
+        # 모든 입력은 최소폭+Expanding이라 창 크기에 따라 자연스럽게 늘고/줄어든다.
         row = QWidget()
         v = QVBoxLayout(row)
         v.setContentsMargins(SPACING["xs"], SPACING["xxs"], SPACING["xs"], SPACING["xxs"])
@@ -215,79 +224,78 @@ class BlockEditor(QWidget):
         top = QHBoxLayout(); top.setSpacing(SPACING["xs"])
         bot = QHBoxLayout(); bot.setSpacing(SPACING["xs"])
         v.addLayout(top); v.addLayout(bot)
+        g = self._grow
 
         handle = QLabel("≡"); handle.setObjectName("subtle"); handle.setFixedWidth(14)
         top.addWidget(handle)
-        top.addWidget(QLabel(f"{idx+1}. {blk['type']}"))
+        tl = QLabel(f"{idx+1}. {blk['type']}"); tl.setMinimumWidth(60)
+        top.addWidget(tl)
 
         if blk["type"] == "move":
-            md = QComboBox(); md.addItems(["count", "infinite", "pass"]); md.setFixedWidth(92)
+            md = QComboBox(); md.addItems(["count", "infinite", "pass"])
             md.setCurrentText(blk.get("mode", "count"))
             md.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "mode", val))
             md.setToolTip("count=왕복횟수 / infinite=무한왕복 / pass=한방향 통과")
-            top.addWidget(md)
-            mt = QComboBox(); mt.addItems(["walk", "teleport"]); mt.setFixedWidth(92)
+            top.addWidget(g(md, 84), 1)
+            mt = QComboBox(); mt.addItems(["walk", "teleport"])
             mt.setCurrentText(blk.get("move_type", "walk"))
             mt.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "move_type", val))
-            top.addWidget(mt)
-            sw = QSpinBox(); sw.setRange(1, 99); sw.setPrefix("왕복 "); sw.setFixedWidth(90)
+            top.addWidget(g(mt, 84), 1)
+            sw = QSpinBox(); sw.setRange(1, 99); sw.setPrefix("왕복 ")
             sw.setValue(int(blk.get("sweeps", 1)))
             sw.valueChanged.connect(lambda val, i=idx: self.set_field(i, "sweeps", val))
-            top.addWidget(sw)
+            top.addWidget(g(sw, 74), 1)
 
-            s_sx = QSpinBox(); s_sx.setRange(0, 4000); s_sx.setPrefix("시작 "); s_sx.setFixedWidth(106)
+            s_sx = QSpinBox(); s_sx.setRange(0, 4000); s_sx.setPrefix("시작 ")
             s_sx.setValue(int(blk.get("start_x", 0)))
             s_sx.valueChanged.connect(lambda val, i=idx: self.set_field(i, "start_x", val))
-            bot.addWidget(s_sx)
-            e_sx = QSpinBox(); e_sx.setRange(0, 4000); e_sx.setPrefix("끝 "); e_sx.setFixedWidth(100)
+            bot.addWidget(g(s_sx, 92), 1)
+            e_sx = QSpinBox(); e_sx.setRange(0, 4000); e_sx.setPrefix("끝 ")
             e_sx.setValue(int(blk.get("end_x", 0)))
             e_sx.valueChanged.connect(lambda val, i=idx: self.set_field(i, "end_x", val))
-            bot.addWidget(e_sx)
-            ln = QPushButton("📏 구간 긋기"); ln.setFixedWidth(100)
+            bot.addWidget(g(e_sx, 88), 1)
+            ln = QPushButton("구간 긋기")
             ln.clicked.connect(lambda _=False, i=idx, sw_=s_sx, ew_=e_sx:
                                self._pick_line(i, sw_, ew_))
-            bot.addWidget(ln)
+            bot.addWidget(g(ln, 96), 1)
         elif blk["type"] == "attack":
             sk = QLineEdit(blk.get("skill_key", "")); sk.setPlaceholderText("스킬키")
-            sk.setFixedWidth(120)
             sk.textChanged.connect(lambda val, i=idx: self.set_field(i, "skill_key", val))
-            top.addWidget(sk)
+            top.addWidget(g(sk, 120), 1)
         elif blk["type"] == "ladder":
-            dr = QComboBox(); dr.addItems(["up", "down"]); dr.setFixedWidth(80)
+            dr = QComboBox(); dr.addItems(["up", "down"])
             dr.setCurrentText(blk.get("ladder_dir", "up"))
             dr.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "ladder_dir", val))
             dr.setToolTip("up=등반(y_top까지) / down=하강(아래+점프)")
-            top.addWidget(dr)
-            es = QComboBox(); es.addItems(["left", "right"]); es.setFixedWidth(74)
+            top.addWidget(g(dr, 72), 1)
+            es = QComboBox(); es.addItems(["left", "right"])
             es.setCurrentText(blk.get("exit_side", "left"))
             es.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "exit_side", val))
             es.setToolTip("하강 시 뛰어내릴 방향")
-            top.addWidget(es)
-            gs = QComboBox(); gs.addItems(["auto", "left", "right", "random"]); gs.setFixedWidth(86)
+            top.addWidget(g(es, 72), 1)
+            gs = QComboBox(); gs.addItems(["auto", "left", "right", "random"])
             gs.setCurrentText(blk.get("grab_side", "auto"))
             gs.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "grab_side", val))
             gs.setToolTip("밧줄 잡는 방향: auto=가까운쪽 / random=좌우 랜덤")
-            top.addWidget(gs)
+            top.addWidget(g(gs, 84), 1)
 
-            lx = QSpinBox(); lx.setRange(0, 4000); lx.setPrefix("X "); lx.setFixedWidth(98)
+            lx = QSpinBox(); lx.setRange(0, 4000); lx.setPrefix("X ")
             lx.setValue(int(blk.get("ladder_x", 0)))
             lx.valueChanged.connect(lambda val, i=idx: self.set_field(i, "ladder_x", val))
-            bot.addWidget(lx)
-            yb = QSpinBox(); yb.setRange(0, 4000); yb.setPrefix("아래Y "); yb.setFixedWidth(108)
+            bot.addWidget(g(lx, 80), 1)
+            yb = QSpinBox(); yb.setRange(0, 4000); yb.setPrefix("아래Y ")
             yb.setValue(int(blk.get("y_bot", 0)))
             yb.valueChanged.connect(lambda val, i=idx: self.set_field(i, "y_bot", val))
-            bot.addWidget(yb)
-            yt = QSpinBox(); yt.setRange(0, 4000); yt.setPrefix("위Y "); yt.setFixedWidth(100)
+            bot.addWidget(g(yb, 100), 1)
+            yt = QSpinBox(); yt.setRange(0, 4000); yt.setPrefix("위Y ")
             yt.setValue(int(blk.get("y_top", 0)))
             yt.valueChanged.connect(lambda val, i=idx: self.set_field(i, "y_top", val))
-            bot.addWidget(yt)
-            ln = QPushButton("📏 사다리 긋기"); ln.setFixedWidth(108)
+            bot.addWidget(g(yt, 92), 1)
+            ln = QPushButton("사다리 긋기")
             ln.clicked.connect(lambda _=False, i=idx, xw=lx, ybw=yb, ytw=yt:
                                self._pick_ladder(i, xw, ybw, ytw))
-            bot.addWidget(ln)
+            bot.addWidget(g(ln, 100), 1)
 
-        top.addStretch()
-        bot.addStretch()
         rm = QPushButton("✕"); rm.setFixedWidth(28)
         rm.clicked.connect(lambda _=False, i=idx: self.remove_row(i))
         top.addWidget(rm)
