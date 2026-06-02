@@ -1,30 +1,32 @@
-# theme — DESIGN.md(Linear) 토큰과 QSS 생성 검증
+# theme — Discord Night 토큰과 QSS 생성 검증
 from core_ui.theme import TOKENS, build_qss
 
 
-def test_tokens_match_design_md():
-    """DESIGN.md(Linear) 핵심 토큰이 그대로 반영됐는지."""
-    assert TOKENS["canvas"] == "#010102"     # near-black 캔버스
-    assert TOKENS["primary"] == "#5e6ad2"    # 라벤더 액센트
-    assert TOKENS["surface_1"] == "#0f1011"  # 차콜 패널
-    assert TOKENS["hairline"] == "#23252a"
-    assert TOKENS["ink"] == "#f7f8f8"
+def test_tokens_match_discord_night():
+    """Discord Night 핵심 토큰."""
+    assert TOKENS["canvas"] == "#1a1b1e"     # 다크 배경
+    assert TOKENS["primary"] == "#5865f2"    # 블러플
+    assert TOKENS["surface_1"] == "#202125"  # 내비/컨트롤바
+    assert TOKENS["hairline"] == "#2c2e33"
+    assert TOKENS["ink"] == "#f2f3f5"
+    assert TOKENS["accent"] == "#a855f7"     # 바이올렛
+    assert TOKENS["danger"] == "#f23f43"     # HP
 
 
 def test_build_qss_returns_stylesheet():
     qss = build_qss()
     assert isinstance(qss, str) and len(qss) > 0
-    # 캔버스/액센트 색이 QSS에 들어있어야
-    assert "#010102" in qss
-    assert "#5e6ad2" in qss
+    # 배경/강조 색이 QSS에 들어있어야
+    assert "#1a1b1e" in qss
+    assert "#5865f2" in qss
 
 
 def test_design_tokens_present():
-    """DESIGN.md spacing/radius/typography 토큰이 정의됐는지."""
+    """spacing/radius/typography 토큰이 정의됐는지."""
     from core_ui.theme import SPACING, RADIUS, TYPOGRAPHY
-    assert SPACING["md"] == 16 and SPACING["lg"] == 24   # DESIGN.md spacing
-    assert RADIUS["md"] == 8 and RADIUS["xl"] == 16       # DESIGN.md radius
-    assert TYPOGRAPHY["h1"]["tracking"] < 0               # 음수 트래킹
+    assert SPACING["md"] == 16 and SPACING["lg"] == 24   # spacing
+    assert RADIUS["md"] == 11 and RADIUS["pill"] == 999  # 둥근 반경
+    assert TYPOGRAPHY["h1"]["tracking"] < 0              # 음수 트래킹
 
 
 def test_qss_has_widget_rules():

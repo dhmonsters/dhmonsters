@@ -55,10 +55,10 @@ def char_track_state(elapsed_sec: float,
     return "stale"
 
 
-# 블록 타입 색 (단일 출처) — 캔버스가 참조
+# 블록 타입 색 (단일 출처, Discord Night 네온) — 캔버스가 참조
 BLOCK_COLORS = {
-    "move": "#3a8f5a", "attack": "#c0556a", "ladder": "#b07a30",
-    "jump": "#5aa0c0", "teleport": "#7a5ad2",
+    "move": "#3ada85", "attack": "#ff6b81", "ladder": "#e3b341",
+    "jump": "#5ab0e3", "teleport": "#b06bff",
 }
 
 
