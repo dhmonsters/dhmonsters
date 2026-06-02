@@ -53,3 +53,89 @@ def char_track_state(elapsed_sec: float,
     if elapsed_sec < stale_after:
         return "lost"
     return "stale"
+
+
+# 블록 타입 색 (단일 출처) — 캔버스가 참조
+BLOCK_COLORS = {
+    "move": "#3a8f5a", "attack": "#c0556a", "ladder": "#b07a30",
+    "jump": "#5aa0c0", "teleport": "#7a5ad2",
+}
+
+
+def canvas_to_minimap(px: float, py: float, zoom: float,
+                      pan: tuple[int, int] = (0, 0)) -> tuple[int, int]:
+    """캔버스 픽셀 → 미니맵 픽셀 (minimap_to_canvas의 역변환). zoom=0이면 (0,0)."""
+    if zoom == 0:
+        return (0, 0)
+    return (round((px - pan[0]) / zoom), round((py - pan[1]) / zoom))
+
+
+def block_color(block: dict) -> str:
+    """블록 표시색. move + move_type=teleport면 텔포색, 그 외 타입색."""
+    t = block.get("type", "move")
+    if t == "move" and block.get("move_type") == "teleport":
+        return BLOCK_COLORS["teleport"]
+    return BLOCK_COLORS.get(t, "#888888")
+
+
+def block_anchor(block: dict) -> tuple[int, int] | None:
+    """블록의 캔버스 앵커(미니맵 픽셀). ladder는 (ladder_x,y_bot), 그 외는 (pos_x,pos_y).
+    미배치(ladder 좌표 0이거나 pos<0)면 None."""
+    if block.get("type") == "ladder":
+        lx, yb = int(block.get("ladder_x", 0)), int(block.get("y_bot", 0))
+        if lx <= 0 and yb <= 0:
+            return None
+        return (lx, yb)
+    px, py = int(block.get("pos_x", -1)), int(block.get("pos_y", -1))
+    if px < 0 or py < 0:
+        return None
+    return (px, py)
+
+
+def hit_test(blocks: list[dict], mx: int, my: int, radius: int = 10) -> int | None:
+    """(mx,my)에서 radius 내 가장 가까운 블록 인덱스. 미배치(anchor None)는 제외, 없으면 None."""
+    best_i, best_d = None, None
+    for i, b in enumerate(blocks):
+        a = block_anchor(b)
+        if a is None:
+            continue
+        d = (a[0] - mx) ** 2 + (a[1] - my) ** 2
+        if d <= radius * radius and (best_d is None or d < best_d):
+            best_i, best_d = i, d
+    return best_i
+
+
+def seed_block_at(block_type: str, mx: int, my: int) -> dict:
+    """클릭 좌표에 놓을 새 블록 dict. block_editor._DEFAULTS 재사용(지연 임포트).
+    'teleport'는 move + move_type=teleport. 타입필드도 좌표로 시드."""
+    from core_ui.block_editor import _DEFAULTS
+    base = "move" if block_type == "teleport" else block_type
+    blk = dict(_DEFAULTS[base])
+    blk["pos_x"], blk["pos_y"] = mx, my
+    if base == "move":
+        blk["start_x"] = blk["end_x"] = mx
+        if block_type == "teleport":
+            blk["move_type"] = "teleport"
+    elif base == "ladder":
+        blk["ladder_x"] = mx
+        blk["y_bot"] = my
+    return blk
+
+
+def translate_block(block: dict, dx: int, dy: int) -> dict:
+    """블록을 (dx,dy)만큼 평행이동한 새 dict. 캔버스가 블록 내부필드를 몰라도 되게 한다.
+    배치된 pos_x/y는 이동, move면 start_x/end_x, ladder면 ladder_x/y_top/y_bot도 함께."""
+    b = dict(block)
+    if int(b.get("pos_x", -1)) >= 0:
+        b["pos_x"] = int(b["pos_x"]) + dx
+    if int(b.get("pos_y", -1)) >= 0:
+        b["pos_y"] = int(b["pos_y"]) + dy
+    t = b.get("type")
+    if t == "move":
+        b["start_x"] = int(b.get("start_x", 0)) + dx
+        b["end_x"] = int(b.get("end_x", 0)) + dx
+    elif t == "ladder":
+        b["ladder_x"] = int(b.get("ladder_x", 0)) + dx
+        b["y_top"] = int(b.get("y_top", 0)) + dy
+        b["y_bot"] = int(b.get("y_bot", 0)) + dy
+    return b
