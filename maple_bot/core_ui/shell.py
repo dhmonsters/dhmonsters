@@ -108,7 +108,7 @@ class MainShell(QMainWindow):
         h.addWidget(self.btn_stop)
         h.addStretch(1)
 
-        log_btn = QPushButton("🗎  로그"); log_btn.setObjectName("navtab")
+        log_btn = QPushButton("로그"); log_btn.setObjectName("navtab"); log_btn.setMinimumWidth(56)
         log_btn.clicked.connect(self._toggle_log)
         h.addWidget(log_btn)
 

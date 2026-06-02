@@ -5,7 +5,7 @@ from __future__ import annotations
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
     QSpinBox, QLineEdit, QListWidget, QListWidgetItem, QAbstractItemView,
-    QSizePolicy,
+    QSizePolicy, QAbstractSpinBox,
 )
 from PyQt6.QtCore import Qt
 
@@ -57,7 +57,7 @@ class BlockEditor(QWidget):
         self._list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._list.setSpacing(SPACING["xxs"])
+        self._list.setSpacing(SPACING["xs"])
         self._list.setMinimumHeight(360)   # 한 번에 ~6블록 보이게(캔버스가 커도 충분한 높이)
         self._list.model().rowsMoved.connect(self._on_rows_moved)
         self._v.addWidget(self._list, 1)
@@ -209,9 +209,12 @@ class BlockEditor(QWidget):
 
     @staticmethod
     def _grow(w, min_w: int):
-        """창 크기에 따라 늘고/줄도록: 최소폭 + 가로 Expanding. (고정폭 대신)"""
+        """창 크기에 따라 늘고/줄도록: 최소폭 + 가로 Expanding. (고정폭 대신)
+        스핀박스는 업/다운 버튼 제거 → 어수선함 없이 깔끔한 둥근칸(좌표는 긋기/입력으로)."""
         w.setMinimumWidth(min_w)
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        if isinstance(w, QSpinBox):
+            w.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         return w
 
     def _build_row(self, idx: int, blk: dict) -> QWidget:
@@ -220,7 +223,7 @@ class BlockEditor(QWidget):
         row = QWidget()
         v = QVBoxLayout(row)
         v.setContentsMargins(SPACING["xs"], SPACING["xxs"], SPACING["xs"], SPACING["xxs"])
-        v.setSpacing(SPACING["xxs"])
+        v.setSpacing(SPACING["xs"])
         top = QHBoxLayout(); top.setSpacing(SPACING["xs"])
         bot = QHBoxLayout(); bot.setSpacing(SPACING["xs"])
         v.addLayout(top); v.addLayout(bot)
