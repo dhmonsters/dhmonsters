@@ -142,3 +142,118 @@ class MinimapCanvas(QWidget):
     def wheelEvent(self, ev) -> None:
         step = 1.1 if ev.angleDelta().y() > 0 else 0.9
         self.set_zoom(self._zoom * step)
+
+
+class RouteCanvas(MinimapCanvas):
+    """미니맵 캔버스 위에 동선 블록을 클릭 배치·드래그 이동하는 편집 캔버스.
+    config의 route(같은 키)를 편집하고 on_route_changed로 리스트와 동기화한다."""
+
+    def __init__(self, config, screen_capture,
+                 route_keys=("floor_hunt", "route"), on_route_changed=None, **kw):
+        super().__init__(config, screen_capture, **kw)
+        self._route_keys = route_keys
+        self._on_changed = on_route_changed or (lambda: None)
+        self._active_type: str | None = None
+        self._dragging: int | None = None
+        self._drag_last: tuple[int, int] | None = None
+
+    def set_active_type(self, t: str | None) -> None:
+        self._active_type = t
+
+    # ── route 입출력 ──────────────────────────────────────────────────
+    def _route(self) -> list[dict]:
+        return list(self._cfg.get(*self._route_keys, default=[]) or [])
+
+    def _save_route(self, route: list[dict]) -> None:
+        from core.navigation.block import Block
+        valid = []
+        for b in route:
+            try:
+                Block.from_dict(b); valid.append(b)
+            except Exception:
+                pass
+        self._cfg.set(*self._route_keys, valid)
+        self._cfg.save()
+        self._on_changed()
+
+    # ── 마우스 로직(테스트 가능한 좌표 단위로 분리) ───────────────────
+    def _place_or_select(self, mx: int, my: int) -> None:
+        from core_ui.minimap_geom import hit_test, seed_block_at
+        W, H = self.minimap_size()
+        if W > 0:
+            mx = max(0, min(W - 1, mx))
+        if H > 0:
+            my = max(0, min(H - 1, my))
+        route = self._route()
+        idx = hit_test(route, mx, my)
+        if idx is not None:
+            self._dragging = idx
+            self._drag_last = (mx, my)
+        elif self._active_type is not None:
+            route.append(seed_block_at(self._active_type, mx, my))
+            self._save_route(route)
+            self._active_type = None
+        self.update()
+
+    def _drag_to(self, mx: int, my: int) -> None:
+        from core_ui.minimap_geom import translate_block
+        if self._dragging is None or self._drag_last is None:
+            return
+        dx = mx - self._drag_last[0]
+        dy = my - self._drag_last[1]
+        route = self._route()
+        route[self._dragging] = translate_block(route[self._dragging], dx, dy)
+        self._cfg.set(*self._route_keys, route)   # 드래그 중엔 메모리만(저장 스팸 방지)
+        self._drag_last = (mx, my)
+        self.update()
+
+    def _end_drag(self) -> None:
+        if self._dragging is not None:
+            self._save_route(self._route())
+            self._dragging = None
+            self._drag_last = None
+        self.update()
+
+    def mousePressEvent(self, ev) -> None:
+        from core_ui.minimap_geom import canvas_to_minimap
+        mx, my = canvas_to_minimap(ev.position().x(), ev.position().y(), self._zoom)
+        self._place_or_select(mx, my)
+
+    def mouseMoveEvent(self, ev) -> None:
+        if self._dragging is None:
+            return
+        from core_ui.minimap_geom import canvas_to_minimap
+        mx, my = canvas_to_minimap(ev.position().x(), ev.position().y(), self._zoom)
+        self._drag_to(mx, my)
+
+    def mouseReleaseEvent(self, ev) -> None:
+        self._end_drag()
+
+    # ── 렌더 ──────────────────────────────────────────────────────────
+    def paintEvent(self, ev) -> None:
+        super().paintEvent(ev)        # 배경+노란점+범위
+        if self._shot is None:
+            return
+        from core_ui.minimap_geom import block_anchor, minimap_to_canvas, block_color
+        route = self._route()
+        p = QPainter(self)
+        pts = []
+        for b in route:
+            a = block_anchor(b)
+            if a is not None:
+                pts.append(minimap_to_canvas(a[0], a[1], self._zoom))
+        if len(pts) >= 2:
+            p.setPen(QPen(QColor("#5e6ad2"), 1.5, Qt.PenStyle.DashLine))
+            for i in range(len(pts) - 1):
+                p.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+        for i, b in enumerate(route):
+            a = block_anchor(b)
+            if a is None:
+                continue
+            cx, cy = minimap_to_canvas(a[0], a[1], self._zoom)
+            if i == self._dragging:
+                p.setPen(QPen(QColor("#ffffff"), 2))
+            else:
+                p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(block_color(b)))
+            p.drawEllipse(cx - 6, cy - 6, 12, 12)
