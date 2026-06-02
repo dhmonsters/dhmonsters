@@ -11,17 +11,20 @@ from PyQt6.QtCore import QTimer
 class GaugePreview(QWidget):
     """detector.hp_ratio()/mp_ratio()를 주기적으로 읽어 HP/MP %를 색상 바로 표시."""
 
-    def __init__(self, detector, interval_ms: int = 700):
+    def __init__(self, detector, interval_ms: int = 700, compact: bool = False):
         super().__init__()
         self._d = detector
         v = QVBoxLayout(self)
-        v.setContentsMargins(0, 4, 0, 4)
-        v.setSpacing(4)
-        cap = QLabel("HP/MP 실시간 인식 (게임 실행 중 자동 표시)")
-        cap.setObjectName("subtle")
-        v.addWidget(cap)
+        v.setContentsMargins(0, 0, 0, 0) if compact else v.setContentsMargins(0, 4, 0, 4)
+        v.setSpacing(2 if compact else 4)
+        if not compact:
+            cap = QLabel("HP/MP 실시간 인식 (게임 실행 중 자동 표시)")
+            cap.setObjectName("subtle")
+            v.addWidget(cap)
+        else:
+            self.setMaximumHeight(40); self.setMaximumWidth(220)
 
-        self.hp_lbl, self.hp_bar = self._make_row(v, "HP", "#f04452")
+        self.hp_lbl, self.hp_bar = self._make_row(v, "HP", "#f23f43")
         self.mp_lbl, self.mp_bar = self._make_row(v, "MP", "#4d7cff")
 
         self._timer = QTimer(self)
