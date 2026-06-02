@@ -152,6 +152,13 @@ class MinimapCanvas(QWidget):
         super().resizeEvent(ev)
         if getattr(self, "_auto_fit", True):
             self.fit_width()
+            # 캔버스 높이를 미니맵 비율에 맞춰 전체 맵이 아래까지 보이게(루프 방지 가드)
+            r = self._region()
+            W, H = r["width"], r["height"]
+            if W > 0 and H > 0 and self.width() > 0:
+                need = int(self.width() * H / W)
+                if abs(self.minimumHeight() - need) > 4:
+                    self.setMinimumHeight(need)
 
     def wheelEvent(self, ev) -> None:
         self._auto_fit = False        # 수동 줌 시작 → 자동 가로맞춤 해제

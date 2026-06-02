@@ -77,7 +77,7 @@ class MainShell(QMainWindow):
 
         h.addStretch(1)
         self.status_chip = QLabel("● 정지"); self.status_chip.setObjectName("statusChip")
-        self.status_chip.setStyleSheet("color:#80848e;")   # 기본 정지(회색)
+        self.status_chip.setStyleSheet("color:#80848e; background:transparent;")   # 기본 정지(회색)
         h.addWidget(self.status_chip)
         return bar
 
@@ -97,7 +97,7 @@ class MainShell(QMainWindow):
 
     # ── 하단 컨트롤바 ─────────────────────────────────────────────────
     def _build_controlbar(self) -> QWidget:
-        bar = QWidget(); bar.setObjectName("controlbar"); bar.setFixedHeight(60)
+        bar = QWidget(); bar.setObjectName("controlbar"); bar.setFixedHeight(66)
         h = QHBoxLayout(bar)
         h.setContentsMargins(SPACING["md"], SPACING["xs"], SPACING["md"], SPACING["xs"])
         h.setSpacing(SPACING["xs"])
@@ -118,7 +118,8 @@ class MainShell(QMainWindow):
                 from core.detector import Detector
                 from core.screen_reader import ScreenReader
                 from core_ui.gauge_preview import GaugePreview
-                h.addWidget(GaugePreview(Detector(ScreenReader(), self._config), compact=True))
+                h.addWidget(GaugePreview(Detector(ScreenReader(), self._config), compact=True),
+                            0, Qt.AlignmentFlag.AlignVCenter)
             except Exception:
                 pass
         return bar
@@ -153,7 +154,8 @@ class MainShell(QMainWindow):
     def set_status(self, text: str, running: bool = False) -> None:
         """상단 상태 칩 갱신 (사냥중=네온그린 / 정지=회색)."""
         self.status_chip.setText(f"● {text}")
-        self.status_chip.setStyleSheet("color:#3ada85;" if running else "color:#80848e;")
+        self.status_chip.setStyleSheet(
+            ("color:#3ada85;" if running else "color:#80848e;") + " background:transparent;")
 
     def append_log(self, msg: str) -> None:
         self.log_view.append(msg)

@@ -94,6 +94,7 @@ def build_qss() -> str:
         border: 1px solid {t['hairline']};
         border-radius: {r['lg']}px;
     }}
+    QLabel {{ background: transparent; }}
     QLabel#h1 {{ font-size: {h1['size']}px; font-weight: {h1['weight']}; color: {t['ink']}; }}
     QLabel#cardTitle {{ font-size: {ct['size']}px; font-weight: {ct['weight']}; color: {t['ink']}; }}
     QLabel#subtle {{ color: {t['ink_subtle']}; }}
@@ -138,7 +139,7 @@ def build_qss() -> str:
         color: {t['ink']}; background-color: {t['surface_3']};
         border-bottom: 2px solid {t['primary']}; font-weight: 600;
     }}
-    QLabel#statusChip {{ color: {t['success']}; font-size: 12px; }}
+    QLabel#statusChip {{ color: {t['success']}; font-size: 12px; background: transparent; }}
 
     /* 하단 컨트롤바 */
     QWidget#controlbar {{ background-color: {t['surface_1']}; border-top: 1px solid {t['hairline']}; }}
@@ -151,13 +152,40 @@ def build_qss() -> str:
     QPushButton#nav:hover {{ color: {t['ink_muted']}; background-color: {t['surface_2']}; }}
     QPushButton#nav:checked {{ background-color: {t['surface_3']}; color: {t['ink']}; border-left: 2px solid {t['primary']}; }}
 
-    /* 입력 위젯 (둥근·포커스 강조) */
+    /* 입력 위젯 (둥근·포커스 강조, 글자 안 잘리게 min-height) */
     QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
         background-color: {t['surface_3']}; color: {t['ink']};
-        border: 1px solid {t['hairline_strong']}; border-radius: {r['sm']}px; padding: 4px 8px;
+        border: 1px solid {t['hairline_strong']}; border-radius: {r['sm']}px;
+        padding: 2px 8px; min-height: 22px;
     }}
     QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{ border-color: {t['primary']}; }}
     QComboBox::drop-down {{ border: none; width: 18px; }}
+    QComboBox::down-arrow {{
+        width: 0; height: 0; margin-right: 6px;
+        border-left: 4px solid transparent; border-right: 4px solid transparent;
+        border-top: 5px solid {t['ink_muted']};
+    }}
+    /* 스핀박스 업다운 — 깔끔한 삼각 화살표 */
+    QSpinBox::up-button, QDoubleSpinBox::up-button {{
+        subcontrol-origin: border; subcontrol-position: top right; width: 16px;
+        background: {t['surface_4']}; border-top-right-radius: {r['sm']}px; border: none;
+    }}
+    QSpinBox::down-button, QDoubleSpinBox::down-button {{
+        subcontrol-origin: border; subcontrol-position: bottom right; width: 16px;
+        background: {t['surface_4']}; border-bottom-right-radius: {r['sm']}px; border: none;
+    }}
+    QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+    QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {t['primary']}; }}
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+        width: 0; height: 0;
+        border-left: 4px solid transparent; border-right: 4px solid transparent;
+        border-bottom: 5px solid {t['ink_muted']};
+    }}
+    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+        width: 0; height: 0;
+        border-left: 4px solid transparent; border-right: 4px solid transparent;
+        border-top: 5px solid {t['ink_muted']};
+    }}
     QComboBox QAbstractItemView {{
         background-color: {t['surface_2']}; color: {t['ink']};
         border: 1px solid {t['hairline_strong']}; selection-background-color: {t['primary']};
