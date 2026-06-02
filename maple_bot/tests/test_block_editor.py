@@ -88,3 +88,20 @@ def test_move_row_noop_same_index(app):
     ed = BlockEditor(cfg, ("floor_hunt", "route"))
     ed.move_row(1, 1)
     assert [b["type"] for b in cfg.get("floor_hunt", "route")] == ["move", "attack"]
+
+
+def test_on_change_called_when_saved(app):
+    cfg = FakeConfig()
+    calls = {"n": 0}
+    ed = BlockEditor(cfg, ("floor_hunt", "route"), on_change=lambda: calls.__setitem__("n", calls["n"] + 1))
+    ed.add_block("move")            # _save 발생
+    assert calls["n"] >= 1
+
+
+def test_reload_reads_config(app):
+    cfg = FakeConfig({"floor_hunt": {"route": [{"type": "attack", "skill_key": "a"}]}})
+    ed = BlockEditor(cfg, ("floor_hunt", "route"))
+    assert ed.row_count() == 1
+    cfg.set("floor_hunt", "route", [{"type": "attack"}, {"type": "jump"}])
+    ed.reload()
+    assert ed.row_count() == 2

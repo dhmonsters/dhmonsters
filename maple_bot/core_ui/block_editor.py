@@ -23,10 +23,11 @@ _DEFAULTS = {
 class BlockEditor(QWidget):
     """floor_hunt.route 블록 리스트 편집. 추가/삭제/필드편집/드래그재정렬 → config 즉시 저장."""
 
-    def __init__(self, config, keys: tuple):
+    def __init__(self, config, keys: tuple, on_change=None):
         super().__init__()
         self._cfg = config
         self._keys = keys
+        self._on_change = on_change or (lambda: None)
         self._route: list[dict] = list(config.get(*keys, default=[]) or [])
         self._reordering = False
 
@@ -180,6 +181,12 @@ class BlockEditor(QWidget):
                 pass
         self._cfg.set(*self._keys, valid)
         self._cfg.save()
+        self._on_change()
+
+    def reload(self) -> None:
+        """config에서 route를 다시 읽어 화면 갱신(외부 변경 반영)."""
+        self._route = list(self._cfg.get(*self._keys, default=[]) or [])
+        self._render()
 
     def _save_render(self) -> None:
         self._save()
