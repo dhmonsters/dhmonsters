@@ -16,8 +16,9 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
     keys_xywh: ((sec,..,'region_x'), y키, w키, h키)
     fields_xywh: 갱신할 IntField 4개(없으면 None) / on_done: 완료 후 콜백(상태 갱신)
     """
-    btn = QPushButton(f"📐 {label} 영역 드래그")
+    btn = QPushButton("📐 지정"); btn.setFixedWidth(82)
     btn.setObjectName("primary")
+    btn.setToolTip(f"{label} 영역을 스크린샷에서 드래그")
 
     def on_click():
         import mss as _mss
@@ -126,7 +127,8 @@ def _make_template_capture(config, save_path, config_key, label: str,
 
     save_path: 저장할 png 경로(templates/...). config_key: 경로 저장할 config 키. on_done: 완료 콜백.
     """
-    btn = QPushButton(f"📷 {label} 캡처 드래그")
+    btn = QPushButton("📷 캡처"); btn.setFixedWidth(82)
+    btn.setToolTip(f"{label} 이미지를 스크린샷에서 드래그로 캡처")
 
     def on_click():
         import os
@@ -210,30 +212,31 @@ def build_pages(config) -> list[QWidget]:
         c, [("attack", "hunt_area", "x"), ("attack", "hunt_area", "y"),
             ("attack", "hunt_area", "w"), ("attack", "hunt_area", "h")],
         None, "사냥", on_done=lambda: ha_status.refresh())
+    # 사냥 영역 옆에 색 허용오차 슬라이더(정수)
+    tol_slider = SliderField("색 허용오차", c, ("minimap", "tolerance"),
+                             lo=0, hi=255, default=30, is_int=True, label_w=74)
     ha_status = StatusField("사냥 영역",
                             lambda: int(c.get("attack", "hunt_area", "w", default=0)) > 0,
-                            [hunt_area_picker])
+                            [hunt_area_picker], extra=tol_slider.row)
+    # 몬스터 캡처 옆에 몬스터 임계값 슬라이더
     monster_cap = _make_template_capture(
         c, "templates/monster_capture.png", ("attack", "monster_template"), "몬스터",
         on_done=lambda: mon_status.refresh())
+    mon_thr = SliderField("임계값", c, ("attack", "monster_accuracy"), default=0.9, label_w=52)
     mon_status = StatusField("몬스터 캡처",
                              lambda: bool(c.get("attack", "monster_template", default="")),
-                             [monster_cap])
+                             [monster_cap], extra=mon_thr.row)
+    # 닉네임 캡처 옆에 닉네임 임계값 슬라이더
     name_cap = _make_template_capture(
         c, "templates/name_tag.png", ("attack", "name_template"), "닉네임",
         on_done=lambda: name_status.refresh())
+    name_thr = SliderField("임계값", c, ("attack", "name_tag_threshold"), default=0.7, label_w=52)
     name_status = StatusField("닉네임 캡처",
                               lambda: bool(c.get("attack", "name_template", default="")),
-                              [name_cap])
+                              [name_cap], extra=name_thr.row)
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
         ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"]),
-        mm_status, ha_status,
-        # 캡처 바로 아래에 해당 임계값 슬라이더(드래그 바)
-        mon_status,
-        SliderField("몬스터 임계값", c, ("attack", "monster_accuracy"), default=0.9),
-        name_status,
-        SliderField("닉네임 임계값", c, ("attack", "name_tag_threshold"), default=0.7),
-        IntField("색 허용오차", c, ("minimap", "tolerance"), 0, 255, default=30),
+        mm_status, ha_status, mon_status, name_status,
     ]))
 
     # 2. 동선·이동 — 좌표 동선은 블록 빌더로 (이동/공격/사다리 순차)

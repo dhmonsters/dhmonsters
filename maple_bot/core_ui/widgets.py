@@ -11,30 +11,40 @@ from core_ui.theme import SPACING
 
 
 class SliderField:
-    """라벨 + 드래그 슬라이더(0.1~1.0) + % 값. config 양방향. self.row=QWidget."""
+    """라벨 + 드래그 슬라이더 + 값. config 양방향. self.row=QWidget.
+    is_int=False면 0.1~1.0 비율(%표시), is_int=True면 정수 그대로(예 색 허용오차 0~255)."""
 
     def __init__(self, label: str, config, keys: tuple,
-                 lo: float = 0.1, hi: float = 1.0, default: float = 0.9, label_w: int = 130):
+                 lo: float = 0.1, hi: float = 1.0, default: float = 0.9,
+                 is_int: bool = False, label_w: int = 130):
         self._cfg = config
         self._keys = keys
+        self._is_int = is_int
         self.row = QWidget()
         h = QHBoxLayout(self.row)
         h.setContentsMargins(0, SPACING["xxs"], 0, SPACING["xxs"])
-        h.setSpacing(SPACING["sm"])
+        h.setSpacing(SPACING["xs"])
         lbl = QLabel(label); lbl.setFixedWidth(label_w); lbl.setObjectName("subtle")
         h.addWidget(lbl)
         self.widget = QSlider(Qt.Orientation.Horizontal)
-        self.widget.setRange(int(lo * 100), int(hi * 100))
-        cur = float(config.get(*keys, default=default))
-        self.widget.setValue(int(round(cur * 100)))
+        cur = config.get(*keys, default=default)
+        if is_int:
+            self.widget.setRange(int(lo), int(hi)); self.widget.setValue(int(cur))
+            self._val = QLabel(str(int(cur)))
+        else:
+            self.widget.setRange(int(lo * 100), int(hi * 100))
+            self.widget.setValue(int(round(float(cur) * 100)))
+            self._val = QLabel(f"{int(round(float(cur) * 100))}%")
+        self._val.setFixedWidth(40)
         h.addWidget(self.widget, 1)
-        self._val = QLabel(f"{int(round(cur * 100))}%"); self._val.setFixedWidth(46)
         h.addWidget(self._val)
         self.widget.valueChanged.connect(self._changed)
 
     def _changed(self, v: int) -> None:
-        self._val.setText(f"{v}%")
-        self._cfg.set(*self._keys, round(v / 100.0, 2))
+        if self._is_int:
+            self._val.setText(str(v)); self._cfg.set(*self._keys, int(v))
+        else:
+            self._val.setText(f"{v}%"); self._cfg.set(*self._keys, round(v / 100.0, 2))
         self._cfg.save()
 
 
@@ -42,7 +52,8 @@ class StatusField:
     """라벨 + 상태표시(● 설정됨 / ○ 미설정 색상) + 액션 버튼들.
     숫자 대신 색으로 입력 완료를 확인한다. refresh()로 상태 갱신, self.row=QWidget."""
 
-    def __init__(self, label: str, is_set_fn, buttons: list, label_w: int = 130):
+    def __init__(self, label: str, is_set_fn, buttons: list,
+                 extra=None, label_w: int = 130):
         self._is_set = is_set_fn
         self.row = QWidget()
         h = QHBoxLayout(self.row)
@@ -50,11 +61,14 @@ class StatusField:
         h.setSpacing(SPACING["sm"])
         lbl = QLabel(label); lbl.setFixedWidth(label_w); lbl.setObjectName("subtle")
         h.addWidget(lbl)
-        self.status = QLabel(); self.status.setFixedWidth(82)
+        self.status = QLabel(); self.status.setFixedWidth(72)
         h.addWidget(self.status)
         for b in buttons:
             h.addWidget(b)
-        h.addStretch()
+        if extra is not None:        # 옆에 슬라이더 등 동반 위젯(남은 폭 채움)
+            h.addWidget(extra, 1)
+        else:
+            h.addStretch()
         self.refresh()
 
     def refresh(self) -> None:
@@ -65,10 +79,10 @@ class StatusField:
             ok = False
         if ok:
             self.status.setText("● 설정됨")
-            self.status.setStyleSheet("color:#27a644; font-weight:600;")  # 초록
+            self.status.setStyleSheet("color:#3ada85; font-weight:600; background:transparent;")
         else:
             self.status.setText("○ 미설정")
-            self.status.setStyleSheet("color:#8a8f98;")                   # 회색
+            self.status.setStyleSheet("color:#80848e; background:transparent;")
 
 
 class _Field:
