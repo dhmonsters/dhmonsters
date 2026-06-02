@@ -45,6 +45,11 @@ class MinimapCanvas(QWidget):
                 "width": int(c.get("minimap", "width", default=0)),
                 "height": int(c.get("minimap", "height", default=0))}
 
+    def minimap_size(self) -> tuple[int, int]:
+        """미니맵 (W,H) — _region 기반이라 타이머 틱 전에도 유효(클램프용)."""
+        r = self._region()
+        return (r["width"], r["height"])
+
     def track_state(self) -> str:
         """현재 캐릭터 추적 상태: tracking | lost | stale (한 번도 검출 전이면 stale)."""
         if self._last_seen is None:

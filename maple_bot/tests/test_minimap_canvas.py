@@ -103,3 +103,10 @@ def test_zoom_clamped(app):
     assert cv._zoom == 4.0          # 상한
     cv.set_zoom(0.01)
     assert cv._zoom == 0.5          # 하한
+
+
+def test_minimap_size_from_region_without_tick(app):
+    cfg = _region_cfg()
+    cv = MinimapCanvas(cfg, screen_capture=lambda r: None,
+                       char_finder=lambda *a, **k: None, interval_ms=99999)
+    assert cv.minimap_size() == (200, 120)   # 타이머 안 돌아도 _region 기반
