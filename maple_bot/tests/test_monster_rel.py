@@ -20,6 +20,8 @@ def _make_runtime(monkeypatch, name_pos, boxes):
         game_window_title = ""
         coord_anchor = None
     rt._cfg = _Cfg()
+    from core.sensing.name_tracker import NameTracker
+    rt.name_tracker = NameTracker(rt._name_tpl, 0.7)   # find()가 아래 monkeypatch된 find_template_pos 사용
 
     monkeypatch.setattr(rt_mod.monster_vision, "find_template_pos",
                         lambda *a, **k: name_pos)
