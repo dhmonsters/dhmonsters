@@ -131,8 +131,13 @@ class Humanizer:
         return round(self._rng.uniform(lo, hi), ndigits)
 
     def jitter_pct(self, base: float, pct: float = 0.05, ndigits: int = 4) -> float:
-        """고정값을 base±pct 비율로 랜덤화(소수점 ndigits자리). 버프 간격·홀드 등 미세 비주기화용."""
+        """고정값을 base±pct 비율로 랜덤화(소수점 ndigits자리). 양방향용."""
         return round(base * self._rng.uniform(1 - pct, 1 + pct), ndigits)
+
+    def jitter_down(self, base: float, pct: float = 0.05, ndigits: int = 4) -> float:
+        """고정값을 [base*(1-pct), base]로만 랜덤화(소수점 ndigits자리) — base를 절대 넘지 않음.
+        (버프/펫: 설정 간격·홀드를 초과하지 않게. 예 200초면 190~200초만)"""
+        return round(base * self._rng.uniform(1 - pct, 1.0), ndigits)
 
     def perform(self, intent: Intent) -> None:
         """의도를 변형해 실제 입력으로 송출."""
@@ -162,8 +167,8 @@ class Humanizer:
     # ── 내부 ──────────────────────────────────────────────────────────
     def _jitter_hold(self, base: float, p: dict, pct: float = 0.0) -> float:
         if pct > 0:
-            # 정밀 모드: base±pct 비율로만(버프/펫 — 큰 지터 대신 좁게)
-            val = round(base * self._uniform(1 - pct, 1 + pct), 4)
+            # 정밀 모드: [base*(1-pct), base]로만 — base(설정 홀드시간) 초과 안 함(버프/펫)
+            val = round(base * self._uniform(1 - pct, 1.0), 4)
         else:
             val = base * self._uniform(*p["hold_jitter"])
             if self._rng.random() < p["sloppy"]:   # 의도적 불완전성: 가끔 미세하게 더/덜

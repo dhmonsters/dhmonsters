@@ -33,7 +33,7 @@ class BuffManager:
         self._next_allowed = -1e9
 
     def _jp(self, base: float) -> float:
-        f = getattr(self._h, "jitter_pct", None)
+        f = getattr(self._h, "jitter_down", None)
         return f(base, self._jit) if f else base
 
     def tick(self, now: float) -> None:
