@@ -8,6 +8,23 @@
 
 ---
 
+## 0. 참조 소스 상태 — 왜 A만 비교 대상인가
+
+추출본 분석 결과, **코드 포팅이 가능한 건 A뿐**이다.
+
+| 프로그램 | 형태 | 포팅 |
+|---|---|---|
+| **A** (DHMONSTERS, 우리 `core/`) | 파이썬 소스 | ✅ 유일하게 소스 포팅 가능 (이 감사의 기준) |
+| **B** (Planet) | 앱 전체 `__mypyc.cp313-win_amd64.pyd`(mypyc 네이티브) + Themida + 메모리 기반 | ❌ 디컴파일 불가 + 메모리(헌법 위반) |
+| **C** (MapleHunter) | 핵심 `core/hunting.pyd`·`memory_reader_external.pyd` 등 컴파일 .pyd + 메모리 기반 | ❌ 알고리즘 디컴파일 불가 |
+
+- C에서 **읽을 수 있는 건 루트 데이터뿐**: `coord_scripts/*.json`, `maps/*.pyc`.
+  스키마 = `{skill_key, actions:[{type:attack|move, x, direction, move_type, attack_mode, attack_value}]}`
+  → 우리 `Block` 모델과 **이미 호환**(데이터 모델은 C를 잘 따름). 알고리즘은 참고 불가.
+- 결론: 아래 항목들은 모두 **A 소스** 기준 포팅 점검이다.
+
+---
+
 ## 1. 감지 (Sensing)
 
 - [ ] ⚠️ **캐릭터 위치 검출** — A/B/C `minimap_reader.get_character_pos`는 `char_r/g/b ± tolerance`
