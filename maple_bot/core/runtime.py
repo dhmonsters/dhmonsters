@@ -144,13 +144,18 @@ class BotRuntime:
 
         # 행동/동선 계층
         self._bot_running = False    # 컨트롤러 start/stop로 토글 (루트 실행 활성 조건)
-        self.floor_judge = FloorJudge(config.floors) if config.floors else None
+        # 층: 명시적 zones가 있으면 우선, 없으면 루트 블록 Y에서 자동 추출(복귀용)
+        _floors = config.floors
+        if not _floors and config.route:
+            from core.navigation.floor_extract import floors_from_route
+            _floors = floors_from_route([b.to_dict() for b in config.route])
+        self.floor_judge = FloorJudge(_floors) if _floors else None
         # 층 이탈 복귀 그래프 — route의 사다리에서 자동 구성
         _recovery_graph = None
         if self.floor_judge is not None and config.route:
             from core.navigation.map_graph import build_graph
             _recovery_graph = build_graph(
-                config.floors, [b.to_dict() for b in config.route], self.floor_judge)
+                _floors, [b.to_dict() for b in config.route], self.floor_judge)
         self.block_runner = BlockRunner(
             humanizer=self.humanizer,
             pos_fn=lambda: self.orchestrator.state.get_position() or (0, 0),
@@ -166,7 +171,7 @@ class BotRuntime:
         # 몬스터 감지(image 모드) — 닉네임/몬스터 템플릿 로드 (B 메커니즘)
         self._name_tpl = None
         self._monster_tpls = {}
-        if config.hunt_mode == "image":
+        if config.hunt_mode == "image" or config.route_mode:
             if config.name_template:
                 self._name_tpl = monster_vision.load_template(config.name_template)
             for i, p in enumerate(config.monster_templates):
