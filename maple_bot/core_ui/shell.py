@@ -124,17 +124,25 @@ class MainShell(QMainWindow):
                 pass
         return bar
 
-    # ── 단축키 ────────────────────────────────────────────────────────
+    # ── 단축키 (전역: 게임 포커스 중에도 동작) ────────────────────────
     def _bind_hotkeys(self) -> None:
-        from PyQt6.QtGui import QShortcut, QKeySequence
-        start_key, stop_key = "F1", "F2"
+        start_key, stop_key = "f1", "f2"
         if self._config is not None:
-            start_key = str(self._config.get("hotkeys", "start", default="f1")).upper()
-            stop_key = str(self._config.get("hotkeys", "stop", default="f2")).upper()
-        QShortcut(QKeySequence(start_key), self, activated=self.btn_start.click)
-        QShortcut(QKeySequence(stop_key), self, activated=self.btn_stop.click)
-        self.btn_start.setText(f"▶  시작  ({start_key})")
-        self.btn_stop.setText(f"■  정지  ({stop_key})")
+            start_key = str(self._config.get("hotkeys", "start", default="f1")).lower()
+            stop_key = str(self._config.get("hotkeys", "stop", default="f2")).lower()
+        # QShortcut은 앱 포커스 때만 동작 → GetAsyncKeyState 폴링(HotkeyManager)으로 전역화
+        try:
+            from core.hotkey_manager import HotkeyManager
+            self._hotkey_mgr = HotkeyManager(self)
+            self._hotkey_mgr.register("start", start_key, self.btn_start.click)
+            self._hotkey_mgr.register("stop", stop_key, self.btn_stop.click)
+        except Exception:
+            # win32 미가용 등 폴백 — 앱 포커스 단축키라도 건다
+            from PyQt6.QtGui import QShortcut, QKeySequence
+            QShortcut(QKeySequence(start_key.upper()), self, activated=self.btn_start.click)
+            QShortcut(QKeySequence(stop_key.upper()), self, activated=self.btn_stop.click)
+        self.btn_start.setText(f"▶  시작  ({start_key.upper()})")
+        self.btn_stop.setText(f"■  정지  ({stop_key.upper()})")
 
     # ── 플레이스홀더 페이지 (config 없을 때) ──────────────────────────
     def _build_page(self, name: str, desc: str) -> QWidget:
