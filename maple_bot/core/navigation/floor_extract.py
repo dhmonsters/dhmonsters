@@ -20,7 +20,9 @@ def floors_from_route(route: list[dict], band: int = 12) -> list[Floor]:
             clusters[-1].append(y)
         else:
             clusters.append([y])
+    # 라벨: 화면 y가 클수록(아래) 낮은 층 → 맨 아래 = 1층 (clusters는 y 오름차순=위→아래)
     floors: list[Floor] = []
+    n = len(clusters)
     for i, cl in enumerate(clusters):
-        floors.append(Floor(name=f"F{i}", y_min=min(cl) - band, y_max=max(cl) + band))
+        floors.append(Floor(name=f"{n - i}층", y_min=min(cl) - band, y_max=max(cl) + band))
     return floors
