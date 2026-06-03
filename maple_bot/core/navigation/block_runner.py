@@ -32,7 +32,8 @@ class BlockRunner:
                  stop_fn: Callable[[], bool] | None = None,
                  poll_sec: float = 0.05,
                  floor_judge=None, recovery_graph=None, max_recover: int = 3,
-                 on_segment_enter=None, on_segment_exit=None):
+                 on_segment_enter: Callable[[Block], None] | None = None,
+                 on_segment_exit: Callable[[Block], None] | None = None):
         self._h = humanizer
         self._pos = pos_fn
         self._jump_key = jump_key

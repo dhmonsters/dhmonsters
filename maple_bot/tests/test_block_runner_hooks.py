@@ -1,5 +1,7 @@
 # tests/test_block_runner_hooks.py
 # BlockRunner가 블록 실행을 enter/exit로 감싸 통지하는지(예외에도 exit 보장) 검증
+import pytest
+
 from core.navigation.block import Block
 from core.navigation.block_runner import BlockRunner
 
@@ -27,10 +29,8 @@ def test_enter_then_exit_wraps_block():
 def test_exit_called_even_on_exception():
     events = []
     r = _runner(events)
-    # _recover_if_needed가 터지게 만들어 예외 경로에서도 exit 보장 확인
+    # _recover_if_needed가 터지게 만들어 예외 경로에서도 exit 보장 + 예외 재전파 확인
     r._recover_if_needed = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
-    try:
+    with pytest.raises(RuntimeError):
         r.run_block(Block(type="move", target_x=0, move_type="walk"))
-    except RuntimeError:
-        pass
     assert ("exit", "move", "count") in events
