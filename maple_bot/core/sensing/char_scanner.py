@@ -9,9 +9,9 @@ from core.sensing.scanner import Scanner
 
 
 def hsv_range_from_rgb(r: int, g: int, b: int,
-                       h_tol: int = 12, s_min: int = 60, v_min: int = 60):
-    """캐릭터색 RGB → 느슨한 HSV (하한, 상한). 미니맵 점이 다소 어둡/흐려도 잡히게
-    S/V 하한을 낮춘다. H는 ±h_tol. (설정 char_r/g/b를 그대로 감지에 쓰기 위함)"""
+                       h_tol: int = 10, s_min: int = 100, v_min: int = 200):
+    """캐릭터색 RGB → HSV (하한, 상한). H는 색상 ±h_tol, S/V는 높은 하한으로 밝고 진한
+    점만 골라낸다(미니맵 배경의 칙칙한 색 제외 — 검증된 기본값과 동일). 설정 char_r/g/b 반영용."""
     h = int(cv2.cvtColor(np.uint8([[[b, g, r]]]), cv2.COLOR_BGR2HSV)[0, 0, 0])
     return ((max(0, h - h_tol), s_min, v_min), (min(179, h + h_tol), 255, 255))
 
