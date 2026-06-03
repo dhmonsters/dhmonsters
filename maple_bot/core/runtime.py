@@ -102,10 +102,14 @@ class BotRuntime:
     """
 
     def __init__(self, screen_capture, input_backend, config: RuntimeConfig,
-                 sidecar_channel: SidecarChannel | None = None):
+                 sidecar_channel: SidecarChannel | None = None,
+                 hp_mp_reader=None):
         self._capture = screen_capture
         self._cfg = config
         self._sidecar = sidecar_channel or InMemoryChannel()
+        # HP/MP 비율을 읽어 (hp, mp) 반환하는 콜백(run_integrated가 Detector로 주입).
+        # 통합 포팅 때 포션 배선이 빠져 있었음 — 이 리더 + check_potions로 복구.
+        self._hp_mp_reader = hp_mp_reader
 
         # 입력 계층
         self.humanizer = Humanizer(backend=input_backend)
@@ -285,6 +289,9 @@ class BotRuntime:
         if self.orchestrator.mode != "hunting":
             return
 
+        # HP/MP 물약 — 매 사냥 틱 확인(임계 미만이면 Combat이 키 입력). 어느 분기든 먼저 실행.
+        self._check_potions(now)
+
         # 루트 실행기 모드: 이동·공격은 루트 스레드가 수행 → 여기선 버프/펫만
         if self.floor_hunt_runner is not None:
             self.buffs.tick(now)
@@ -326,6 +333,18 @@ class BotRuntime:
         self.buffs.tick(now)
         self.pet.tick(now)
         self.pickup.tick(now)
+
+    def _check_potions(self, now: float) -> None:
+        """HP/MP 비율을 읽어 임계 미만이면 물약 사용(Combat.check_potions).
+        리더 미주입(테스트 등)이면 아무것도 안 함."""
+        reader = getattr(self, "_hp_mp_reader", None)
+        if reader is None:
+            return
+        try:
+            hp, mp = reader()
+        except Exception:
+            return
+        self.combat.check_potions(hp, mp, now)
 
     def _on_route_segment_enter(self, block) -> None:
         """루트 러너가 블록 진입 시 호출 — 사냥 구간(move·pass아님)이면 공격 허용."""

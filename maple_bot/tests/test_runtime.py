@@ -77,6 +77,36 @@ def test_attack_releases_held_move_key():
     assert "a" in backend.presses            # 공격 입력
 
 
+def test_potion_fires_when_hp_low():
+    """통합 런타임: HP가 임계 미만이면 hunting_tick에서 물약 키 송출(통합 포팅 때 빠졌던 배선 복구)."""
+    from core.acting.combat import PotionRule
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        hp_rule=PotionRule(enabled=True, key="pgup", threshold=0.65, cooldown=0.0),
+    )
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel(),
+                    hp_mp_reader=lambda: (0.30, 1.0))   # HP 30% < 65%
+    rt.hunting_tick(now=1.0)
+    assert "pgup" in backend.presses
+
+
+def test_potion_no_fire_when_full():
+    """HP/MP 가득이면 물약 키 안 나감."""
+    from core.acting.combat import PotionRule
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        hp_rule=PotionRule(enabled=True, key="pgup", threshold=0.65, cooldown=0.0),
+    )
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel(),
+                    hp_mp_reader=lambda: (1.0, 1.0))
+    rt.hunting_tick(now=1.0)
+    assert "pgup" not in backend.presses
+
+
 def test_route_mode_builds_floor_hunt_runner_and_gates():
     """route_mode면 FloorHuntRunner 생성 + 활성조건(_bot_running & hunting) 게이팅."""
     backend = RecordingBackend()

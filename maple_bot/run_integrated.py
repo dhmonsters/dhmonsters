@@ -34,8 +34,15 @@ def build_runtime():
     backend = select_backend()
     print(f"[입력] 백엔드: {backend.name}")
 
+    # 3-1) HP/MP 비율 리더 (A 방식 Detector 재사용) — 물약 판정용. 통합 포팅 때 누락됐던 배선.
+    from core.detector import Detector
+    _det = Detector(screen, cm)
+    def hp_mp_reader():
+        return (_det.hp_ratio(), _det.mp_ratio())
+
     # 4) 런타임 조립
-    rt = BotRuntime(screen_capture=capture, input_backend=backend, config=rc)
+    rt = BotRuntime(screen_capture=capture, input_backend=backend, config=rc,
+                    hp_mp_reader=hp_mp_reader)
     return rt, rc, cm
 
 
