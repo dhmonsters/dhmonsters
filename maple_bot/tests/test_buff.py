@@ -33,12 +33,16 @@ def test_disabled_buff_skipped():
     assert len(h.intents) == 0
 
 
-def test_multiple_buffs_independent():
+def test_multiple_buffs_staggered():
     h = FakeHumanizer()
     bm = BuffManager(humanizer=h, buffs=[
         Buff(key="1", interval=60),
         Buff(key="2", interval=120),
-    ])
-    bm.tick(now=100.0)  # 둘 다 최초 발동
-    keys = {i.key for i in h.intents}
-    assert "1" in keys and "2" in keys
+    ], gap=1.2)
+    # 동시 발동 방지: 한 틱에 하나씩, gap 간격으로 발동
+    bm.tick(now=100.0)
+    assert {i.key for i in h.intents} == {"1"}        # 버프1만
+    bm.tick(now=100.5)                                # gap 전 → 추가 없음
+    assert {i.key for i in h.intents} == {"1"}
+    bm.tick(now=101.5)                                # gap 경과 → 버프2
+    assert {i.key for i in h.intents} == {"1", "2"}

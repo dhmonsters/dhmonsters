@@ -62,6 +62,8 @@ class RuntimeConfig:
     # 펫 먹이
     pet_key: str = ""
     pet_interval: float = 600.0
+    pet_count: int = 1
+    attack_interval: float = 0.4   # 공격(스킬) 최소 발동 간격(초) — 매 틱 도배 방지
     # 픽업 타이머 — 주기적으로 줍기 키 입력(바닥 아이템 자동 줍기)
     pickup_key: str = ""
     pickup_interval: float = 60.0
@@ -185,7 +187,8 @@ class BotRuntime:
         self.buffs = BuffManager(self.humanizer, config.buffs,
                                  log_fn=lambda m: self.log(m, "버프"))
         self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval,
-                             log_fn=lambda m: self.log(m, "펫·줍기"), label="펫 먹이")
+                             log_fn=lambda m: self.log(m, "펫·줍기"), label="펫 먹이",
+                             count=config.pet_count)
         # 픽업 타이머 — PetFeeder 패턴 재사용(주기 줍기 키)
         self.pickup = PetFeeder(self.humanizer, key=config.pickup_key,
                                 interval=config.pickup_interval,
@@ -286,7 +289,8 @@ class BotRuntime:
             self.pickup.tick(now)
             # 사냥 구간이면 이미지 탐지→공격(이동은 루트 스레드 담당)
             if self._route_hunt_active and self._cfg.attack_key and self._monster_in_range():
-                self.combat.attack(self._cfg.attack_key, mode="duration")
+                self.combat.attack(self._cfg.attack_key, mode="duration",
+                                   now=now, interval=self._cfg.attack_interval)
             return
 
         # 공격할지 판정: image 모드는 공격박스 안 몬스터 있을 때만(B), 그 외(key)는 항상
@@ -300,7 +304,8 @@ class BotRuntime:
         # 이동 XOR 제자리공격 — 좌우 이동키는 누른 채 유지하고, 공격할 땐 뗀다.
         if attacking:
             self.humanizer.release_dir()   # 제자리 공격: 유지 중인 이동키 해제
-            self.combat.attack(self._cfg.attack_key, mode="duration")
+            self.combat.attack(self._cfg.attack_key, mode="duration",
+                               now=now, interval=self._cfg.attack_interval)
         else:
             # 순찰: 현재 위치로 방향 결정 → 목표 경계로 이동(hold_dir로 키 유지)
             if self.patrol is not None:

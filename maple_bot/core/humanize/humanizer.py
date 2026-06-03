@@ -20,8 +20,9 @@ _PROFILE = {
 }
 
 # hold_sec 안전 범위 — 지터가 폭주하지 않도록 클램프
+# 버프는 캔슬방지로 길게(≈0.8s) 눌러야 하므로 상한을 1.2까지 허용(공격 탭은 base가 작아 영향 없음)
 _HOLD_MIN = 0.03
-_HOLD_MAX = 0.30
+_HOLD_MAX = 1.2
 
 
 class Humanizer:

@@ -35,24 +35,31 @@ class Combat:
         import time as _t
         self._clock = clock or _t.monotonic
         self._atk_log_last = -1e9   # 공격 로그 폭주 방지(초당 1회만 표시)
+        self._atk_last = -1e9       # 마지막 공격 시각(스킬 딜레이/쿨다운 게이팅)
 
     def check_potions(self, hp_ratio: float, mp_ratio: float, now: float) -> None:
         """HP/MP 비율을 확인하고 임계 미만이면 물약 사용(독립 처리)."""
         self._hp_last = self._maybe_potion(self._hp, hp_ratio, now, self._hp_last, "HP")
         self._mp_last = self._maybe_potion(self._mp, mp_ratio, now, self._mp_last, "MP")
 
-    def attack(self, skill_key: str, mode: str = "duration", value: float = 0.0) -> None:
-        """공격. mode='count' 면 value 횟수, 'duration' 이면 호출측이 주기 제어."""
+    def attack(self, skill_key: str, mode: str = "duration", value: float = 0.0,
+               now: float | None = None, interval: float = 0.0) -> None:
+        """공격. mode='count'면 value회. interval>0이면 스킬 딜레이로 그 간격마다만 발동
+        (매 틱 도배 방지 — 너무 빠른 연타는 게임이 무시함)."""
         if not skill_key:
             return
+        if interval > 0 and now is not None:
+            if now - self._atk_last < interval:
+                return                       # 스킬 딜레이 — 아직 다음 타격 전
+            self._atk_last = now
         if mode == "count":
             for _ in range(int(value)):
-                self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=0.05))
+                self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=0.08))
         else:
-            self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=0.05))
-        now = self._clock()
-        if now - self._atk_log_last >= 1.0:   # 매 틱 폭주 방지 — 초당 1회만 로그
-            self._atk_log_last = now
+            self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=0.08))
+        t = self._clock()
+        if t - self._atk_log_last >= 1.0:   # 로그는 초당 1회만(가독)
+            self._atk_log_last = t
             self._log(f"공격 [{skill_key}]", "공격")
 
     # ── 내부 ──────────────────────────────────────────────────────────
