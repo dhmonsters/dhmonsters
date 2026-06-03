@@ -75,6 +75,9 @@ class RuntimeConfig:
     auto_reply_messages: list = field(default_factory=list)
     # 사냥 영역 (B training: 이 영역 안에서만 몬스터/닉네임 감지)
     hunt_area_region: dict | None = None
+    # 좌표 기준 — relative면 영역을 게임창 클라이언트 원점 기준으로 해석(창 따라감)
+    coord_mode: str = "absolute"
+    game_window_title: str = ""
     # 몬스터 감지(image 모드, B 메커니즘: 닉네임 박스 안 몬스터)
     hunt_mode: str = "key"
     name_template: str = ""        # 닉네임 템플릿 경로
@@ -105,7 +108,8 @@ class BotRuntime:
 
         # 감지 계층 → 이벤트큐
         self.event_queue: queue.Queue = queue.Queue()
-        self.char_scanner = CharScanner(screen_capture, config.minimap_region)
+        self.char_scanner = CharScanner(
+            screen_capture, lambda: self._resolve_region(config.minimap_region))
         self.antimob_scanner = None
         if config.antimob_templates:
             self.antimob_scanner = AntiMobScanner(
@@ -127,7 +131,7 @@ class BotRuntime:
         if config.user_detect_enabled:
             self.user_scanner = UserScanner(
                 screen_capture, min_red=config.user_min_red,
-                region=config.minimap_region,
+                region=lambda: self._resolve_region(config.minimap_region),
             )
         # 텔레그램 알림 — 토큰·챗ID 있으면 활성(거탐 알림 통합 토글이 발동 시점 결정)
         self.telegram = TelegramNotifier(
@@ -310,11 +314,22 @@ class BotRuntime:
         """블록 이탈(finally) 시 호출 — 공격 플래그를 항상 끈다(블록 사이 비공격)."""
         self._route_hunt_active = False
 
+    def _resolve_region(self, region: dict | None) -> dict | None:
+        """상대 영역 dict를 현재 게임창 원점으로 해석(absolute면 그대로, None이면 None)."""
+        if not region:
+            return region
+        from core.config_manager import resolve_window_region
+        x, y, w, h = resolve_window_region(
+            self._cfg.coord_mode, self._cfg.game_window_title,
+            int(region["left"]), int(region["top"]),
+            int(region["width"]), int(region["height"]))
+        return {"left": x, "top": y, "width": w, "height": h}
+
     def _monster_in_range(self) -> bool:
         """B 메커니즘: 사냥영역 캡처 → 닉네임 위치 → atk 박스 → 박스 안 몬스터 매칭."""
         if self._name_tpl is None or not self._monster_tpls:
             return False
-        region = self._cfg.hunt_area_region
+        region = self._resolve_region(self._cfg.hunt_area_region)
         scene = self._capture(region) if region else self._capture()
         if scene is None:
             return False
@@ -333,7 +348,7 @@ class BotRuntime:
         미니맵 캔버스의 몬스터 점 표시용(헌트모드 무관). 템플릿/닉네임 없으면 []."""
         if self._name_tpl is None or not self._monster_tpls:
             return []
-        region = self._cfg.hunt_area_region
+        region = self._resolve_region(self._cfg.hunt_area_region)
         scene = self._capture(region) if region else self._capture()
         if scene is None:
             return []
