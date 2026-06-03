@@ -29,6 +29,7 @@ class Intent:
     base_hold_sec: float = 0.05
     base_delay: float = 0.0
     risk_profile: RiskProfile = RiskProfile.NORMAL
+    hold_jitter_pct: float = 0.0   # >0이면 홀드를 base±이 비율로만 랜덤(버프/펫 ±5% 등 정밀 제어)
 
     def __post_init__(self) -> None:
         if self.action not in _VALID_ACTIONS:

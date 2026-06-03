@@ -130,6 +130,10 @@ class Humanizer:
             return round(float(lo), ndigits)
         return round(self._rng.uniform(lo, hi), ndigits)
 
+    def jitter_pct(self, base: float, pct: float = 0.05, ndigits: int = 4) -> float:
+        """고정값을 base±pct 비율로 랜덤화(소수점 ndigits자리). 버프 간격·홀드 등 미세 비주기화용."""
+        return round(base * self._rng.uniform(1 - pct, 1 + pct), ndigits)
+
     def perform(self, intent: Intent) -> None:
         """의도를 변형해 실제 입력으로 송출."""
         p = _PROFILE[intent.risk_profile]
@@ -147,7 +151,7 @@ class Humanizer:
                 self._backend.key_down(intent.key)
                 return
             # action == "key": 홀드 시간을 지터해 누름
-            hold = self._jitter_hold(intent.base_hold_sec, p)
+            hold = self._jitter_hold(intent.base_hold_sec, p, intent.hold_jitter_pct)
             self._backend.press(intent.key, hold)
 
     def reaction_delay(self, profile: RiskProfile) -> float:
@@ -156,12 +160,14 @@ class Humanizer:
         return self._uniform(lo, hi)
 
     # ── 내부 ──────────────────────────────────────────────────────────
-    def _jitter_hold(self, base: float, p: dict) -> float:
-        factor = self._uniform(*p["hold_jitter"])
-        val = base * factor
-        # 의도적 불완전성: 가끔 미세하게 더/덜
-        if self._rng.random() < p["sloppy"]:
-            val *= self._uniform(0.7, 1.3)
+    def _jitter_hold(self, base: float, p: dict, pct: float = 0.0) -> float:
+        if pct > 0:
+            # 정밀 모드: base±pct 비율로만(버프/펫 — 큰 지터 대신 좁게)
+            val = round(base * self._uniform(1 - pct, 1 + pct), 4)
+        else:
+            val = base * self._uniform(*p["hold_jitter"])
+            if self._rng.random() < p["sloppy"]:   # 의도적 불완전성: 가끔 미세하게 더/덜
+                val *= self._uniform(0.7, 1.3)
         return max(_HOLD_MIN, min(_HOLD_MAX, val))
 
     def _uniform(self, lo: float, hi: float) -> float:
