@@ -53,6 +53,9 @@ class FloorHuntRunner:
         return True
 
     def _run(self) -> None:
-        while not self._stop.is_set():
-            if not self.run_once():
-                self._sleep(self._idle)   # 비활성/빈 루트면 잠깐 쉬고 재확인
+        try:
+            while not self._stop.is_set():
+                if not self.run_once():
+                    self._sleep(self._idle)   # 비활성/빈 루트면 잠깐 쉬고 재확인
+        finally:
+            self._br.release_inputs()   # 스레드 종료 시 눌린 이동키 해제(키 눌림 방지)

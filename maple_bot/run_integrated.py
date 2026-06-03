@@ -69,7 +69,12 @@ class BotController:
         if self._rt.floor_hunt_runner is not None:
             self._rt.floor_hunt_runner.stop()
         self._rt.stop_scanners()
-        self._log("■ 봇 정지")
+        # 종료 시 유지 중인 이동키 해제(안 떼면 게임에서 계속 이동) — 백스톱
+        try:
+            self._rt.humanizer.release_all()
+        except Exception:
+            pass
+        self._log("■ 봇 정지 (입력키 해제됨)")
 
     def _loop(self):
         """메인 루프: 이벤트 처리 → 모드별 틱(루트 모드면 이동·공격은 루트 스레드 담당)."""
@@ -99,6 +104,7 @@ def main():
     shell.append_log(f"설정 로드: 미니맵 {rc.minimap_region}, 층 {len(rc.floors)}개, 버프 {len(rc.buffs)}개")
 
     controller = BotController(rt, log_fn=shell.append_log)
+    rt.log = shell.append_log          # 봇 동작(블록 실행 등)을 로그창에 표시
     shell.btn_start.clicked.connect(controller.start)
     shell.btn_stop.clicked.connect(controller.stop)
 

@@ -33,7 +33,8 @@ class BlockRunner:
                  poll_sec: float = 0.05,
                  floor_judge=None, recovery_graph=None, max_recover: int = 3,
                  on_segment_enter: Callable[[Block], None] | None = None,
-                 on_segment_exit: Callable[[Block], None] | None = None):
+                 on_segment_exit: Callable[[Block], None] | None = None,
+                 log_fn: Callable[[str], None] | None = None):
         self._h = humanizer
         self._pos = pos_fn
         self._jump_key = jump_key
@@ -46,6 +47,36 @@ class BlockRunner:
         self._max_recover = max_recover
         self._on_seg_enter = on_segment_enter   # callable(Block) | None — 블록 진입 통지
         self._on_seg_exit = on_segment_exit     # callable(Block) | None — 블록 이탈 통지(finally)
+        self._log = log_fn or (lambda m: None)  # UI 로그 콜백(동작 가시화)
+        self._last_log = None                   # 직전 로그(연속 중복 억제)
+
+    def release_inputs(self) -> None:
+        """유지 중인 모든 입력키 해제(정지/이탈 시 키 눌림 방지)."""
+        self._h.release_all()
+
+    def _log_once(self, msg: str) -> None:
+        """직전과 같은 메시지는 생략(루트 반복 중 로그 폭주 방지)."""
+        if msg != self._last_log:
+            self._last_log = msg
+            self._log(msg)
+
+    @staticmethod
+    def _desc(block: Block) -> str:
+        """블록을 사람이 읽는 한국어 한 줄로."""
+        t = block.type
+        if t == "move":
+            if block.end_x > block.start_x:
+                mode = {"count": f"왕복{block.sweeps}", "infinite": "무한왕복",
+                        "pass": "통과"}.get(block.mode, block.mode)
+                return f"이동 {block.start_x}~{block.end_x} ({mode})"
+            return f"이동 →{block.target_x}"
+        if t == "ladder":
+            return f"사다리 {'등반' if block.ladder_dir == 'up' else '하강'} x={block.ladder_x}"
+        if t == "jump":
+            return "점프"
+        if t == "attack":
+            return f"공격 {block.skill_key}"
+        return t
 
     def _jsleep(self, base: float) -> None:
         """고정 타이밍을 Humanizer로 ±0.05 지터해 대기(어떤 고정 수치도 매번 다르게)."""
@@ -82,6 +113,7 @@ class BlockRunner:
     def run_block(self, block: Block, max_steps: int = 200) -> bool:
         if self._on_seg_enter is not None:
             self._on_seg_enter(block)
+        self._log_once(f"▶ {self._desc(block)}")
         try:
             self._recover_if_needed(block, max_steps)
             if block.type == "move":
@@ -151,6 +183,9 @@ class BlockRunner:
             if last_x is not None and x == last_x:
                 stuck += 1
                 if stuck >= 5:
+                    self._h.release_dir()   # 포기 시 이동키 떼기(눌림 방지)
+                    self._log_once(
+                        f"⚠ 이동 멈춤: x={x}가 안 변함 → 캐릭터(노란 점) 인식 실패 가능. 미니맵 영역 확인")
                     return False
             else:
                 stuck = 0
