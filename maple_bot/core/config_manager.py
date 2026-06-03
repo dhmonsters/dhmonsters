@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import time
 
 
 def _get_config_path() -> str:
@@ -362,6 +363,48 @@ def resolve_region_coords(config: "ConfigManager", region_cfg) -> tuple[int, int
     if w <= 0 or h <= 0:
         return None
     return (x, y, w, h)
+
+
+def _query_window_origin(window_title: str) -> tuple[int, int, int, int]:
+    """win32로 게임창 클라이언트 (ox, oy, cw, ch). 못 찾거나 win32 미가용이면 (0,0,0,0)."""
+    try:
+        import win32gui
+        hwnd = win32gui.FindWindow(None, window_title or "MapleStory")
+        if hwnd:
+            ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+            if right - left > 0 and bottom - top > 0:
+                return (ox, oy, right - left, bottom - top)
+    except Exception:
+        pass
+    return (0, 0, 0, 0)
+
+
+_origin_cache = {"title": None, "ts": 0.0, "rect": (0, 0, 0, 0)}
+
+
+def cached_window_origin(window_title: str, ttl: float = 0.2,
+                         _now=time.monotonic) -> tuple[int, int, int, int]:
+    """게임창 클라이언트 (ox,oy,cw,ch) — win32 조회를 ttl초 캐시(매 캡처 폭주 방지)."""
+    c = _origin_cache
+    now = _now()
+    if c["title"] == window_title and (now - c["ts"]) < ttl:
+        return c["rect"]
+    rect = _query_window_origin(window_title)
+    c.update(title=window_title, ts=now, rect=rect)
+    return rect
+
+
+def resolve_window_region(coord_mode: str, window_title: str,
+                          left: int, top: int, w: int, h: int) -> tuple[int, int, int, int]:
+    """창 상대 픽셀(left,top)+w,h → 절대 화면 (x,y,w,h).
+    coord_mode != 'relative'거나 창 못 찾으면 (left,top,w,h) 그대로(절대 폴백)."""
+    if (coord_mode or "absolute") != "relative":
+        return (left, top, w, h)
+    ox, oy, cw, ch = cached_window_origin(window_title)
+    if cw <= 0:
+        return (left, top, w, h)
+    return (ox + left, oy + top, w, h)
 
 
 def logical_to_physical_coords(x: int, y: int, w: int, h: int) -> tuple[int, int, int, int]:

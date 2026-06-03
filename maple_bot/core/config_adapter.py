@@ -92,6 +92,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
 
     return RuntimeConfig(
         minimap_region=minimap_region,
+        coord_mode=str(d.get("coord_mode", "relative")),
+        game_window_title=str(d.get("settings2", {}).get("game_window_title", "")),
         floors=_floors(zones),
         route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
                if isinstance(b, dict) and "type" in b],

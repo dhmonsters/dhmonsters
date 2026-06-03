@@ -44,10 +44,15 @@ class MinimapCanvas(QWidget):
 
     def _region(self) -> dict:
         c = self._cfg
-        return {"left": int(c.get("minimap", "region_x", default=0)),
-                "top": int(c.get("minimap", "region_y", default=0)),
-                "width": int(c.get("minimap", "width", default=0)),
-                "height": int(c.get("minimap", "height", default=0))}
+        left = int(c.get("minimap", "region_x", default=0))
+        top = int(c.get("minimap", "region_y", default=0))
+        w = int(c.get("minimap", "width", default=0))
+        h = int(c.get("minimap", "height", default=0))
+        from core.config_manager import resolve_window_region
+        coord_mode = c.get("coord_mode") or "absolute"
+        title = c.get("settings2", "game_window_title") or ""
+        x, y, w, h = resolve_window_region(coord_mode, title, left, top, w, h)
+        return {"left": x, "top": y, "width": w, "height": h}
 
     def minimap_size(self) -> tuple[int, int]:
         """미니맵 (W,H) — _region 기반이라 타이머 틱 전에도 유효(클램프용)."""

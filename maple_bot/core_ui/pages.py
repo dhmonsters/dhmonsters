@@ -32,6 +32,13 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
         dlg = ScreenshotRegionSelector(raw, src_origin=origin)
 
         def apply(x, y, w, h):
+            # relative 모드 + 게임창 찾으면 클라이언트 상대 픽셀로 저장(창을 따라가게)
+            if (config.get("coord_mode") or "relative") == "relative":
+                from core.config_manager import cached_window_origin
+                title = config.get("settings2", "game_window_title") or ""
+                ox, oy, cw, ch = cached_window_origin(title)
+                if cw > 0:
+                    x, y = x - ox, y - oy
             for i, (key, val) in enumerate(zip(keys_xywh, (x, y, w, h))):
                 config.set(*key, val)
                 if fields_xywh and i < len(fields_xywh) and fields_xywh[i] is not None:
