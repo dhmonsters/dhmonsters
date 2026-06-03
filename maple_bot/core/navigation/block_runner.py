@@ -13,8 +13,9 @@ TOLERANCE = 3           # 도착 판정 픽셀 (이 이내면 도달)
 MOVE_STUCK_POLLS = 30   # 이 횟수(≈1.5s) 동안 목표에 한 번도 가까워지지 않으면 포기(벽 판정)
 TELEPORT_MIN_DIST = 15  # 이 거리 초과면 teleport, 이하면 walk 폴백
 LADDER_X_TOL = 4        # 사다리 X 도달 판정 픽셀
-JUMP_GRAB_NEAR = 9      # 사다리 X ±이 값 '근처'에 오면(딱 맞추지 말고) 그쪽으로 점프+↑ 잡기
-                        # (A/B/C: rope_x±jump_offset 접근점에서 점프 — 정확 정렬 불필요)
+JUMP_GRAB_OFFSET = 8    # 사다리에서 이만큼 떨어진 '접근점'에서 사다리 쪽으로 점프(A/B/C jump_offset)
+MAX_GRAB_RETRY = 3      # 사다리 못 잡으면 재접근·재점프 재시도 횟수(A/B/C 재시도)
+CLIMB_STUCK_POLLS = 16  # 등반 중 이 횟수(≈0.8s) y가 안 올라가면 '못 잡음'으로 보고 재시도
 Y_ARRIVE_TOL = 2        # 사다리 등반/하강 도착 판정 Y (C: y <= y_top+2)
 SAME_LEVEL_TOL = 2      # |char_y - y_bot| ≤ 이 값이면 사다리 밑 같은 층 (C _do_ladder)
 LADDER_HANG_SEC = 0.5   # 점프 후 ↑로 사다리 매달리는 안정화 시간 (C 0.5)
@@ -211,41 +212,49 @@ class BlockRunner:
             self._jsleep(self._poll)
         return False
 
-    # ── 사다리 (C routine_runner._do_ladder 방식, 비전 기반) ───────────
+    # ── 사다리 (A/B/C map_navigator 방식 포팅: 접근점 점프 + 재시도 + 등반 진척감지) ──
     def _do_ladder(self, block: Block, max_steps: int) -> bool:
-        """ladder_dir=up이면 사다리 X로 가서 등반(같은층 ↑ / 그 외 점프잡기),
-        down이면 지정 X에서 ↓+좌우+점프로 뛰어내림. y 좌표로 층 도착 확인."""
-        # 1) 사다리 X로 먼저 이동 (C: _do_move {'x': ladder_x})
-        self._exec_move(Block(type="move", target_x=block.ladder_x, move_type="walk"),
-                        max_steps)
+        """up: 접근점에서 사다리 쪽으로 점프+↑ 잡기(못 잡으면 재시도). down: 사다리 X에서 뛰어내림."""
         x, y = self._pos()
         if x is None or y is None:
             self._h.release_all()
             return False   # 좌표 인식 실패 — 스킵
-
-        # 사다리 X 근처에 못 왔으면 등반/점프잡기 보류(제자리에서 ↑/방향키만 누르는 것 방지)
-        if abs(x - block.ladder_x) > LADDER_X_TOL + 6:
-            self._h.release_all()
-            self._log_once(
-                f"⚠ 사다리 X 도달 실패: 현재 x={x}, 목표 {block.ladder_x} "
-                f"(좌우 이동이 사다리까지 안 됨) — 등반 보류")
-            return False
-
         if block.ladder_dir == "down":
+            self._exec_move(Block(type="move", target_x=block.ladder_x, move_type="walk"),
+                            max_steps)   # 하강은 사다리 X에 서서 뛰어내림
             return self._descend_ladder(block.exit_side, block.y_bot, max_steps)
+        return self._climb_with_retry(block, max_steps)
 
-        # up: 같은 층(사다리 밑)이면 ↑만, 아니면 점프 잡기
-        if abs(y - block.y_bot) <= SAME_LEVEL_TOL:
-            self._log_once(f"사다리 등반(같은층) x={block.ladder_x}, y {y}→{block.y_top}")
-            ok = self._climb_up_until(block.y_top, max_steps)
-        else:
-            side = self._grab_side(block, x)
-            self._log_once(
-                f"사다리 점프잡기 x={block.ladder_x} ({side}), y {y}→{block.y_top}")
-            ok = self._jump_grab(block.ladder_x, side, block.y_top, max_steps)
-        self._log_once("✓ 사다리 등반 완료" if ok
-                       else f"⚠ 사다리 등반 실패: y가 {block.y_top}까지 안 올라감(사다리 위치/Y 확인)")
-        return ok
+    def _climb_with_retry(self, block: Block, max_steps: int) -> bool:
+        """등반 시도 → 못 잡으면(y가 안 올라감) 재접근·재점프 재시도(A/B/C 재시도).
+        매 시도 현재 위치로 방향을 재계산 → 사다리를 지나쳤으면 반대로 돌아 '쳐다보고' 점프."""
+        for attempt in range(1, MAX_GRAB_RETRY + 1):
+            if self._stop():
+                self._h.release_all(); return False
+            x, y = self._pos()
+            if x is None or y is None:
+                self._h.release_all(); return False
+            if abs(y - block.y_bot) <= SAME_LEVEL_TOL:
+                # 같은 층(사다리 밑): 사다리 X로 가서 ↑만
+                self._log_once(f"사다리 등반(같은층) x={block.ladder_x}, y {y}→{block.y_top}")
+                self._exec_move(Block(type="move", target_x=block.ladder_x, move_type="walk"),
+                                max_steps)
+                ok = self._climb_hold_until(block.y_top, max_steps)
+            else:
+                side = self._grab_side(block, x)
+                self._log_once(
+                    f"사다리 점프잡기 x={block.ladder_x} ({side}) 시도 {attempt}/{MAX_GRAB_RETRY}, "
+                    f"y {y}→{block.y_top}")
+                ok = self._jump_grab(block.ladder_x, side, block.y_top, max_steps)
+            if ok:
+                self._log_once("✓ 사다리 등반 완료")
+                return True
+            self._h.release_all()
+            self._log_once(f"↻ 사다리 못 잡음 → 재시도 {attempt}/{MAX_GRAB_RETRY}")
+            self._jsleep(0.2)
+        self._log_once(
+            f"⚠ 사다리 등반 실패(재시도 {MAX_GRAB_RETRY}회 소진) — 사다리 X/Y·접근 확인")
+        return False
 
     def _grab_side(self, block: Block, char_x: int) -> str:
         """밧줄 잡을 때 누를 좌우 방향. auto=가까운쪽(C방식)/left/right/random=좌우랜덤."""
@@ -256,54 +265,66 @@ class BlockRunner:
             return self._h.random_side()
         return "left" if block.ladder_x < char_x else "right"   # auto
 
-    def _climb_up_until(self, y_top: int, max_steps: int) -> bool:
-        """↑ 키를 누른 채 유지 → y ≤ y_top+2 도달까지 등반(C _climb_ladder_up_until)."""
+    def _climb_loop(self, y_top: int, max_steps: int) -> bool:
+        """↑가 눌린 상태에서 y_top까지 등반. 도달 시 True. y가 CLIMB_STUCK_POLLS 동안
+        한 번도 안 줄면(로프 못 잡음/미끄러짐) False → 호출부가 재시도한다."""
+        best = None
+        no_prog = 0
+        for _ in range(max_steps):
+            if self._stop():
+                return False
+            _x, y = self._pos()
+            if y is None:
+                return False
+            if y <= y_top + Y_ARRIVE_TOL:
+                return True   # 층 도착
+            if best is None or y < best:
+                best = y       # 조금이라도 올라감 → 진척
+                no_prog = 0
+            else:
+                no_prog += 1
+                if no_prog >= CLIMB_STUCK_POLLS:
+                    return False   # y 안 줄어듦 = 못 잡음 → 재시도
+            self._jsleep(self._poll)
+        return False
+
+    def _climb_hold_until(self, y_top: int, max_steps: int) -> bool:
+        """↑ 누른 채 y_top까지 등반(같은층 단순 등반용). 진척 없으면 False(재시도용)."""
         self._h.hold("up")
         try:
-            for _ in range(max_steps):
-                if self._stop():
-                    return False
-                _x, y = self._pos()
-                if y is not None and y <= y_top + Y_ARRIVE_TOL:
-                    return True   # 층 도착 확인
-                self._jsleep(self._poll)
-            return False
+            return self._climb_loop(y_top, max_steps)
         finally:
             self._h.release("up")
 
     def _jump_grab(self, ladder_x: int, side: str, y_top: int, max_steps: int) -> bool:
-        """side(사다리쪽) 누른 채 접근 → 사다리 X '근처'(±JUMP_GRAB_NEAR)에 오면 딱 맞추지
-        않고 그쪽으로 점프+↑ 잡기 → y_top까지 등반 (A/B/C: 접근점에서 점프해 로프 잡기)."""
-        # 1) side 홀드로 접근 — 사다리 근처에 들어오면 멈추지 말고 바로 점프(모멘텀으로 잡음)
+        """접근점(사다리에서 side 반대쪽으로 JUMP_GRAB_OFFSET 떨어진 곳)으로 가서, 거기서
+        사다리 쪽으로 점프+↑ 잡기 → y_top까지 등반 (A/B/C jump_offset 접근 점프)."""
+        # 접근점: side=right면 사다리 왼쪽(ladder_x-offset)에서 오른쪽으로 점프해 잡음
+        approach_x = (ladder_x - JUMP_GRAB_OFFSET if side == "right"
+                      else ladder_x + JUMP_GRAB_OFFSET)
         self._h.hold_dir(side)
         reached = False
         for _ in range(max_steps):
             if self._stop():
                 self._h.release_all(); return False
             x, _y = self._pos()
-            if x is not None and abs(x - ladder_x) <= JUMP_GRAB_NEAR:
+            if x is not None and ((side == "right" and x >= approach_x) or
+                                  (side == "left" and x <= approach_x)):
                 reached = True
                 break
             self._jsleep(self._poll)
         if not reached:
             self._h.release_all()
             return False
-        # 2) 점프 + ↑ 잡기 (C: press jump → 0.05 → keyDown up → 0.5 매달림 → keyUp side)
+        # 사다리 쪽으로 점프(방향 유지=모멘텀) → ↑ 매달림 → 방향키 해제
         self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
         self._jsleep(0.05)
         self._h.hold("up")
         self._jsleep(LADDER_HANG_SEC)
         self._h.release_dir()
-        # 3) y_top 까지 등반 + 도착 확인
+        # y_top까지 등반(진척 감지) — 못 올라가면 False로 재시도 유도
         try:
-            for _ in range(max_steps):
-                if self._stop():
-                    return False
-                _x, y = self._pos()
-                if y is not None and y <= y_top + Y_ARRIVE_TOL:
-                    return True
-                self._jsleep(self._poll)
-            return False
+            return self._climb_loop(y_top, max_steps)
         finally:
             self._h.release("up")
 
