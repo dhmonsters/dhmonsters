@@ -21,25 +21,36 @@ class BuffManager:
     각 버프는 interval 에 ±지터(Humanizer 위임)로 비주기성 확보.
     """
 
-    def __init__(self, humanizer, buffs: list[Buff], log_fn=None, gap: float = 1.2):
+    def __init__(self, humanizer, buffs: list[Buff], log_fn=None, gap: float = 1.2,
+                 jitter: float = 0.05):
         self._h = humanizer
         self._buffs = buffs
         self._last: dict[int, float] = {}   # buff index → 마지막 사용 시각
+        self._iv: dict[int, float] = {}     # buff index → 이번 주기(±5% 랜덤 적용)
         self._log = log_fn or (lambda msg: None)   # 버프 사용 로그
         self._gap = gap          # 연속 버프 사이 최소 간격(초) — 동시발동 시 스킬딜레이로 씹힘 방지
+        self._jit = jitter       # 간격·홀드 ±비율 랜덤(소수점4자리)
         self._next_allowed = -1e9
 
+    def _jp(self, base: float) -> float:
+        f = getattr(self._h, "jitter_pct", None)
+        return f(base, self._jit) if f else base
+
     def tick(self, now: float) -> None:
-        """주기 경과한 버프를 한 틱에 하나씩, gap 간격으로 사용(동시 발동 안 함)."""
+        """주기 경과한 버프를 한 틱에 하나씩, gap 간격으로 사용(동시 발동 안 함).
+        간격·홀드는 ±5%(소수점4자리) 랜덤으로 비주기화."""
         if now < self._next_allowed:
             return                          # 직전 버프 후 gap 동안 대기
         for i, b in enumerate(self._buffs):
             if not b.key:
                 continue   # 키 미설정 = 비활성
             last = self._last.get(i, -1e9)
-            if now - last >= b.interval:
-                self._h.perform(Intent(action="key", key=b.key, base_hold_sec=b.hold_sec))
+            iv = self._iv.get(i, b.interval)   # 이번 주기(±5% 적용된 값)
+            if now - last >= iv:
+                self._h.perform(Intent(action="key", key=b.key, base_hold_sec=b.hold_sec,
+                                       hold_jitter_pct=self._jit))   # 홀드 ±5%
                 self._last[i] = now
-                self._next_allowed = now + self._gap   # 다음 버프는 gap 후
+                self._iv[i] = self._jp(b.interval)        # 다음 주기 ±5%
+                self._next_allowed = now + self._jp(self._gap)
                 self._log(f"버프 [{b.key}]")
                 return                      # 한 틱에 한 버프만 → 나머지는 다음 틱(gap 후)
