@@ -21,10 +21,11 @@ class BuffManager:
     각 버프는 interval 에 ±지터(Humanizer 위임)로 비주기성 확보.
     """
 
-    def __init__(self, humanizer, buffs: list[Buff]):
+    def __init__(self, humanizer, buffs: list[Buff], log_fn=None):
         self._h = humanizer
         self._buffs = buffs
         self._last: dict[int, float] = {}   # buff index → 마지막 사용 시각
+        self._log = log_fn or (lambda msg: None)   # 버프 사용 로그
 
     def tick(self, now: float) -> None:
         """주기 경과한 버프를 사용."""
@@ -35,3 +36,4 @@ class BuffManager:
             if now - last >= b.interval:
                 self._h.perform(Intent(action="key", key=b.key, base_hold_sec=b.hold_sec))
                 self._last[i] = now
+                self._log(f"버프 [{b.key}]")

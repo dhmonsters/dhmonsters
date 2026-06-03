@@ -20,6 +20,9 @@ CATEGORIES = [
 ]
 _ICONS = ["🔌", "🧭", "⚔️", "🛡️", "⚙️", "🖥️"]
 
+# 로그 카테고리 — 칩으로 켜고 끔(표시 필터). 봇 동작을 종류별로 구분
+LOG_CATEGORIES = ["이동", "공격", "버프", "물약", "펫·줍기", "감지", "시스템"]
+
 
 class MainShell(QMainWindow):
     """통합 봇 메인 셸. 상단 내비 탭 + 중앙 페이지 스택 + 하단 컨트롤바(시작/정지·상태·로그)."""
@@ -93,12 +96,37 @@ class MainShell(QMainWindow):
         self._log_drawer = QWidget()
         v = QVBoxLayout(self._log_drawer)
         v.setContentsMargins(SPACING["md"], SPACING["xs"], SPACING["md"], 0)
+        # 카테고리 필터 칩 (켜진 것만 로그에 표시) — 클릭으로 추가/제외
+        self._log_buffer: list[tuple] = []          # (cat, msg) 전체 보관(필터 토글 시 재렌더)
+        self._log_cats_on = set(LOG_CATEGORIES)      # 켜진 카테고리(기본 전부)
+        self._cat_btns: dict[str, QPushButton] = {}
+        chips = QWidget(); ch = QHBoxLayout(chips)
+        ch.setContentsMargins(0, 0, 0, SPACING["xxs"]); ch.setSpacing(SPACING["xxs"])
+        ch.addWidget(QLabel("로그:"))
+        for cat in LOG_CATEGORIES:
+            b = QPushButton(cat); b.setObjectName("navtab"); b.setCheckable(True)
+            b.setChecked(True)
+            b.clicked.connect(lambda _=False, c=cat: self._toggle_log_cat(c))
+            self._cat_btns[cat] = b; ch.addWidget(b)
+        ch.addStretch(1)
+        v.addWidget(chips)
         self.log_view = QTextEdit(); self.log_view.setObjectName("log")
         self.log_view.setReadOnly(True)
         self.log_view.setMinimumHeight(80)   # 스플리터 드래그로 자유 조절(고정 높이 제거)
         v.addWidget(self.log_view)
         self._log_drawer.setVisible(False)
         return self._log_drawer
+
+    def _toggle_log_cat(self, cat: str) -> None:
+        """카테고리 표시 토글 → 버퍼에서 켜진 카테고리만 재렌더."""
+        if cat in self._log_cats_on:
+            self._log_cats_on.discard(cat)
+        else:
+            self._log_cats_on.add(cat)
+        self.log_view.clear()
+        for c, m in self._log_buffer:
+            if c in self._log_cats_on:
+                self.log_view.append(f"[{c}] {m}")
 
     def _toggle_log(self) -> None:
         self._log_drawer.setVisible(not self._log_drawer.isVisible())
@@ -173,5 +201,12 @@ class MainShell(QMainWindow):
         self.status_chip.setStyleSheet(
             ("color:#3ada85;" if running else "color:#80848e;") + " background:transparent;")
 
-    def append_log(self, msg: str) -> None:
-        self.log_view.append(msg)
+    def append_log(self, msg: str, cat: str = "시스템") -> None:
+        """카테고리 태그와 함께 로그 적재. 켜진 카테고리만 화면에 표시(전체는 버퍼 보관)."""
+        if cat not in LOG_CATEGORIES:
+            cat = "시스템"
+        self._log_buffer.append((cat, msg))
+        if len(self._log_buffer) > 1000:        # 버퍼 상한(메모리)
+            self._log_buffer = self._log_buffer[-1000:]
+        if cat in self._log_cats_on:
+            self.log_view.append(f"[{cat}] {msg}")

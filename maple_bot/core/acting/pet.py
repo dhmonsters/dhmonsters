@@ -7,11 +7,14 @@ from core.humanize.intent import Intent
 class PetFeeder:
     """주기 펫 먹이. key 없으면 비활성."""
 
-    def __init__(self, humanizer, key: str = "", interval: float = 600.0):
+    def __init__(self, humanizer, key: str = "", interval: float = 600.0,
+                 log_fn=None, label: str = "펫 먹이"):
         self._h = humanizer
         self._key = key
         self._interval = interval
         self._last = -1e9
+        self._log = log_fn or (lambda msg: None)
+        self._label = label
 
     def tick(self, now: float) -> None:
         if not self._key:
@@ -19,3 +22,4 @@ class PetFeeder:
         if now - self._last >= self._interval:
             self._h.perform(Intent(action="key", key=self._key, base_hold_sec=0.05))
             self._last = now
+            self._log(f"{self._label} [{self._key}]")
