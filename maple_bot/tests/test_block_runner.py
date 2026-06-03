@@ -198,6 +198,19 @@ def test_ladder_same_level_climbs_to_y_top():
     assert "up" not in h.held_keys  # 등반 후 ↑ 떼짐
 
 
+def test_ladder_no_false_complete_when_ytop_at_or_below_start():
+    """y_top이 시작 y 이하(오를 거리 없음)면 허위 '등반 완료' 금지 — 실패 반환.
+
+    사용자 보고: y가 안 바뀌었는데(층이동 안 됐는데) '사다리 등반 완료'가 떴음.
+    원인은 시작 y가 이미 y_top+여유 이하라 _climb_loop이 즉시 도착 처리한 것."""
+    w = LadderWorld(x=100, y=74); h = WorldHumanizer(w)
+    ok = _runner(h, w).run_block(
+        Block(type="ladder", ladder_x=100, y_top=80, y_bot=74, ladder_dir="up"),
+        max_steps=200)
+    assert ok is False           # 허위 '등반 완료' 안 함(핵심)
+    assert w.y < 80              # 엉뚱한 목표(y_top=80, 아래)에 '도착'한 적 없음
+
+
 def test_ladder_jump_grab_then_climb():
     """사다리에서 떨어진 위치 → 접근+점프+↑ 잡기 → 등반."""
     w = LadderWorld(x=40, y=60); h = WorldHumanizer(w)

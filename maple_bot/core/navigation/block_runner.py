@@ -291,12 +291,20 @@ class BlockRunner:
         한 번도 안 줄면(로프 못 잡음/미끄러짐) False → 호출부가 재시도한다."""
         best = None
         no_prog = 0
+        start_y = None
         for _ in range(max_steps):
             if self._stop():
                 return False
             _x, y = self._pos()
             if y is None:
                 return False
+            if start_y is None:
+                start_y = y
+                # 시작 시점에 이미 목표(y_top) 이하 = 오를 거리가 없음(잘못된 사다리 Y/이미 위층).
+                # 등반이 아니므로 '도착'으로 보지 않는다 — 한 칸도 안 올라갔는데 허위 '등반 완료'가
+                # 떠서 같은 층에서 좌우만 하던 버그 방지(사용자 보고: y 안 바뀌었는데 층이동 표기).
+                if start_y <= y_top + Y_ARRIVE_TOL:
+                    return False
             if y <= y_top + Y_ARRIVE_TOL:
                 return True   # 층 도착
             if best is None or y < best:
