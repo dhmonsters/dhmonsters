@@ -114,7 +114,8 @@ class BotRuntime:
         if config.antimob_templates:
             self.antimob_scanner = AntiMobScanner(
                 screen_capture, config.antimob_templates,
-                config.antimob_enabled, region=config.minimap_region,
+                config.antimob_enabled,
+                region=lambda: self._resolve_region(config.minimap_region),
             )
         # 거탐 감지 — 타이틀 출현 → "lie" 이벤트 → Orchestrator가 safety 모드 전환
         self.lie_scanner = None
