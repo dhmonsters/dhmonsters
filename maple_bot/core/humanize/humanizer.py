@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+import threading
 import time
 from typing import Callable
 
@@ -37,6 +38,8 @@ class Humanizer:
         self._rng = rng or random.Random()
         self._held: str | None = None   # 현재 누른 채 유지 중인 이동키(left/right)
         self._held_keys: set[str] = set()   # 좌우 외 유지키(사다리 ↑/↓ 등)
+        # 이동(루트 스레드)과 공격(메인 루프)이 같은 Humanizer를 동시 사용 → 키 상태 보호
+        self._lock = threading.RLock()
 
     # ── 이동키 유지/해제 (C _walk_to_x 방식) ──────────────────────────
     # 좌우 이동키는 '한 번 누르고 계속 유지'한다. 매 틱 톡톡 누르지 않는다.
@@ -45,42 +48,54 @@ class Humanizer:
                  risk_profile: RiskProfile = RiskProfile.NORMAL) -> None:
         """좌우 이동키를 누른 채 유지. 같은 방향이면 그대로(no-op),
         다른 방향이면 기존 키를 떼고 새 키를 누른다(방향 전환)."""
-        if self._held == key:
-            return                          # 이미 같은 방향 유지 중 → 계속 누름 유지
-        p = _PROFILE[risk_profile]
-        if self._held is not None:
-            self._backend.key_up(self._held)   # 방향 전환: 기존 키 떼기
-            self._sleep(self._uniform(*p["reaction"]))  # 전환 사이 사람같은 미세 지연
-        self._backend.key_down(key)
-        self._held = key
+        with self._lock:
+            if self._held == key:
+                return                      # 이미 같은 방향 유지 중 → 계속 누름 유지
+            p = _PROFILE[risk_profile]
+            if self._held is not None:
+                self._backend.key_up(self._held)   # 방향 전환: 기존 키 떼기
+                self._sleep(self._uniform(*p["reaction"]))  # 전환 사이 사람같은 미세 지연
+            self._backend.key_down(key)
+            self._held = key
+
+    def refresh_dir(self) -> None:
+        """유지 중인 이동키를 같은 키로 재전송(키가 풀린 이벤트 뒤 재유지용). 없으면 no-op."""
+        with self._lock:
+            if self._held is not None:
+                self._backend.key_down(self._held)
 
     def release_dir(self) -> None:
         """유지 중인 이동키를 뗀다(제자리 공격/정지/안전 진입 시)."""
-        if self._held is not None:
-            self._backend.key_up(self._held)
-            self._held = None
+        with self._lock:
+            if self._held is not None:
+                self._backend.key_up(self._held)
+                self._held = None
 
     def held_dir(self) -> str | None:
         """현재 유지 중인 이동키(없으면 None)."""
-        return self._held
+        with self._lock:
+            return self._held
 
     def hold(self, key: str) -> None:
         """좌우 외 임의 키를 누른 채 유지(사다리 ↑/↓ 등)."""
-        if key not in self._held_keys:
-            self._backend.key_down(key)
-            self._held_keys.add(key)
+        with self._lock:
+            if key not in self._held_keys:
+                self._backend.key_down(key)
+                self._held_keys.add(key)
 
     def release(self, key: str) -> None:
         """hold로 누른 키를 뗀다(멱등)."""
-        if key in self._held_keys:
-            self._backend.key_up(key)
-            self._held_keys.discard(key)
+        with self._lock:
+            if key in self._held_keys:
+                self._backend.key_up(key)
+                self._held_keys.discard(key)
 
     def release_all(self) -> None:
         """유지 중인 모든 키(좌우+↑/↓)를 뗀다(정지/안전 진입 시)."""
-        self.release_dir()
-        for k in list(self._held_keys):
-            self.release(k)
+        with self._lock:
+            self.release_dir()
+            for k in list(self._held_keys):
+                self.release(k)
 
     # ── 고정 타이밍 랜덤화 (헌법: 어떤 고정 수치도 매번 미세하게 다르게) ──
     def jitter_sec(self, base: float, spread: float | None = None) -> float:
@@ -108,6 +123,12 @@ class Humanizer:
         return self._rng.choice(["left", "right"])
 
     # ── 공개 API ──────────────────────────────────────────────────────
+    def rand_in(self, lo: float, hi: float, ndigits: int = 4) -> float:
+        """[lo, hi] 균일 랜덤을 소수점 ndigits자리로(왕복 끝점 랜덤마진 등). lo>hi면 lo 반환."""
+        if hi <= lo:
+            return round(float(lo), ndigits)
+        return round(self._rng.uniform(lo, hi), ndigits)
+
     def perform(self, intent: Intent) -> None:
         """의도를 변형해 실제 입력으로 송출."""
         p = _PROFILE[intent.risk_profile]
@@ -117,16 +138,16 @@ class Humanizer:
         if delay > 0:
             self._sleep(delay)
 
-        if intent.action == "hold":
-            self._backend.key_down(intent.key)
-            return
-        if intent.action == "move_dir":
-            self._backend.key_down(intent.key)
-            return
-
-        # action == "key": 홀드 시간을 지터해 누름
-        hold = self._jitter_hold(intent.base_hold_sec, p)
-        self._backend.press(intent.key, hold)
+        with self._lock:
+            if intent.action == "hold":
+                self._backend.key_down(intent.key)
+                return
+            if intent.action == "move_dir":
+                self._backend.key_down(intent.key)
+                return
+            # action == "key": 홀드 시간을 지터해 누름
+            hold = self._jitter_hold(intent.base_hold_sec, p)
+            self._backend.press(intent.key, hold)
 
     def reaction_delay(self, profile: RiskProfile) -> float:
         """프로파일별 반응 지연 1회 샘플 (테스트/외부 사용)."""

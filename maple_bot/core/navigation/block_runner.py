@@ -132,7 +132,7 @@ class BlockRunner:
                     sweeps = max(1, block.sweeps)
                     return self.run_sweep(block.start_x, block.end_x, sweeps,
                                           block.move_type, max_steps=max_steps,
-                                          infinite=infinite)
+                                          infinite=infinite, margin=block.rand_margin)
                 return self._exec_move(block, max_steps)
             if block.type == "ladder":
                 return self._do_ladder(block, max_steps)
@@ -143,16 +143,28 @@ class BlockRunner:
             if self._on_seg_exit is not None:
                 self._on_seg_exit(block)
 
+    def _sweep_targets(self, start_x: int, end_x: int, margin: int) -> tuple[float, float]:
+        """이번 왕복의 (끝쪽 턴, 시작쪽 턴) 목표. margin>0이면 구간 안에서 매번 랜덤(소수점4자리):
+        끝=[end-margin, end], 시작=[start, start+margin] — 설정 구간을 벗어나지 않음."""
+        if margin <= 0:
+            return float(end_x), float(start_x)
+        m = min(margin, max(0, (end_x - start_x)))   # 마진이 구간보다 크면 구간으로 제한
+        end_t = self._h.rand_in(end_x - m, end_x)
+        start_t = self._h.rand_in(start_x, start_x + m)
+        return end_t, start_t
+
     def run_sweep(self, start_x: int, end_x: int, sweeps: int,
                   move_type: str = "walk", max_steps: int = 200,
-                  step_fn=None, infinite: bool = False) -> bool:
+                  step_fn=None, infinite: bool = False, margin: int = 0) -> bool:
         """start_x ~ end_x 사이를 sweeps회 왕복. 한 sweep = 끝→시작 1회.
 
         infinite=True면 stop_fn()이 True가 될 때까지 무한 왕복.
+        margin>0이면 매 왕복 끝점을 구간 안에서 랜덤화(소수점4자리, 매번 다른 지점에서 턴).
         step_fn: 테스트용 위치 강제 콜백(실기에선 None=실제 이동).
         """
         def one_sweep() -> bool:
-            for tx in (end_x, start_x):   # 끝으로 갔다 시작으로 = 1왕복
+            end_t, start_t = self._sweep_targets(start_x, end_x, margin)
+            for tx in (end_t, start_t):   # 끝으로 갔다 시작으로 = 1왕복(매번 랜덤 끝점)
                 if self._stop():
                     return False
                 blk = Block(type="move", target_x=tx, move_type=move_type)
@@ -185,6 +197,7 @@ class BlockRunner:
             x, _y = self._pos()
             dist = block.target_x - x
             if abs(dist) <= TOLERANCE:
+                self._h.release_dir()   # 도착 시 이동키 떼기 → 목표 지나침(overshoot) 방지·정지
                 return True   # 도착 (폐루프 종료)
 
             if best is None or abs(dist) < best:
@@ -349,7 +362,7 @@ class BlockRunner:
         return True   # 하강은 도착 확인 약해도 완료 처리(C와 동일 성향)
 
     def _do_jump(self, block: Block) -> bool:
-        """단순 점프 — 방향 키(있으면) 유지한 채 점프키 1회(C _do_jump)."""
+        """단순 점프 — 방향 키(있으면) 유지한 채 점프키 1회(C _do_jump). 점프 후 키 정리."""
         if block.direction in ("left", "right"):
             self._h.hold_dir(block.direction)
         elif block.direction == "down":
@@ -357,4 +370,6 @@ class BlockRunner:
         self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
         if block.direction == "down":
             self._h.release("down")
+        elif block.direction in ("left", "right"):
+            self._h.release_dir()   # 점프 후 방향키 떼기(잔류 이동 방지)
         return True

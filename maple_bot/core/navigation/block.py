@@ -30,6 +30,8 @@ class Block:
     start_x: int = 0
     end_x: int = 0
     sweeps: int = 1
+    rand_margin: int = 0         # 왕복 끝점 랜덤폭: 끝=[end-margin,end], 시작=[start,start+margin]
+                                 # 사이 랜덤(소수점4자리)으로 매 왕복 다른 지점에서 턴(0=정확 끝점)
     mode: str = "count"          # count=sweeps회 왕복 / infinite=무한왕복 / pass=한방향 1회 통과
     # attack
     skill_key: str = ""

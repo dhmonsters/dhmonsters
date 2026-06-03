@@ -268,6 +268,11 @@ class BlockEditor(QWidget):
             sw.setValue(int(blk.get("sweeps", 1)))
             sw.valueChanged.connect(lambda val, i=idx: self.set_field(i, "sweeps", val))
             top.addWidget(g(sw, 74), 1)
+            rm = QSpinBox(); rm.setRange(0, 99); rm.setPrefix("랜덤 ")
+            rm.setValue(int(blk.get("rand_margin", 0)))
+            rm.setToolTip("왕복 끝점 랜덤폭(px). 구간 안에서 매번 다른 지점에서 턴(0=정확 끝점)")
+            rm.valueChanged.connect(lambda val, i=idx: self.set_field(i, "rand_margin", val))
+            top.addWidget(g(rm, 74), 1)
 
             s_sx = QSpinBox(); s_sx.setRange(0, 4000); s_sx.setPrefix("시작 ")
             s_sx.setValue(int(blk.get("start_x", 0)))
