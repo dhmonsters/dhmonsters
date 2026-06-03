@@ -112,7 +112,7 @@ class BotRuntime:
         self.event_queue: queue.Queue = queue.Queue()
         self.char_scanner = CharScanner(
             screen_capture, lambda: self._resolve_region(config.minimap_region),
-            log_fn=lambda m: self.log(m))
+            log_fn=lambda m: self.log(m, "감지"))
         self.antimob_scanner = None
         if config.antimob_templates:
             self.antimob_scanner = AntiMobScanner(
@@ -153,7 +153,7 @@ class BotRuntime:
         # 행동/동선 계층
         self._bot_running = False    # 컨트롤러 start/stop로 토글 (루트 실행 활성 조건)
         self._route_hunt_active = False   # 현재 루트 블록이 사냥 구간이면 True(공격 게이팅)
-        self.log = lambda m: None    # UI 로그 콜백(run_integrated에서 주입). 동작 가시화용
+        self.log = lambda m, cat="시스템": None  # UI 로그 콜백(run_integrated 주입). (msg, 카테고리)
         # 층: 명시적 zones가 있으면 우선, 없으면 루트 블록 Y에서 자동 추출(복귀용)
         _floors = config.floors
         if not _floors and config.route:
@@ -173,19 +173,23 @@ class BotRuntime:
             floor_judge=self.floor_judge, recovery_graph=_recovery_graph,
             on_segment_enter=self._on_route_segment_enter,
             on_segment_exit=self._on_route_segment_exit,
-            log_fn=lambda m: self.log(m),
+            log_fn=lambda m: self.log(m, "이동"),
         )
         # 설정된 캐릭터색(char_r/g/b)을 느슨한 HSV로 감지에 반영(미니맵 노란점 인식률↑)
         if config.char_rgb:
             from core.sensing.char_scanner import hsv_range_from_rgb
             lo, hi = hsv_range_from_rgb(*config.char_rgb)
             self.char_scanner.set_hsv(lo, hi)
-        self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
-        self.buffs = BuffManager(self.humanizer, config.buffs)
-        self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval)
+        self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule,
+                             log_fn=lambda m, c: self.log(m, c))
+        self.buffs = BuffManager(self.humanizer, config.buffs,
+                                 log_fn=lambda m: self.log(m, "버프"))
+        self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval,
+                             log_fn=lambda m: self.log(m, "펫·줍기"), label="펫 먹이")
         # 픽업 타이머 — PetFeeder 패턴 재사용(주기 줍기 키)
         self.pickup = PetFeeder(self.humanizer, key=config.pickup_key,
-                                interval=config.pickup_interval)
+                                interval=config.pickup_interval,
+                                log_fn=lambda m: self.log(m, "펫·줍기"), label="줍기")
         # 몬스터 감지(image 모드) — 닉네임/몬스터 템플릿 로드 (B 메커니즘)
         self._name_tpl = None
         self._monster_tpls = {}
