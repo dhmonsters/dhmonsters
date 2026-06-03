@@ -43,3 +43,26 @@ det(박스탐색)는 기존 파이프라인이 담당, 여기선 **rec-only**(�
 ※ `assets/ocr/`·`tools/`는 .gitignore 대상 → 코드만 커밋, 모델/스크립트는 로컬 유지.
 
 **검증:** 렌더한 한글(확인/취소/기타) 실제 인식 통합테스트 포함. 전체 316 passed.
+
+---
+
+## 2026-06-04 — ⚠️ 사용자가 실제로 돌리는 경로 (중요·재확인)
+
+**사용자는 `run_integrated.py`(신규 통합 런타임 = `BotRuntime` + `core_ui/shell.py`)를 돌린다.**
+구형 `main.py`(→`MainWindow`→`BotLoop`+`ui/`)가 **아니다.**
+
+- 판별법: 로그에 "✓ 캐릭터 감지"(`core/sensing/char_scanner.py`), "사다리 등반/점프잡기"
+  (`core/navigation/block_runner.py`)가 보이면 신규 런타임이다.
+- **버그 수정 시 신규 경로를 고쳐야 한다**: 동선=`navigation/block_runner`, 공격·물약=`acting/combat`,
+  감지=`sensing/*`, UI/로그=`core_ui/shell.py`, 조립=`runtime.py`+`config_adapter`+`run_integrated`.
+- 구형(`bot_loop.py`/`potion_manager.py`/`ui/tab_main.py`)은 이 경로에서 **안 쓰임**(헷갈리지 말 것).
+  (이번에 물약 진단/로그스크롤을 구형에 먼저 고쳤다가 헛수고함.)
+
+**이번 수정 3건(모두 신규 경로):**
+1. 사다리 허위 '등반 완료' — `block_runner._climb_loop` 시작 가드(시작 y ≤ y_top+여유면 등반 아님).
+   ※ 로그 "y 74→80"처럼 y_top이 시작보다 아래면 사용자 route의 ladder Y가 잘못된 것일 수 있음.
+2. 물약 미작동 — `BotRuntime`이 HP/MP를 안 읽고 `Combat.check_potions`를 호출 안 했음.
+   `hp_mp_reader`(A `Detector` 재사용) 주입 + `hunting_tick`에서 호출로 복구.
+3. 로그 자동스크롤 — `core_ui/shell.py` 로그뷰 `verticalScrollBar().rangeChanged`→맨아래.
+
+전체 324 passed.
