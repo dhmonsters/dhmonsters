@@ -113,6 +113,7 @@ class BlockRunner:
             path = shortest_path(self._graph, cur.name, want)
             if not path:
                 return                       # 복구 불가 → 그냥 진행
+            self._log_once(f"⤴ 층 이탈 감지(현재 {cur.name}≠목표 {want}, y={y}) → 사다리로 복귀")
             self._do_ladder(Block.from_dict(path[0]), max_steps)
 
     def run_block(self, block: Block, max_steps: int = 200) -> bool:
@@ -245,6 +246,9 @@ class BlockRunner:
         for attempt in range(1, MAX_GRAB_RETRY + 1):
             if self._stop():
                 self._h.release_all(); return False
+            # 등반 도중 몬스터에 맞아 다른 층으로 떨어졌을 수 있음 → 매 시도 현재 층 확인,
+            # 사다리 바닥층이 아니면 그래프로 먼저 복귀(엉뚱한 사다리 헛잡기 방지).
+            self._recover_if_needed(block, max_steps)
             x, y = self._pos()
             if x is None or y is None:
                 self._h.release_all(); return False
