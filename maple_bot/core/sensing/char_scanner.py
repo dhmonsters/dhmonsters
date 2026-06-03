@@ -68,7 +68,8 @@ class CharScanner(Scanner):
         self._lo, self._hi = lower, upper
 
     def scan_once(self) -> Event | None:
-        img = self._capture(self._region)
+        region = self._region() if callable(self._region) else self._region
+        img = self._capture(region)
         if img is None:
             return None
         pos = find_char_in_hsv(img, self._lo, self._hi, self._min_area, self._max_area)

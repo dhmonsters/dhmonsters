@@ -32,7 +32,8 @@ class UserScanner(Scanner):
         self._present = False
 
     def scan_once(self) -> Event | None:
-        img = self._capture(self._region) if self._region else self._capture()
+        region = self._region() if callable(self._region) else self._region
+        img = self._capture(region) if region else self._capture()
         if img is None:
             return None
         red = count_red_pixels(img)

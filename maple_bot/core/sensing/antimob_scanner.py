@@ -55,7 +55,8 @@ class AntiMobScanner(Scanner):
         self._region = region
 
     def scan_once(self) -> Event | None:
-        scene = self._capture(self._region) if self._region else self._capture()
+        region = self._region() if callable(self._region) else self._region
+        scene = self._capture(region) if region else self._capture()
         if scene is None:
             return None
         for mob_type, tpl_set in self._templates.items():
