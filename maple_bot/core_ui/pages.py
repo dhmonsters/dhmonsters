@@ -262,13 +262,16 @@ def build_pages(config) -> list[QWidget]:
         bar = _QWidget(); bl = _QHBox(bar)
         bl.setContentsMargins(0, 0, 0, 0)
         grp = _QBtnGroup(bar); grp.setExclusive(True)
+        none_btn = None
         for label, typ in [("선택 안 함", None), ("이동", "move"), ("공격", "attack"),
                            ("사다리", "ladder"), ("점프", "jump"), ("텔포", "teleport")]:
             btn = _QBtn(label); btn.setCheckable(True)
             btn.clicked.connect(lambda _=False, t=typ: route_canvas.set_active_type(t))
             grp.addButton(btn); bl.addWidget(btn)
             if typ is None:
-                btn.setChecked(True)
+                btn.setChecked(True); none_btn = btn
+        # 블록 1개 배치하면 캔버스가 _active_type을 None으로 되돌리므로, 툴바도 '선택 안 함'으로
+        route_canvas.on_type_consumed = lambda b=none_btn: b.setChecked(True)
         bl.addStretch()
         nav_extras += [bar, route_canvas]
     except Exception:
