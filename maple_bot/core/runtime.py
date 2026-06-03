@@ -151,6 +151,7 @@ class BotRuntime:
         # 행동/동선 계층
         self._bot_running = False    # 컨트롤러 start/stop로 토글 (루트 실행 활성 조건)
         self._route_hunt_active = False   # 현재 루트 블록이 사냥 구간이면 True(공격 게이팅)
+        self.log = lambda m: None    # UI 로그 콜백(run_integrated에서 주입). 동작 가시화용
         # 층: 명시적 zones가 있으면 우선, 없으면 루트 블록 Y에서 자동 추출(복귀용)
         _floors = config.floors
         if not _floors and config.route:
@@ -170,6 +171,7 @@ class BotRuntime:
             floor_judge=self.floor_judge, recovery_graph=_recovery_graph,
             on_segment_enter=self._on_route_segment_enter,
             on_segment_exit=self._on_route_segment_exit,
+            log_fn=lambda m: self.log(m),
         )
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
