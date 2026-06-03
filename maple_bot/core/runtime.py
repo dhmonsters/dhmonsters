@@ -111,7 +111,8 @@ class BotRuntime:
         # 감지 계층 → 이벤트큐
         self.event_queue: queue.Queue = queue.Queue()
         self.char_scanner = CharScanner(
-            screen_capture, lambda: self._resolve_region(config.minimap_region))
+            screen_capture, lambda: self._resolve_region(config.minimap_region),
+            log_fn=lambda m: self.log(m))
         self.antimob_scanner = None
         if config.antimob_templates:
             self.antimob_scanner = AntiMobScanner(
