@@ -208,6 +208,7 @@ class RouteCanvas(MinimapCanvas):
         self._active_type: str | None = None
         self._dragging: int | None = None
         self._drag_last: tuple[int, int] | None = None
+        self.on_type_consumed = None   # 블록 1개 배치 후 호출(툴바 '선택 안 함' 복귀용)
         self.sync_unplaced()   # 리스트로만 만든 미배치 블록을 캔버스에 끌어다 놓을 수 있게 staging
 
     def set_active_type(self, t: str | None) -> None:
@@ -256,6 +257,8 @@ class RouteCanvas(MinimapCanvas):
             route.append(seed_block_at(self._active_type, mx, my))
             self._save_route(route)
             self._active_type = None
+            if self.on_type_consumed is not None:   # 툴바 버튼도 '선택 안 함'으로 복귀
+                self.on_type_consumed()
         self.update()
 
     def _drag_to(self, mx: int, my: int) -> None:
