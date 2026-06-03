@@ -144,6 +144,7 @@ class BotRuntime:
 
         # 행동/동선 계층
         self._bot_running = False    # 컨트롤러 start/stop로 토글 (루트 실행 활성 조건)
+        self._route_hunt_active = False   # 현재 루트 블록이 사냥 구간이면 True(공격 게이팅)
         # 층: 명시적 zones가 있으면 우선, 없으면 루트 블록 Y에서 자동 추출(복귀용)
         _floors = config.floors
         if not _floors and config.route:
@@ -161,6 +162,8 @@ class BotRuntime:
             pos_fn=lambda: self.orchestrator.state.get_position() or (0, 0),
             stop_fn=lambda: not self._route_can_run(),   # 안전모드·정지 시 루트 폴링루프 즉시 이탈
             floor_judge=self.floor_judge, recovery_graph=_recovery_graph,
+            on_segment_enter=self._on_route_segment_enter,
+            on_segment_exit=self._on_route_segment_exit,
         )
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
@@ -262,6 +265,9 @@ class BotRuntime:
             self.buffs.tick(now)
             self.pet.tick(now)
             self.pickup.tick(now)
+            # 사냥 구간이면 이미지 탐지→공격(이동은 루트 스레드 담당)
+            if self._route_hunt_active and self._cfg.attack_key and self._monster_in_range():
+                self.combat.attack(self._cfg.attack_key, mode="duration")
             return
 
         # 공격할지 판정: image 모드는 공격박스 안 몬스터 있을 때만(B), 그 외(key)는 항상
@@ -293,6 +299,16 @@ class BotRuntime:
         self.buffs.tick(now)
         self.pet.tick(now)
         self.pickup.tick(now)
+
+    def _on_route_segment_enter(self, block) -> None:
+        """루트 러너가 블록 진입 시 호출 — 사냥 구간(move·pass아님)이면 공격 허용."""
+        self._route_hunt_active = (
+            getattr(block, "type", None) == "move"
+            and getattr(block, "mode", "count") != "pass")
+
+    def _on_route_segment_exit(self, block) -> None:
+        """블록 이탈(finally) 시 호출 — 공격 플래그를 항상 끈다(블록 사이 비공격)."""
+        self._route_hunt_active = False
 
     def _monster_in_range(self) -> bool:
         """B 메커니즘: 사냥영역 캡처 → 닉네임 위치 → atk 박스 → 박스 안 몬스터 매칭."""
