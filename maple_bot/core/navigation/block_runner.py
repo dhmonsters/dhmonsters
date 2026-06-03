@@ -254,14 +254,14 @@ class BlockRunner:
             x, y = self._pos()
             if x is None or y is None:
                 self._h.release_all(); return False
+            side = self._grab_side(block, x)   # 잡기·발판확인에 쓸 한 방향
             if abs(y - block.y_bot) <= SAME_LEVEL_TOL:
                 # 같은 층(사다리 밑): 사다리 X로 가서 ↑만
                 self._log_once(f"사다리 등반(같은층) x={block.ladder_x}, y {y}→{block.y_top}")
                 self._exec_move(Block(type="move", target_x=block.ladder_x, move_type="walk"),
                                 max_steps)
-                ok = self._climb_hold_until(block.ladder_x, block.y_top, max_steps)
+                ok = self._climb_hold_until(block.ladder_x, block.y_top, max_steps, side)
             else:
-                side = self._grab_side(block, x)
                 self._log_once(
                     f"사다리 점프잡기 x={block.ladder_x} ({side}) 시도 {attempt}/{MAX_GRAB_RETRY}, "
                     f"y {y}→{block.y_top}")
@@ -309,38 +309,39 @@ class BlockRunner:
             self._jsleep(self._poll)
         return False
 
-    def _confirm_on_platform(self, ladder_x: int, max_steps: int) -> bool:
-        """발판 확인 = 등반 완료 판정의 핵심: 좌우로 살짝 밀어 x가 사다리에서 벗어나면(=발판 위) True.
-        로프에 매달린 채면 x가 안 변함 → False(재시도). (사용자 정의: 그 층 y에서 좌우 이동돼야 완료)"""
+    def _confirm_on_platform(self, ladder_x: int, confirm_dir: str, max_steps: int) -> bool:
+        """발판 확인 = 등반 완료 판정의 핵심: confirm_dir 한 방향으로만 밀어 x가 사다리에서
+        벗어나면(=발판 위) True. 로프 매달림이면 x 안 변함 → False(재시도).
+        한 방향만 써서 좌우 왔다갔다(이상한 움직임) 없음. (사용자 정의: 그 층 y에서 좌/우 이동돼야 완료)"""
         self._h.release("up")            # 로프에서 ↑ 떼야 좌우 이동 가능
-        for d in ("left", "right"):
-            self._h.hold_dir(d)
-            try:
-                for _ in range(CONFIRM_MOVE_POLLS):
-                    if self._stop():
-                        return False
-                    self._jsleep(self._poll)
-                    x, _y = self._pos()
-                    if x is not None and abs(x - ladder_x) >= CONFIRM_MOVE_PX:
-                        return True       # 좌우로 이동됨 = 발판 위 = 등반 완료
-            finally:
-                self._h.release_dir()
-        return False                     # 어느쪽도 안 움직임 = 아직 로프 → 미완료(재시도)
+        self._h.hold_dir(confirm_dir)
+        try:
+            for _ in range(CONFIRM_MOVE_POLLS):
+                if self._stop():
+                    return False
+                self._jsleep(self._poll)
+                x, _y = self._pos()
+                if x is not None and abs(x - ladder_x) >= CONFIRM_MOVE_PX:
+                    return True           # 한 방향으로 이동됨 = 발판 위 = 등반 완료
+            return False                  # 안 움직임 = 아직 로프 → 미완료(재시도)
+        finally:
+            self._h.release_dir()
 
-    def _finish_climb(self, ladder_x: int, y_top: int, max_steps: int) -> bool:
-        """↑ 등반 → 정점 도달 후 ↑ 더(dismount) → 발판 확인(좌우 이동). 확인돼야 등반 완료(True)."""
+    def _finish_climb(self, ladder_x: int, y_top: int, max_steps: int, confirm_dir: str) -> bool:
+        """↑ 등반 → 정점 후 ↑ 더(dismount) → confirm_dir 한 방향 이동으로 발판 확인 → 완료(True)."""
         self._h.hold("up")
         try:
             if not self._climb_loop(y_top, max_steps):
                 return False
             self._jsleep(LADDER_TOP_SETTLE_SEC)   # 발판으로 올라서기
-            return self._confirm_on_platform(ladder_x, max_steps)
+            return self._confirm_on_platform(ladder_x, confirm_dir, max_steps)
         finally:
             self._h.release("up")
 
-    def _climb_hold_until(self, ladder_x: int, y_top: int, max_steps: int) -> bool:
-        """같은 층(사다리 밑)에서 ↑만으로 등반 + 발판 확인."""
-        return self._finish_climb(ladder_x, y_top, max_steps)
+    def _climb_hold_until(self, ladder_x: int, y_top: int, max_steps: int,
+                          confirm_dir: str) -> bool:
+        """같은 층(사다리 밑)에서 ↑만으로 등반 + 발판 확인(한 방향)."""
+        return self._finish_climb(ladder_x, y_top, max_steps, confirm_dir)
 
     def _grab_offset(self, base: int) -> float:
         """점프 접근 거리: 설정 base에서 ±10% 랜덤(소수점4자리). base<=0이면 0(사다리 X에서 점프)."""
@@ -377,8 +378,8 @@ class BlockRunner:
         self._jsleep(LADDER_HANG_SEC)
         self._h.release_dir()
         self._h.release("up")           # 점프잡기 안정화 ↑ 해제 후 _finish_climb이 다시 등반
-        # y_top까지 등반 + 발판 확인(좌우 이동돼야 완료). 미확인이면 False로 재시도 유도
-        return self._finish_climb(ladder_x, y_top, max_steps)
+        # y_top까지 등반 + 발판 확인(side 한 방향 이동돼야 완료). 미확인이면 False로 재시도 유도
+        return self._finish_climb(ladder_x, y_top, max_steps, side)
 
     def _descend_ladder(self, exit_side: str, y_bot: int, max_steps: int) -> bool:
         """지정 X에서 ↓ 1초 + 좌/우 + 점프 → 사다리에서 뛰어내림(C _descend_ladder_jump).
