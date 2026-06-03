@@ -200,6 +200,9 @@ class BlockRunner:
             if use_tele:
                 # 방향 유지한 채 텔포 키 (C _teleport_to_x)
                 self._h.perform(Intent(action="key", key=self._tele_key, base_hold_sec=0.05))
+            # 다음 위치 갱신을 기다린다 — 안 쉬면 스캐너(≈0.05s)보다 빨리 읽어
+            # 위치가 안 변한 것처럼 보여 거짓 '멈춤'이 된다(시작 시 좌표 미수신 포함).
+            self._jsleep(self._poll)
         return False
 
     # ── 사다리 (C routine_runner._do_ladder 방식, 비전 기반) ───────────
