@@ -10,6 +10,7 @@ from core.humanize.intent import Intent
 
 # C CoordScriptRunner/routine_runner 검증 상수
 TOLERANCE = 3           # 도착 판정 픽셀 (이 이내면 도달)
+MOVE_STUCK_POLLS = 30   # 이 횟수(≈1.5s) 동안 목표에 한 번도 가까워지지 않으면 포기(벽 판정)
 TELEPORT_MIN_DIST = 15  # 이 거리 초과면 teleport, 이하면 walk 폴백
 LADDER_X_TOL = 4        # 사다리 X ±이 값 진입 시 점프 잡기 (C _jump_grab_ladder)
 Y_ARRIVE_TOL = 2        # 사다리 등반/하강 도착 판정 Y (C: y <= y_top+2)
@@ -170,26 +171,29 @@ class BlockRunner:
 
     # ── 이동 ──────────────────────────────────────────────────────────
     def _exec_move(self, block: Block, max_steps: int) -> bool:
-        """target_x 까지 walk/teleport 로 접근. TOLERANCE 이내 도달 시 True."""
-        last_x = None
-        stuck = 0
+        """target_x 까지 walk/teleport 로 접근. TOLERANCE 이내 도달 시 True.
+
+        '진척 기반' 끼임 판정: 목표까지 거리가 한 번이라도 줄면 리셋. MOVE_STUCK_POLLS회
+        (≈1.5초) 동안 한 번도 가까워지지 않으면 포기 — 거친 미니맵에서 캐릭터가 느리게
+        움직여 x가 잠깐 안 변해도 거짓 '멈춤'이 안 되게 한다(벽일 때만 포기)."""
+        best = None
+        no_progress = 0
         for _ in range(max_steps):
             x, _y = self._pos()
             dist = block.target_x - x
             if abs(dist) <= TOLERANCE:
                 return True   # 도착 (폐루프 종료)
 
-            # 끼임 감지: 위치가 안 변하면 카운트, 일정 횟수 넘으면 포기
-            if last_x is not None and x == last_x:
-                stuck += 1
-                if stuck >= 5:
+            if best is None or abs(dist) < best:
+                best = abs(dist)          # 목표에 조금이라도 가까워짐 → 진척
+                no_progress = 0
+            else:
+                no_progress += 1
+                if no_progress >= MOVE_STUCK_POLLS:
                     self._h.release_dir()   # 포기 시 이동키 떼기(눌림 방지)
                     self._log_once(
-                        f"⚠ 이동 멈춤: x={x}가 안 변함 → 캐릭터(노란 점) 인식 실패 가능. 미니맵 영역 확인")
+                        f"⚠ 이동 멈춤: x={x}→목표 {block.target_x} 진척 없음(벽/좌표 확인)")
                     return False
-            else:
-                stuck = 0
-            last_x = x
 
             direction = "right" if dist > 0 else "left"
             use_tele = (block.move_type == "teleport" and abs(dist) > TELEPORT_MIN_DIST)
@@ -217,14 +221,29 @@ class BlockRunner:
             self._h.release_all()
             return False   # 좌표 인식 실패 — 스킵
 
+        # 사다리 X 근처에 못 왔으면 등반/점프잡기 보류(제자리에서 ↑/방향키만 누르는 것 방지)
+        if abs(x - block.ladder_x) > LADDER_X_TOL + 6:
+            self._h.release_all()
+            self._log_once(
+                f"⚠ 사다리 X 도달 실패: 현재 x={x}, 목표 {block.ladder_x} "
+                f"(좌우 이동이 사다리까지 안 됨) — 등반 보류")
+            return False
+
         if block.ladder_dir == "down":
             return self._descend_ladder(block.exit_side, block.y_bot, max_steps)
 
         # up: 같은 층(사다리 밑)이면 ↑만, 아니면 점프 잡기
         if abs(y - block.y_bot) <= SAME_LEVEL_TOL:
-            return self._climb_up_until(block.y_top, max_steps)
-        side = self._grab_side(block, x)
-        return self._jump_grab(block.ladder_x, side, block.y_top, max_steps)
+            self._log_once(f"사다리 등반(같은층) x={block.ladder_x}, y {y}→{block.y_top}")
+            ok = self._climb_up_until(block.y_top, max_steps)
+        else:
+            side = self._grab_side(block, x)
+            self._log_once(
+                f"사다리 점프잡기 x={block.ladder_x} ({side}), y {y}→{block.y_top}")
+            ok = self._jump_grab(block.ladder_x, side, block.y_top, max_steps)
+        self._log_once("✓ 사다리 등반 완료" if ok
+                       else f"⚠ 사다리 등반 실패: y가 {block.y_top}까지 안 올라감(사다리 위치/Y 확인)")
+        return ok
 
     def _grab_side(self, block: Block, char_x: int) -> str:
         """밧줄 잡을 때 누를 좌우 방향. auto=가까운쪽(C방식)/left/right/random=좌우랜덤."""
