@@ -18,6 +18,7 @@ def _make_runtime(monkeypatch, name_pos, boxes):
         atk_x_min, atk_x_max, atk_y_min, atk_y_max = -30, 30, -40, 40
         coord_mode = "absolute"      # _resolve_region 통과(좌표 그대로)
         game_window_title = ""
+        coord_anchor = None
     rt._cfg = _Cfg()
 
     monkeypatch.setattr(rt_mod.monster_vision, "find_template_pos",

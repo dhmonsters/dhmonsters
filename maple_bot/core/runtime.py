@@ -75,9 +75,10 @@ class RuntimeConfig:
     auto_reply_messages: list = field(default_factory=list)
     # 사냥 영역 (B training: 이 영역 안에서만 몬스터/닉네임 감지)
     hunt_area_region: dict | None = None
-    # 좌표 기준 — relative면 영역을 게임창 클라이언트 원점 기준으로 해석(창 따라감)
+    # 좌표 기준 — relative면 영역을 게임창 이동량(현재원점-앵커)만큼 보정(창 따라감)
     coord_mode: str = "absolute"
     game_window_title: str = ""
+    coord_anchor: list | None = None      # 영역 지정 시점 창 원점 [ox, oy]
     # 몬스터 감지(image 모드, B 메커니즘: 닉네임 박스 안 몬스터)
     hunt_mode: str = "key"
     name_template: str = ""        # 닉네임 템플릿 경로
@@ -320,10 +321,12 @@ class BotRuntime:
         if not region:
             return region
         from core.config_manager import resolve_window_region
+        a = self._cfg.coord_anchor
+        anchor = (int(a[0]), int(a[1])) if a else None
         x, y, w, h = resolve_window_region(
             self._cfg.coord_mode, self._cfg.game_window_title,
             int(region["left"]), int(region["top"]),
-            int(region["width"]), int(region["height"]))
+            int(region["width"]), int(region["height"]), anchor)
         return {"left": x, "top": y, "width": w, "height": h}
 
     def _monster_in_range(self) -> bool:
