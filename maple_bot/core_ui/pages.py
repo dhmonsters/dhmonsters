@@ -275,7 +275,6 @@ def build_pages(config) -> list[QWidget]:
         pass
     nav_extras += [route_lbl, block_editor]
     pages.append(_page("동선·이동", "구역·사다리·다운점프·텔포·포탈·블록빌더·녹화·프리셋", [
-        CheckField("층별 사냥 사용", c, ("floor_hunt", "enabled")),
         CheckField("커스텀 루트 모드", c, ("floor_hunt", "route_mode")),
         TextField("현재 사냥터", c, ("hunt_grounds", "active")),
         ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative"),

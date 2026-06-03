@@ -31,7 +31,9 @@ class BlockRunner:
                  sleep_fn: Callable[[float], None] | None = None,
                  stop_fn: Callable[[], bool] | None = None,
                  poll_sec: float = 0.05,
-                 floor_judge=None, recovery_graph=None, max_recover: int = 3):
+                 floor_judge=None, recovery_graph=None, max_recover: int = 3,
+                 on_segment_enter: Callable[[Block], None] | None = None,
+                 on_segment_exit: Callable[[Block], None] | None = None):
         self._h = humanizer
         self._pos = pos_fn
         self._jump_key = jump_key
@@ -42,6 +44,8 @@ class BlockRunner:
         self._judge = floor_judge
         self._graph = recovery_graph
         self._max_recover = max_recover
+        self._on_seg_enter = on_segment_enter   # callable(Block) | None — 블록 진입 통지
+        self._on_seg_exit = on_segment_exit     # callable(Block) | None — 블록 이탈 통지(finally)
 
     def _jsleep(self, base: float) -> None:
         """고정 타이밍을 Humanizer로 ±0.05 지터해 대기(어떤 고정 수치도 매번 다르게)."""
@@ -76,26 +80,32 @@ class BlockRunner:
             self._do_ladder(Block.from_dict(path[0]), max_steps)
 
     def run_block(self, block: Block, max_steps: int = 200) -> bool:
-        self._recover_if_needed(block, max_steps)
-        if block.type == "move":
-            # 구간 모드: start_x < end_x 이면 mode(count/infinite/pass)에 따라 왕복/통과
-            if block.end_x > block.start_x:
-                if block.mode == "pass":
-                    # 통과: 구간을 한 방향으로 1회만 지나감(end_x까지)
-                    return self._exec_move(
-                        Block(type="move", target_x=block.end_x, move_type=block.move_type),
-                        max_steps)
-                infinite = (block.mode == "infinite")
-                sweeps = max(1, block.sweeps)
-                return self.run_sweep(block.start_x, block.end_x, sweeps,
-                                      block.move_type, max_steps=max_steps,
-                                      infinite=infinite)
-            return self._exec_move(block, max_steps)
-        if block.type == "ladder":
-            return self._do_ladder(block, max_steps)
-        if block.type == "jump":
-            return self._do_jump(block)
-        return True
+        if self._on_seg_enter is not None:
+            self._on_seg_enter(block)
+        try:
+            self._recover_if_needed(block, max_steps)
+            if block.type == "move":
+                # 구간 모드: start_x < end_x 이면 mode(count/infinite/pass)에 따라 왕복/통과
+                if block.end_x > block.start_x:
+                    if block.mode == "pass":
+                        # 통과: 구간을 한 방향으로 1회만 지나감(end_x까지)
+                        return self._exec_move(
+                            Block(type="move", target_x=block.end_x, move_type=block.move_type),
+                            max_steps)
+                    infinite = (block.mode == "infinite")
+                    sweeps = max(1, block.sweeps)
+                    return self.run_sweep(block.start_x, block.end_x, sweeps,
+                                          block.move_type, max_steps=max_steps,
+                                          infinite=infinite)
+                return self._exec_move(block, max_steps)
+            if block.type == "ladder":
+                return self._do_ladder(block, max_steps)
+            if block.type == "jump":
+                return self._do_jump(block)
+            return True
+        finally:
+            if self._on_seg_exit is not None:
+                self._on_seg_exit(block)
 
     def run_sweep(self, start_x: int, end_x: int, sweeps: int,
                   move_type: str = "walk", max_steps: int = 200,
