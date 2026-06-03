@@ -51,6 +51,7 @@ class MainShell(QMainWindow):
         self._vsplit.setStretchFactor(0, 1)
         self._vsplit.setStretchFactor(1, 0)
         self._vsplit.setCollapsible(0, False)
+        self._vsplit.setHandleWidth(8)   # 로그창 크기조절 핸들 — 잡기 쉽게
         root_v.addWidget(self._vsplit, 1)
         root_v.addWidget(self._build_controlbar(), 0)
         self.setCentralWidget(root)

@@ -220,4 +220,11 @@ def build_qss() -> str:
     QScrollBar::handle:vertical {{ background: {t['surface_4']}; border-radius: 5px; min-height: 28px; }}
     QScrollBar::handle:vertical:hover {{ background: {t['primary']}; }}
     QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+
+    /* 세로 스플리터 핸들 — 로그창 크기조절용(잡기 쉽게 보이는 그립) */
+    QSplitter#vsplit::handle:vertical {{
+        background: {t['surface_3']}; height: 8px; margin: 2px 0;
+        border-top: 1px solid {t['hairline_strong']}; border-bottom: 1px solid {t['hairline_strong']};
+    }}
+    QSplitter#vsplit::handle:vertical:hover {{ background: {t['primary']}; }}
     """
