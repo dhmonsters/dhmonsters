@@ -19,6 +19,7 @@ CLIMB_STUCK_POLLS = 16  # 등반 중 이 횟수(≈0.8s) y가 안 올라가면 '
 Y_ARRIVE_TOL = 2        # 사다리 등반/하강 도착 판정 Y (C: y <= y_top+2)
 SAME_LEVEL_TOL = 2      # |char_y - y_bot| ≤ 이 값이면 사다리 밑 같은 층 (C _do_ladder)
 LADDER_HANG_SEC = 0.5   # 점프 후 ↑로 사다리 매달리는 안정화 시간 (C 0.5)
+LADDER_TOP_SETTLE_SEC = 0.45  # 정점(y_top) 도달 후 ↑ 추가 유지 — 로프에서 발판으로 올라서기(dismount)
 DESCEND_DOWN_SEC = 1.0  # 하강 시 ↓ 선홀드 시간 (C _descend_ladder_jump 1초)
 
 
@@ -303,10 +304,14 @@ class BlockRunner:
         return False
 
     def _climb_hold_until(self, y_top: int, max_steps: int) -> bool:
-        """↑ 누른 채 y_top까지 등반(같은층 단순 등반용). 진척 없으면 False(재시도용)."""
+        """↑ 누른 채 y_top까지 등반(같은층 단순 등반용). 진척 없으면 False(재시도용).
+        정점 도달 후 ↑를 잠깐 더 눌러 로프에서 발판으로 올라선다(dismount)."""
         self._h.hold("up")
         try:
-            return self._climb_loop(y_top, max_steps)
+            ok = self._climb_loop(y_top, max_steps)
+            if ok:
+                self._jsleep(LADDER_TOP_SETTLE_SEC)   # 발판으로 올라서기
+            return ok
         finally:
             self._h.release("up")
 
@@ -346,7 +351,10 @@ class BlockRunner:
         self._h.release_dir()
         # y_top까지 등반(진척 감지) — 못 올라가면 False로 재시도 유도
         try:
-            return self._climb_loop(y_top, max_steps)
+            ok = self._climb_loop(y_top, max_steps)
+            if ok:
+                self._jsleep(LADDER_TOP_SETTLE_SEC)   # 정점 후 ↑ 추가 → 발판으로 올라서기
+            return ok
         finally:
             self._h.release("up")
 
