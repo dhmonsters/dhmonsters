@@ -203,6 +203,9 @@ class BotRuntime:
                 t = monster_vision.load_template(p)
                 if t is not None:
                     self._monster_tpls[f"m{i}"] = t
+        # 닉네임 템플릿 추적기 — 사냥영역에서 닉네임 위치(=캐릭 기준점)를 찾아 따라감
+        from core.sensing.name_tracker import NameTracker
+        self.name_tracker = NameTracker(self._name_tpl, config.name_threshold)
         # 잡템 자동판매 (A sell_junk 래핑 + B 보호목록). 실판매는 게임 필요 → 인스턴스만 준비
         self.junk_seller = None
         if config.junk_config is not None:
@@ -355,8 +358,7 @@ class BotRuntime:
         scene = self._capture(region) if region else self._capture()
         if scene is None:
             return False
-        name_pos = monster_vision.find_template_pos(
-            scene, self._name_tpl, threshold=self._cfg.name_threshold)
+        name_pos = self.name_tracker.find(scene)
         if name_pos is None:
             return False
         box = monster_vision.attack_box(
@@ -374,8 +376,7 @@ class BotRuntime:
         scene = self._capture(region) if region else self._capture()
         if scene is None:
             return []
-        name_pos = monster_vision.find_template_pos(
-            scene, self._name_tpl, threshold=self._cfg.name_threshold)
+        name_pos = self.name_tracker.find(scene)
         if name_pos is None:
             return []
         box = monster_vision.attack_box(
