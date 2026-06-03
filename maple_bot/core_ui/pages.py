@@ -242,7 +242,8 @@ def build_pages(config) -> list[QWidget]:
                               lambda: bool(c.get("attack", "name_template", default="")),
                               [name_cap], extra=name_thr.row)
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
-        ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"]),
+        ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"],
+                   labels={"key": "키 입력", "image": "이미지 인식", "coordinate": "좌표"}),
         mm_status, ha_status, mon_status, name_status,
     ]))
 
@@ -287,7 +288,8 @@ def build_pages(config) -> list[QWidget]:
     pages.append(_page("동선·이동", "구역·사다리·다운점프·텔포·포탈·블록빌더·녹화·프리셋", [
         CheckField("커스텀 루트 모드", c, ("floor_hunt", "route_mode")),
         TextField("현재 사냥터", c, ("hunt_grounds", "active")),
-        ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative"),
+        ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative",
+                   labels={"relative": "게임창 기준(상대)", "absolute": "화면 기준(절대)"}),
     ], extras=nav_extras, fill_last=True))
 
     # 3. 전투 — 공격범위 박스는 드래그 후 색상(●설정됨)으로 확인 (숫자 표시 안 함)
