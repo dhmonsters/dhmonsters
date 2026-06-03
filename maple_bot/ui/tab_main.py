@@ -251,7 +251,14 @@ class TabMain(QWidget):
         # 현재 체크 상태일 때만 화면에 출력
         if self._log_filters.get(cat, _DummyCheck()).isChecked():
             self.log_view.append(f"[{timestamp}] {msg}")
-            self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+            self._scroll_log_to_bottom()
+
+    def _scroll_log_to_bottom(self) -> None:
+        """새 로그가 추가되면 항상 맨 아래로 따라가게 한다.
+        moveCursor(End)만으로는 뷰포트가 안 내려가므로 스크롤바를 최대로 내린다."""
+        self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+        bar = self.log_view.verticalScrollBar()
+        bar.setValue(bar.maximum())
 
     def _rerender_log(self) -> None:
         """필터 체크박스 변경 시 버퍼 전체를 다시 그린다."""
@@ -261,7 +268,7 @@ class TabMain(QWidget):
             if self._log_filters.get(cat, _DummyCheck()).isChecked():
                 self.log_view.append(f"[{ts}] {msg}")
         self.log_view.setUpdatesEnabled(True)
-        self.log_view.moveCursor(QTextCursor.MoveOperation.End)
+        self._scroll_log_to_bottom()
 
     def _clear_log(self) -> None:
         """버퍼와 화면 모두 지운다."""
