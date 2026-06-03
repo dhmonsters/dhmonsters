@@ -30,6 +30,8 @@ class FakeHumanizer:
     def release_all(self):
         self.release_dir()
         self.held_keys.clear()
+    def rand_in(self, lo, hi, ndigits=4):
+        return round((lo + hi) / 2.0, ndigits)   # 결정적(중앙값) — 테스트 안정
     def jitter_sec(self, base, spread=0.05):
         return base   # 테스트는 결정적으로(지터 없이)
     def random_side(self):

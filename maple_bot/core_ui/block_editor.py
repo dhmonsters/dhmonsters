@@ -306,6 +306,11 @@ class BlockEditor(QWidget):
                                 blk.get("grab_side", "auto"),
                                 "밧줄 잡는 방향: 자동=가까운쪽 / 랜덤=좌우 랜덤")
             top.addWidget(g(gs, 84), 1)
+            jo = QSpinBox(); jo.setRange(0, 99); jo.setPrefix("점프 ")
+            jo.setValue(int(blk.get("jump_offset", 8)))
+            jo.setToolTip("밧줄에서 이만큼(px) 떨어진 곳에서 점프해 잡음. 실제 거리 ±10% 랜덤(0=사다리 X에서 점프)")
+            jo.valueChanged.connect(lambda val, i=idx: self.set_field(i, "jump_offset", val))
+            top.addWidget(g(jo, 78), 1)
 
             lx = QSpinBox(); lx.setRange(0, 4000); lx.setPrefix("X ")
             lx.setValue(int(blk.get("ladder_x", 0)))

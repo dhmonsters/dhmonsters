@@ -44,6 +44,7 @@ class Block:
     exit_side: str = "left"
     ladder_dir: str = "up"       # up=등반(y_top까지) / down=하강(점프 내림)
     grab_side: str = "auto"      # 밧줄 잡기 방향: auto(가까운쪽)/left/right/random(좌우 랜덤)
+    jump_offset: int = 8         # 밧줄에서 이만큼 떨어진 곳에서 점프(잡기). 실제 거리는 ±10% 랜덤(소수점4자리)
     pos_x: int = -1              # 캔버스 앵커 X (미니맵 픽셀). -1=미배치(캔버스에 안 그림)
     pos_y: int = -1              # 캔버스 앵커 Y (미니맵 픽셀). -1=미배치
 

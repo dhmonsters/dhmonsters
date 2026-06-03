@@ -20,6 +20,7 @@ def test_ladder_retries_until_grabbed():
         def release_all(self): st["dir"] = None; st["up"] = False
         def jitter_sec(self, base, spread=None): return base
         def random_side(self): return "left"
+        def rand_in(self, lo, hi, ndigits=4): return round((lo + hi) / 2.0, ndigits)
 
     def pos():
         if st["dir"] == "right": st["x"] += 8

@@ -258,7 +258,8 @@ class BlockRunner:
                 self._log_once(
                     f"사다리 점프잡기 x={block.ladder_x} ({side}) 시도 {attempt}/{MAX_GRAB_RETRY}, "
                     f"y {y}→{block.y_top}")
-                ok = self._jump_grab(block.ladder_x, side, block.y_top, max_steps)
+                ok = self._jump_grab(block.ladder_x, side, block.y_top, max_steps,
+                                     getattr(block, "jump_offset", JUMP_GRAB_OFFSET))
             if ok:
                 self._log_once("✓ 사다리 등반 완료")
                 return True
@@ -309,12 +310,20 @@ class BlockRunner:
         finally:
             self._h.release("up")
 
-    def _jump_grab(self, ladder_x: int, side: str, y_top: int, max_steps: int) -> bool:
-        """접근점(사다리에서 side 반대쪽으로 JUMP_GRAB_OFFSET 떨어진 곳)으로 가서, 거기서
-        사다리 쪽으로 점프+↑ 잡기 → y_top까지 등반 (A/B/C jump_offset 접근 점프)."""
-        # 접근점: side=right면 사다리 왼쪽(ladder_x-offset)에서 오른쪽으로 점프해 잡음
-        approach_x = (ladder_x - JUMP_GRAB_OFFSET if side == "right"
-                      else ladder_x + JUMP_GRAB_OFFSET)
+    def _grab_offset(self, base: int) -> float:
+        """점프 접근 거리: 설정 base에서 ±10% 랜덤(소수점4자리). base<=0이면 0(사다리 X에서 점프)."""
+        if base <= 0:
+            return 0.0
+        return self._h.rand_in(base * 0.9, base * 1.1, 4)
+
+    def _jump_grab(self, ladder_x: int, side: str, y_top: int, max_steps: int,
+                   jump_offset: int = JUMP_GRAB_OFFSET) -> bool:
+        """접근점(사다리에서 side 반대쪽으로 jump_offset±10% 떨어진 곳)으로 가서, 거기서
+        사다리 쪽으로 점프+↑ 잡기 → y_top까지 등반 (A/B/C jump_offset 접근 점프, 거리 랜덤)."""
+        # 접근점: side=right면 사다리 왼쪽(ladder_x-offset)에서 오른쪽으로 점프해 잡음. 거리 ±10% 랜덤
+        offset = self._grab_offset(jump_offset)
+        approach_x = (ladder_x - offset if side == "right"
+                      else ladder_x + offset)
         self._h.hold_dir(side)
         reached = False
         for _ in range(max_steps):
