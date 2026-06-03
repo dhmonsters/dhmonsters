@@ -62,7 +62,8 @@ class CharScanner(Scanner):
 
     def __init__(self, screen_capture, region,
                  hsv_lower=(20, 100, 200), hsv_upper=(40, 255, 255),
-                 min_area: float = 6, max_area: float = 4000):
+                 min_area: float = 6, max_area: float = 4000,
+                 log_fn=None):
         super().__init__()
         self._capture = screen_capture   # callable(region) -> BGR ndarray
         self._region = region
@@ -70,17 +71,36 @@ class CharScanner(Scanner):
         self._hi = hsv_upper
         self._min_area = min_area
         self._max_area = max_area
+        self._log = log_fn or (lambda m: None)   # 스캐너 스레드 진단용(예외/검출 결과)
+        self._last_log = None
+        self._last_log_ts = 0.0
 
     def set_hsv(self, lower, upper) -> None:
         """맵별 HSV 오버라이드 (C set_hsv_override)."""
         self._lo, self._hi = lower, upper
 
+    def _diag(self, msg: str) -> None:
+        """진단 로그 — 같은 메시지는 1.5초에 한 번만(폭주 방지)."""
+        import time as _t
+        now = _t.monotonic()
+        if msg == self._last_log and now - self._last_log_ts < 1.5:
+            return
+        self._last_log, self._last_log_ts = msg, now
+        self._log(msg)
+
     def scan_once(self) -> Event | None:
         region = self._region() if callable(self._region) else self._region
-        img = self._capture(region)
+        try:
+            img = self._capture(region)
+        except Exception as e:
+            self._diag(f"⚠ 미니맵 캡처 예외(스캐너 스레드): {e!r}")
+            return None
         if img is None:
+            self._diag("⚠ 미니맵 캡처 결과 None")
             return None
         pos = find_char_in_hsv(img, self._lo, self._hi, self._min_area, self._max_area)
         if pos is None:
+            self._diag(f"⚠ 노란점 미검출 (캡처 {tuple(img.shape)}, HSV {tuple(self._lo)}~{tuple(self._hi)})")
             return None
+        self._diag(f"✓ 캐릭터 감지 x={pos[0]} y={pos[1]}")
         return Event(type="char_pos", data={"x": pos[0], "y": pos[1]})
