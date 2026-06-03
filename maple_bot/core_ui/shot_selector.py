@@ -1,7 +1,7 @@
 # 스크린샷 기반 영역 선택기 — 게임창을 캡처해 정지 이미지 위에서 드래그(움직이는 게임보다 정확)
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QDialog, QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QDialog, QWidget, QVBoxLayout, QScrollArea
 from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QPen, QFont
 
@@ -178,26 +178,42 @@ class LinePointPicker(QDialog):
 
 class _Canvas(QWidget):
     """배경 이미지 + 드래그 사각형을 한 표면에 그리는 캔버스.
-    QLabel을 쓰면 이미지가 사각형을 가리므로 직접 paint 한다."""
+    QLabel을 쓰면 이미지가 사각형을 가리므로 직접 paint 한다.
+    좌표는 source(원본 이미지) 기준으로 보관하고, eff(표시배율)을 곱해 그린다 → Ctrl+휠 줌 가능."""
 
-    def __init__(self, pix: QPixmap, on_release,
-                 initial_rect: QRect | None = None, anchor: QPoint | None = None,
-                 overlays: list | None = None):
+    def __init__(self, src_img: QImage, eff: float, on_release,
+                 initial_src=None, anchor_src=None, overlays_src=None):
         super().__init__()
-        self._pix = pix
+        self._src = src_img
+        self.eff = eff                       # 표시배율(원본→표시). 줌 시 갱신
         self._on_release = on_release
-        self._initial = initial_rect   # 기존 범위(표시좌표) 미리보기
-        self._anchor = anchor          # 기준점(캐릭) 십자 표시
-        self._overlays = overlays or []  # [(QRect, "#hex", "label"), ...] 닉네임/몬스터
-        self.setFixedSize(pix.width(), pix.height())
+        self._initial_src = initial_src      # (l,t,w,h) 원본좌표 기존범위
+        self._anchor_src = anchor_src        # (x,y) 원본좌표 기준점
+        self._overlays_src = overlays_src or []  # [(l,t,w,h,color,label), ...] 원본좌표
+        self._pix = QPixmap()
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.start: QPoint | None = None
         self.cur: QPoint | None = None
+        self.set_eff(eff)
+
+    def set_eff(self, eff: float) -> None:
+        """표시배율 변경 → 픽스맵 재생성·크기 갱신(드래그 좌표는 표시공간 그대로)."""
+        self.eff = eff
+        w, h = self._src.width(), self._src.height()
+        self._pix = QPixmap.fromImage(self._src).scaled(
+            max(1, int(w * eff)), max(1, int(h * eff)),
+            Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.setFixedSize(self._pix.width(), self._pix.height())
+        self.update()
 
     def _clamp(self, p: QPoint) -> QPoint:
         return QPoint(max(0, min(p.x(), self._pix.width())),
                       max(0, min(p.y(), self._pix.height())))
+
+    def _r(self, l, t, w, h) -> QRect:   # 원본좌표 → 현재 표시좌표
+        return QRect(int(l * self.eff), int(t * self.eff),
+                     int(w * self.eff), int(h * self.eff))
 
     def mousePressEvent(self, e):
         self.start = self._clamp(e.position().toPoint())
@@ -217,25 +233,26 @@ class _Canvas(QWidget):
         qp = QPainter(self)
         qp.drawPixmap(0, 0, self._pix)
         # 감지 오버레이 (닉네임=노랑, 몬스터=빨강 등) — 항상 표시
-        for rect, color, label in self._overlays:
+        for l, t, w, h, color, label in self._overlays_src:
             qp.setBrush(Qt.BrushStyle.NoBrush)
             qp.setPen(QPen(QColor(color), 2))
+            rect = self._r(l, t, w, h)
             qp.drawRect(rect)
             if label:
                 qp.setFont(QFont("Inter", 9))
                 qp.drawText(rect.left(), rect.top() - 3, label)
         # 앵커(캐릭 기준점) 십자
-        if self._anchor is not None:
+        if self._anchor_src is not None:
             qp.setPen(QPen(QColor("#27a644"), 1, Qt.PenStyle.DashLine))
-            ax, ay = self._anchor.x(), self._anchor.y()
+            ax = int(self._anchor_src[0] * self.eff); ay = int(self._anchor_src[1] * self.eff)
             qp.drawLine(ax - 10, ay, ax + 10, ay)
             qp.drawLine(ax, ay - 10, ax, ay + 10)
         # 드래그 전이면 기존 범위(점선) 미리보기
         if not (self.start and self.cur):
-            if self._initial is not None:
+            if self._initial_src is not None:
                 qp.setPen(QPen(QColor("#828fff"), 2, Qt.PenStyle.DashLine))
                 qp.setBrush(Qt.BrushStyle.NoBrush)
-                qp.drawRect(self._initial)
+                qp.drawRect(self._r(*self._initial_src))
             return
         rect = QRect(self.start, self.cur).normalized()
         # 선택 영역 밖을 어둡게 (선택 부분 도드라지게)
@@ -276,44 +293,47 @@ class ScreenshotRegionSelector(QDialog):
 
         import numpy as np
         h, w = bgr_image.shape[:2]
-        self._scale = min(1.0, max_display / max(w, h))
-        disp_w, disp_h = int(w * self._scale), int(h * self._scale)
+        self._base = min(1.0, max_display / max(w, h))   # 처음 화면맞춤 배율
+        self._zoom = 1.0                                  # Ctrl+휠 줌(1.0=기본)
 
         rgb = np.ascontiguousarray(bgr_image[:, :, ::-1])
-        qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-        pix = QPixmap.fromImage(qimg).scaled(
-            disp_w, disp_h, Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
+        self._src_img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
 
-        # 기존 범위/앵커를 표시좌표로 환산해 미리보기
-        init_disp = None
-        if self._initial_rect:
-            l, t, ww, hh = self._initial_rect
-            s = self._scale
-            init_disp = QRect(int(l * s), int(t * s), int(ww * s), int(hh * s))
-        anchor_disp = None
-        if self._anchor:
-            anchor_disp = QPoint(int(self._anchor[0] * self._scale),
-                                 int(self._anchor[1] * self._scale))
-        # 오버레이(닉네임/몬스터) 표시좌표 환산
-        s = self._scale
-        overlays_disp = [
-            (QRect(int(l * s), int(t * s), int(ww * s), int(hh * s)), col, lab)
-            for (l, t, ww, hh, col, lab) in self._overlays_src
-        ]
+        # 캔버스는 원본좌표 + eff(=base*zoom)로 그린다(줌해도 좌표 정합 유지)
+        self._canvas = _Canvas(self._src_img, self._base, self._on_release,
+                               initial_src=self._initial_rect, anchor_src=self._anchor,
+                               overlays_src=self._overlays_src)
 
-        self._canvas = _Canvas(pix, self._on_release,
-                               initial_rect=init_disp, anchor=anchor_disp,
-                               overlays=overlays_disp)
+        # 스크롤 영역으로 감싸 줌 인 시 이동 가능, 다이얼로그는 화면맞춤 크기로
+        self._scroll = QScrollArea()
+        self._scroll.setWidget(self._canvas)
+        self._scroll.setWidgetResizable(False)
+        self._scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(self._canvas)
+        lay.addWidget(self._scroll)
+        self.resize(min(int(w * self._base) + 4, 1280),
+                    min(int(h * self._base) + 4, 860))
+        self.setWindowState(Qt.WindowState.WindowMaximized)
+
+    @property
+    def _scale(self) -> float:    # 현재 유효 배율(테스트/호환)
+        return self._base * self._zoom
+
+    def wheelEvent(self, e):
+        """Ctrl+휠 → 확대/축소(0.2~8배). 일반 휠은 스크롤(스크롤영역 기본동작)."""
+        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            step = 1.15 if e.angleDelta().y() > 0 else 1 / 1.15
+            self._zoom = max(0.2, min(8.0, self._zoom * step))
+            self._canvas.set_eff(self._base * self._zoom)
+            e.accept()
+        else:
+            super().wheelEvent(e)
 
     def _on_release(self, rect: QRect):
         rx, ry, rw, rh = display_to_source_rect(
             rect.x(), rect.y(), rect.width(), rect.height(),
-            self._scale, self._origin,
+            self._canvas.eff, self._origin,
         )
         if rw > 2 and rh > 2:
             self.region_selected.emit(rx, ry, rw, rh)

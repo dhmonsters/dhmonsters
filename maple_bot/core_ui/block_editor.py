@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QSpinBox, QLineEdit, QListWidget, QListWidgetItem, QAbstractItemView,
     QSizePolicy, QAbstractSpinBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QSize
 
 from core_ui.theme import SPACING
 from core.navigation.block import Block
@@ -202,7 +202,8 @@ class BlockEditor(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, i)   # 현재 self._route 인덱스
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
             row = self._build_row(i, blk)
-            item.setSizeHint(row.sizeHint())
+            sh = row.sizeHint()
+            item.setSizeHint(QSize(sh.width(), max(sh.height(), 80)))  # 2줄+버튼 세로 안 잘리게
             self._list.addItem(item)
             self._list.setItemWidget(item, row)
         self._reordering = False
@@ -271,10 +272,10 @@ class BlockEditor(QWidget):
             dr.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "ladder_dir", val))
             dr.setToolTip("up=등반(y_top까지) / down=하강(아래+점프)")
             top.addWidget(g(dr, 72), 1)
-            es = QComboBox(); es.addItems(["left", "right"])
+            es = QComboBox(); es.addItems(["left", "right", "both"])
             es.setCurrentText(blk.get("exit_side", "left"))
             es.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "exit_side", val))
-            es.setToolTip("하강 시 뛰어내릴 방향")
+            es.setToolTip("하강 시 뛰어내릴 방향 (both=좌우 랜덤)")
             top.addWidget(g(es, 72), 1)
             gs = QComboBox(); gs.addItems(["auto", "left", "right", "random"])
             gs.setCurrentText(blk.get("grab_side", "auto"))
