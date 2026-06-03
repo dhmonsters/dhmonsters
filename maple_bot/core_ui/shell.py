@@ -114,6 +114,11 @@ class MainShell(QMainWindow):
         self.log_view = QTextEdit(); self.log_view.setObjectName("log")
         self.log_view.setReadOnly(True)
         self.log_view.setMinimumHeight(80)   # 스플리터 드래그로 자유 조절(고정 높이 제거)
+        # 새 로그가 쌓이면 항상 맨 아래로 따라가게 — append 직후엔 maximum이 아직 안 커져
+        # 한 줄 모자라게 멈추므로, 스크롤 범위가 바뀌는 순간(rangeChanged)에 맨 아래로 내린다.
+        self.log_view.verticalScrollBar().rangeChanged.connect(
+            lambda _min, _max: self.log_view.verticalScrollBar().setValue(_max)
+        )
         v.addWidget(self.log_view)
         self._log_drawer.setVisible(False)
         return self._log_drawer
