@@ -42,6 +42,17 @@ class MinimapCanvas(QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start(interval_ms)
 
+    def _char_hsv(self):
+        """설정 캐릭터색(char_r/g/b)→느슨한 HSV 범위. 없으면 기본 노랑."""
+        c = self._cfg
+        r = c.get("minimap", "char_r", default=None)
+        g = c.get("minimap", "char_g", default=None)
+        b = c.get("minimap", "char_b", default=None)
+        if None in (r, g, b):
+            return ((20, 100, 200), (40, 255, 255))
+        from core.sensing.char_scanner import hsv_range_from_rgb
+        return hsv_range_from_rgb(int(r), int(g), int(b))
+
     def _region(self) -> dict:
         c = self._cfg
         left = int(c.get("minimap", "region_x", default=0))
@@ -83,7 +94,8 @@ class MinimapCanvas(QWidget):
             return
         if bgr is None:
             return
-        pos = self._find(bgr, (20, 100, 200), (40, 255, 255), 6, 4000)
+        lo, hi = self._char_hsv()
+        pos = self._find(bgr, lo, hi, 6, 4000)
         if pos is not None:
             self._last_char = pos
             self._last_seen = self._clock()

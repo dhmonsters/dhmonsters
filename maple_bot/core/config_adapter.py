@@ -95,6 +95,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         coord_mode=str(d.get("coord_mode", "relative")),
         game_window_title=str(d.get("settings2", {}).get("game_window_title", "")),
         coord_anchor=d.get("coord_anchor"),
+        char_rgb=((int(mm["char_r"]), int(mm["char_g"]), int(mm["char_b"]))
+                  if all(k in mm for k in ("char_r", "char_g", "char_b")) else None),
         floors=_floors(zones),
         route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
                if isinstance(b, dict) and "type" in b],

@@ -54,6 +54,12 @@ class BotController:
         self._stop.clear()
         self._rt.set_running(True)
         self._rt.start_scanners()
+        # 진단: 실제로 캡처하는 미니맵 영역(창 보정 반영) — 노란점 인식 안 될 때 확인용
+        try:
+            rg = self._rt._resolve_region(self._rt._cfg.minimap_region)
+            self._log(f"미니맵 캡처영역: {rg} / 캐릭터색: {self._rt._cfg.char_rgb or '기본 노랑'}")
+        except Exception:
+            pass
         # 층별 반복 사냥 루트는 별도 스레드로(블로킹 사다리 등반 중 메인루프 선점 유지)
         if self._rt.floor_hunt_runner is not None:
             self._rt.floor_hunt_runner.start()

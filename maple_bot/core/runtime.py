@@ -79,6 +79,7 @@ class RuntimeConfig:
     coord_mode: str = "absolute"
     game_window_title: str = ""
     coord_anchor: list | None = None      # 영역 지정 시점 창 원점 [ox, oy]
+    char_rgb: tuple | None = None          # 미니맵 캐릭터 점 색(RGB). None이면 기본 노랑
     # 몬스터 감지(image 모드, B 메커니즘: 닉네임 박스 안 몬스터)
     hunt_mode: str = "key"
     name_template: str = ""        # 닉네임 템플릿 경로
@@ -173,6 +174,11 @@ class BotRuntime:
             on_segment_exit=self._on_route_segment_exit,
             log_fn=lambda m: self.log(m),
         )
+        # 설정된 캐릭터색(char_r/g/b)을 느슨한 HSV로 감지에 반영(미니맵 노란점 인식률↑)
+        if config.char_rgb:
+            from core.sensing.char_scanner import hsv_range_from_rgb
+            lo, hi = hsv_range_from_rgb(*config.char_rgb)
+            self.char_scanner.set_hsv(lo, hi)
         self.combat = Combat(self.humanizer, hp_rule=config.hp_rule, mp_rule=config.mp_rule)
         self.buffs = BuffManager(self.humanizer, config.buffs)
         self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval)

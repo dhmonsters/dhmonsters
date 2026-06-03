@@ -8,6 +8,14 @@ from core.sensing.event import Event
 from core.sensing.scanner import Scanner
 
 
+def hsv_range_from_rgb(r: int, g: int, b: int,
+                       h_tol: int = 12, s_min: int = 60, v_min: int = 60):
+    """캐릭터색 RGB → 느슨한 HSV (하한, 상한). 미니맵 점이 다소 어둡/흐려도 잡히게
+    S/V 하한을 낮춘다. H는 ±h_tol. (설정 char_r/g/b를 그대로 감지에 쓰기 위함)"""
+    h = int(cv2.cvtColor(np.uint8([[[b, g, r]]]), cv2.COLOR_BGR2HSV)[0, 0, 0])
+    return ((max(0, h - h_tol), s_min, v_min), (min(179, h + h_tol), 255, 255))
+
+
 def find_char_in_hsv(
     bgr_img: np.ndarray,
     hsv_lower: tuple[int, int, int],
@@ -52,7 +60,7 @@ class CharScanner(Scanner):
     """
     interval = 0.05
 
-    def __init__(self, screen_capture, region: dict,
+    def __init__(self, screen_capture, region,
                  hsv_lower=(20, 100, 200), hsv_upper=(40, 255, 255),
                  min_area: float = 6, max_area: float = 4000):
         super().__init__()
