@@ -20,6 +20,10 @@ _DEFAULTS = {
     "jump":   {"type": "jump", "direction": "right"},
 }
 
+# 블록 타입 한글 표시명 (저장값은 영문 유지)
+_TYPE_KO = {"move": "이동", "attack": "공격", "ladder": "사다리",
+            "jump": "점프", "teleport": "텔포"}
+
 
 class BlockEditor(QWidget):
     """floor_hunt.route 블록 리스트 편집. 추가/삭제/필드편집/드래그재정렬 → config 즉시 저장."""
@@ -218,6 +222,21 @@ class BlockEditor(QWidget):
             w.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         return w
 
+    def _kv_combo(self, idx: int, field: str, pairs: list, current: str,
+                  tooltip: str = "") -> QComboBox:
+        """한글 표시 + 영문 저장값 콤보. pairs=[(한글, 저장값), ...]. 변경 시 set_field(저장값)."""
+        cb = QComboBox()
+        for label, val in pairs:
+            cb.addItem(label, val)
+        i = cb.findData(current)
+        if i >= 0:
+            cb.setCurrentIndex(i)
+        cb.currentIndexChanged.connect(
+            lambda _i, i_=idx, f=field, c=cb: self.set_field(i_, f, c.currentData()))
+        if tooltip:
+            cb.setToolTip(tooltip)
+        return cb
+
     def _build_row(self, idx: int, blk: dict) -> QWidget:
         # 2줄 카드: 윗줄=핸들·타입·옵션콤보·삭제 / 아랫줄=좌표 숫자+긋기
         # 모든 입력은 최소폭+Expanding이라 창 크기에 따라 자연스럽게 늘고/줄어든다.
@@ -232,18 +251,18 @@ class BlockEditor(QWidget):
 
         handle = QLabel("≡"); handle.setObjectName("subtle"); handle.setFixedWidth(14)
         top.addWidget(handle)
-        tl = QLabel(f"{idx+1}. {blk['type']}"); tl.setMinimumWidth(60)
+        tl = QLabel(f"{idx+1}. {_TYPE_KO.get(blk['type'], blk['type'])}"); tl.setMinimumWidth(60)
         top.addWidget(tl)
 
         if blk["type"] == "move":
-            md = QComboBox(); md.addItems(["count", "infinite", "pass"])
-            md.setCurrentText(blk.get("mode", "count"))
-            md.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "mode", val))
-            md.setToolTip("count=왕복횟수 / infinite=무한왕복 / pass=한방향 통과")
+            md = self._kv_combo(idx, "mode",
+                                [("횟수왕복", "count"), ("무한왕복", "infinite"), ("통과", "pass")],
+                                blk.get("mode", "count"),
+                                "횟수왕복=지정 횟수 / 무한왕복=계속 / 통과=한방향 1회")
             top.addWidget(g(md, 84), 1)
-            mt = QComboBox(); mt.addItems(["walk", "teleport"])
-            mt.setCurrentText(blk.get("move_type", "walk"))
-            mt.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "move_type", val))
+            mt = self._kv_combo(idx, "move_type",
+                                [("걷기", "walk"), ("텔레포트", "teleport")],
+                                blk.get("move_type", "walk"))
             top.addWidget(g(mt, 84), 1)
             sw = QSpinBox(); sw.setRange(1, 99); sw.setPrefix("왕복 ")
             sw.setValue(int(blk.get("sweeps", 1)))
@@ -267,20 +286,20 @@ class BlockEditor(QWidget):
             sk.textChanged.connect(lambda val, i=idx: self.set_field(i, "skill_key", val))
             top.addWidget(g(sk, 120), 1)
         elif blk["type"] == "ladder":
-            dr = QComboBox(); dr.addItems(["up", "down"])
-            dr.setCurrentText(blk.get("ladder_dir", "up"))
-            dr.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "ladder_dir", val))
-            dr.setToolTip("up=등반(y_top까지) / down=하강(아래+점프)")
+            dr = self._kv_combo(idx, "ladder_dir",
+                                [("등반", "up"), ("하강", "down")],
+                                blk.get("ladder_dir", "up"),
+                                "등반=위Y까지 올라감 / 하강=아래+점프로 내림")
             top.addWidget(g(dr, 72), 1)
-            es = QComboBox(); es.addItems(["left", "right", "both"])
-            es.setCurrentText(blk.get("exit_side", "left"))
-            es.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "exit_side", val))
-            es.setToolTip("하강 시 뛰어내릴 방향 (both=좌우 랜덤)")
+            es = self._kv_combo(idx, "exit_side",
+                                [("왼쪽", "left"), ("오른쪽", "right"), ("양쪽", "both")],
+                                blk.get("exit_side", "left"),
+                                "하강 시 뛰어내릴 방향 (양쪽=좌우 랜덤)")
             top.addWidget(g(es, 72), 1)
-            gs = QComboBox(); gs.addItems(["auto", "left", "right", "random"])
-            gs.setCurrentText(blk.get("grab_side", "auto"))
-            gs.currentTextChanged.connect(lambda val, i=idx: self.set_field(i, "grab_side", val))
-            gs.setToolTip("밧줄 잡는 방향: auto=가까운쪽 / random=좌우 랜덤")
+            gs = self._kv_combo(idx, "grab_side",
+                                [("자동", "auto"), ("왼쪽", "left"), ("오른쪽", "right"), ("랜덤", "random")],
+                                blk.get("grab_side", "auto"),
+                                "밧줄 잡는 방향: 자동=가까운쪽 / 랜덤=좌우 랜덤")
             top.addWidget(g(gs, 84), 1)
 
             lx = QSpinBox(); lx.setRange(0, 4000); lx.setPrefix("X ")

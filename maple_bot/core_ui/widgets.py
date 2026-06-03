@@ -167,15 +167,24 @@ class FloatField(_Field):
 
 
 class ComboField(_Field):
-    def __init__(self, label, config, keys, options: list[str], default="", **kw):
+    """options=저장값(영문). labels={저장값: 한글표시}를 주면 화면엔 한글, 저장은 영문."""
+
+    def __init__(self, label, config, keys, options: list[str], default="",
+                 labels: dict | None = None, **kw):
         self._options, self._default = options, default
+        self._labels = labels or {}
         super().__init__(label, config, keys, **kw)
 
     def _build(self):
-        c = QComboBox(); c.addItems(self._options); return c
+        c = QComboBox()
+        for v in self._options:
+            c.addItem(self._labels.get(v, v), v)   # 표시=한글(있으면), userData=저장값
+        return c
     def _load(self):
         cur = str(self._cfg.get(*self._keys, default=self._default or self._options[0]))
-        if cur in self._options:
-            self.widget.setCurrentText(cur)
+        i = self.widget.findData(cur)
+        if i >= 0:
+            self.widget.setCurrentIndex(i)
     def _connect(self):
-        self.widget.currentTextChanged.connect(lambda v: self._save(v))
+        self.widget.currentIndexChanged.connect(
+            lambda _i: self._save(self.widget.currentData()))
