@@ -307,6 +307,27 @@ class BotRuntime:
         return monster_vision.monsters_in_box(
             scene, self._monster_tpls, box, threshold=self._cfg.monster_accuracy) > 0
 
+    def detect_monsters_rel(self) -> list[tuple[int, int]]:
+        """사냥영역 몬스터 탐지 → 캐릭(닉네임) 기준 화면px 오프셋 [(dx,dy), ...].
+        미니맵 캔버스의 몬스터 점 표시용(헌트모드 무관). 템플릿/닉네임 없으면 []."""
+        if self._name_tpl is None or not self._monster_tpls:
+            return []
+        region = self._cfg.hunt_area_region
+        scene = self._capture(region) if region else self._capture()
+        if scene is None:
+            return []
+        name_pos = monster_vision.find_template_pos(
+            scene, self._name_tpl, threshold=self._cfg.name_threshold)
+        if name_pos is None:
+            return []
+        box = monster_vision.attack_box(
+            name_pos, self._cfg.atk_x_min, self._cfg.atk_x_max,
+            self._cfg.atk_y_min, self._cfg.atk_y_max)
+        boxes = monster_vision.monster_boxes_in_box(
+            scene, self._monster_tpls, box, threshold=self._cfg.monster_accuracy)
+        nx, ny = name_pos
+        return [(x + w // 2 - nx, y + h // 2 - ny) for (x, y, w, h) in boxes]
+
     def safety_tick(self, now: float | None = None) -> None:
         """안전 모드 1틱: (자동풀이 켜졌을 때만) 거탐 풀이 시도 → 성공 시 사냥 재개."""
         if self.orchestrator.mode != "safety":

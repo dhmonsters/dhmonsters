@@ -35,6 +35,9 @@ class MinimapCanvas(QWidget):
         self._mm_size = (0, 0)        # (W_mm, H_mm)
         self.setMinimumHeight(340)
         self._auto_fit = True         # 가로폭 자동맞춤(배경 확대), 휠 줌 시 해제
+        self._monster_provider = None  # () -> [(dx,dy)] 캐릭 기준 화면px 오프셋
+        self._monsters_rel: list = []  # 최근 탐지 캐시
+        self._mon_last = 0.0           # 마지막 탐지 시각(스로틀)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(interval_ms)
@@ -50,6 +53,10 @@ class MinimapCanvas(QWidget):
         """미니맵 (W,H) — _region 기반이라 타이머 틱 전에도 유효(클램프용)."""
         r = self._region()
         return (r["width"], r["height"])
+
+    def set_monster_provider(self, fn) -> None:
+        """몬스터 오프셋 공급자 등록(봇 런타임). None이면 점 표시 안 함."""
+        self._monster_provider = fn
 
     def track_state(self) -> str:
         """현재 캐릭터 추적 상태: tracking | lost | stale (한 번도 검출 전이면 stale)."""
@@ -73,6 +80,13 @@ class MinimapCanvas(QWidget):
         if pos is not None:
             self._last_char = pos
             self._last_seen = self._clock()
+        # 몬스터 탐지(헌트영역, 무거우니 0.3초 스로틀) → 캐릭 기준 오프셋 캐시
+        if self._monster_provider is not None and self._clock() - self._mon_last > 0.3:
+            self._mon_last = self._clock()
+            try:
+                self._monsters_rel = list(self._monster_provider() or [])
+            except Exception:
+                self._monsters_rel = []
         h, w = bgr.shape[:2]
         self._mm_size = (w, h)
         if self._auto_fit:
@@ -98,6 +112,7 @@ class MinimapCanvas(QWidget):
             return
         cx, cy = minimap_to_canvas(self._last_char[0], self._last_char[1], self._zoom)
         self._draw_ranges(p, cx, cy)
+        self._draw_monsters(p, cx, cy)
         if state == "lost":
             # 천천히 깜빡임(0.8초 주기) — '일시적 끊김' 상황 인지
             phase = (self._clock() % 0.8) / 0.8
@@ -126,6 +141,21 @@ class MinimapCanvas(QWidget):
         p.drawRect(int(cx - hxw), int(cy - hyh), int(hxw * 2), int(hyh * 2))
         p.setPen(QPen(QColor("#f04452"), 1.4, Qt.PenStyle.DashLine))   # 공격
         p.drawRect(int(cx - axw), int(cy - ayh), int(axw * 2), int(ayh * 2))
+
+    def _draw_monsters(self, p: QPainter, cx: int, cy: int) -> None:
+        """탐지된 몬스터를 캐릭 기준 오프셋으로 미니맵 축척 환산해 빨간 점으로 표시."""
+        if not self._monsters_rel:
+            return
+        c = self._cfg
+        W = self._mm_size[0]
+        ratio = float(c.get("attack", "camera_w_ratio", default=0.5))
+        z = self._zoom
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor("#f04452"))
+        for dx, dy in self._monsters_rel:
+            mx = cx + screen_px_to_minimap_px(dx, W, self._screen_w, ratio) * z
+            my = cy + screen_px_to_minimap_px(dy, W, self._screen_w, ratio) * z
+            p.drawEllipse(int(mx) - 4, int(my) - 4, 8, 8)
 
     def _hint(self, p: QPainter, text: str) -> None:
         p.setPen(QColor("#8a8f98"))

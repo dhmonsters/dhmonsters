@@ -102,6 +102,15 @@ def main():
     shell.btn_start.clicked.connect(controller.start)
     shell.btn_stop.clicked.connect(controller.stop)
 
+    # 실시간 미니맵 캔버스에 몬스터 점 표시 — 런타임 탐지를 공급자로 연결
+    try:
+        from core_ui.minimap_canvas import MinimapCanvas
+        canvas = shell.findChild(MinimapCanvas)
+        if canvas is not None:
+            canvas.set_monster_provider(rt.detect_monsters_rel)
+    except Exception:
+        pass
+
     shell.show()
     sys.exit(app.exec())
 
