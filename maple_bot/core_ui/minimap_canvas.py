@@ -51,7 +51,9 @@ class MinimapCanvas(QWidget):
         from core.config_manager import resolve_window_region
         coord_mode = c.get("coord_mode") or "absolute"
         title = c.get("settings2", "game_window_title") or ""
-        x, y, w, h = resolve_window_region(coord_mode, title, left, top, w, h)
+        a = c.get("coord_anchor", default=None)
+        anchor = (int(a[0]), int(a[1])) if a else None
+        x, y, w, h = resolve_window_region(coord_mode, title, left, top, w, h, anchor)
         return {"left": x, "top": y, "width": w, "height": h}
 
     def minimap_size(self) -> tuple[int, int]:

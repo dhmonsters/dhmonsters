@@ -396,15 +396,21 @@ def cached_window_origin(window_title: str, ttl: float = 0.2,
 
 
 def resolve_window_region(coord_mode: str, window_title: str,
-                          left: int, top: int, w: int, h: int) -> tuple[int, int, int, int]:
-    """창 상대 픽셀(left,top)+w,h → 절대 화면 (x,y,w,h).
-    coord_mode != 'relative'거나 창 못 찾으면 (left,top,w,h) 그대로(절대 폴백)."""
+                          left: int, top: int, w: int, h: int,
+                          anchor: tuple[int, int] | None = None) -> tuple[int, int, int, int]:
+    """저장된 절대 영역(left,top)+w,h를 창 이동량만큼 보정해 (x,y,w,h) 반환.
+
+    앵커=영역 지정 시점의 창 클라이언트 원점. 현재 원점이 앵커와 같거나(창 안 움직임)
+    창을 못 찾거나 앵커가 없으면 절대좌표 그대로(=안 밀림). 창을 옮겼을 때만 그 delta만큼 따라감.
+    coord_mode != 'relative'이면 항상 절대 그대로."""
     if (coord_mode or "absolute") != "relative":
+        return (left, top, w, h)
+    if not anchor:
         return (left, top, w, h)
     ox, oy, cw, ch = cached_window_origin(window_title)
     if cw <= 0:
         return (left, top, w, h)
-    return (ox + left, oy + top, w, h)
+    return (left + (ox - anchor[0]), top + (oy - anchor[1]), w, h)
 
 
 def logical_to_physical_coords(x: int, y: int, w: int, h: int) -> tuple[int, int, int, int]:
