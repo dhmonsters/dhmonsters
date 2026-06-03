@@ -86,6 +86,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     pet = recovery.get("pet_food", {})
     pet_key = pet.get("key", "") if pet.get("enabled") else ""
     pet_interval = float(pet.get("interval_min", 10)) * 60
+    pet_count = int(pet.get("pet_count", 1))
 
     lie = d.get("settings1", {}).get("lie_detector", {})
     user = d.get("settings1", {}).get("user_detected", {})
@@ -111,6 +112,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         patrol_margin=patrol_margin,
         pet_key=pet_key,
         pet_interval=pet_interval,
+        pet_count=pet_count,
+        attack_interval=float(attack.get("delay_sec", 0.4)),
         pickup_key=(d.get("pickup_timer", {}).get("pickup_key", "")
                     if d.get("pickup_timer", {}).get("enabled") else ""),
         pickup_interval=float(d.get("pickup_timer", {}).get("interval_sec", 60)),
