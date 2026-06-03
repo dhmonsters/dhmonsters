@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
-    QStackedWidget, QLabel, QTextEdit, QButtonGroup,
+    QStackedWidget, QLabel, QTextEdit, QButtonGroup, QSplitter,
 )
 from PyQt6.QtCore import Qt
 
@@ -40,8 +40,15 @@ class MainShell(QMainWindow):
         root_v.setContentsMargins(0, 0, 0, 0)
         root_v.setSpacing(0)
         root_v.addWidget(self._build_topnav(), 0)
-        root_v.addWidget(self.stack, 1)
-        root_v.addWidget(self._build_log_drawer(), 0)
+        # 중앙 스택 + 로그 드로어를 세로 스플리터로 → 경계 드래그로 로그창 높이 조절
+        self._vsplit = QSplitter(Qt.Orientation.Vertical)
+        self._vsplit.setObjectName("vsplit")
+        self._vsplit.addWidget(self.stack)
+        self._vsplit.addWidget(self._build_log_drawer())
+        self._vsplit.setStretchFactor(0, 1)
+        self._vsplit.setStretchFactor(1, 0)
+        self._vsplit.setCollapsible(0, False)
+        root_v.addWidget(self._vsplit, 1)
         root_v.addWidget(self._build_controlbar(), 0)
         self.setCentralWidget(root)
 
@@ -87,7 +94,8 @@ class MainShell(QMainWindow):
         v = QVBoxLayout(self._log_drawer)
         v.setContentsMargins(SPACING["md"], SPACING["xs"], SPACING["md"], 0)
         self.log_view = QTextEdit(); self.log_view.setObjectName("log")
-        self.log_view.setReadOnly(True); self.log_view.setFixedHeight(120)
+        self.log_view.setReadOnly(True)
+        self.log_view.setMinimumHeight(80)   # 스플리터 드래그로 자유 조절(고정 높이 제거)
         v.addWidget(self.log_view)
         self._log_drawer.setVisible(False)
         return self._log_drawer
