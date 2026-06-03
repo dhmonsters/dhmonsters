@@ -12,7 +12,9 @@ from core.humanize.intent import Intent
 TOLERANCE = 3           # 도착 판정 픽셀 (이 이내면 도달)
 MOVE_STUCK_POLLS = 30   # 이 횟수(≈1.5s) 동안 목표에 한 번도 가까워지지 않으면 포기(벽 판정)
 TELEPORT_MIN_DIST = 15  # 이 거리 초과면 teleport, 이하면 walk 폴백
-LADDER_X_TOL = 4        # 사다리 X ±이 값 진입 시 점프 잡기 (C _jump_grab_ladder)
+LADDER_X_TOL = 4        # 사다리 X 도달 판정 픽셀
+JUMP_GRAB_NEAR = 9      # 사다리 X ±이 값 '근처'에 오면(딱 맞추지 말고) 그쪽으로 점프+↑ 잡기
+                        # (A/B/C: rope_x±jump_offset 접근점에서 점프 — 정확 정렬 불필요)
 Y_ARRIVE_TOL = 2        # 사다리 등반/하강 도착 판정 Y (C: y <= y_top+2)
 SAME_LEVEL_TOL = 2      # |char_y - y_bot| ≤ 이 값이면 사다리 밑 같은 층 (C _do_ladder)
 LADDER_HANG_SEC = 0.5   # 점프 후 ↑로 사다리 매달리는 안정화 시간 (C 0.5)
@@ -270,16 +272,16 @@ class BlockRunner:
             self._h.release("up")
 
     def _jump_grab(self, ladder_x: int, side: str, y_top: int, max_steps: int) -> bool:
-        """좌/우 누른 채 사다리 X로 접근 → ±4 진입 시 점프+↑ 잡기 → y_top까지 등반
-        (C _jump_grab_ladder)."""
-        # 1) side 홀드로 접근
+        """side(사다리쪽) 누른 채 접근 → 사다리 X '근처'(±JUMP_GRAB_NEAR)에 오면 딱 맞추지
+        않고 그쪽으로 점프+↑ 잡기 → y_top까지 등반 (A/B/C: 접근점에서 점프해 로프 잡기)."""
+        # 1) side 홀드로 접근 — 사다리 근처에 들어오면 멈추지 말고 바로 점프(모멘텀으로 잡음)
         self._h.hold_dir(side)
         reached = False
         for _ in range(max_steps):
             if self._stop():
                 self._h.release_all(); return False
             x, _y = self._pos()
-            if x is not None and abs(x - ladder_x) <= LADDER_X_TOL:
+            if x is not None and abs(x - ladder_x) <= JUMP_GRAB_NEAR:
                 reached = True
                 break
             self._jsleep(self._poll)
