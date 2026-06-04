@@ -13,8 +13,9 @@ TOLERANCE = 3           # 도착 판정 픽셀 (이 이내면 도달)
 MOVE_STUCK_POLLS = 30   # 이 횟수(≈1.5s) 동안 목표에 한 번도 가까워지지 않으면 포기(벽 판정)
 TELEPORT_MIN_DIST = 15  # 이 거리 초과면 teleport, 이하면 walk 폴백
 LADDER_X_TOL = 4        # 사다리 X 도달 판정 픽셀
-JUMP_GRAB_OFFSET = 8    # 사다리에서 이만큼 떨어진 '접근점'에서 사다리 쪽으로 점프(A/B/C jump_offset)
-MAX_GRAB_RETRY = 3      # 사다리 못 잡으면 재접근·재점프 재시도 횟수(A/B/C 재시도)
+JUMP_GRAB_OFFSET = 1    # 사다리에서 이만큼만 뒤로 떨어진 '접근점'에서 사다리 쪽으로 점프(아주 가까이)
+MAX_GRAB_RETRY = 5      # 사다리 못 잡으면 재접근·재점프 재시도 횟수
+JUMP_TO_UP_SEC = 0.02   # 점프 후 ↑ 전환 지연(작을수록 빠르게 사다리 잡음)
 CLIMB_STUCK_POLLS = 16  # 등반 중 이 횟수(≈0.8s) y가 안 올라가면 '못 잡음'으로 보고 재시도
 Y_ARRIVE_TOL = 2        # 사다리 등반/하강 도착 판정 Y (C: y <= y_top+2)
 SAME_LEVEL_TOL = 2      # |char_y - y_bot| ≤ 이 값이면 사다리 밑 같은 층 (C _do_ladder)
@@ -22,7 +23,6 @@ LADDER_HANG_SEC = 0.5   # 점프 후 ↑로 사다리 매달리는 안정화 시
 LADDER_TOP_SETTLE_SEC = 0.45  # 정점(y_top) 도달 후 ↑ 추가 유지 — 로프에서 발판으로 올라서기(dismount)
 CONFIRM_MOVE_POLLS = 8   # 발판 확인: 좌우로 이 횟수(≈0.4s)까지 밀어보며 x 변화 관찰
 CONFIRM_MOVE_PX = 3      # x가 사다리에서 이만큼 벗어나면 '발판 위(좌우 이동됨)' = 등반 완료
-DESCEND_DOWN_SEC = 1.0  # 하강 시 ↓ 선홀드 시간 (C _descend_ladder_jump 1초)
 
 
 class BlockRunner:
@@ -313,20 +313,14 @@ class BlockRunner:
         한 번도 안 줄면(로프 못 잡음/미끄러짐) False → 호출부가 재시도한다."""
         best = None
         no_prog = 0
-        start_y = None
         for _ in range(max_steps):
             if self._stop():
                 return False
             _x, y = self._pos()
             if y is None:
                 return False
-            if start_y is None:
-                start_y = y
-                # 시작 시점에 이미 목표(y_top) 이하 = 오를 거리가 없음(잘못된 사다리 Y/이미 위층).
-                # 등반이 아니므로 '도착'으로 보지 않는다 — 한 칸도 안 올라갔는데 허위 '등반 완료'가
-                # 떠서 같은 층에서 좌우만 하던 버그 방지(사용자 보고: y 안 바뀌었는데 층이동 표기).
-                if start_y <= y_top + Y_ARRIVE_TOL:
-                    return False
+            # 목표 층 y에 도달(또는 매달림이 정점을 지나쳐 이미 도달)하면 등반 완료.
+            # 엉뚱한 위층에서 잡는 오인식은 floor_judge 다층 인식 + _recover_if_needed가 먼저 막는다.
             if y <= y_top + Y_ARRIVE_TOL:
                 return True   # 층 도착
             if best is None or y < best:
@@ -404,7 +398,7 @@ class BlockRunner:
             return False
         # 사다리 쪽으로 점프(방향 유지=모멘텀) → ↑ 매달림 → 방향키 해제
         self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
-        self._jsleep(0.05)
+        self._jsleep(JUMP_TO_UP_SEC)    # 점프 직후 빠르게 ↑로 전환
         self._h.hold("up")
         self._jsleep(LADDER_HANG_SEC)
         self._h.release_dir()
@@ -413,16 +407,14 @@ class BlockRunner:
         return self._finish_climb(ladder_x, y_top, max_steps, side)
 
     def _descend_ladder(self, exit_side: str, y_bot: int, max_steps: int) -> bool:
-        """지정 X에서 ↓ 1초 + 좌/우 + 점프 → 사다리에서 뛰어내림(C _descend_ladder_jump).
+        """아래층으로 내려가기 = 아래점프(↓+점프)만 사용 — 사다리 로프를 타고 내려가지 않는다.
+        (사용자 요청: 내려갈 때 down-hold 로프하강·↑ 등 다른 키 금지, 아래점프만.)
         y가 y_bot 근처(아래 발판)로 내려오면 도착."""
-        side = self._h.random_side() if exit_side not in ("left", "right") else exit_side
         self._h.hold("down")
-        self._jsleep(DESCEND_DOWN_SEC)
-        self._h.hold_dir(side)
-        self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
+        self._jsleep(JUMP_TO_UP_SEC)    # 아래키 살짝 — 발판 드랍 인식
+        self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))  # ↓+점프
         self._jsleep(0.1)
         self._h.release("down")
-        self._h.release_dir()
         for _ in range(max_steps):
             if self._stop():
                 return False

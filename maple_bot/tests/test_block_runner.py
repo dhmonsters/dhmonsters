@@ -214,19 +214,6 @@ def test_ladder_same_level_climbs_to_y_top():
     assert "up" not in h.held_keys  # 등반 후 ↑ 떼짐
 
 
-def test_ladder_no_false_complete_when_ytop_at_or_below_start():
-    """y_top이 시작 y 이하(오를 거리 없음)면 허위 '등반 완료' 금지 — 실패 반환.
-
-    사용자 보고: y가 안 바뀌었는데(층이동 안 됐는데) '사다리 등반 완료'가 떴음.
-    원인은 시작 y가 이미 y_top+여유 이하라 _climb_loop이 즉시 도착 처리한 것."""
-    w = LadderWorld(x=100, y=74); h = WorldHumanizer(w)
-    ok = _runner(h, w).run_block(
-        Block(type="ladder", ladder_x=100, y_top=80, y_bot=74, ladder_dir="up"),
-        max_steps=200)
-    assert ok is False           # 허위 '등반 완료' 안 함(핵심)
-    assert w.y < 80              # 엉뚱한 목표(y_top=80, 아래)에 '도착'한 적 없음
-
-
 def test_climb_keeps_up_held_during_platform_confirm():
     """발판 확인(좌우 이동) 중에도 ↑를 유지한다 — 확인이 끝나면 해제(사용자 요청)."""
     w = LadderWorld(x=100, y=200); h = WorldHumanizer(w)   # 같은 층(사다리 밑) 진입
@@ -258,8 +245,8 @@ def test_ladder_jump_grab_then_climb():
     assert "up" not in h.held_keys
 
 
-def test_ladder_descend_uses_down_side_jump():
-    """하강: ↓ + 좌/우 + 점프 키 시퀀스 (지정 X에서 뛰어내림)."""
+def test_ladder_descend_uses_down_jump_only():
+    """하강: 아래점프(↓+점프)만 — 로프 타고 내려가지 않고 ↑도 안 씀(사용자 요청)."""
     w = LadderWorld(x=100, y=10); h = WorldHumanizer(w)
     ok = _runner(h, w).run_block(
         Block(type="ladder", ladder_x=100, y_top=10, y_bot=200,
@@ -267,8 +254,8 @@ def test_ladder_descend_uses_down_side_jump():
         max_steps=20)
     assert ok is True
     assert any(i.key == "alt" for i in h.intents)  # 점프
-    assert "down" not in h.held_keys               # 정리됨
-    assert h.held_dir() is None
+    assert "down" not in h.held_keys               # ↓ 정리됨
+    assert "up" not in h.held_keys                 # 내려갈 때 ↑ 안 씀
 
 
 def test_move_mode_pass_one_direction_only():
