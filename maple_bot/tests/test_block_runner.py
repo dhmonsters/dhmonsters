@@ -227,6 +227,25 @@ def test_ladder_no_false_complete_when_ytop_at_or_below_start():
     assert w.y < 80              # 엉뚱한 목표(y_top=80, 아래)에 '도착'한 적 없음
 
 
+def test_climb_keeps_up_held_during_platform_confirm():
+    """발판 확인(좌우 이동) 중에도 ↑를 유지한다 — 확인이 끝나면 해제(사용자 요청)."""
+    w = LadderWorld(x=100, y=200); h = WorldHumanizer(w)   # 같은 층(사다리 밑) 진입
+    seen = {"up_held": None}
+    orig = h.hold_dir
+    def spy(key, risk_profile=None):
+        # ↑가 눌린 채로 hold_dir(좌우)가 처음 불리는 시점 = 발판 확인 단계
+        if seen["up_held"] is None and "up" in h.held_keys:
+            seen["up_held"] = True
+        orig(key, risk_profile)
+    h.hold_dir = spy
+    ok = _runner(h, w).run_block(
+        Block(type="ladder", ladder_x=100, y_top=10, y_bot=200, ladder_dir="up"),
+        max_steps=300)
+    assert ok is True
+    assert seen["up_held"] is True      # 좌우 확인 시작 때 ↑ 유지됨
+    assert "up" not in h.held_keys      # 완료 후엔 ↑ 해제
+
+
 def test_ladder_jump_grab_then_climb():
     """사다리에서 떨어진 위치 → 접근+점프+↑ 잡기 → 등반."""
     w = LadderWorld(x=40, y=60); h = WorldHumanizer(w)

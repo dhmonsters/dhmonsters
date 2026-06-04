@@ -340,11 +340,11 @@ class BlockRunner:
         return False
 
     def _confirm_on_platform(self, ladder_x: int, confirm_dir: str, max_steps: int) -> bool:
-        """발판 확인 = 등반 완료 판정의 핵심: confirm_dir 한 방향으로만 밀어 x가 사다리에서
-        벗어나면(=발판 위) True. 로프 매달림이면 x 안 변함 → False(재시도).
-        한 방향만 써서 좌우 왔다갔다(이상한 움직임) 없음. (사용자 정의: 그 층 y에서 좌/우 이동돼야 완료)"""
-        self._h.release("up")            # 로프에서 ↑ 떼야 좌우 이동 가능
-        self._h.hold_dir(confirm_dir)
+        """발판 확인 = 등반 완료 판정: ↑를 유지한 채 confirm_dir 한 방향으로 밀어 x가
+        사다리에서 벗어나면(=발판 위) True. 로프 매달림이면 x 안 변함 → False(재시도).
+        ↑를 떼지 않는다 — 좌우 이동 확인이 끝날 때까지 ↑ 유지(사용자 요청; ↑+좌우 동시 가능).
+        한 방향만 써서 좌우 왔다갔다(이상한 움직임) 없음."""
+        self._h.hold_dir(confirm_dir)    # ↑ 유지한 상태에서 좌우 한 방향 추가
         try:
             for _ in range(CONFIRM_MOVE_POLLS):
                 if self._stop():
@@ -358,12 +358,13 @@ class BlockRunner:
             self._h.release_dir()
 
     def _finish_climb(self, ladder_x: int, y_top: int, max_steps: int, confirm_dir: str) -> bool:
-        """↑ 등반 → 정점 후 ↑ 더(dismount) → confirm_dir 한 방향 이동으로 발판 확인 → 완료(True)."""
+        """↑ 등반 → 정점 후 ↑ 더(dismount) → ↑ 유지한 채 한 방향 이동으로 발판 확인 → 완료.
+        ↑는 좌우 이동 확인이 끝날 때까지 계속 유지된다(사용자 요청)."""
         self._h.hold("up")
         try:
             if not self._climb_loop(y_top, max_steps):
                 return False
-            self._jsleep(LADDER_TOP_SETTLE_SEC)   # 발판으로 올라서기
+            self._jsleep(LADDER_TOP_SETTLE_SEC)   # 정점에서 ↑ 더 눌러 발판으로 올라섬
             return self._confirm_on_platform(ladder_x, confirm_dir, max_steps)
         finally:
             self._h.release("up")
