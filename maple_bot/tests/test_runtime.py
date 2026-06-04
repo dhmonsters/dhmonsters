@@ -107,6 +107,31 @@ def test_potion_no_fire_when_full():
     assert "pgup" not in backend.presses
 
 
+def test_route_mode_floors_from_route_not_single_zone():
+    """route_mode면 route의 다층(pos_y)에서 층을 추출 — 단일 zone만으로 오판 안 함.
+
+    버그: zone '1층'(y66~79) 하나만 쓰면 2층(y74)도 1층으로 오판 → 1층 좌표로 이동."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        floors=[Floor("1층", 66, 79)],                    # 잘못된 단일 zone
+        route=[
+            Block(type="move", target_x=0, start_x=79, end_x=176, pos_x=81, pos_y=109),
+            Block(type="ladder", ladder_x=122, y_top=80, y_bot=101),
+            Block(type="move", target_x=0, start_x=103, end_x=161, pos_x=97, pos_y=78),
+        ],
+        route_mode=True, attack_key="a",
+    )
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel())
+    # route에서 다층 추출(1층 pos_y=109, 2층 pos_y=78) → 2개 이상 층
+    names = [f.name for f in rt.floor_judge._floors]
+    assert len(names) >= 2
+    # y=74는 1층(109대)이 아니라 2층(78대)으로 인식돼야 함
+    f = rt.floor_judge.floor_at(74)
+    assert f is not None and f.name == "2층"
+
+
 def test_dense_area_attacks_sparse_does_not():
     """밀집 사냥: 사냥영역 몹 ≥진입임계면 멈춰 공격, 희소면 공격 안 함(이동만)."""
     import numpy as np

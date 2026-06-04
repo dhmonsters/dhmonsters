@@ -167,11 +167,16 @@ class BotRuntime:
         self._bot_running = False    # 컨트롤러 start/stop로 토글 (루트 실행 활성 조건)
         self._route_hunt_active = False   # 현재 루트 블록이 사냥 구간이면 True(공격 게이팅)
         self.log = lambda m, cat="시스템": None  # UI 로그 콜백(run_integrated 주입). (msg, 카테고리)
-        # 층: 명시적 zones가 있으면 우선, 없으면 루트 블록 Y에서 자동 추출(복귀용)
+        # 층 정의:
+        #   - route_mode면 route의 다층 구조(사다리/블록 Y)에서 추출 — 단일 zone보다 우선.
+        #     (단일 zone "1층" 하나만 쓰면 모든 Y를 1층으로 오판 → 다른 층에서 1층 좌표로 움직임)
+        #   - 그 외엔 명시적 zones, 없으면 route에서 보조 추출.
         _floors = config.floors
-        if not _floors and config.route:
+        if config.route:
             from core.navigation.floor_extract import floors_from_route
-            _floors = floors_from_route([b.to_dict() for b in config.route])
+            _rf = floors_from_route([b.to_dict() for b in config.route])
+            if _rf and (config.route_mode or not _floors):
+                _floors = _rf
         self.floor_judge = FloorJudge(_floors) if _floors else None
         # 층 이탈 복귀 그래프 — route의 사다리에서 자동 구성
         _recovery_graph = None

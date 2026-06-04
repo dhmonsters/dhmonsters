@@ -101,6 +101,17 @@ class BlockRunner:
                 return False
         return True
 
+    def _log_floor_status(self, block: Block) -> None:
+        """현재 인식 층 / 이 블록의 목표 층을 로그로 표시(층 이동 진단용)."""
+        if self._judge is None:
+            return
+        from core.navigation.map_graph import expected_floor
+        _x, y = self._pos()
+        cur = self._judge.floor_at(y)
+        want = expected_floor(block.to_dict(), self._judge)
+        cur_s = cur.name if cur is not None else f"층사이(y={y})"
+        self._log_once(f"📍 현재 {cur_s} / 목표 {want or '-'}")
+
     def _recover_if_needed(self, block: Block, max_steps: int) -> None:
         """현재 층이 블록의 기대 층과 다르면 그래프 최단경로의 사다리를 타고 복귀.
         judge/graph 미주입이거나 기대층 None이면 아무것도 안 함."""
@@ -125,6 +136,7 @@ class BlockRunner:
         if self._on_seg_enter is not None:
             self._on_seg_enter(block)
         self._log_once(f"▶ {self._desc(block)}")
+        self._log_floor_status(block)
         try:
             self._recover_if_needed(block, max_steps)
             if block.type == "move":
