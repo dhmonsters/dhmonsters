@@ -43,9 +43,11 @@ class Combat:
         self._mp_last = self._maybe_potion(self._mp, mp_ratio, now, self._mp_last, "MP")
 
     def attack(self, skill_key: str, mode: str = "duration", value: float = 0.0,
-               now: float | None = None, interval: float = 0.0) -> None:
+               now: float | None = None, interval: float = 0.0,
+               hold: float = 0.08) -> None:
         """공격. mode='count'면 value회. interval>0이면 스킬 딜레이로 그 간격마다만 발동
-        (매 틱 도배 방지 — 너무 빠른 연타는 게임이 무시함)."""
+        (재누름 간격 — 매 틱 도배 방지, 너무 빠른 연타는 게임이 무시함).
+        hold=공격키 누름 유지 시간(초). Humanizer가 ±지터를 입혀 실제 누름시간이 매번 다름."""
         if not skill_key:
             return
         if interval > 0 and now is not None:
@@ -54,9 +56,9 @@ class Combat:
             self._atk_last = now
         if mode == "count":
             for _ in range(int(value)):
-                self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=0.08))
+                self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=hold))
         else:
-            self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=0.08))
+            self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=hold))
         t = self._clock()
         if t - self._atk_log_last >= 1.0:   # 로그는 초당 1회만(가독)
             self._atk_log_last = t

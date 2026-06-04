@@ -44,6 +44,18 @@ def test_attack_count_mode():
     assert sum(1 for i in h.intents if i.key == "a") == 3
 
 
+def test_attack_hold_is_configurable():
+    """공격키 홀드 시간(hold)이 Intent.base_hold_sec로 전달된다(설정 조정 가능)."""
+    h = FakeHumanizer()
+    c = Combat(humanizer=h)
+    c.attack(skill_key="a", hold=0.25)
+    atk = [i for i in h.intents if i.key == "a"]
+    assert atk and atk[-1].base_hold_sec == 0.25
+    # 기본값(미지정)은 0.08
+    h2 = FakeHumanizer(); Combat(humanizer=h2).attack(skill_key="a")
+    assert h2.intents[-1].base_hold_sec == 0.08
+
+
 def test_mp_potion_independent():
     """HP/MP 독립 — MP만 낮으면 MP 물약."""
     h = FakeHumanizer()

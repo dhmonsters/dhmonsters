@@ -63,7 +63,8 @@ class RuntimeConfig:
     pet_key: str = ""
     pet_interval: float = 600.0
     pet_count: int = 1
-    attack_interval: float = 0.4   # 공격(스킬) 최소 발동 간격(초) — 매 틱 도배 방지
+    attack_interval: float = 0.4   # 공격키 재누름 최소 간격(초) — 매 틱 도배 방지(스킬 딜레이)
+    attack_hold_sec: float = 0.08  # 공격키 누름 유지 시간(초) — Humanizer가 ±지터 적용
     # 밀집 사냥(시간당 처치 최적화): 사냥영역 몹 개수로 멈춰사냥↔이동 결정
     hunt_stay_threshold: int = 3    # 이 마리수 이상이면 멈춰 사냥(밀집)
     hunt_leave_threshold: int = 1   # 이 마리수 이하로 줄면 이동(희소)
@@ -323,7 +324,8 @@ class BotRuntime:
             if self._route_hunt_active and self._cfg.attack_key:
                 if dwelling if density_on else self._monster_in_range():
                     self.combat.attack(self._cfg.attack_key, mode="duration",
-                                       now=now, interval=self._cfg.attack_interval)
+                                       now=now, interval=self._cfg.attack_interval,
+                                       hold=self._cfg.attack_hold_sec)
             return
 
         # 공격할지 판정: 밀집 사용 시 dwelling, 아니면 image=공격박스/key=항상
@@ -340,7 +342,8 @@ class BotRuntime:
         if attacking:
             self.humanizer.release_dir()   # 제자리 공격: 유지 중인 이동키 해제
             self.combat.attack(self._cfg.attack_key, mode="duration",
-                               now=now, interval=self._cfg.attack_interval)
+                               now=now, interval=self._cfg.attack_interval,
+                               hold=self._cfg.attack_hold_sec)
         else:
             # 순찰: 현재 위치로 방향 결정 → 목표 경계로 이동(hold_dir로 키 유지)
             if self.patrol is not None:
