@@ -38,14 +38,18 @@ class SliderField:
         self._val.setFixedWidth(40)
         h.addWidget(self.widget, 1)
         h.addWidget(self._val)
+        # 라벨·메모리값은 매 변경마다 실시간 갱신(가벼움), 디스크 저장은 드래그 끝에 1회만
+        # (드래그 중 매 틱 save()하면 디스크 쓰기가 UI를 막아 숫자가 안 바뀌는 것처럼 보였음).
         self.widget.valueChanged.connect(self._changed)
+        self.widget.sliderReleased.connect(self._cfg.save)
 
     def _changed(self, v: int) -> None:
         if self._is_int:
             self._val.setText(str(v)); self._cfg.set(*self._keys, int(v))
         else:
             self._val.setText(f"{v}%"); self._cfg.set(*self._keys, round(v / 100.0, 2))
-        self._cfg.save()
+        if not self.widget.isSliderDown():   # 드래그가 아니면(키보드/클릭) 즉시 저장
+            self._cfg.save()
 
 
 class StatusField:
