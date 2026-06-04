@@ -27,6 +27,15 @@ def test_max_dwell_timeout_forces_move():
     assert d.update(5, now=8.0) is False      # 8초 경과 → 많아도 강제 이동
 
 
+def test_max_dwell_jittered_per_entry():
+    """jitter_fn으로 진입마다 체류 상한이 −줄어듦(설정값 초과 안 함)."""
+    d = HuntDirector(stay_threshold=3, leave_threshold=1, max_dwell_sec=8.0,
+                     jitter_fn=lambda v: v * 0.5)   # 체류 상한 4.0으로 단축
+    d.update(5, now=0.0)                              # 진입 → 상한 4.0
+    assert d.update(5, now=3.9) is True               # 4초 전 → 계속
+    assert d.update(5, now=4.0) is False              # 4초 경과 → 이동(8초 아님)
+
+
 def test_sparse_never_dwells():
     d = _d()
     for t in range(5):
