@@ -253,14 +253,13 @@ class BlockRunner:
 
     # ── 사다리 (A/B/C map_navigator 방식 포팅: 접근점 점프 + 재시도 + 등반 진척감지) ──
     def _do_ladder(self, block: Block, max_steps: int) -> bool:
-        """up: 접근점에서 사다리 쪽으로 점프+↑ 잡기(못 잡으면 재시도). down: 사다리 X에서 뛰어내림."""
+        """up: 접근점에서 사다리 쪽으로 점프+↑ 잡기(못 잡으면 재시도).
+        down: 현재 위치에서 바로 아래점프 — ladder_x로 이동 안 함(사용자 요청)."""
         x, y = self._pos()
         if x is None or y is None:
             self._h.release_all()
             return False   # 좌표 인식 실패 — 스킵
         if block.ladder_dir == "down":
-            self._exec_move(Block(type="move", target_x=block.ladder_x, move_type="walk"),
-                            max_steps)   # 하강은 사다리 X에 서서 뛰어내림
             return self._descend_ladder(block.exit_side, block.y_bot, max_steps)
         return self._climb_with_retry(block, max_steps)
 
