@@ -44,6 +44,7 @@ def test_hunting_tick_attacks_only_in_hunt_segment(monkeypatch):
     class _Cfg:
         attack_key = "ctrl"
         attack_interval = 0.0   # 테스트: 쿨다운 없이 매 호출 발동
+        attack_hold_sec = 0.08
     rt.combat = _Combat(); rt.buffs = _Tick(); rt.pet = _Tick(); rt.pickup = _Tick()
     rt.orchestrator = _Orch(); rt._cfg = _Cfg()
     monkeypatch.setattr(rt, "_monster_in_range", lambda: True)

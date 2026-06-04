@@ -137,6 +137,22 @@ def test_gives_up_after_max_steps():
     assert arrived is False
 
 
+def test_dwell_parks_movement():
+    """밀집 사냥(DWELL) 중엔 이동을 멈춘다(park) — target에 접근하지 않음."""
+    h = FakeHumanizer()
+    char = MovingChar(start_x=0, speed=10); char.target = 50
+    ticks = {"n": 0}
+    runner = BlockRunner(
+        humanizer=h, pos_fn=char.pos,
+        dwell_fn=lambda: True,                       # 계속 DWELL → 정지 유지
+        stop_fn=lambda: ticks["n"] >= 5,             # 5번 park 뒤 정지로 탈출(무한루프 방지)
+        sleep_fn=lambda s: ticks.__setitem__("n", ticks["n"] + 1),
+    )
+    arrived = runner.run_block(Block(type="move", target_x=50), max_steps=100)
+    assert arrived is False        # DWELL 내내 정지 → 도착 못 함
+    assert char.x == 0             # 한 칸도 안 움직임(park)
+
+
 def test_all_input_goes_through_humanizer():
     """헌법: 모든 입력은 Humanizer 경유 — runner는 직접 키 송출 안 함."""
     h = FakeHumanizer()

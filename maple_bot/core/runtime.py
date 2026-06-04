@@ -63,7 +63,12 @@ class RuntimeConfig:
     pet_key: str = ""
     pet_interval: float = 600.0
     pet_count: int = 1
-    attack_interval: float = 0.4   # 공격(스킬) 최소 발동 간격(초) — 매 틱 도배 방지
+    attack_interval: float = 0.4   # 공격키 재누름 최소 간격(초) — 매 틱 도배 방지(스킬 딜레이)
+    attack_hold_sec: float = 0.08  # 공격키 누름 유지 시간(초) — Humanizer가 ±지터 적용
+    # 밀집 사냥(시간당 처치 최적화): 사냥영역 몹 개수로 멈춰사냥↔이동 결정
+    hunt_stay_threshold: int = 3    # 이 마리수 이상이면 멈춰 사냥(밀집)
+    hunt_leave_threshold: int = 1   # 이 마리수 이하로 줄면 이동(희소)
+    hunt_max_dwell_sec: float = 8.0 # 한 자리 최대 체류(밀집이어도 초과 시 강제 이동)
     # 픽업 타이머 — 주기적으로 줍기 키 입력(바닥 아이템 자동 줍기)
     pickup_key: str = ""
     pickup_interval: float = 60.0
@@ -172,10 +177,18 @@ class BotRuntime:
             from core.navigation.map_graph import build_graph
             _recovery_graph = build_graph(
                 _floors, [b.to_dict() for b in config.route], self.floor_judge)
+        # 밀집 사냥 디렉터 — 사냥영역 몹 개수로 멈춰사냥(DWELL)↔이동(MOVING) 결정
+        from core.acting.hunt_director import HuntDirector
+        self.hunt_director = HuntDirector(
+            config.hunt_stay_threshold, config.hunt_leave_threshold,
+            config.hunt_max_dwell_sec)
+        self._area_count = 0
+        self._area_count_ts = -1e9
         self.block_runner = BlockRunner(
             humanizer=self.humanizer,
             pos_fn=lambda: self.orchestrator.state.get_position() or (0, 0),
             stop_fn=lambda: not self._route_can_run(),   # 안전모드·정지 시 루트 폴링루프 즉시 이탈
+            dwell_fn=lambda: self.hunt_director.is_dwelling(),  # 밀집 시 이동 park
             floor_judge=self.floor_judge, recovery_graph=_recovery_graph,
             on_segment_enter=self._on_route_segment_enter,
             on_segment_exit=self._on_route_segment_exit,
@@ -292,21 +305,35 @@ class BotRuntime:
         # HP/MP 물약 — 매 사냥 틱 확인(임계 미만이면 Combat이 키 입력). 어느 분기든 먼저 실행.
         self._check_potions(now)
 
+        # 밀집 판단 — 몬스터 템플릿이 있을 때만(image/route). 사냥영역 전체 몹 개수로
+        # 멈춰사냥(dwelling)↔이동 결정. 희소(≤이탈임계)면 안 멈추고 이동, 밀집(≥진입임계)이면 멈춰 처치.
+        density_on = (getattr(self, "_name_tpl", None) is not None
+                      and bool(getattr(self, "_monster_tpls", None))
+                      and getattr(self, "hunt_director", None) is not None)
+        dwelling = False
+        if density_on:
+            dwelling = self.hunt_director.update(self._count_monsters_in_area(now), now)
+
         # 루트 실행기 모드: 이동·공격은 루트 스레드가 수행 → 여기선 버프/펫만
         if self.floor_hunt_runner is not None:
             self.buffs.tick(now)
             self.pet.tick(now)
             self.pickup.tick(now)
-            # 사냥 구간이면 이미지 탐지→공격(이동은 루트 스레드 담당)
-            if self._route_hunt_active and self._cfg.attack_key and self._monster_in_range():
-                self.combat.attack(self._cfg.attack_key, mode="duration",
-                                   now=now, interval=self._cfg.attack_interval)
+            # 사냥 구간에서, 밀집(dwelling)일 때만 멈춰 공격(이동 park는 dwell_fn이 처리).
+            # 템플릿 없으면 기존 공격박스 판정으로 폴백.
+            if self._route_hunt_active and self._cfg.attack_key:
+                if dwelling if density_on else self._monster_in_range():
+                    self.combat.attack(self._cfg.attack_key, mode="duration",
+                                       now=now, interval=self._cfg.attack_interval,
+                                       hold=self._cfg.attack_hold_sec)
             return
 
-        # 공격할지 판정: image 모드는 공격박스 안 몬스터 있을 때만(B), 그 외(key)는 항상
+        # 공격할지 판정: 밀집 사용 시 dwelling, 아니면 image=공격박스/key=항상
         attacking = False
         if self._cfg.attack_key:
-            if self._cfg.hunt_mode == "image":
+            if density_on:
+                attacking = dwelling
+            elif self._cfg.hunt_mode == "image":
                 attacking = self._monster_in_range()
             else:
                 attacking = True
@@ -315,7 +342,8 @@ class BotRuntime:
         if attacking:
             self.humanizer.release_dir()   # 제자리 공격: 유지 중인 이동키 해제
             self.combat.attack(self._cfg.attack_key, mode="duration",
-                               now=now, interval=self._cfg.attack_interval)
+                               now=now, interval=self._cfg.attack_interval,
+                               hold=self._cfg.attack_hold_sec)
         else:
             # 순찰: 현재 위치로 방향 결정 → 목표 경계로 이동(hold_dir로 키 유지)
             if self.patrol is not None:
@@ -385,6 +413,26 @@ class BotRuntime:
             self._cfg.atk_y_min, self._cfg.atk_y_max)
         return monster_vision.monsters_in_box(
             scene, self._monster_tpls, box, threshold=self._cfg.monster_accuracy) > 0
+
+    def _count_monsters_in_area(self, now: float) -> int:
+        """사냥영역 '전체'의 몹 개수(공격박스가 아님). 밀집 판단용. ≈0.3s throttle 캐시."""
+        if now - self._area_count_ts < 0.3:
+            return self._area_count
+        self._area_count_ts = now
+        if self._name_tpl is None or not self._monster_tpls:
+            self._area_count = 0
+            return 0
+        region = self._resolve_region(self._cfg.hunt_area_region)
+        scene = self._capture(region) if region else self._capture()
+        if scene is None:
+            self._area_count = 0
+            return 0
+        h, w = scene.shape[:2]
+        boxes = monster_vision.monster_boxes_in_box(
+            scene, self._monster_tpls, (0, 0, w, h),
+            threshold=self._cfg.monster_accuracy)
+        self._area_count = len(boxes)
+        return self._area_count
 
     def detect_monsters_rel(self) -> list[tuple[int, int]]:
         """사냥영역 몬스터 탐지 → 캐릭(닉네임) 기준 화면px 오프셋 [(dx,dy), ...].

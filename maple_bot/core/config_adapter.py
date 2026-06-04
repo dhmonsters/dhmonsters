@@ -113,7 +113,11 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         pet_key=pet_key,
         pet_interval=pet_interval,
         pet_count=pet_count,
-        attack_interval=float(attack.get("delay_sec", 0.4)),
+        attack_interval=float(attack.get("delay_sec") if attack.get("delay_sec") is not None else 0.4),
+        attack_hold_sec=float(attack.get("hold_sec") if attack.get("hold_sec") is not None else 0.08),
+        hunt_stay_threshold=int(attack.get("density_stay", 3)),
+        hunt_leave_threshold=int(attack.get("density_leave", 1)),
+        hunt_max_dwell_sec=float(attack.get("density_max_dwell_sec", 8.0)),
         pickup_key=(d.get("pickup_timer", {}).get("pickup_key", "")
                     if d.get("pickup_timer", {}).get("enabled") else ""),
         pickup_interval=float(d.get("pickup_timer", {}).get("interval_sec", 60)),

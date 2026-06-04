@@ -107,6 +107,25 @@ def test_potion_no_fire_when_full():
     assert "pgup" not in backend.presses
 
 
+def test_dense_area_attacks_sparse_does_not():
+    """밀집 사냥: 사냥영역 몹 ≥진입임계면 멈춰 공격, 희소면 공격 안 함(이동만)."""
+    import numpy as np
+    rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))
+    # 밀집 판단 활성화(템플릿 있음으로 위장) + 개수 주입
+    rt._name_tpl = np.zeros((2, 2, 3), np.uint8)
+    rt._monster_tpls = {"m": np.zeros((2, 2, 3), np.uint8)}
+    rt._cfg.attack_key = "a"
+
+    rt._count_monsters_in_area = lambda now: 3      # 밀집(≥3)
+    rt.hunting_tick(now=1.0)
+    assert "a" in backend.presses                   # 멈춰 공격
+
+    backend.presses.clear()
+    rt._count_monsters_in_area = lambda now: 1      # 희소(≤1) → 이탈
+    rt.hunting_tick(now=2.0)
+    assert "a" not in backend.presses               # 공격 안 함(이동만)
+
+
 def test_route_mode_builds_floor_hunt_runner_and_gates():
     """route_mode면 FloorHuntRunner 생성 + 활성조건(_bot_running & hunting) 게이팅."""
     backend = RecordingBackend()
