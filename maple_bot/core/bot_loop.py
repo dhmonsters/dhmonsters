@@ -102,8 +102,9 @@ class BotLoop:
         self._enable_lie_notify = True   # 거탐 알림 (경보음 + 텔레그램)
         self._enable_lie_solve  = True   # 거탐 해제 (퍼즐 자동 풀기)
         self._enable_transparent_shape = True  # 투명 도형 찾기 자동 해제
-        self._transparent_game  = None   # lazy init: TransparentShapeGame
-        self._transparent_yolo  = None   # lazy init: YoloDetector (투명 도형 전용)
+        self._transparent_game  = None   # lazy init: TransparentShapeGame (구형 경로 폴백)
+        self._transparent_yolo  = None   # lazy init: YoloDetector (감지 전용)
+        self._transparent_engine = None  # lazy init: SelfTransparentEngine (ncnn, 신형 해제)
         self._safety_pending: str | None = None  # 백그라운드 감지 결과: "lie" | "transparent"
         self._lie_solving   = False              # True인 동안 감지 루프 억제 (run_follow_loop 실행 중)
         self._lie_last_solved: float = 0.0      # 투명도형 완료 시각 (재감지 쿨다운 기준)
@@ -1574,31 +1575,17 @@ class BotLoop:
                 _t.Thread(target=_send_tg, daemon=True).start()
 
     def _check_transparent_shape(self, screenshot) -> bool:
-        """투명 도형 찾기 미니게임 감지 시 폐루프 추적 루프를 실행한다.
+        """투명 도형 찾기 미니게임 감지 시 SelfTransparentEngine(ncnn)으로 해제한다.
 
-        감지 우선순위:
-          1. YOLO (settings1.transparent_shape.yolo_model_path 설정 시)
-          2. 템플릿 매칭 폴백 (templates/transparent_shape_title.png)
-
-        YOLO 감지 시 board ROI를 bbox에서 자동 계산 (수동 좌표 설정 불필요).
+        run_integrated(BotRuntime) 경로와 동일한 엔진을 사용.
+        감지: YOLO(models/lie_detector.pt) → 없으면 템플릿 매칭 폴백.
+        해제: SelfTransparentEngine — models/transparent/ ncnn 모델로 도형 추적 + 커서 이동.
         """
         cfg = self._config.get("settings1", "transparent_shape") or {}
         if not cfg.get("enabled"):
-            return False  # 설정1 탭에서 "투명 도형 찾기 활성화" 체크 필요
+            return False
 
-        # lazy init TransparentShapeGame
-        if self._transparent_game is None:
-            from core.transparent_shape_game import TransparentShapeGame
-            self._transparent_game = TransparentShapeGame(
-                self._screen, self._input, self._config, self._stop_event
-            )
-            self._transparent_game.window_title = self._game_window_title()
-
-        # ── YOLO 감지 (models/lie_detector.pt 고정) ──────────────────
-        detected_bbox = None
-        _bbox_from_yolo = False
-
-        # lazy init 투명 도형 전용 YOLO
+        # ── YOLO 감지 (팝업 출현 여부 확인) ────────────────────────────
         if self._transparent_yolo is None:
             import os as _os
             _yolo_path = "models/lie_detector.pt"
@@ -1608,8 +1595,7 @@ class BotLoop:
                     self._transparent_yolo = YoloDetector(
                         _yolo_path,
                         confidence=float(cfg.get("yolo_confidence", 0.25)),
-                        iou=0.45,
-                        max_det=5,
+                        iou=0.45, max_det=5,
                     )
                     logger.info("투명 도형 YOLO 로드: %s", _yolo_path)
                 except Exception as e:
@@ -1617,65 +1603,80 @@ class BotLoop:
 
         if self._transparent_yolo and self._transparent_yolo.is_loaded:
             det = self._transparent_yolo.detect(screenshot)
-            if det["monsters"]:
-                best = max(det["monsters"], key=lambda m: m["conf"])
-                detected_bbox = best["box"]
-                _bbox_from_yolo = True
+            if not det["monsters"]:
+                return False  # 팝업 없음
+        else:
+            return False  # YOLO 미로드 — 감지 불가
 
-        if detected_bbox is None:
-            return False  # YOLO 미감지 — 팝업 없음
-
-        # ── 감지 확정 → 알람은 스레드로 비동기 발동, 추적은 즉시 시작 ────────
-        # 알람(winsound.Beep × 3 ≈ 1.2s)을 메인 흐름에서 실행하면 그 시간 동안
-        # 마우스 추적이 지연돼 도형을 놓친다. 별도 스레드로 분리한다.
+        # ── 감지 확정 ───────────────────────────────────────────────────
         import threading as _t
         _t.Thread(target=self._fire_lie_alarm, daemon=True).start()
-        self._status("투명 도형 찾기 감지! 마우스 추적 시작...")
+        self._status("투명 도형 찾기 감지! ncnn 엔진으로 해제 시작...")
 
-        # board ROI: YOLO bbox 가용 시 팝업 전체에서 게임판 영역 자동 계산
-        # YOLO bbox = 팝업 전체 → 타이틀바 상단 ~10%를 제외한 나머지가 게임판
-        if _bbox_from_yolo and detected_bbox is not None:
-            _bx1, _by1, _bx2, _by2 = [int(v) for v in detected_bbox]
-            _pw, _ph = _bx2 - _bx1, _by2 - _by1
-            _hdr = max(40, int(_ph * 0.10))   # 타이틀 바 높이 추정 (최소 40px)
-            dynamic_roi = (_bx1, _by1 + _hdr, _pw, _ph - _hdr)
-            self._status(
-                f"게임판 ROI 자동: {_pw}×{_ph - _hdr}  X={_bx1} Y={_by1 + _hdr}"
-            )
-        else:
-            dynamic_roi = None  # None → run_follow_loop 내부에서 get_board_roi() 호출
+        # ── SelfTransparentEngine lazy init ────────────────────────────
+        if self._transparent_engine is None:
+            try:
+                from core.minigame.self_transparent_engine import SelfTransparentEngine
+                self._transparent_engine = SelfTransparentEngine(
+                    models_dir="models/transparent",
+                    board_capture_fn=self._transparent_capture_board,
+                    move_cursor_fn=self._transparent_move_cursor,
+                )
+                logger.info("SelfTransparentEngine 로드 완료")
+            except Exception as e:
+                logger.warning("SelfTransparentEngine 로드 실패: %s", e)
+                self._transparent_engine = None
 
-        # 게임 종료 감지 — YOLO로 팝업 사라지면 종료
-        _yolo_ref = self._transparent_yolo  # 클로저 캡처
+        if self._transparent_engine is None:
+            self._status("투명 도형 엔진 로드 실패 — 수동 해제 필요")
+            return True   # 감지는 됐으므로 True(사냥 일시정지 유지)
 
-        def _detect_end(shot) -> bool:
-            """True = 게임 아직 진행 중, False = 게임 종료."""
-            if _yolo_ref and _yolo_ref.is_loaded:
-                det = _yolo_ref.detect(shot)
-                return bool(det["monsters"])
-            return False
-
+        # ── 풀이 실행 ────────────────────────────────────────────────────
         floor_cfg = self._config.get("floor_hunt") or {}
         if floor_cfg.get("enabled"):
             self._floor_hunter.pause()
         try:
             self._input.focus_game_window()
-            self._transparent_game.run_follow_loop(
-                self._status,
-                board_roi=dynamic_roi,
-                detect_end_fn=_detect_end,
-            )
+            result = self._transparent_engine.solve(screenshot=None)
+            if result and result.success:
+                self._status("✅ 투명 도형 찾기 해제 완료, 사냥 재개")
+            else:
+                note = getattr(result, "note", "") if result else "알 수 없음"
+                self._status(f"⚠ 투명 도형 해제 실패: {note}")
+        except Exception as e:
+            logger.warning("투명 도형 풀이 오류: %s", e)
+            self._status(f"투명 도형 오류: {e}")
         finally:
             if floor_cfg.get("enabled"):
                 self._floor_hunter.resume()
-            if cfg.get("debug_overlay"):
-                import cv2
-                try:
-                    cv2.destroyWindow("transparent_shape_debug")
-                except Exception:
-                    pass
-            self._status("투명 도형 찾기: 완료, 사냥 재개")
         return True
+
+    def _transparent_capture_board(self):
+        """SelfTransparentEngine용 게임판 캡처. board_roi 설정값 사용(runtime 동일 방식)."""
+        cfg = self._config.get("settings1", "transparent_shape") or {}
+        roi_cfg = cfg.get("board_roi")
+        if roi_cfg:
+            try:
+                import mss as _mss
+                with _mss.mss() as sct:
+                    mon = sct.monitors[1]
+                region = {
+                    "left":   mon["left"] + int(roi_cfg["x_ratio"] * mon["width"]),
+                    "top":    mon["top"]  + int(roi_cfg["y_ratio"] * mon["height"]),
+                    "width":  max(1, int(roi_cfg["w_ratio"] * mon["width"])),
+                    "height": max(1, int(roi_cfg["h_ratio"] * mon["height"])),
+                }
+                return self._screen.capture(region)
+            except Exception:
+                pass
+        return self._screen.capture()
+
+    def _transparent_move_cursor(self, cx: int, cy: int) -> None:
+        """SelfTransparentEngine용 커서 이동. InputController.click 재사용."""
+        try:
+            self._input.click(cx, cy)
+        except Exception:
+            pass
 
     def _check_lie_detector(self, screenshot) -> bool:
         cfg = self._config.get("settings1", "lie_detector") or {}
