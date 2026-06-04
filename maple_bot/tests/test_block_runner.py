@@ -343,6 +343,43 @@ def test_run_block_recovers_when_on_wrong_floor():
     assert ok is True
 
 
+def test_climb_completes_at_top_without_recovering_down():
+    """정점(위층) 도달 후엔 confirm 실패로 재시도해도 아래로 복귀하지 않고 완료.
+
+    버그: 사다리 블록의 '목표 층'은 아래층이라, 2층 도달 후 재시도 루프의 복귀가
+    '현재 2층≠목표 1층'으로 발동해 다시 내려가던 오실레이션."""
+    h = FakeHumanizer()
+    judge = BandJudge([("2층", 100, 149), ("1층", 150, 199)])
+    graph = {
+        "1층": [{"to": "2층", "via": {"type": "ladder", "ladder_x": 40,
+                                     "y_bot": 170, "y_top": 120, "ladder_dir": "up"}}],
+        "2층": [{"to": "1층", "via": {"type": "ladder", "ladder_x": 40,
+                                     "y_bot": 170, "y_top": 120, "ladder_dir": "down"}}],
+    }
+    state = {"y": 160}   # 1층(아래층, y_bot=170 아님 → 점프잡기 경로)
+    runner = BlockRunner(humanizer=h, pos_fn=lambda: (40, state["y"]),
+                         floor_judge=judge, recovery_graph=graph)
+    grabs = {"n": 0}
+    def fake_grab(ladder_x, side, y_top, max_steps, jump_offset=1):
+        grabs["n"] += 1; state["y"] = 122   # 정점(2층) 도달
+        return False                          # confirm 실패로 재시도 유발
+    runner._jump_grab = fake_grab
+    descends = {"n": 0}
+    orig_do = runner._do_ladder
+    def spy_do(blk, max_steps=200):
+        d = getattr(blk, "ladder_dir", None) if not isinstance(blk, dict) else blk.get("ladder_dir")
+        if d == "down":
+            descends["n"] += 1
+        return orig_do(blk, max_steps)
+    runner._do_ladder = spy_do
+    ok = runner.run_block(
+        Block(type="ladder", ladder_x=40, y_top=120, y_bot=170, ladder_dir="up"),
+        max_steps=10)
+    assert ok is True
+    assert grabs["n"] == 1        # 한 번 잡아 정점 도달하면 완료(재잡기 없음)
+    assert descends["n"] == 0     # 아래로 복귀(하강) 발동 안 함
+
+
 def test_run_block_no_recovery_when_same_floor():
     h = FakeHumanizer()
     judge = BandJudge([("2층", 100, 149), ("1층", 150, 199)])

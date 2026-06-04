@@ -270,8 +270,14 @@ class BlockRunner:
         for attempt in range(1, MAX_GRAB_RETRY + 1):
             if self._stop():
                 self._h.release_all(); return False
-            # 등반 도중 몬스터에 맞아 다른 층으로 떨어졌을 수 있음 → 매 시도 현재 층 확인,
-            # 사다리 바닥층이 아니면 그래프로 먼저 복귀(엉뚱한 사다리 헛잡기 방지).
+            # 이미 위층(y_top)에 도달했으면 등반 완료 — 절대 아래로 복귀시키지 않는다.
+            # (사다리 블록의 '목표 층'은 아래층이라, 정점 도달 후 복귀가 발동해 다시 내려가던 버그)
+            _x, y0 = self._pos()
+            if y0 is not None and y0 <= block.y_top + Y_ARRIVE_TOL:
+                self._h.release_all()
+                self._log_once("✓ 사다리 등반 완료(정점 도달)")
+                return True
+            # 아래로 떨어졌으면(몬스터 피격 등) 사다리 바닥층으로 복귀 후 재등반.
             self._recover_if_needed(block, max_steps)
             x, y = self._pos()
             if x is None or y is None:
