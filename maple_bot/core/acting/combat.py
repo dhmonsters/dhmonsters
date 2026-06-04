@@ -36,6 +36,7 @@ class Combat:
         self._clock = clock or _t.monotonic
         self._atk_log_last = -1e9   # 공격 로그 폭주 방지(초당 1회만 표시)
         self._atk_last = -1e9       # 마지막 공격 시각(스킬 딜레이/쿨다운 게이팅)
+        self._cur_interval = None   # 이번 사이클의 재누름 간격(−5%~0 랜덤, 발동 시 재추첨)
 
     def check_potions(self, hp_ratio: float, mp_ratio: float, now: float) -> None:
         """HP/MP 비율을 확인하고 임계 미만이면 물약 사용(독립 처리)."""
@@ -44,27 +45,37 @@ class Combat:
 
     def attack(self, skill_key: str, mode: str = "duration", value: float = 0.0,
                now: float | None = None, interval: float = 0.0,
-               hold: float = 0.08) -> None:
+               hold: float = 0.08, hold_jitter_pct: float = 0.0) -> None:
         """공격. mode='count'면 value회. interval>0이면 스킬 딜레이로 그 간격마다만 발동
-        (재누름 간격 — 매 틱 도배 방지, 너무 빠른 연타는 게임이 무시함).
-        hold=공격키 누름 유지 시간(초). Humanizer가 ±지터를 입혀 실제 누름시간이 매번 다름."""
+        (재누름 간격 — 매 틱 도배 방지). 재누름 간격은 발동마다 −5%~0 랜덤(설정값 초과 안 함).
+        hold=공격키 누름 유지 시간(초, =목표 방수×스킬1회 시간). hold_jitter_pct>0이면
+        Humanizer가 홀드를 −그 비율~0(4자리)로 랜덤화한다."""
         if not skill_key:
             return
         if interval > 0 and now is not None:
-            if now - self._atk_last < interval:
+            cur = self._cur_interval if self._cur_interval is not None else interval
+            if now - self._atk_last < cur:
                 return                       # 스킬 딜레이 — 아직 다음 타격 전
             self._atk_last = now
+            self._cur_interval = self._jitter_down(interval)   # 다음 재누름 간격 재추첨
         if mode == "count":
             for _ in range(int(value)):
-                self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=hold))
+                self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=hold,
+                                       hold_jitter_pct=hold_jitter_pct))
         else:
-            self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=hold))
+            self._h.perform(Intent(action="key", key=skill_key, base_hold_sec=hold,
+                                   hold_jitter_pct=hold_jitter_pct))
         t = self._clock()
         if t - self._atk_log_last >= 1.0:   # 로그는 초당 1회만(가독)
             self._atk_log_last = t
             self._log(f"공격 [{skill_key}]", "공격")
 
     # ── 내부 ──────────────────────────────────────────────────────────
+    def _jitter_down(self, base: float) -> float:
+        """재누름 간격을 −5%~0(4자리)로 랜덤화. Humanizer.jitter_down 재사용(없으면 그대로)."""
+        jit = getattr(self._h, "jitter_down", None)
+        return jit(base, 0.05) if jit else base
+
     def _maybe_potion(self, rule: PotionRule, ratio: float, now: float, last: float,
                       label: str = "") -> float:
         if not rule.enabled or not rule.key:

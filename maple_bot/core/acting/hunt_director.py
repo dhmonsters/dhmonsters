@@ -1,30 +1,37 @@
 # 사냥영역 몹 밀집도로 '멈춰 사냥(DWELL) ↔ 이동(MOVING)'을 결정하는 상태기계 — 시간당 처치 최적화
 from __future__ import annotations
 
+from typing import Callable
+
 
 class HuntDirector:
     """몹 개수로 체류/이동 결정. 히스테리시스(진입≥stay, 이탈≤leave) + 최대 체류 타임아웃.
 
     1마리뿐인 자리에서 멈춰 시간을 낭비하지 않도록, 밀집(≥stay)일 때만 멈춰 처치하고
-    개수가 leave 이하로 줄거나 max_dwell_sec를 넘으면 다시 이동한다."""
+    개수가 leave 이하로 줄거나 max_dwell_sec를 넘으면 다시 이동한다.
+    jitter_fn(주입 시): 최대 체류초를 진입마다 −5%~0 등으로 랜덤화(설정값 초과 안 함)."""
 
     def __init__(self, stay_threshold: int = 3, leave_threshold: int = 1,
-                 max_dwell_sec: float = 8.0):
+                 max_dwell_sec: float = 8.0,
+                 jitter_fn: Callable[[float], float] | None = None):
         self._stay = max(1, int(stay_threshold))
         self._leave = max(0, int(leave_threshold))
         self._max_dwell = max(0.0, float(max_dwell_sec))
+        self._jitter = jitter_fn or (lambda v: v)
         self._dwelling = False
         self._dwell_start = 0.0
+        self._dwell_limit = self._max_dwell   # 이번 체류의 실제 상한(진입 시 재추첨)
 
     def update(self, count: int, now: float) -> bool:
         """현재 몹 개수로 상태 갱신 후 '지금 DWELL(멈춰 사냥)인가' 반환."""
         if self._dwelling:
-            if count <= self._leave or (now - self._dwell_start) >= self._max_dwell:
+            if count <= self._leave or (now - self._dwell_start) >= self._dwell_limit:
                 self._dwelling = False
         else:
             if count >= self._stay:
                 self._dwelling = True
                 self._dwell_start = now
+                self._dwell_limit = self._jitter(self._max_dwell)   # −5%~0 랜덤 체류 상한
         return self._dwelling
 
     def is_dwelling(self) -> bool:

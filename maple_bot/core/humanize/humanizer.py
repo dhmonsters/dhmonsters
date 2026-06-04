@@ -167,12 +167,12 @@ class Humanizer:
     # ── 내부 ──────────────────────────────────────────────────────────
     def _jitter_hold(self, base: float, p: dict, pct: float = 0.0) -> float:
         if pct > 0:
-            # 정밀 모드: [base*(1-pct), base]로만 — base(설정 홀드시간) 초과 안 함(버프/펫)
-            val = round(base * self._uniform(1 - pct, 1.0), 4)
-        else:
-            val = base * self._uniform(*p["hold_jitter"])
-            if self._rng.random() < p["sloppy"]:   # 의도적 불완전성: 가끔 미세하게 더/덜
-                val *= self._uniform(0.7, 1.3)
+            # 정밀 모드: [base*(1-pct), base]로만 — base(설정 홀드시간) 초과 안 함(버프/펫/공격).
+            # 호출자가 의도한 값이라 상한 클램프 없음(다중 타격 홀드는 1.2s를 넘을 수 있음).
+            return max(_HOLD_MIN, round(base * self._uniform(1 - pct, 1.0), 4))
+        val = base * self._uniform(*p["hold_jitter"])
+        if self._rng.random() < p["sloppy"]:   # 의도적 불완전성: 가끔 미세하게 더/덜
+            val *= self._uniform(0.7, 1.3)
         return max(_HOLD_MIN, min(_HOLD_MAX, val))
 
     def _uniform(self, lo: float, hi: float) -> float:

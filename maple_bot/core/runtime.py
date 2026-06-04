@@ -64,7 +64,9 @@ class RuntimeConfig:
     pet_interval: float = 600.0
     pet_count: int = 1
     attack_interval: float = 0.4   # 공격키 재누름 최소 간격(초) — 매 틱 도배 방지(스킬 딜레이)
-    attack_hold_sec: float = 0.08  # 공격키 누름 유지 시간(초) — Humanizer가 ±지터 적용
+    # 홀드 = 목표 방수 × 스킬1회 시간 (몹이 몇 방에 죽는지에 맞춰 그만큼 길게 누름)
+    hits_to_kill: int = 1          # 몹 처치에 필요한 타격 수
+    skill_cast_sec: float = 0.6    # 스킬 1회 시전 시간(초) — 1방 나가는 시간
     # 밀집 사냥(시간당 처치 최적화): 사냥영역 몹 개수로 멈춰사냥↔이동 결정
     hunt_stay_threshold: int = 3    # 이 마리수 이상이면 멈춰 사냥(밀집)
     hunt_leave_threshold: int = 1   # 이 마리수 이하로 줄면 이동(희소)
@@ -181,7 +183,8 @@ class BotRuntime:
         from core.acting.hunt_director import HuntDirector
         self.hunt_director = HuntDirector(
             config.hunt_stay_threshold, config.hunt_leave_threshold,
-            config.hunt_max_dwell_sec)
+            config.hunt_max_dwell_sec,
+            jitter_fn=lambda v: self.humanizer.jitter_down(v, 0.05))  # 체류초 −5%~0 랜덤
         self._area_count = 0
         self._area_count_ts = -1e9
         self.block_runner = BlockRunner(
@@ -325,7 +328,7 @@ class BotRuntime:
                 if dwelling if density_on else self._monster_in_range():
                     self.combat.attack(self._cfg.attack_key, mode="duration",
                                        now=now, interval=self._cfg.attack_interval,
-                                       hold=self._cfg.attack_hold_sec)
+                                       hold=self._attack_hold(), hold_jitter_pct=0.05)
             return
 
         # 공격할지 판정: 밀집 사용 시 dwelling, 아니면 image=공격박스/key=항상
@@ -343,7 +346,7 @@ class BotRuntime:
             self.humanizer.release_dir()   # 제자리 공격: 유지 중인 이동키 해제
             self.combat.attack(self._cfg.attack_key, mode="duration",
                                now=now, interval=self._cfg.attack_interval,
-                               hold=self._cfg.attack_hold_sec)
+                               hold=self._attack_hold(), hold_jitter_pct=0.05)
         else:
             # 순찰: 현재 위치로 방향 결정 → 목표 경계로 이동(hold_dir로 키 유지)
             if self.patrol is not None:
@@ -361,6 +364,10 @@ class BotRuntime:
         self.buffs.tick(now)
         self.pet.tick(now)
         self.pickup.tick(now)
+
+    def _attack_hold(self) -> float:
+        """공격키 홀드 시간(초) = 목표 방수 × 스킬1회 시간. −5% 랜덤은 Humanizer가 적용."""
+        return max(1, int(self._cfg.hits_to_kill)) * float(self._cfg.skill_cast_sec)
 
     def _check_potions(self, now: float) -> None:
         """HP/MP 비율을 읽어 임계 미만이면 물약 사용(Combat.check_potions).
