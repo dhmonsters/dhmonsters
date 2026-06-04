@@ -3,7 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication
-from core_ui.widgets import CheckField, TextField, IntField, ComboField, FloatField
+from core_ui.widgets import CheckField, TextField, IntField, ComboField, FloatField, SliderField
 
 
 @pytest.fixture(scope="module")
@@ -71,6 +71,28 @@ def test_combo_field_roundtrip(app):
     assert f.widget.currentText() == "key"
     f.widget.setCurrentText("coord")
     assert cfg.get("hunt_mode") == "coord"
+
+
+def test_slider_label_updates_realtime(app):
+    """슬라이더 값 변경 시 숫자 라벨이 즉시 갱신 + 메모리값 반영(실시간)."""
+    cfg = FakeConfig({"attack": {"monster_accuracy": 0.9}})
+    f = SliderField("임계값", cfg, ("attack", "monster_accuracy"), default=0.9)
+    assert f._val.text() == "90%"
+    f.widget.setValue(75)                       # valueChanged
+    assert f._val.text() == "75%"               # 라벨 실시간 갱신
+    assert abs(cfg.get("attack", "monster_accuracy") - 0.75) < 1e-6  # 메모리값 반영
+
+
+def test_slider_saves_on_release(app):
+    """드래그 끝(sliderReleased)에 config 저장."""
+    cfg = FakeConfig({"minimap": {"tolerance": 30}})
+    f = SliderField("색 허용오차", cfg, ("minimap", "tolerance"),
+                    lo=0, hi=255, default=30, is_int=True)
+    cfg.saved = False
+    f.widget.setValue(50)                       # 드래그 중 변경(라벨만)
+    assert f._val.text() == "50"
+    f.widget.sliderReleased.emit()              # 드래그 끝 → 저장
+    assert cfg.saved is True
 
 
 def test_missing_key_uses_default(app):
