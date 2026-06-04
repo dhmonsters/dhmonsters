@@ -126,6 +126,11 @@ class TabMain(QWidget):
 
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
+        # append 직후엔 스크롤바 maximum이 아직 안 커져 한 줄 모자라게 멈춤 →
+        # 범위가 실제로 바뀌는 순간(rangeChanged) 맨 아래로 내려 항상 최신 로그를 따라간다.
+        self.log_view.verticalScrollBar().rangeChanged.connect(
+            lambda _min, _max: self.log_view.verticalScrollBar().setValue(_max)
+        )
         layout.addWidget(self.log_view, stretch=1)  # 그룹박스 내 세로 공간 모두 차지
 
         btn_clear = QPushButton("로그 지우기")
