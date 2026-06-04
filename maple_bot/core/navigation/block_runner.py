@@ -37,6 +37,7 @@ class BlockRunner:
                  jump_key: str = "alt", teleport_key: str = "space",
                  sleep_fn: Callable[[float], None] | None = None,
                  stop_fn: Callable[[], bool] | None = None,
+                 dwell_fn: Callable[[], bool] | None = None,
                  poll_sec: float = 0.05,
                  floor_judge=None, recovery_graph=None, max_recover: int = 3,
                  on_segment_enter: Callable[[Block], None] | None = None,
@@ -48,6 +49,8 @@ class BlockRunner:
         self._tele_key = teleport_key
         self._sleep = sleep_fn or time.sleep
         self._stop = stop_fn or (lambda: False)
+        # True면 이동 중 그 자리에 정지(park) — 밀집 사냥(DWELL) 동안 메인 틱이 공격하게 양보
+        self._dwell = dwell_fn or (lambda: False)
         self._poll = poll_sec
         self._judge = floor_judge
         self._graph = recovery_graph
@@ -198,6 +201,13 @@ class BlockRunner:
         best = None
         no_progress = 0
         for _ in range(max_steps):
+            # 밀집 사냥(DWELL) 중엔 이동키 떼고 제자리 정지 — 메인 틱이 공격. 해제되면 이동 재개.
+            while self._dwell() and not self._stop():
+                self._h.release_dir()
+                self._jsleep(self._poll)
+            if self._stop():
+                self._h.release_dir()
+                return False
             x, _y = self._pos()
             dist = block.target_x - x
             if abs(dist) <= TOLERANCE:

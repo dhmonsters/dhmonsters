@@ -92,6 +92,10 @@ DEFAULT_CONFIG = {
         "deadzone_ratio":      0.0,   # DeadZone 비율 (0=항상 중앙, 0.3=중앙 30% 고정 영역)
         "name_tag_threshold":  0.70,  # 이름표 템플릿 매칭 신뢰도 임계값 (0.3~1.0)
         "name_tag_y_offset":   0,     # 이름표 중앙에서 위로 이동할 픽셀 (양수=위쪽)
+        # 밀집 사냥(시간당 처치 최적화): 사냥영역 몹 개수로 멈춰사냥↔이동
+        "density_stay":        3,     # 이 마리수 이상이면 멈춰 사냥(밀집)
+        "density_leave":       1,     # 이 마리수 이하로 줄면 이동(희소)
+        "density_max_dwell_sec": 8.0, # 한 자리 최대 체류(밀집이어도 초과 시 강제 이동)
     },
     "hunt_mode": "key",   # "key" | "image" | "coordinate"
     "hunt_grounds": {
