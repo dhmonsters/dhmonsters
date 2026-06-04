@@ -95,6 +95,26 @@ def test_slider_saves_on_release(app):
     assert cfg.saved is True
 
 
+def test_slider_survives_gc_and_still_updates(app):
+    """SliderField 객체 참조를 버리고 GC해도(.row만 레이아웃에 남음) 연결이 살아 갱신된다.
+
+    회귀: bound method로 connect하면 PyQt가 약참조로 들어 GC 시 연결이 끊겨
+    드래그해도 숫자가 안 바뀌던 버그."""
+    import gc
+    from PyQt6.QtWidgets import QLabel
+    cfg = FakeConfig({"attack": {"monster_accuracy": 0.9}})
+
+    def make():
+        f = SliderField("임계값", cfg, ("attack", "monster_accuracy"), default=0.9)
+        return f.row, f.widget        # SliderField 객체는 반환 안 함 → GC 대상
+    row, slider = make()
+    gc.collect()
+    slider.setValue(75)               # 드래그 중 valueChanged 모사
+    texts = [w.text() for w in row.findChildren(QLabel)]
+    assert "75%" in texts                                  # 라벨 실시간 갱신(연결 생존)
+    assert abs(cfg.get("attack", "monster_accuracy") - 0.75) < 1e-6
+
+
 def test_missing_key_uses_default(app):
     cfg = FakeConfig({})
     f = CheckField("X", cfg, ("nope", "missing"), default=False)

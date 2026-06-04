@@ -38,10 +38,13 @@ class SliderField:
         self._val.setFixedWidth(40)
         h.addWidget(self.widget, 1)
         h.addWidget(self._val)
-        # 라벨·메모리값은 매 변경마다 실시간 갱신(가벼움), 디스크 저장은 드래그 끝에 1회만
-        # (드래그 중 매 틱 save()하면 디스크 쓰기가 UI를 막아 숫자가 안 바뀌는 것처럼 보였음).
-        self.widget.valueChanged.connect(self._changed)
-        self.widget.sliderReleased.connect(self._cfg.save)
+        # 라벨·메모리값은 매 변경마다 실시간 갱신(가벼움), 디스크 저장은 드래그 끝에 1회만.
+        # 연결은 반드시 lambda로 — bound method(self._changed)로 연결하면 PyQt6가 슬롯을
+        # 약참조로 들어, 이 객체가 GC될 때 연결이 끊겨 드래그해도 숫자가 안 바뀌었음.
+        # (다른 _Field들은 lambda를 써서 클로저가 self를 잡아 살아있다.)
+        self.row._field = self   # .row 위젯이 이 객체를 강참조로 유지(GC 방지)
+        self.widget.valueChanged.connect(lambda v: self._changed(v))
+        self.widget.sliderReleased.connect(lambda: self._cfg.save())
 
     def _changed(self, v: int) -> None:
         if self._is_int:
