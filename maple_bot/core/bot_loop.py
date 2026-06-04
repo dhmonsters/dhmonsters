@@ -1524,6 +1524,22 @@ class BotLoop:
                     if self._safety_pending is None and self._enable_transparent_shape:
                         ts_cfg = self._config.get("settings1", "transparent_shape") or {}
                         if ts_cfg.get("enabled"):
+                            # YOLO lazy-init: 감지 스레드에서 먼저 초기화해
+                            # _check_transparent_shape 재확인 시 즉시 사용 가능하게 함
+                            if self._transparent_yolo is None:
+                                import os as _os
+                                _yolo_path = "models/lie_detector.pt"
+                                if _os.path.exists(_yolo_path):
+                                    try:
+                                        from core.yolo_detector import YoloDetector
+                                        self._transparent_yolo = YoloDetector(
+                                            _yolo_path,
+                                            confidence=float(ts_cfg.get("yolo_confidence", 0.25)),
+                                            iou=0.45, max_det=5,
+                                        )
+                                        logger.info("투명 도형 YOLO 로드: %s", _yolo_path)
+                                    except Exception as _e:
+                                        logger.warning("투명 도형 YOLO 로드 실패: %s", _e)
                             detected = False
                             # YOLO 감지
                             if self._transparent_yolo and self._transparent_yolo.is_loaded:
