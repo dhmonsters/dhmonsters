@@ -177,12 +177,15 @@ class TabMain(QWidget):
         # 봇 시작 전 모든 탭 설정을 config에 반영
         if self._pre_start_cb:
             self._pre_start_cb()
+        # transparent_shape는 settings1 탭 "투명 도형 찾기 활성화" 체크박스 값을 직접 읽음
+        _ts_enabled = bool((self.config.get("settings1", "transparent_shape") or {}).get("enabled", True))
         self._bot.set_modules(
             attack=self.chk_attack.isChecked(),
             move=self.chk_move.isChecked(),
             potion=self.chk_potion.isChecked(),
             lie_notify=self.chk_lie_notify.isChecked(),
             lie_solve=self.chk_lie_solve.isChecked(),
+            transparent_shape=_ts_enabled,
         )
         self._bot.start()
         self.btn_start.setEnabled(False)
