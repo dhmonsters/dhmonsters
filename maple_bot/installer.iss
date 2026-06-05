@@ -2,7 +2,7 @@
 ; ISCC.exe installer.iss 로 빌드
 
 #define AppName    "DHMONSTERS"
-#define AppVersion "2.1.4"
+#define AppVersion "2.1.5"
 #define AppExe     "dhmonsters.exe"
 #define AppPublisher "dhmonsters"
 #define SourceDir  "dist\dhmonsters"

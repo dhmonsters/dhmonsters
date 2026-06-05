@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo  DHMONSTERS v2.1.4 Build (PyArmor + PyInstaller)
+echo  DHMONSTERS v2.1.5 Build (PyArmor + PyInstaller)
 echo ========================================
 
 py -m pip show pyarmor >nul 2>&1
