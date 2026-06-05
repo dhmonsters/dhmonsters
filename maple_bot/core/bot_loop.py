@@ -1688,9 +1688,10 @@ class BotLoop:
         return self._screen.capture()
 
     def _transparent_move_cursor(self, cx: int, cy: int) -> None:
-        """SelfTransparentEngine용 커서 이동. InputController.click 재사용."""
+        """SelfTransparentEngine용 커서 이동. planet_live_solver와 동일하게 SetCursorPos 사용."""
         try:
-            self._input.click(cx, cy)
+            import win32api
+            win32api.SetCursorPos((int(cx), int(cy)))
         except Exception:
             pass
 

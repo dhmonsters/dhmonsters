@@ -524,10 +524,12 @@ class BotRuntime:
             return None
 
     def _move_cursor(self, cx: int, cy: int) -> None:
-        """거탐 도형 추적용 커서 이동. 백엔드에 move_to 있으면 사용(실기 Interception)."""
-        bk = self.humanizer._backend
-        if hasattr(bk, "move_to"):
-            bk.move_to(cx, cy)
+        """거탐 도형 추적용 커서 이동. planet_live_solver와 동일하게 SetCursorPos 사용."""
+        try:
+            import win32api
+            win32api.SetCursorPos((int(cx), int(cy)))
+        except Exception:
+            pass
 
     def _on_safety_pause(self) -> None:
         """안전 진입 시 유지 중인 이동 방향키 해제(행동 정지)."""
