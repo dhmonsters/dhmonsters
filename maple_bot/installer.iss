@@ -38,6 +38,8 @@ Name: "desktopicon"; Description: "바탕화면 바로가기 만들기"; GroupDe
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; version.txt를 루트에서 직접 포함 — dist 빌드 누락 시에도 항상 정확한 버전이 설치됨
+Source: "version.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
