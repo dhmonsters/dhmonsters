@@ -187,7 +187,33 @@ class TabSettings1(QWidget):
         self.chk_transparent_enabled.toggled.connect(self._save_transparent_shape)
         layout.addWidget(self.chk_transparent_enabled)
 
+        # Planet Solver v1.0.5 직접 실행 버튼
+        from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QLabel
+        row = QHBoxLayout()
+        btn_open = QPushButton("🪐 Planet Solver v1.0.5 열기")
+        btn_open.setToolTip("_planet_solver_extract/Planet_solver_v1.0.5.exe 실행")
+        btn_open.clicked.connect(self._open_planet_solver)
+        row.addWidget(btn_open)
+        row.addStretch()
+        layout.addLayout(row)
+
         return group
+
+    def _open_planet_solver(self):
+        """Planet_solver_v1.0.5.exe 를 별도 창으로 실행한다."""
+        import os, subprocess
+        _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        exe = os.path.join(_here, "_planet_solver_extract", "Planet_solver_v1.0.5.exe")
+        if not os.path.exists(exe):
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "파일 없음",
+                                f"Planet Solver 실행 파일을 찾을 수 없습니다.\n{exe}")
+            return
+        try:
+            subprocess.Popen([exe], cwd=os.path.dirname(exe))
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "실행 오류", str(e))
 
     def _save_transparent_shape(self):
         self.config.set("settings1", "transparent_shape", "enabled",
