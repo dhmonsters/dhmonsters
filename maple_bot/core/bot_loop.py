@@ -1474,6 +1474,8 @@ class BotLoop:
         except Exception:
             pass
 
+        _ts_consec = 0   # 투명 도형 M1 연속 감지 횟수 (오탐 방지용)
+
         # ── 감지 루프 시작 시 활성화 상태 보고 ─────────────────────────
         self._status(
             f"[거탐] 감지 스레드 시작 — "
@@ -1543,7 +1545,7 @@ class BotLoop:
                                     logger.info("투명 도형 M1 앙상블 로드 완료")
                                 except Exception as _e:
                                     logger.warning("투명 도형 M1 로드 실패: %s", _e)
-                            # board ROI 캡처 → M1 탐지
+                            # board ROI 캡처 → M1 탐지 (연속 2프레임 이상 + score≥0.4)
                             _roi_cfg = ts_cfg.get("board_roi")
                             if self._transparent_m1 is not None and _roi_cfg:
                                 try:
@@ -1555,10 +1557,16 @@ class BotLoop:
                                         {"left": _bx, "top": _by, "width": _bw, "height": _bh}
                                     )
                                     if _board is not None and len(
-                                        self._transparent_m1.detect(_board, score_thr=0.2)
+                                        self._transparent_m1.detect(_board, score_thr=0.4)
                                     ):
-                                        self._safety_pending = "transparent"
+                                        _ts_consec += 1
+                                        if _ts_consec >= 2:   # 연속 2회 감지 시 처리
+                                            _ts_consec = 0
+                                            self._safety_pending = "transparent"
+                                    else:
+                                        _ts_consec = 0        # 1프레임이라도 끊기면 리셋
                                 except Exception as _e:
+                                    _ts_consec = 0
                                     logger.warning("투명 도형 M1 감지 오류: %s", _e)
 
             except Exception as exc:
@@ -1681,7 +1689,7 @@ class BotLoop:
                     lost   = 0
                 else:
                     lost += 1
-                    if lost >= LOST_DONE and moved > 0:
+                    if lost >= LOST_DONE and moved >= 5:   # 최소 5프레임 추적 후 완료
                         self._lie_last_solved = time.time()
                         self._status("✅ 투명 도형 찾기 해제 완료, 사냥 재개")
                         return True
