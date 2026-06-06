@@ -1534,7 +1534,8 @@ class BotLoop:
                                 self._safety_pending = "lie"
 
                     # ── 투명 도형 찾기 감지 (M1 ncnn, planet v2 방식) ────
-                    if self._safety_pending is None and self._enable_transparent_shape:
+                    # _enable_lie_solve = 메인 탭 "거탐 해제" 체크박스 — 해제 시 투명도형도 동작하지 않음
+                    if self._safety_pending is None and self._enable_transparent_shape and self._enable_lie_solve:
                         ts_cfg = self._config.get("settings1", "transparent_shape") or {}
                         if ts_cfg.get("enabled"):
                             # M1 lazy-init
@@ -1611,6 +1612,9 @@ class BotLoop:
         """
         cfg = self._config.get("settings1", "transparent_shape") or {}
         if not cfg.get("enabled"):
+            return False
+        # 메인 탭 "거탐 해제" 체크박스가 꺼져 있으면 해제 시도 안 함
+        if not self._enable_lie_solve:
             return False
 
         # ── 알림 ────────────────────────────────────────────────────────
