@@ -102,9 +102,9 @@ class BotLoop:
         self._enable_lie_notify = True   # 거탐 알림 (경보음 + 텔레그램)
         self._enable_lie_solve  = True   # 거탐 해제 (퍼즐 자동 풀기)
         self._enable_transparent_shape = True  # 투명 도형 찾기 자동 해제
-        self._transparent_game  = None   # lazy init: TransparentShapeGame (구형 경로 폴백)
-        self._transparent_yolo  = None   # lazy init: YoloDetector (감지 전용)
-        self._transparent_engine = None  # lazy init: SelfTransparentEngine (ncnn, 신형 해제)
+        self._transparent_game  = None   # lazy init: TransparentShapeGame (거탐 해제용 구형 경로)
+        self._transparent_m1    = None   # lazy init: M1Ensemble (planet v2 탐지·추적)
+        self._transparent_m2    = None   # lazy init: HyungYolo M2 (도형 분류 로그용)
         self._safety_pending: str | None = None  # 백그라운드 감지 결과: "lie" | "transparent"
         self._lie_solving   = False              # True인 동안 감지 루프 억제 (run_follow_loop 실행 중)
         self._lie_last_solved: float = 0.0      # 투명도형 완료 시각 (재감지 쿨다운 기준)
@@ -1463,6 +1463,17 @@ class BotLoop:
 
         _lie_yolo_init_done = False   # 최초 로드 시도 결과를 UI 로그에 한 번만 출력
 
+        # 모니터 절대 좌표 캐시 (board ROI M1 감지용 — 루프마다 mss() 생성 방지)
+        _mon_left, _mon_top, _mon_width, _mon_height = 0, 0, 1920, 1080
+        try:
+            import mss as _mss_cache
+            with _mss_cache.mss() as _sct:
+                _m = _sct.monitors[1]
+                _mon_left, _mon_top = _m["left"], _m["top"]
+                _mon_width, _mon_height = _m["width"], _m["height"]
+        except Exception:
+            pass
+
         # ── 감지 루프 시작 시 활성화 상태 보고 ─────────────────────────
         self._status(
             f"[거탐] 감지 스레드 시작 — "
@@ -1520,41 +1531,35 @@ class BotLoop:
                                 self._status(f"[거탐] ⚠ 투명도형 타이틀 템플릿 감지! score={_ts:.2f}")
                                 self._safety_pending = "lie"
 
-                    # ── 투명 도형 찾기 감지 ──────────────────────────────
+                    # ── 투명 도형 찾기 감지 (M1 ncnn, planet v2 방식) ────
                     if self._safety_pending is None and self._enable_transparent_shape:
                         ts_cfg = self._config.get("settings1", "transparent_shape") or {}
                         if ts_cfg.get("enabled"):
-                            # YOLO lazy-init: 감지 스레드에서 먼저 초기화해
-                            # _check_transparent_shape 재확인 시 즉시 사용 가능하게 함
-                            if self._transparent_yolo is None:
-                                import os as _os
-                                _yolo_path = "models/lie_detector.pt"
-                                if _os.path.exists(_yolo_path):
-                                    try:
-                                        from core.yolo_detector import YoloDetector
-                                        self._transparent_yolo = YoloDetector(
-                                            _yolo_path,
-                                            confidence=float(ts_cfg.get("yolo_confidence", 0.25)),
-                                            iou=0.45, max_det=5,
-                                        )
-                                        logger.info("투명 도형 YOLO 로드: %s", _yolo_path)
-                                    except Exception as _e:
-                                        logger.warning("투명 도형 YOLO 로드 실패: %s", _e)
-                            detected = False
-                            # YOLO 감지
-                            if self._transparent_yolo and self._transparent_yolo.is_loaded:
-                                det = self._transparent_yolo.detect(_shot_roi)
-                                if det["monsters"]:
-                                    detected = True
-                            # 템플릿 매칭 폴백
-                            if not detected:
-                                score = self._screen.find_template_score(
-                                    _shot_roi, TITLE_TEMPLATE
-                                )
-                                if score >= TITLE_THRESHOLD:
-                                    detected = True
-                            if detected:
-                                self._safety_pending = "transparent"
+                            # M1 lazy-init
+                            if self._transparent_m1 is None:
+                                try:
+                                    from core.minigame.transparent_yolo import load_default
+                                    self._transparent_m1 = load_default("models/transparent")
+                                    logger.info("투명 도형 M1 앙상블 로드 완료")
+                                except Exception as _e:
+                                    logger.warning("투명 도형 M1 로드 실패: %s", _e)
+                            # board ROI 캡처 → M1 탐지
+                            _roi_cfg = ts_cfg.get("board_roi")
+                            if self._transparent_m1 is not None and _roi_cfg:
+                                try:
+                                    _bx = _mon_left + int(_roi_cfg["x_ratio"] * _mon_width)
+                                    _by = _mon_top  + int(_roi_cfg["y_ratio"] * _mon_height)
+                                    _bw = max(1, int(_roi_cfg["w_ratio"] * _mon_width))
+                                    _bh = max(1, int(_roi_cfg["h_ratio"] * _mon_height))
+                                    _board = self._screen.capture(
+                                        {"left": _bx, "top": _by, "width": _bw, "height": _bh}
+                                    )
+                                    if _board is not None and len(
+                                        self._transparent_m1.detect(_board, score_thr=0.2)
+                                    ):
+                                        self._safety_pending = "transparent"
+                                except Exception as _e:
+                                    logger.warning("투명 도형 M1 감지 오류: %s", _e)
 
             except Exception as exc:
                 logger.warning("_safety_detect_loop 오류: %s", exc)
@@ -1591,74 +1596,99 @@ class BotLoop:
                 _t.Thread(target=_send_tg, daemon=True).start()
 
     def _check_transparent_shape(self, screenshot) -> bool:
-        """투명 도형 찾기 미니게임 감지 시 SelfTransparentEngine(ncnn)으로 해제한다.
+        """투명 도형 찾기 — planet v2와 동일한 M1+M2 통합 루프로 해제.
 
-        run_integrated(BotRuntime) 경로와 동일한 엔진을 사용.
-        감지: YOLO(models/lie_detector.pt) → 없으면 템플릿 매칭 폴백.
-        해제: SelfTransparentEngine — models/transparent/ ncnn 모델로 도형 추적 + 커서 이동.
+        감지(M1 detect) + 추적(SetCursorPos) + 분류(M2 classify_crop) 을
+        planet_live_solver.py 와 동일한 단일 루프로 처리한다.
         """
         cfg = self._config.get("settings1", "transparent_shape") or {}
         if not cfg.get("enabled"):
             return False
 
-        # ── YOLO 감지 (팝업 출현 여부 확인) ────────────────────────────
-        if self._transparent_yolo is None:
-            import os as _os
-            _yolo_path = "models/lie_detector.pt"
-            if _os.path.exists(_yolo_path):
-                try:
-                    from core.yolo_detector import YoloDetector
-                    self._transparent_yolo = YoloDetector(
-                        _yolo_path,
-                        confidence=float(cfg.get("yolo_confidence", 0.25)),
-                        iou=0.45, max_det=5,
-                    )
-                    logger.info("투명 도형 YOLO 로드: %s", _yolo_path)
-                except Exception as e:
-                    logger.warning("투명 도형 YOLO 로드 실패: %s", e)
-
-        if self._transparent_yolo and self._transparent_yolo.is_loaded:
-            det = self._transparent_yolo.detect(screenshot)
-            if not det["monsters"]:
-                return False  # 팝업 없음
-        else:
-            return False  # YOLO 미로드 — 감지 불가
-
-        # ── 감지 확정 ───────────────────────────────────────────────────
+        # ── 알림 ────────────────────────────────────────────────────────
         import threading as _t
         _t.Thread(target=self._fire_lie_alarm, daemon=True).start()
-        self._status("투명 도형 찾기 감지! ncnn 엔진으로 해제 시작...")
+        self._status("투명 도형 찾기 감지! planet v2 M1+M2 엔진으로 해제 시작...")
 
-        # ── SelfTransparentEngine lazy init ────────────────────────────
-        if self._transparent_engine is None:
+        # ── M1 / M2 lazy init ───────────────────────────────────────────
+        if self._transparent_m1 is None:
             try:
-                from core.minigame.self_transparent_engine import SelfTransparentEngine
-                self._transparent_engine = SelfTransparentEngine(
-                    models_dir="models/transparent",
-                    board_capture_fn=self._transparent_capture_board,
-                    move_cursor_fn=self._transparent_move_cursor,
-                )
-                logger.info("SelfTransparentEngine 로드 완료")
+                from core.minigame.transparent_yolo import load_default
+                self._transparent_m1 = load_default("models/transparent")
             except Exception as e:
-                logger.warning("SelfTransparentEngine 로드 실패: %s", e)
-                self._transparent_engine = None
+                self._status(f"M1 로드 실패: {e}")
+                return True
+        if self._transparent_m2 is None:
+            try:
+                from core.minigame.transparent_yolo import load_m2
+                self._transparent_m2 = load_m2("models/transparent")
+            except Exception as e:
+                logger.warning("M2 로드 실패 (분류 로그 생략): %s", e)
 
-        if self._transparent_engine is None:
-            self._status("투명 도형 엔진 로드 실패 — 수동 해제 필요")
-            return True   # 감지는 됐으므로 True(사냥 일시정지 유지)
+        # ── board ROI 절대 좌표 계산 ────────────────────────────────────
+        roi_cfg = cfg.get("board_roi")
+        if not roi_cfg:
+            self._status("⚠ board_roi 미설정 — 설정1 탭에서 게임판 영역을 먼저 설정하세요")
+            return True
+        try:
+            import mss as _mss
+            with _mss.mss() as _sct:
+                _mon = _sct.monitors[1]
+            board_left = _mon["left"] + int(roi_cfg["x_ratio"] * _mon["width"])
+            board_top  = _mon["top"]  + int(roi_cfg["y_ratio"] * _mon["height"])
+            board_w    = max(1, int(roi_cfg["w_ratio"] * _mon["width"]))
+            board_h    = max(1, int(roi_cfg["h_ratio"] * _mon["height"]))
+        except Exception as e:
+            self._status(f"board ROI 계산 오류: {e}")
+            return True
 
-        # ── 풀이 실행 ────────────────────────────────────────────────────
+        _region = {"left": board_left, "top": board_top, "width": board_w, "height": board_h}
+        _SHAPE  = {0: "cls0", 1: "cls1", 2: "cls2", 3: "cls3"}
+
         floor_cfg = self._config.get("floor_hunt") or {}
         if floor_cfg.get("enabled"):
             self._floor_hunter.pause()
         try:
             self._input.focus_game_window()
-            result = self._transparent_engine.solve(screenshot=None)
-            if result and result.success:
-                self._status("✅ 투명 도형 찾기 해제 완료, 사냥 재개")
-            else:
-                note = getattr(result, "note", "") if result else "알 수 없음"
-                self._status(f"⚠ 투명 도형 해제 실패: {note}")
+            import win32api as _w32
+            start = time.time()
+            lost  = 0
+            moved = 0
+            LOST_DONE = 8
+
+            while time.time() - start < 30.0:
+                board = self._screen.capture(_region)
+                if board is None:
+                    break
+                boxes = self._transparent_m1.detect(board, score_thr=0.2)
+                if len(boxes):
+                    best = boxes[boxes[:, 4].argmax()]
+                    x1, y1, x2, y2, sc = best[0], best[1], best[2], best[3], best[4]
+                    cx = int((x1 + x2) / 2)
+                    cy = int((y1 + y2) / 2)
+                    _w32.SetCursorPos((board_left + cx, board_top + cy))
+                    # M2 분류 — 첫 감지 시 한 번만 로그
+                    if moved == 0 and self._transparent_m2 is not None:
+                        try:
+                            cls_id   = self._transparent_m2.classify_crop(board, score_thr=0.0)
+                            cls_name = _SHAPE.get(cls_id, "?")
+                            self._status(
+                                f"투명도형: {cls_name} score={sc:.2f} → 추적 시작"
+                            )
+                        except Exception:
+                            pass
+                    moved += 1
+                    lost   = 0
+                else:
+                    lost += 1
+                    if lost >= LOST_DONE and moved > 0:
+                        self._lie_last_solved = time.time()
+                        self._status("✅ 투명 도형 찾기 해제 완료, 사냥 재개")
+                        return True
+                time.sleep(0.033)
+
+            _note = f"추적 {moved}회" + (" 완료" if moved > 0 else " — 도형 미감지")
+            self._status(f"투명 도형 처리 종료: {_note}")
         except Exception as e:
             logger.warning("투명 도형 풀이 오류: %s", e)
             self._status(f"투명 도형 오류: {e}")
@@ -1666,34 +1696,6 @@ class BotLoop:
             if floor_cfg.get("enabled"):
                 self._floor_hunter.resume()
         return True
-
-    def _transparent_capture_board(self):
-        """SelfTransparentEngine용 게임판 캡처. board_roi 설정값 사용(runtime 동일 방식)."""
-        cfg = self._config.get("settings1", "transparent_shape") or {}
-        roi_cfg = cfg.get("board_roi")
-        if roi_cfg:
-            try:
-                import mss as _mss
-                with _mss.mss() as sct:
-                    mon = sct.monitors[1]
-                region = {
-                    "left":   mon["left"] + int(roi_cfg["x_ratio"] * mon["width"]),
-                    "top":    mon["top"]  + int(roi_cfg["y_ratio"] * mon["height"]),
-                    "width":  max(1, int(roi_cfg["w_ratio"] * mon["width"])),
-                    "height": max(1, int(roi_cfg["h_ratio"] * mon["height"])),
-                }
-                return self._screen.capture(region)
-            except Exception:
-                pass
-        return self._screen.capture()
-
-    def _transparent_move_cursor(self, cx: int, cy: int) -> None:
-        """SelfTransparentEngine용 커서 이동. planet_live_solver와 동일하게 SetCursorPos 사용."""
-        try:
-            import win32api
-            win32api.SetCursorPos((int(cx), int(cy)))
-        except Exception:
-            pass
 
     def _check_lie_detector(self, screenshot) -> bool:
         cfg = self._config.get("settings1", "lie_detector") or {}
