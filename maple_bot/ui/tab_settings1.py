@@ -200,8 +200,13 @@ class TabSettings1(QWidget):
         return group
 
     def _open_planet_solver(self):
-        """Planet_solver_v1.0.5.exe 를 별도 창으로 실행한다."""
-        import os, subprocess
+        """Planet_solver_v1.0.5.exe 를 실행하고 F1을 자동으로 눌러 즉시 시작 상태로 만든다.
+
+        Planet Solver는 StatusOverlay(작은 오버레이 창)만 있고
+        F1로 투명도형 추적을 시작/중지한다.
+        exe 실행 후 3초 대기 → F1 자동 입력 → 바로 '▶ 시작됨' 상태.
+        """
+        import os, subprocess, threading, time
         _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         exe = os.path.join(_here, "_planet_solver_extract", "Planet_solver_v1.0.5.exe")
         if not os.path.exists(exe):
@@ -214,6 +219,21 @@ class TabSettings1(QWidget):
         except Exception as e:
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "실행 오류", str(e))
+            return
+
+        # 백그라운드 스레드: 초기화 완료까지 대기 후 F1 자동 입력
+        def _auto_start():
+            time.sleep(3.0)   # 서버 인증 + 모델 로드 대기
+            try:
+                import win32api, win32con
+                # F1 = VK 0x70
+                win32api.keybd_event(0x70, 0, 0, 0)          # key down
+                time.sleep(0.05)
+                win32api.keybd_event(0x70, 0, win32con.KEYEVENTF_KEYUP, 0)  # key up
+            except Exception:
+                pass
+
+        threading.Thread(target=_auto_start, daemon=True).start()
 
     def _save_transparent_shape(self):
         self.config.set("settings1", "transparent_shape", "enabled",
