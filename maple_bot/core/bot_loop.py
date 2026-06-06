@@ -1658,23 +1658,24 @@ class BotLoop:
             self._floor_hunter.pause()
         try:
             self._input.focus_game_window()
-            import win32api as _w32
-            start = time.time()
-            lost  = 0
-            moved = 0
-            LOST_DONE = 8
+            start      = time.time()
+            lost       = 0
+            moved      = 0
+            LOST_DONE  = 8
+            last_click = 0.0   # 클릭 쓰로틀 (0.25s 간격)
 
             while time.time() - start < 30.0:
                 board = self._screen.capture(_region)
                 if board is None:
                     break
-                boxes = self._transparent_m1.detect(board, score_thr=0.2)
+                boxes = self._transparent_m1.detect(board, score_thr=0.4)
                 if len(boxes):
                     best = boxes[boxes[:, 4].argmax()]
                     x1, y1, x2, y2, sc = best[0], best[1], best[2], best[3], best[4]
                     cx = int((x1 + x2) / 2)
                     cy = int((y1 + y2) / 2)
-                    _w32.SetCursorPos((board_left + cx, board_top + cy))
+                    abs_x = board_left + cx
+                    abs_y = board_top  + cy
                     # M2 분류 — 첫 감지 시 한 번만 로그
                     if moved == 0 and self._transparent_m2 is not None:
                         try:
@@ -1685,6 +1686,11 @@ class BotLoop:
                             )
                         except Exception:
                             pass
+                    # 커서 이동 + 클릭 (0.25s 쓰로틀)
+                    now = time.time()
+                    if now - last_click >= 0.25:
+                        self._input.click(abs_x, abs_y)
+                        last_click = now
                     moved += 1
                     lost   = 0
                 else:

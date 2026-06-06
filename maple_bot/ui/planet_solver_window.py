@@ -15,6 +15,7 @@ import numpy as np
 import cv2
 import mss
 import win32api
+import ctypes
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
@@ -87,11 +88,45 @@ class _SolverThread(threading.Thread):
         board_left, board_top = origin
         self._emit.status.emit("running")
 
-        lost  = 0
-        moved = 0
-        LOST_DONE = 8
-        MIN_TRACK = 5
+        lost       = 0
+        moved      = 0
+        LOST_DONE  = 8
+        MIN_TRACK  = 5
         first_detect = True
+        last_click = 0.0   # 클릭 쓰로틀
+
+        # SendInput용 상수
+        INPUT_MOUSE       = 0
+        MOUSEEVENTF_MOVE  = 0x0001
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP   = 0x0004
+        MOUSEEVENTF_ABSOLUTE = 0x8000
+
+        class _MOUSEINPUT(ctypes.Structure):
+            _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                        ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+                        ("time", ctypes.c_ulong), ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+
+        class _INPUT_UNION(ctypes.Union):
+            _fields_ = [("mi", _MOUSEINPUT)]
+
+        class _INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong), ("_input", _INPUT_UNION)]
+
+        def _do_click(ax: int, ay: int) -> None:
+            """SendInput으로 절대 좌표 좌클릭."""
+            sm_cx = ctypes.windll.user32.GetSystemMetrics(0)
+            sm_cy = ctypes.windll.user32.GetSystemMetrics(1)
+            nx = int(ax * 65535 / sm_cx)
+            ny = int(ay * 65535 / sm_cy)
+            inputs = (_INPUT * 2)()
+            for i, flag in enumerate([MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP]):
+                inputs[i].type = INPUT_MOUSE
+                inputs[i]._input.mi = _MOUSEINPUT(
+                    dx=nx, dy=ny,
+                    dwFlags=MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | flag,
+                )
+            ctypes.windll.user32.SendInput(2, inputs, ctypes.sizeof(_INPUT))
 
         with mss.mss() as sct:
             while not self._stop_ev.is_set():
@@ -103,7 +138,8 @@ class _SolverThread(threading.Thread):
                         best = boxes[boxes[:, 4].argmax()]
                         cx = int((best[0] + best[2]) / 2)
                         cy = int((best[1] + best[3]) / 2)
-                        win32api.SetCursorPos((board_left + cx, board_top + cy))
+                        abs_x = board_left + cx
+                        abs_y = board_top  + cy
                         # 첫 감지 시 소리 알람 + M2 분류
                         if first_detect:
                             first_detect = False
@@ -113,6 +149,11 @@ class _SolverThread(threading.Thread):
                                 _ = self.SHAPE.get(cls_id, "?")
                             except Exception:
                                 pass
+                        # 클릭 (0.25s 쓰로틀)
+                        now = time.time()
+                        if now - last_click >= 0.25:
+                            _do_click(abs_x, abs_y)
+                            last_click = now
                         moved += 1
                         lost   = 0
                     else:
