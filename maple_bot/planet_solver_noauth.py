@@ -36,11 +36,13 @@ MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
 # ── 팝업 감지 / 보드 ROI 상대 좌표 ─────────────────────────────────────────
-# 참조: 00412.PNG (2560×1440 모니터, 게임 클라이언트 1920×1080 기준)
-HDR_X1_R, HDR_X2_R = 0.252, 0.748
+# 참조: 00412.PNG / popup_range.png (게임 클라이언트 1920×1080 기준)
+HDR_X1_R, HDR_X2_R = 0.252, 0.748   # 헤더 감지 (팝업 존재 여부 판단)
 HDR_Y1_R, HDR_Y2_R = 0.216, 0.292
-BRD_X1_R, BRD_X2_R = 0.254, 0.748
+BRD_X1_R, BRD_X2_R = 0.254, 0.748   # 빨간 영역: 미리보기 크롭 범위
 BRD_Y1_R, BRD_Y2_R = 0.292, 0.880
+DET_X1_R, DET_X2_R = 0.270, 0.732   # 노란 영역: 투명도형 실제 감지 구역
+DET_Y1_R, DET_Y2_R = 0.310, 0.862
 
 _POPUP_TEMPLATES: list = []
 for _tname in ("minigame.png", "xz.bmp", "xz1.bmp", "xz2.bmp", "xz4.bmp"):
@@ -249,28 +251,32 @@ class _MacroThread(threading.Thread):
                     if board_mon is None:
                         preview_cnt += 1
                         if preview_cnt % 5 == 0:
-                            # 팝업 미감지 — 클라이언트 프레임에 헤더 ROI(주황)만 표시
-                            vis = client.copy()
-                            _hx1 = int(bw * HDR_X1_R); _hy1 = int(bh * HDR_Y1_R)
-                            _hx2 = int(bw * HDR_X2_R); _hy2 = int(bh * HDR_Y2_R)
-                            cv2.rectangle(vis, (_hx1, _hy1), (_hx2, _hy2),
-                                          (0, 140, 255), 2)
-                            cv2.putText(vis, "HDR (팝업 대기)",
-                                        (_hx1 + 4, _hy1 + 14),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.4,
-                                        (0, 140, 255), 1, cv2.LINE_AA)
-                            self._sig.preview.emit(vis)
+                            self._sig.preview.emit(None)
                         time.sleep(0.033)
                         continue
+
+                    # 빨간 영역: 보드 전체 크롭 (미리보기용)
                     board = cv2.cvtColor(np.array(sct.grab(board_mon)), cv2.COLOR_BGRA2BGR)
-                    boxes = m1.detect(board, self.IMGSZ, self.SCORE)
+
+                    # 노란 영역: 실제 감지에 쓸 내부 구역
+                    det_mon = {
+                        "left":   bx + int(bw * DET_X1_R),
+                        "top":    by + int(bh * DET_Y1_R),
+                        "width":  int(bw * (DET_X2_R - DET_X1_R)),
+                        "height": int(bh * (DET_Y2_R - DET_Y1_R)),
+                    }
+                    det = cv2.cvtColor(np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
+                    boxes = m1.detect(det, self.IMGSZ, self.SCORE)
+
+                    # board 좌표계 오프셋 (det → board 변환용)
+                    _det_ox = det_mon["left"] - board_mon["left"]
+                    _det_oy = det_mon["top"]  - board_mon["top"]
 
                     if len(boxes):
                         best = boxes[boxes[:, 4].argmax()]
-                        brd_cx = int((best[0] + best[2]) / 2)
-                        brd_cy = int((best[1] + best[3]) / 2)
-                        cli_cx = (board_mon["left"] - bx) + brd_cx
-                        cli_cy = (board_mon["top"]  - by) + brd_cy
+                        # det 내부 중심 → client 좌표
+                        cli_cx = (det_mon["left"] - bx) + int((best[0] + best[2]) / 2)
+                        cli_cy = (det_mon["top"]  - by) + int((best[1] + best[3]) / 2)
                         _bg_click(hwnd, cli_cx, cli_cy)
                         miss = 0
                         if not tracking:
@@ -304,43 +310,36 @@ class _MacroThread(threading.Thread):
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 누적 {success}회")
 
-                    # ── 미리보기 emit (5프레임마다) ───────────────────────
+                    # ── 미리보기 emit: 빨간 영역(board) 크롭 위에 박스 표시 ──
                     preview_cnt += 1
                     if preview_cnt % 5 == 0:
-                        vis = client.copy()
-                        # 주황색: 헤더 감지 영역
-                        _hx1 = int(bw * HDR_X1_R); _hy1 = int(bh * HDR_Y1_R)
-                        _hx2 = int(bw * HDR_X2_R); _hy2 = int(bh * HDR_Y2_R)
-                        cv2.rectangle(vis, (_hx1, _hy1), (_hx2, _hy2),
-                                      (0, 140, 255), 2)
-                        cv2.putText(vis, "HDR", (_hx1 + 4, _hy1 + 14),
+                        vis = board.copy()
+                        bh2, bw2 = vis.shape[:2]
+                        # 노란색: 감지 구역 경계 (board 좌표계)
+                        _det_lx = det_mon["left"] - board_mon["left"]
+                        _det_ly = det_mon["top"]  - board_mon["top"]
+                        _det_rx = _det_lx + det_mon["width"]
+                        _det_ry = _det_ly + det_mon["height"]
+                        cv2.rectangle(vis, (_det_lx, _det_ly), (_det_rx, _det_ry),
+                                      (0, 215, 255), 2)
+                        cv2.putText(vis, "DET", (_det_lx + 4, _det_ly + 14),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4,
-                                    (0, 140, 255), 1, cv2.LINE_AA)
-                        # 빨간색: 보드 ROI 경계
-                        _blx = board_mon["left"] - bx
-                        _bly = board_mon["top"]  - by
-                        _brx = _blx + board_mon["width"]
-                        _bry = _bly + board_mon["height"]
-                        cv2.rectangle(vis, (_blx, _bly), (_brx, _bry),
-                                      (0, 0, 220), 2)
-                        cv2.putText(vis, "BOARD", (_blx + 4, _bly + 14),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4,
-                                    (0, 0, 220), 1, cv2.LINE_AA)
-                        # 초록색: M1 detection 박스 (board 좌표 → client 좌표 변환)
+                                    (0, 215, 255), 1, cv2.LINE_AA)
+                        # 초록색: M1 detection 박스 (det 좌표 → board 좌표 변환)
                         for b in boxes:
-                            dx1 = _blx + int(b[0]); dy1 = _bly + int(b[1])
-                            dx2 = _blx + int(b[2]); dy2 = _bly + int(b[3])
+                            dx1 = _det_ox + int(b[0]); dy1 = _det_oy + int(b[1])
+                            dx2 = _det_ox + int(b[2]); dy2 = _det_oy + int(b[3])
                             cv2.rectangle(vis, (dx1, dy1), (dx2, dy2),
                                           (80, 255, 0), 2)
                         if len(boxes):
                             best2 = boxes[boxes[:, 4].argmax()]
-                            cx2 = _blx + int((best2[0] + best2[2]) / 2)
-                            cy2 = _bly + int((best2[1] + best2[3]) / 2)
+                            cx2 = _det_ox + int((best2[0] + best2[2]) / 2)
+                            cy2 = _det_oy + int((best2[1] + best2[3]) / 2)
                             cv2.drawMarker(vis, (cx2, cy2),
                                            (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
                             sc = float(best2[4])
                             cv2.putText(vis, f"score={sc:.2f}",
-                                        (_blx + 4, _bly + 30),
+                                        (_det_lx + 4, _det_ly + 30),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.45, (255, 220, 0), 1, cv2.LINE_AA)
                         self._sig.preview.emit(vis)
@@ -477,7 +476,7 @@ class PreviewWindow(QWidget):
                        Qt.TransformationMode.SmoothTransformation)
         self.lbl_img.setPixmap(pm)
         self.lbl_img.setText("")
-        self.lbl_info.setText(f"client {w}×{h}")
+        self.lbl_info.setText(f"board {w}×{h}")
 
     def reset(self) -> None:
         self.lbl_img.setPixmap(QPixmap())
