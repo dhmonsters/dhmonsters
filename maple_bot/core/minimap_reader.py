@@ -137,9 +137,35 @@ class MinimapReader:
     def __init__(self, screen_reader: ScreenReader):
         self._screen = screen_reader
         self._cfg: MinimapConfig = MinimapConfig()
+        # 창모드↔전체화면 전환 대응: config+mm_dict 저장 시 매 호출마다 위치 재계산
+        self._dyn_config = None   # ConfigManager
+        self._dyn_mm: dict = {}   # 미니맵 설정 dict
 
     def set_config(self, cfg: MinimapConfig) -> None:
         self._cfg = cfg
+
+    def set_dynamic_source(self, config, mm: dict) -> None:
+        """창 이동·전체화면 전환 시 region_x/y를 매 호출마다 재계산하도록 설정.
+
+        config: ConfigManager 인스턴스
+        mm:     minimap 설정 dict (region_x_ratio 등 포함)
+        """
+        self._dyn_config = config
+        self._dyn_mm = mm
+
+    def _resolve_region(self) -> tuple[int, int, int, int]:
+        """현재 창 위치 기준으로 미니맵 region (x, y, w, h) 를 반환.
+
+        set_dynamic_source 가 설정된 경우 매번 재계산 → 창 이동/전체화면 전환 대응.
+        그 외에는 set_config 로 저장된 값 사용.
+        """
+        if self._dyn_config is not None:
+            from core.config_manager import resolve_minimap_coords
+            rx, ry, rw, rh = resolve_minimap_coords(self._dyn_config, self._dyn_mm)
+            if rw > 0 and rh > 0:
+                return rx, ry, rw, rh
+        cfg = self._cfg
+        return cfg.region_x, cfg.region_y, cfg.width, cfg.height
 
     @property
     def config(self) -> MinimapConfig:
@@ -152,14 +178,15 @@ class MinimapReader:
         미니맵 영역이 설정되지 않았거나 도트를 찾지 못하면 None.
         """
         cfg = self._cfg
-        if cfg.width <= 0 or cfg.height <= 0:
+        rx, ry, rw, rh = self._resolve_region()
+        if rw <= 0 or rh <= 0:
             return None
 
         region = {
-            "left": cfg.region_x,
-            "top":  cfg.region_y,
-            "width": cfg.width,
-            "height": cfg.height,
+            "left": rx,
+            "top":  ry,
+            "width": rw,
+            "height": rh,
         }
         minimap = self._screen.capture(region)
 
@@ -179,12 +206,12 @@ class MinimapReader:
 
     def capture_minimap(self) -> np.ndarray:
         """미니맵 영역 이미지를 반환 (디버그/미리보기용)."""
-        cfg = self._cfg
+        rx, ry, rw, rh = self._resolve_region()
         region = {
-            "left": cfg.region_x,
-            "top":  cfg.region_y,
-            "width": max(1, cfg.width),
-            "height": max(1, cfg.height),
+            "left": rx,
+            "top":  ry,
+            "width": max(1, rw),
+            "height": max(1, rh),
         }
         return self._screen.capture(region)
 

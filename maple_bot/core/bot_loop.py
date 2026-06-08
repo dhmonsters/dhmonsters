@@ -269,6 +269,8 @@ class BotLoop:
             jump_key=mm.get("jump_key", "alt"),
         )
         self._minimap_reader.set_config(cfg)
+        # 창모드↔전체화면 전환 대응: region_x/y를 매 호출마다 재계산
+        self._minimap_reader.set_dynamic_source(self._config, mm)
 
         zones = [Zone.from_dict(z, mm_w, mm_h) for z in raw_zones]
         ropes = [RopePoint.from_dict(r, mm_w)  for r in raw_ropes]
