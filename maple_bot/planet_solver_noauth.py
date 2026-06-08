@@ -402,6 +402,12 @@ class _MacroThread(threading.Thread):
                     # ── 팝업 첫 감지 → _on_trigger_start ────────────────────
                     if not popup_logged:
                         popup_logged = True
+                        _CLS_NAMES = {0: "원", 1: "사각형", 2: "삼각형", 3: "별"}
+
+                        self._sig.log.emit(
+                            f"[팝업 감지] HDR score={hdr_score:.2f} (임계값 0.65 초과) "
+                            f"→ _on_trigger_start 진입"
+                        )
 
                         det_mon = {
                             "left":   bx + int(bw * DET_X1_R),
@@ -415,24 +421,33 @@ class _MacroThread(threading.Thread):
                         # M2로 중앙 도형 클래스 분류 (아직 흰색으로 보이는 순간)
                         dh, dw = det_init.shape[:2]
                         center_crop = det_init[dh//4:3*dh//4, dw//4:3*dw//4]
+                        self._sig.log.emit(
+                            f"[M2] DET 영역 캡처 완료 ({dw}x{dh}px) "
+                            f"→ center_crop {center_crop.shape[1]}x{center_crop.shape[0]}px 분류 중..."
+                        )
                         try:
                             if center_crop.shape[0] >= 32 and center_crop.shape[1] >= 32:
                                 _target_cls = m2.classify_crop(center_crop, 192)
+                                cls_name = _CLS_NAMES.get(_target_cls, "알수없음") if _target_cls is not None else "None"
+                                self._sig.log.emit(
+                                    f"[M2] 분류 완료 → target_cls={_target_cls} ({cls_name}) "
+                                    f"→ M1 {'specialist[' + str(_target_cls) + ']' if _target_cls is not None else 'ensemble(fallback)'} 사용"
+                                )
                             else:
                                 _target_cls = None
                                 self._sig.log.emit(
-                                    f"[M2] center_crop 너무 작음 {center_crop.shape[:2]} → 분류 스킵"
+                                    f"[M2] center_crop 너무 작음 {center_crop.shape[:2]} → 분류 스킵, ensemble 사용"
                                 )
                         except Exception as e:
                             _target_cls = None
-                            self._sig.log.emit(f"[M2] 분류 실패: {e}")
+                            self._sig.log.emit(f"[M2] 분류 실패: {e} → ensemble fallback")
                         _last_marker_pos = (dw // 2, dh // 2)
 
-                        self._sig.log.emit(
-                            f"[팝업 감지] score={hdr_score:.2f} "
-                            f"→ 도형 클래스={_target_cls}, 추적 시작"
-                        )
                         _focus_game(hwnd)  # 게임 창 포그라운드 (1회)
+                        self._sig.log.emit(
+                            f"[포그라운드] 게임 창 활성화 → 추적 시작 "
+                            f"(초기 마커 중앙 {_last_marker_pos})"
+                        )
 
                     # 주황 영역: 퍼즐 해제 구역 — M1 YOLO 도형 감지
                     det_mon = {
@@ -445,10 +460,13 @@ class _MacroThread(threading.Thread):
 
                     # target_cls 확정 시 전담 specialist, 미확정 시 ensemble fallback
                     # 원본 정통: M2 cls 분류 → M1[cls] specialist 하나만 사용
+                    _CLS_NAMES = {0: "원", 1: "사각형", 2: "삼각형", 3: "별"}
                     if _target_cls is not None and 0 <= _target_cls <= 3:
                         detector = m1_specialists[_target_cls]
+                        _det_label = f"M1 specialist[{_target_cls}]({_CLS_NAMES[_target_cls]})"
                     else:
                         detector = m1_ensemble
+                        _det_label = "M1 ensemble(fallback)"
                     boxes = detector.detect(det, self.IMGSZ, self.SCORE)
 
                     if len(boxes):
@@ -460,8 +478,10 @@ class _MacroThread(threading.Thread):
                             ])
                             dists = np.hypot(centers[:,0]-lx, centers[:,1]-ly)
                             best = boxes[dists.argmin()]
+                            _select_method = f"거리기반(boxes={len(boxes)}개중 최근접)"
                         else:
                             best = boxes[boxes[:, 4].argmax()]
+                            _select_method = f"최고점수(boxes={len(boxes)})"
 
                         cx = int((best[0] + best[2]) / 2)
                         cy = int((best[1] + best[3]) / 2)
@@ -475,8 +495,14 @@ class _MacroThread(threading.Thread):
                         if not tracking:
                             tracking = True
                             self._sig.log.emit(
-                                f"[도형 감지] score={float(best[4]):.2f} "
-                                f"→ ({abs_x}, {abs_y})"
+                                f"[{_det_label}] 첫 감지 score={float(best[4]):.2f} "
+                                f"→ 커서 ({abs_x}, {abs_y})  선택방식={_select_method}"
+                            )
+                        elif preview_cnt % 30 == 0:
+                            # 30프레임(~1.5초)마다 추적 상태 요약
+                            self._sig.log.emit(
+                                f"[추적중] {_det_label}  score={float(best[4]):.2f} "
+                                f"pos=({abs_x},{abs_y})  {_select_method}  miss={miss}"
                             )
                             now = time.time()
                             if self._sound and now - last_alert > 2.0:
@@ -506,7 +532,15 @@ class _MacroThread(threading.Thread):
                             _real_click(abs_x, abs_y)
                         miss += 1
                         if miss == 1:
-                            self._sig.log.emit("[도형] 미감지 — 마지막 위치 유지 중...")
+                            self._sig.log.emit(
+                                f"[{_det_label}] 미감지(1회) — "
+                                f"마지막 위치 {_last_marker_pos} 유지 중..."
+                            )
+                        elif miss % 10 == 0:
+                            self._sig.log.emit(
+                                f"[{_det_label}] 미감지 {miss}회 연속 — "
+                                f"마지막 위치 {_last_marker_pos}"
+                            )
 
                     # ── 미리보기 emit (5프레임마다) ──────────────────────────
                     preview_cnt += 1
