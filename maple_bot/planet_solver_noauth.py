@@ -251,7 +251,14 @@ class _MacroThread(threading.Thread):
                     if board_mon is None:
                         preview_cnt += 1
                         if preview_cnt % 5 == 0:
-                            self._sig.preview.emit(None)
+                            # 팝업 없음 — BRD 구역을 그대로 잘라서 "대기 중" 텍스트와 함께 표시
+                            _brd_x1 = int(bw * BRD_X1_R); _brd_y1 = int(bh * BRD_Y1_R)
+                            _brd_x2 = int(bw * BRD_X2_R); _brd_y2 = int(bh * BRD_Y2_R)
+                            standby = client[_brd_y1:_brd_y2, _brd_x1:_brd_x2].copy()
+                            cv2.putText(standby, "팝업 대기 중",
+                                        (10, 24), cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.7, (0, 215, 255), 2, cv2.LINE_AA)
+                            self._sig.preview.emit(standby)
                         time.sleep(0.033)
                         continue
 
