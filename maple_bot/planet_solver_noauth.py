@@ -173,7 +173,7 @@ def _send_telegram(token: str, chat_id: str, img_bgr, caption: str = "") -> tupl
 
 # ── 팝업 보드 ROI 감지 ────────────────────────────────────────────────────
 def _detect_popup_board(client_frame, bx, by, bw, bh,
-                        score_thr=0.55, dark_ratio_thr=0.50):
+                        score_thr=0.80, dark_ratio_thr=0.50):
     """노란색 HDR 영역 템플릿 매칭으로 팝업 감지 → 보드 mss mon 반환, 미감지 시 None.
 
     1차: templates/ 폴더 이미지로 TM_CCOEFF_NORMED 매칭 (score_thr 이상 시 감지 확정)
@@ -240,7 +240,7 @@ class _Sig(QObject):
 
 class _MacroThread(threading.Thread):
     IMGSZ = 96    # 192→96: 픽셀 수 1/4 → M1 추론 ~3~4배 빠름
-    SCORE = 0.30  # 0.2→0.30: 낮은 임계값으로 인한 M1 false positive 감소
+    SCORE = 0.2
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
                  tg_enabled: bool = False, tg_token: str = "", tg_chat: str = ""):
