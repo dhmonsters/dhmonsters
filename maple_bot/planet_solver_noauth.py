@@ -207,45 +207,34 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
         "height": int(bh * (BRD_Y2_R - BRD_Y1_R)),
     }
 
-    # ── 진단용 픽셀 통계 (감지에는 사용 안 함, 로그 표시용) ───────────────────
-    _f = hdr_crop.astype(np.float32)
-    _max_c = _f.max(axis=2)
-    dark_r   = float((_max_c < 70).mean())
-    bright_r = float(np.all(hdr_crop > 175, axis=2).mean())
+    # ── BRD 전체 밝기 vs 좌우 게임 배경 상대 비교 ────────────────────────────
+    # 팝업이 떴을 때: BRD 영역(팝업) 평균 밝기 50~74  ← 훨씬 어두움
+    # 팝업이 없을 때: BRD 영역(게임배경) 평균 밝기 100~160 ← 주변과 비슷
+    # → 상대 비율로 감지하면 게임 맵 밝기에 관계없이 동작
+    brd_y1_px = int(bh * BRD_Y1_R); brd_y2_px = int(bh * BRD_Y2_R)
+    brd_x1_px = int(bw * BRD_X1_R); brd_x2_px = int(bw * BRD_X2_R)
+    brd_crop  = client_frame[brd_y1_px:brd_y2_px, brd_x1_px:brd_x2_px]
+    brd_mean  = float(brd_crop.mean())
 
-    # ── 템플릿 매칭 (유일한 감지 방법) ─────────────────────────────────────
-    # 게임 배경(구름·하늘·풀밭)은 "투명 도형 찾기" 타이틀 템플릿과 매칭되지 않음
-    # → 픽셀 패턴 폴백 없이 템플릿만 사용 (오탐 방지)
-    # 실측 score: 팝업 있을 때 0.36~0.41, 임계값 0.30으로 커버
-    best_tmpl = 0.0
-    if _POPUP_TMPLS:
-        _HDR_REF_W = int(2560 * (HDR_X2_R - HDR_X1_R))
-        hdr_gray = cv2.cvtColor(hdr_crop, cv2.COLOR_BGR2GRAY)
-        dh, dw = hdr_gray.shape
-        ratio_scale = dw / _HDR_REF_W
-        _scales = sorted({1.0, ratio_scale,
-                          round(ratio_scale * 1.1, 3),
-                          round(ratio_scale * 0.9, 3)})
-        for (tmpl, th, tw) in _POPUP_TMPLS:
-            for s in _scales:
-                if abs(s - 1.0) < 0.02:
-                    t = tmpl; _th, _tw = th, tw
-                else:
-                    _tw = max(1, round(tw * s))
-                    _th = max(1, round(th * s))
-                    t = cv2.resize(tmpl, (_tw, _th), interpolation=cv2.INTER_AREA)
-                if _th > dh or _tw > dw:
-                    continue
-                res = cv2.matchTemplate(hdr_gray, t, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, _ = cv2.minMaxLoc(res)
-                if max_val > best_tmpl:
-                    best_tmpl = max_val
+    # 좌우 게임 배경 밝기 (팝업 외부)
+    _surround = []
+    if brd_x1_px > 20:
+        _surround.append(float(client_frame[brd_y1_px:brd_y2_px, 0:brd_x1_px].mean()))
+    if brd_x2_px < bw - 20:
+        _surround.append(float(client_frame[brd_y1_px:brd_y2_px, brd_x2_px:bw].mean()))
+    surround_mean = sum(_surround) / len(_surround) if _surround else 200.0
+    popup_ratio = brd_mean / (surround_mean + 1e-6)
+
+    # 타이틀바 흰 텍스트 비율 (부가 조건)
+    bright_r = float(np.all(hdr_crop > 175, axis=2).mean())
+    dark_r   = float((brd_crop.max(axis=2) < 70).mean())   # 진단용
 
     # ── 최종 판정 ────────────────────────────────────────────────────────────
-    hdr_score = best_tmpl
-    if best_tmpl >= score_thr:
-        return board_mon, hdr_score, dark_r, bright_r
-    return None, hdr_score, dark_r, bright_r
+    # BRD가 주변보다 50% 미만으로 어둡고 + HDR에 흰 텍스트 6% 이상
+    hdr_score = max(0.0, 1.0 - popup_ratio)   # 표시용 (높을수록 팝업 가능성 높음)
+    if popup_ratio < 0.50 and bright_r > 0.06:
+        return board_mon, hdr_score, brd_mean, bright_r
+    return None, hdr_score, brd_mean, bright_r
 
 
 # ── PostMessage 백그라운드 클릭 ───────────────────────────────────────────
@@ -355,8 +344,8 @@ class _MacroThread(threading.Thread):
                         # 60프레임(~1초)마다 진단 값을 텍스트 로그에 출력
                         if preview_cnt % 60 == 1:
                             self._sig.log.emit(
-                                f"[HDR 진단] dark={_dbg_gray:.2f} bright={_dbg_bright:.2f}"
-                                f" score={hdr_score:.2f}  (기준: dark≥0.40, bright≥0.08 / tmpl≥0.30)"
+                                f"[HDR 진단] brd_mean={_dbg_gray:.0f} bright={_dbg_bright:.2f}"
+                                f" score={hdr_score:.2f}  (기준: score≥0.50, bright≥0.06)"
                             )
                         if preview_cnt % 5 == 0:
                             # 팝업 없음 — HDR 노란 테두리 + score + "대기 중" 표시
@@ -366,7 +355,7 @@ class _MacroThread(threading.Thread):
                             cv2.rectangle(standby, (0, 0), (_sb_pop_w, _sb_hdr_ry),
                                           (0, 230, 255), 2)
                             cv2.putText(standby,
-                                        f"HDR score={hdr_score:.2f}  dark={_dbg_gray:.2f}  bright={_dbg_bright:.2f}",
+                                        f"score={hdr_score:.2f}/thr=0.50  brd={_dbg_gray:.0f}  bright={_dbg_bright:.2f}",
                                         (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                         (0, 230, 255), 1, cv2.LINE_AA)
                             cv2.putText(standby, "팝업 대기 중",
