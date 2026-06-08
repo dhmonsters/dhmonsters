@@ -37,11 +37,11 @@ MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
 
 # ── 팝업 감지 / 보드 ROI 상대 좌표 ─────────────────────────────────────────
 # 참조: 00412.PNG / popup_range.png (게임 클라이언트 1920×1080 기준)
-HDR_X1_R, HDR_X2_R = 0.252, 0.748   # 🟡 노란 영역: 상단 검정바 (팝업 존재 여부 감지)
+HDR_X1_R, HDR_X2_R = 0.272, 0.728   # 🟡 노란 영역: 상단 검정바 (팝업 존재 여부 감지)
 HDR_Y1_R, HDR_Y2_R = 0.216, 0.292
-BRD_X1_R, BRD_X2_R = 0.254, 0.748   # 🔴 빨간 영역 x축 (HDR_Y1 ~ BRD_Y2 가 전체 팝업)
+BRD_X1_R, BRD_X2_R = 0.272, 0.728   # 🔴 빨간 영역 x축 (HDR_Y1 ~ BRD_Y2 가 전체 팝업)
 BRD_Y1_R, BRD_Y2_R = 0.292, 0.880
-DET_X1_R, DET_X2_R = 0.270, 0.732   # 🟠 주황 영역: 퍼즐 해제 구역 (M1 감지 + 클릭)
+DET_X1_R, DET_X2_R = 0.284, 0.716   # 🟠 주황 영역: 퍼즐 해제 구역 (M1 감지 + 클릭)
 DET_Y1_R, DET_Y2_R = 0.310, 0.862
 
 _POPUP_TEMPLATES: list = []
@@ -174,7 +174,11 @@ def _send_telegram(token: str, chat_id: str, img_bgr, caption: str = "") -> tupl
 # ── 팝업 보드 ROI 감지 ────────────────────────────────────────────────────
 def _detect_popup_board(client_frame, bx, by, bw, bh,
                         score_thr=0.65, dark_ratio_thr=0.50):
-    """노란색 HDR 영역 템플릿 매칭으로 팝업 감지 → 보드 mss mon 반환, 미감지 시 None.
+    """노란색 HDR 영역 템플릿 매칭으로 팝업 감지.
+
+    반환: (board_mon, hdr_score)
+      - board_mon: 팝업 감지 시 BRD mss mon dict, 미감지 시 None
+      - hdr_score: 최고 매칭 점수 (0.0~1.0, 미리보기 표시용)
 
     1차: templates/ 폴더 이미지로 TM_CCOEFF_NORMED 매칭 (score_thr 이상 시 감지 확정)
     2차 fallback: 템플릿 없을 때 dark pixel 비율 체크 (dark_ratio_thr)
@@ -192,16 +196,17 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
 
     if _POPUP_TMPLS:
         # 1차: 템플릿 매칭 (노란색 HDR 영역)
-        # 템플릿은 1920×1080 기준 캡처 → 현재 HDR 너비 비율로 스케일 보정
-        _HDR_REF_W = int(2560 * (HDR_X2_R - HDR_X1_R))  # ~1270px (템플릿 캡처 기준: 2560×1440)
+        # 템플릿은 2560×1440 기준 캡처 → 현재 HDR 너비 비율로 스케일 보정
+        _HDR_REF_W = int(2560 * (HDR_X2_R - HDR_X1_R))
         hdr_gray = cv2.cvtColor(hdr_crop, cv2.COLOR_BGR2GRAY)
         dh, dw = hdr_gray.shape
-        scale = dw / _HDR_REF_W  # 현재 해상도/DPI 보정 비율
+        scale = dw / _HDR_REF_W
+        best_score = 0.0
         for (tmpl, th, tw) in _POPUP_TMPLS:
-            # 소형 이미지(xz*.bmp 등) 제외: 원본 50×20px 미만은 HDR 매칭에서 오감지 발생
+            # 소형 이미지(xz*.bmp 등) 제외
             if tw < 50 or th < 20:
                 continue
-            # 스케일 보정: scale ≠ 1.0 이면 템플릿 resize
+            # 스케일 보정
             if abs(scale - 1.0) > 0.02:
                 new_w = max(1, round(tw * scale))
                 new_h = max(1, round(th * scale))
@@ -213,15 +218,18 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
                 continue
             res = cv2.matchTemplate(hdr_gray, t, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
-            if max_val >= score_thr:
-                return board_mon
-        return None
+            if max_val > best_score:
+                best_score = max_val
+        if best_score >= score_thr:
+            return board_mon, best_score
+        return None, best_score
     else:
         # 2차 fallback: 템플릿 없을 때 dark pixel 비율 체크
         dark = np.all(hdr_crop.astype(np.int16) < 80, axis=2)
-        if dark.mean() >= dark_ratio_thr:
-            return board_mon
-        return None
+        ratio = float(dark.mean())
+        if ratio >= dark_ratio_thr:
+            return board_mon, ratio
+        return None, ratio
 
 
 # ── PostMessage 백그라운드 클릭 ───────────────────────────────────────────
@@ -308,7 +316,7 @@ class _MacroThread(threading.Thread):
                             pass
 
                     client = cv2.cvtColor(np.array(sct.grab(client_mon)), cv2.COLOR_BGRA2BGR)
-                    board_mon = _detect_popup_board(client, bx, by, bw, bh)
+                    board_mon, hdr_score = _detect_popup_board(client, bx, by, bw, bh)
 
                     # 빨간 영역: 전체 팝업 (HDR_Y1 ~ BRD_Y2) — 항상 캡처해서 미리보기에 사용
                     _pop_x1 = bx + int(bw * BRD_X1_R)
@@ -322,14 +330,15 @@ class _MacroThread(threading.Thread):
                     if board_mon is None:
                         preview_cnt += 1
                         if preview_cnt % 5 == 0:
-                            # 팝업 없음 — HDR 노란 테두리 + "대기 중" 텍스트 표시
+                            # 팝업 없음 — HDR 노란 테두리 + score + "대기 중" 표시
                             standby = popup.copy()
                             _sb_hdr_ry = int(bh * (HDR_Y2_R - HDR_Y1_R))
                             _sb_pop_w  = standby.shape[1]
                             cv2.rectangle(standby, (0, 0), (_sb_pop_w, _sb_hdr_ry),
                                           (0, 230, 255), 2)
-                            cv2.putText(standby, "HDR", (4, 14),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                            cv2.putText(standby,
+                                        f"HDR score={hdr_score:.2f} / thr=0.65",
+                                        (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                         (0, 230, 255), 1, cv2.LINE_AA)
                             cv2.putText(standby, "팝업 대기 중",
                                         (10, _sb_hdr_ry + 24), cv2.FONT_HERSHEY_SIMPLEX,
@@ -394,11 +403,12 @@ class _MacroThread(threading.Thread):
                         _det_ly = det_mon["top"]  - _pop_y1
                         _det_rx = _det_lx + det_mon["width"]
                         _det_ry = _det_ly + det_mon["height"]
-                        # 노란색: 상단 검정바
+                        # 노란색: 상단 검정바 + HDR 매칭 score
                         cv2.rectangle(vis, (0, 0), (_pop_w, _hdr_ry),
                                       (0, 230, 255), 2)
-                        cv2.putText(vis, "HDR", (4, 14),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                        cv2.putText(vis,
+                                    f"HDR score={hdr_score:.2f} / thr=0.65",
+                                    (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                     (0, 230, 255), 1, cv2.LINE_AA)
                         # 주황색: 퍼즐 해제 구역
                         cv2.rectangle(vis, (_det_lx, _det_ly), (_det_rx, _det_ry),
