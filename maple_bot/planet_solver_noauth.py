@@ -184,7 +184,7 @@ def _send_telegram(token: str, chat_id: str, img_bgr, caption: str = "") -> tupl
 
 # ── 팝업 보드 ROI 감지 ────────────────────────────────────────────────────
 def _detect_popup_board(client_frame, bx, by, bw, bh,
-                        score_thr=0.30, dark_ratio_thr=0.50):
+                        score_thr=0.65, dark_ratio_thr=0.50):
     """노란색 HDR 영역으로 팝업 감지.
 
     반환: (board_mon, hdr_score, gray_r, bright_r)
@@ -207,32 +207,31 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
         "height": int(bh * (BRD_Y2_R - BRD_Y1_R)),
     }
 
-    # ── BRD 전체 밝기 vs 좌우 게임 배경 상대 비교 ────────────────────────────
-    # 팝업이 떴을 때: BRD 영역(팝업) 평균 밝기 50~74  ← 훨씬 어두움
-    # 팝업이 없을 때: BRD 영역(게임배경) 평균 밝기 100~160 ← 주변과 비슷
-    # → 상대 비율로 감지하면 게임 맵 밝기에 관계없이 동작
-    brd_y1_px = int(bh * BRD_Y1_R); brd_y2_px = int(bh * BRD_Y2_R)
-    brd_x1_px = int(bw * BRD_X1_R); brd_x2_px = int(bw * BRD_X2_R)
-    brd_crop  = client_frame[brd_y1_px:brd_y2_px, brd_x1_px:brd_x2_px]
-    brd_mean  = float(brd_crop.mean())
+    # ── HDR 영역에서 원본 크기 그대로 매칭 (스케일 계산 없음) ─────────────────
+    # 기존 문제: HDR 높이 62px → 63px 템플릿 1px 초과 → 강제 축소 후 매칭
+    # 수정: 상하 2px 여유를 주어 63px 템플릿이 원본 크기로 매칭되도록 함
+    # (비율 상수는 그대로 유지, crop만 ±2px 확장)
+    _hy1 = max(0,  int(bh * HDR_Y1_R) - 2)
+    _hy2 = min(bh, int(bh * HDR_Y2_R) + 2)
+    hdr_match = client_frame[_hy1:_hy2, hx1:hx2]
+    hdr_gray  = cv2.cvtColor(hdr_match, cv2.COLOR_BGR2GRAY)
+    dh, dw    = hdr_gray.shape
 
-    # 좌우 게임 배경 밝기 (팝업 외부)
-    _surround = []
-    if brd_x1_px > 20:
-        _surround.append(float(client_frame[brd_y1_px:brd_y2_px, 0:brd_x1_px].mean()))
-    if brd_x2_px < bw - 20:
-        _surround.append(float(client_frame[brd_y1_px:brd_y2_px, brd_x2_px:bw].mean()))
-    surround_mean = sum(_surround) / len(_surround) if _surround else 200.0
-    popup_ratio = brd_mean / (surround_mean + 1e-6)
+    bright_r = float(np.all(hdr_crop > 175, axis=2).mean())   # 진단용
+    brd_mean = 0.0                                             # 진단용 placeholder
 
-    # 타이틀바 흰 텍스트 비율 (부가 조건)
-    bright_r = float(np.all(hdr_crop > 175, axis=2).mean())
-    dark_r   = float((brd_crop.max(axis=2) < 70).mean())   # 진단용
+    best_score = 0.0
+    for (tmpl, th, tw) in _POPUP_TMPLS:
+        if th > dh or tw > dw:
+            continue   # 그래도 안 맞으면 skip
+        res = cv2.matchTemplate(hdr_gray, tmpl, cv2.TM_CCOEFF_NORMED)
+        _, mx, _, _ = cv2.minMaxLoc(res)
+        if mx > best_score:
+            best_score = mx
 
     # ── 최종 판정 ────────────────────────────────────────────────────────────
-    # BRD가 주변보다 50% 미만으로 어둡고 + HDR에 흰 텍스트 6% 이상
-    hdr_score = max(0.0, 1.0 - popup_ratio)   # 표시용 (높을수록 팝업 가능성 높음)
-    if popup_ratio < 0.50 and bright_r > 0.06:
+    hdr_score = best_score
+    if best_score >= score_thr:
         return board_mon, hdr_score, brd_mean, bright_r
     return None, hdr_score, brd_mean, bright_r
 
@@ -344,8 +343,8 @@ class _MacroThread(threading.Thread):
                         # 60프레임(~1초)마다 진단 값을 텍스트 로그에 출력
                         if preview_cnt % 60 == 1:
                             self._sig.log.emit(
-                                f"[HDR 진단] brd_mean={_dbg_gray:.0f} bright={_dbg_bright:.2f}"
-                                f" score={hdr_score:.2f}  (기준: score≥0.50, bright≥0.06)"
+                                f"[HDR 진단] score={hdr_score:.2f} bright={_dbg_bright:.2f}"
+                                f"  (기준: score≥0.65)"
                             )
                         if preview_cnt % 5 == 0:
                             # 팝업 없음 — HDR 노란 테두리 + score + "대기 중" 표시
@@ -355,7 +354,7 @@ class _MacroThread(threading.Thread):
                             cv2.rectangle(standby, (0, 0), (_sb_pop_w, _sb_hdr_ry),
                                           (0, 230, 255), 2)
                             cv2.putText(standby,
-                                        f"score={hdr_score:.2f}/thr=0.50  brd={_dbg_gray:.0f}  bright={_dbg_bright:.2f}",
+                                        f"HDR score={hdr_score:.2f} / thr=0.65",
                                         (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                         (0, 230, 255), 1, cv2.LINE_AA)
                             cv2.putText(standby, "팝업 대기 중",
