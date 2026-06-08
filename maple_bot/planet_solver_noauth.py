@@ -198,6 +198,9 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
         dh, dw = hdr_gray.shape
         scale = dw / _HDR_REF_W  # 현재 해상도/DPI 보정 비율
         for (tmpl, th, tw) in _POPUP_TMPLS:
+            # 소형 이미지(xz*.bmp 등) 제외: 원본 50×20px 미만은 HDR 매칭에서 오감지 발생
+            if tw < 50 or th < 20:
+                continue
             # 스케일 보정: scale ≠ 1.0 이면 템플릿 resize
             if abs(scale - 1.0) > 0.02:
                 new_w = max(1, round(tw * scale))
@@ -237,7 +240,7 @@ class _Sig(QObject):
 
 class _MacroThread(threading.Thread):
     IMGSZ = 96    # 192→96: 픽셀 수 1/4 → M1 추론 ~3~4배 빠름
-    SCORE = 0.2
+    SCORE = 0.30  # 0.2→0.30: 낮은 임계값으로 인한 M1 false positive 감소
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
                  tg_enabled: bool = False, tg_token: str = "", tg_chat: str = ""):
