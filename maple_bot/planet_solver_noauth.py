@@ -39,7 +39,7 @@ MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
 # 참조: 00412.PNG / popup_range.png (게임 클라이언트 1920×1080 기준)
 # 기준: popup_range.png 실측 + 미리보기 피드백 미세 보정
 HDR_X1_R, HDR_X2_R = 0.320, 0.678   # 🟡 노란선: 팝업 타이틀바 (HDR 감지)
-HDR_Y1_R, HDR_Y2_R = 0.194, 0.263
+HDR_Y1_R, HDR_Y2_R = 0.202, 0.263
 BRD_X1_R, BRD_X2_R = 0.318, 0.680   # 🔴 전체 팝업 영역
 BRD_Y1_R, BRD_Y2_R = 0.188, 0.775
 DET_X1_R, DET_X2_R = 0.322, 0.676   # 🟠 주황선: 퍼즐 도형 구역
