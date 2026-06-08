@@ -52,14 +52,15 @@ for _tname in ("minigame.png", "xz.bmp", "xz1.bmp", "xz2.bmp", "xz4.bmp"):
         if _img is not None:
             _POPUP_TEMPLATES.append(_img)
 
-# ── 투명도형 템플릿 (templates/ 폴더 — 그레이스케일 사전 변환) ──────────────
+# ── 팝업 감지용 템플릿 (templates/ 폴더 — 그레이스케일 사전 변환) ───────────
+# 용도: 노란색 HDR 영역 매칭으로 "투명 도형 찾기" 팝업 존재 여부 판별
 # templates/ 폴더에 이미지 파일을 넣으면 재시작 없이 자동 감지
 TMPL_DIR = os.path.join(ROOT, "templates")
-_SHAPE_TEMPLATES: list[tuple[np.ndarray, int, int]] = []  # (gray, h, w)
+_POPUP_TMPLS: list[tuple[np.ndarray, int, int]] = []  # (gray, h, w)
 
 def _reload_templates() -> int:
     """templates/ 폴더의 이미지를 그레이스케일로 로드. 로드된 개수 반환."""
-    _SHAPE_TEMPLATES.clear()
+    _POPUP_TMPLS.clear()
     if not os.path.isdir(TMPL_DIR):
         return 0
     exts = {".bmp", ".png", ".jpg", ".jpeg"}
@@ -71,31 +72,10 @@ def _reload_templates() -> int:
         if img is None:
             continue
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _SHAPE_TEMPLATES.append((gray, gray.shape[0], gray.shape[1]))
-    return len(_SHAPE_TEMPLATES)
+        _POPUP_TMPLS.append((gray, gray.shape[0], gray.shape[1]))
+    return len(_POPUP_TMPLS)
 
 _n = _reload_templates()
-
-def _tmpl_detect(det_img: np.ndarray, score_thr: float = 0.55):
-    """templates/ 폴더 이미지로 투명도형 위치 반환 (cx, cy, score) 또는 None.
-
-    그레이스케일 + TM_CCOEFF_NORMED: BGR 대비 ~3x 빠름 (~1ms / 프레임)
-    """
-    det_gray = cv2.cvtColor(det_img, cv2.COLOR_BGR2GRAY)
-    dh, dw   = det_gray.shape
-    best_val, best_cx, best_cy = 0.0, 0, 0
-    for (tmpl, th, tw) in _SHAPE_TEMPLATES:
-        if th > dh or tw > dw:
-            continue
-        res = cv2.matchTemplate(det_gray, tmpl, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(res)
-        if max_val > best_val:
-            best_val = max_val
-            best_cx  = max_loc[0] + tw // 2
-            best_cy  = max_loc[1] + th // 2
-    if best_val >= score_thr:
-        return best_cx, best_cy, best_val
-    return None
 
 # ── 탐지 엔진 로드 ─────────────────────────────────────────────────────────
 from planet_yolo_verify import M1Ensemble, HyungYolo
@@ -192,23 +172,42 @@ def _send_telegram(token: str, chat_id: str, img_bgr, caption: str = "") -> tupl
 
 
 # ── 팝업 보드 ROI 감지 ────────────────────────────────────────────────────
-def _detect_popup_board(client_frame, bx, by, bw, bh, dark_ratio_thr=0.50):
-    """헤더 영역 dark pixel 비율로 팝업 감지 → 보드 mss mon 반환, 미감지 시 None.
+def _detect_popup_board(client_frame, bx, by, bw, bh,
+                        score_thr=0.55, dark_ratio_thr=0.50):
+    """노란색 HDR 영역 템플릿 매칭으로 팝업 감지 → 보드 mss mon 반환, 미감지 시 None.
 
-    팝업 헤더(어두운 바)는 dark ratio ≈ 0.95, 일반 배경은 ≈ 0.00.
+    1차: templates/ 폴더 이미지로 TM_CCOEFF_NORMED 매칭 (score_thr 이상 시 감지 확정)
+    2차 fallback: 템플릿 없을 때 dark pixel 비율 체크 (dark_ratio_thr)
     """
     hx1 = int(bw * HDR_X1_R); hy1 = int(bh * HDR_Y1_R)
     hx2 = int(bw * HDR_X2_R); hy2 = int(bh * HDR_Y2_R)
-    header_crop = client_frame[hy1:hy2, hx1:hx2]
-    dark = np.all(header_crop.astype(np.int16) < 80, axis=2)
-    if dark.mean() >= dark_ratio_thr:
-        return {
-            "left":   bx + int(bw * BRD_X1_R),
-            "top":    by + int(bh * BRD_Y1_R),
-            "width":  int(bw * (BRD_X2_R - BRD_X1_R)),
-            "height": int(bh * (BRD_Y2_R - BRD_Y1_R)),
-        }
-    return None
+    hdr_crop = client_frame[hy1:hy2, hx1:hx2]
+
+    board_mon = {
+        "left":   bx + int(bw * BRD_X1_R),
+        "top":    by + int(bh * BRD_Y1_R),
+        "width":  int(bw * (BRD_X2_R - BRD_X1_R)),
+        "height": int(bh * (BRD_Y2_R - BRD_Y1_R)),
+    }
+
+    if _POPUP_TMPLS:
+        # 1차: 템플릿 매칭 (노란색 HDR 영역)
+        hdr_gray = cv2.cvtColor(hdr_crop, cv2.COLOR_BGR2GRAY)
+        dh, dw = hdr_gray.shape
+        for (tmpl, th, tw) in _POPUP_TMPLS:
+            if th > dh or tw > dw:
+                continue
+            res = cv2.matchTemplate(hdr_gray, tmpl, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(res)
+            if max_val >= score_thr:
+                return board_mon
+        return None
+    else:
+        # 2차 fallback: 템플릿 없을 때 dark pixel 비율 체크
+        dark = np.all(hdr_crop.astype(np.int16) < 80, axis=2)
+        if dark.mean() >= dark_ratio_thr:
+            return board_mon
+        return None
 
 
 # ── PostMessage 백그라운드 클릭 ───────────────────────────────────────────
