@@ -62,30 +62,32 @@ class Detector:
         """바 영역을 한 번에 캡처 후 numpy HSV로 처리 — 개별 픽셀 API 호출 없음."""
         coord = self._config.get("coordinate", bar_type) or {}
 
-        from core.config_manager import get_game_window_rect
-        ox, oy, cw, ch = get_game_window_rect(self._config)
+        # ── 게임 창 원점·크기 조회 (coord_mode 무관하게 항상 시도) ──────────
+        try:
+            import win32gui as _wg
+            _title = self._config.get("settings2", "game_window_title") or "MapleStory"
+            _hwnd  = _wg.FindWindow(None, _title)
+            if _hwnd:
+                game_ox, game_oy = _wg.ClientToScreen(_hwnd, (0, 0))
+                _l, _t, _r, _b   = _wg.GetClientRect(_hwnd)
+                game_cw, game_ch = _r - _l, _b - _t
+            else:
+                game_ox, game_oy, game_cw, game_ch = 0, 0, 0, 0
+        except Exception:
+            game_ox, game_oy, game_cw, game_ch = 0, 0, 0, 0
 
-        if coord.get("x_ratio") is not None and cw > 0 and ch > 0:
-            # relative 비율 모드 — 현재 창 크기로 역산
-            x     = ox + int(coord["x_ratio"]     * cw)
-            y     = oy + int(coord["y_ratio"]     * ch)
-            width = max(1, int(coord["width_ratio"] * cw))
+        if coord.get("x_ratio") is not None and game_cw > 0 and game_ch > 0:
+            # 비율 모드 — 현재 창 크기 기준으로 재계산 (창↔전체화면 전환 자동 대응)
+            x     = game_ox + int(coord["x_ratio"]     * game_cw)
+            y     = game_oy + int(coord["y_ratio"]     * game_ch)
+            width = max(1, int(coord["width_ratio"]    * game_cw))
         else:
-            # absolute 픽셀 모드 — 좌표는 게임 클라이언트 기준 상대값으로 저장됨
+            # 픽셀 fallback — 저장된 클라이언트 상대 픽셀 + 현재 창 원점
             px = coord.get("x")
             py = coord.get("y")
             width = coord.get("width")
-            # x=0이나 y=0은 유효한 좌표일 수 있으므로 None 또는 width=0만 미설정으로 판단
             if px is None or py is None or not width:
                 return 1.0
-            # 게임 창 원점을 coord_mode 무관하게 항상 조회 — 창 모드에서도 정확한 절대 좌표
-            try:
-                import win32gui as _wg
-                _title = self._config.get("settings2", "game_window_title") or "MapleStory"
-                _hwnd  = _wg.FindWindow(None, _title)
-                game_ox, game_oy = (_wg.ClientToScreen(_hwnd, (0, 0)) if _hwnd else (0, 0))
-            except Exception:
-                game_ox, game_oy = 0, 0
             x = game_ox + int(px)
             y = game_oy + int(py)
             width = int(width)
