@@ -207,20 +207,16 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
         "height": int(bh * (BRD_Y2_R - BRD_Y1_R)),
     }
 
-    # ── 1. 타이틀바 픽셀 패턴 감지 ──────────────────────────────────────────
-    # 타이틀바: 매우 어두운 배경(max_c < 70) + 흰 텍스트(> 175)
-    # 실측: bright=0.21(흰 텍스트 21%), 배경은 near-black
+    # ── 진단용 픽셀 통계 (감지에는 사용 안 함, 로그 표시용) ───────────────────
     _f = hdr_crop.astype(np.float32)
     _max_c = _f.max(axis=2)
-    dark_mask   = (_max_c < 70)                            # 어두운 배경 (near-black 포함)
-    bright_mask = np.all(hdr_crop > 175, axis=2)           # 흰 텍스트
-    dark_r   = float(dark_mask.mean())
-    bright_r = float(bright_mask.mean())
-    # 타이틀바: 어두운 배경 40% 이상 + 흰 텍스트 8% 이상
-    pattern_score = dark_r if (dark_r >= 0.40 and bright_r >= 0.08) else 0.0
+    dark_r   = float((_max_c < 70).mean())
+    bright_r = float(np.all(hdr_crop > 175, axis=2).mean())
 
-    # ── 2. 템플릿 매칭 (보조 확인, 임계값 낮춰서 보조 역할) ─────────────────
-    # 실측 best_tmpl=0.36~0.41 → 임계값 0.30으로 조정
+    # ── 템플릿 매칭 (유일한 감지 방법) ─────────────────────────────────────
+    # 게임 배경(구름·하늘·풀밭)은 "투명 도형 찾기" 타이틀 템플릿과 매칭되지 않음
+    # → 픽셀 패턴 폴백 없이 템플릿만 사용 (오탐 방지)
+    # 실측 score: 팝업 있을 때 0.36~0.41, 임계값 0.30으로 커버
     best_tmpl = 0.0
     if _POPUP_TMPLS:
         _HDR_REF_W = int(2560 * (HDR_X2_R - HDR_X1_R))
@@ -246,8 +242,8 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
                     best_tmpl = max_val
 
     # ── 최종 판정 ────────────────────────────────────────────────────────────
-    hdr_score = max(pattern_score, best_tmpl)
-    if pattern_score > 0.0 or best_tmpl >= score_thr:
+    hdr_score = best_tmpl
+    if best_tmpl >= score_thr:
         return board_mon, hdr_score, dark_r, bright_r
     return None, hdr_score, dark_r, bright_r
 
