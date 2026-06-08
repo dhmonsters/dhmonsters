@@ -52,6 +52,35 @@ for _tname in ("minigame.png", "xz.bmp", "xz1.bmp", "xz2.bmp", "xz4.bmp"):
         if _img is not None:
             _POPUP_TEMPLATES.append(_img)
 
+# ── 투명도형 템플릿 (xz*.bmp) ──────────────────────────────────────────────
+_SHAPE_TEMPLATES: list = []
+for _tname in ("xz.bmp", "xz1.bmp", "xz2.bmp", "xz3.bmp", "xz4.bmp"):
+    _tp = os.path.join(ASSETS, _tname)
+    _img = cv2.imread(_tp) if os.path.exists(_tp) else None
+    if _img is not None:
+        _SHAPE_TEMPLATES.append(_img)
+
+def _tmpl_detect(det_img: np.ndarray, score_thr: float = 0.55):
+    """xz*.bmp 템플릿 매칭으로 투명도형 위치 반환 (cx, cy, score) 또는 None.
+
+    TM_CCOEFF_NORMED: ~2~5ms / 프레임 (M1 대비 ~30x 빠름)
+    """
+    dh, dw = det_img.shape[:2]
+    best_val, best_cx, best_cy = 0.0, 0, 0
+    for tmpl in _SHAPE_TEMPLATES:
+        th, tw = tmpl.shape[:2]
+        if th > dh or tw > dw:
+            continue
+        res = cv2.matchTemplate(det_img, tmpl, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        if max_val > best_val:
+            best_val = max_val
+            best_cx  = max_loc[0] + tw // 2
+            best_cy  = max_loc[1] + th // 2
+    if best_val >= score_thr:
+        return best_cx, best_cy, best_val
+    return None
+
 # ── 탐지 엔진 로드 ─────────────────────────────────────────────────────────
 from planet_yolo_verify import M1Ensemble, HyungYolo
 
@@ -267,10 +296,10 @@ class _MacroThread(threading.Thread):
                                         (10, 28), cv2.FONT_HERSHEY_SIMPLEX,
                                         0.8, (0, 215, 255), 2, cv2.LINE_AA)
                             self._sig.preview.emit(standby)
-                        time.sleep(0.033)
+                        time.sleep(0.016)  # 팝업 대기 중 60fps
                         continue
 
-                    # 주황 영역: 퍼즐 해제 구역 — M1 감지 + 클릭
+                    # 주황 영역: 퍼즐 해제 구역 — 템플릿 매칭 감지 + 클릭
                     det_mon = {
                         "left":   bx + int(bw * DET_X1_R),
                         "top":    by + int(bh * DET_Y1_R),
@@ -278,13 +307,14 @@ class _MacroThread(threading.Thread):
                         "height": int(bh * (DET_Y2_R - DET_Y1_R)),
                     }
                     det = cv2.cvtColor(np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
-                    boxes = m1.detect(det, self.IMGSZ, self.SCORE)
 
-                    if len(boxes):
-                        best = boxes[boxes[:, 4].argmax()]
-                        # det 내부 중심 → client 좌표
-                        cli_cx = (det_mon["left"] - bx) + int((best[0] + best[2]) / 2)
-                        cli_cy = (det_mon["top"]  - by) + int((best[1] + best[3]) / 2)
+                    # 템플릿 매칭 (~3ms, M1 대비 ~30x 빠름)
+                    tmpl_result = _tmpl_detect(det)
+                    det_cx = det_cy = score = None
+                    if tmpl_result:
+                        det_cx, det_cy, score = tmpl_result
+                        cli_cx = (det_mon["left"] - bx) + det_cx
+                        cli_cy = (det_mon["top"]  - by) + det_cy
                         _bg_click(hwnd, cli_cx, cli_cy)
                         miss = 0
                         if not tracking:
@@ -318,51 +348,40 @@ class _MacroThread(threading.Thread):
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 누적 {success}회")
 
-                    # ── 미리보기 emit: 빨간 영역(전체 팝업) 크롭 위에 박스 표시 ──
+                    # ── 미리보기 emit (5프레임마다) ──────────────────────────
                     preview_cnt += 1
                     if preview_cnt % 5 == 0:
                         vis = popup.copy()
-                        # popup 좌표계 기준 오프셋
-                        _hdr_lx = 0
-                        _hdr_ly = 0
-                        _hdr_rx = _pop_w
                         _hdr_ry = int(bh * (HDR_Y2_R - HDR_Y1_R))
                         _det_lx = det_mon["left"] - _pop_x1
                         _det_ly = det_mon["top"]  - _pop_y1
                         _det_rx = _det_lx + det_mon["width"]
                         _det_ry = _det_ly + det_mon["height"]
-                        # 노란색: 상단 검정바 (팝업 감지 영역)
-                        cv2.rectangle(vis, (_hdr_lx, _hdr_ly), (_hdr_rx, _hdr_ry),
+                        # 노란색: 상단 검정바
+                        cv2.rectangle(vis, (0, 0), (_pop_w, _hdr_ry),
                                       (0, 230, 255), 2)
-                        cv2.putText(vis, "HDR", (_hdr_lx + 4, _hdr_ly + 14),
+                        cv2.putText(vis, "HDR", (4, 14),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                     (0, 230, 255), 1, cv2.LINE_AA)
-                        # 주황색: 퍼즐 해제 구역 (M1 감지 + 클릭)
+                        # 주황색: 퍼즐 해제 구역
                         cv2.rectangle(vis, (_det_lx, _det_ly), (_det_rx, _det_ry),
                                       (0, 140, 255), 2)
                         cv2.putText(vis, "DET", (_det_lx + 4, _det_ly + 14),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                     (0, 140, 255), 1, cv2.LINE_AA)
-                        # 초록색: M1 detection 박스 (det → popup 좌표 변환)
-                        for b in boxes:
-                            dx1 = _det_lx + int(b[0]); dy1 = _det_ly + int(b[1])
-                            dx2 = _det_lx + int(b[2]); dy2 = _det_ly + int(b[3])
-                            cv2.rectangle(vis, (dx1, dy1), (dx2, dy2),
-                                          (80, 255, 0), 2)
-                        if len(boxes):
-                            best2 = boxes[boxes[:, 4].argmax()]
-                            cx2 = _det_lx + int((best2[0] + best2[2]) / 2)
-                            cy2 = _det_ly + int((best2[1] + best2[3]) / 2)
-                            cv2.drawMarker(vis, (cx2, cy2),
+                        # 초록 십자: 템플릿 매칭 결과
+                        if det_cx is not None:
+                            _mx = _det_lx + det_cx
+                            _my = _det_ly + det_cy
+                            cv2.drawMarker(vis, (_mx, _my),
                                            (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
-                            sc = float(best2[4])
-                            cv2.putText(vis, f"score={sc:.2f}",
+                            cv2.putText(vis, f"sc={score:.2f}",
                                         (_det_lx + 4, _det_ry - 6),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.4, (255, 220, 0), 1, cv2.LINE_AA)
                         self._sig.preview.emit(vis)
 
-                    time.sleep(0.033)
+                    time.sleep(0.008)  # ~120fps (템플릿 매칭은 빠름)
 
                 except Exception as e:
                     self._sig.log.emit(f"[!] {e}")
