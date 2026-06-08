@@ -253,9 +253,17 @@ class TabRecovery(QWidget):
                 coord = {"x_ratio": x_ratio, "y_ratio": y_ratio, "width_ratio": w_ratio}
                 rx, ry, rw = int(x - ox), int(y - oy), w
             else:
-                # absolute 모드 — 논리 절대 좌표로 저장
-                coord = {"x": x, "y": y, "width": w}
-                rx, ry, rw = x, y, w
+                # absolute 모드 — 게임 클라이언트 기준 상대 픽셀로 저장
+                # (전체화면: 게임 = (0,0) → 차이 없음 / 창 모드: 창 원점 차감)
+                try:
+                    import win32gui as _wg
+                    _title = self.config.get("settings2", "game_window_title") or "MapleStory"
+                    _hwnd  = _wg.FindWindow(None, _title)
+                    gox, goy = (_wg.ClientToScreen(_hwnd, (0, 0)) if _hwnd else (0, 0))
+                except Exception:
+                    gox, goy = 0, 0
+                coord = {"x": x - gox, "y": y - goy, "width": w}
+                rx, ry, rw = coord["x"], coord["y"], w
 
             if bar_type == "hp":
                 self.spin_hp_x.setValue(rx)

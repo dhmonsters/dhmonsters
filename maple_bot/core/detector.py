@@ -71,15 +71,23 @@ class Detector:
             y     = oy + int(coord["y_ratio"]     * ch)
             width = max(1, int(coord["width_ratio"] * cw))
         else:
-            # absolute 픽셀 모드
+            # absolute 픽셀 모드 — 좌표는 게임 클라이언트 기준 상대값으로 저장됨
             px = coord.get("x")
             py = coord.get("y")
             width = coord.get("width")
             # x=0이나 y=0은 유효한 좌표일 수 있으므로 None 또는 width=0만 미설정으로 판단
             if px is None or py is None or not width:
                 return 1.0
-            x = ox + int(px)
-            y = oy + int(py)
+            # 게임 창 원점을 coord_mode 무관하게 항상 조회 — 창 모드에서도 정확한 절대 좌표
+            try:
+                import win32gui as _wg
+                _title = self._config.get("settings2", "game_window_title") or "MapleStory"
+                _hwnd  = _wg.FindWindow(None, _title)
+                game_ox, game_oy = (_wg.ClientToScreen(_hwnd, (0, 0)) if _hwnd else (0, 0))
+            except Exception:
+                game_ox, game_oy = 0, 0
+            x = game_ox + int(px)
+            y = game_oy + int(py)
             width = int(width)
 
         scan_h = 17  # ±8행
