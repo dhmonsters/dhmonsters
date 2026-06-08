@@ -173,7 +173,7 @@ def _send_telegram(token: str, chat_id: str, img_bgr, caption: str = "") -> tupl
 
 # ── 팝업 보드 ROI 감지 ────────────────────────────────────────────────────
 def _detect_popup_board(client_frame, bx, by, bw, bh,
-                        score_thr=0.80, dark_ratio_thr=0.50):
+                        score_thr=0.65, dark_ratio_thr=0.50):
     """노란색 HDR 영역 템플릿 매칭으로 팝업 감지 → 보드 mss mon 반환, 미감지 시 None.
 
     1차: templates/ 폴더 이미지로 TM_CCOEFF_NORMED 매칭 (score_thr 이상 시 감지 확정)
@@ -322,10 +322,17 @@ class _MacroThread(threading.Thread):
                     if board_mon is None:
                         preview_cnt += 1
                         if preview_cnt % 5 == 0:
-                            # 팝업 없음 — 전체 팝업 영역에 "대기 중" 텍스트 표시
+                            # 팝업 없음 — HDR 노란 테두리 + "대기 중" 텍스트 표시
                             standby = popup.copy()
+                            _sb_hdr_ry = int(bh * (HDR_Y2_R - HDR_Y1_R))
+                            _sb_pop_w  = standby.shape[1]
+                            cv2.rectangle(standby, (0, 0), (_sb_pop_w, _sb_hdr_ry),
+                                          (0, 230, 255), 2)
+                            cv2.putText(standby, "HDR", (4, 14),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                        (0, 230, 255), 1, cv2.LINE_AA)
                             cv2.putText(standby, "팝업 대기 중",
-                                        (10, 28), cv2.FONT_HERSHEY_SIMPLEX,
+                                        (10, _sb_hdr_ry + 24), cv2.FONT_HERSHEY_SIMPLEX,
                                         0.8, (0, 215, 255), 2, cv2.LINE_AA)
                             self._sig.preview.emit(standby)
                         time.sleep(0.016)  # 팝업 대기 중 60fps
