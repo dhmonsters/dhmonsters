@@ -193,7 +193,7 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
     if _POPUP_TMPLS:
         # 1차: 템플릿 매칭 (노란색 HDR 영역)
         # 템플릿은 1920×1080 기준 캡처 → 현재 HDR 너비 비율로 스케일 보정
-        _HDR_REF_W = int(1920 * (HDR_X2_R - HDR_X1_R))  # ~953px (기준 해상도)
+        _HDR_REF_W = int(2560 * (HDR_X2_R - HDR_X1_R))  # ~1270px (템플릿 캡처 기준: 2560×1440)
         hdr_gray = cv2.cvtColor(hdr_crop, cv2.COLOR_BGR2GRAY)
         dh, dw = hdr_gray.shape
         scale = dw / _HDR_REF_W  # 현재 해상도/DPI 보정 비율
