@@ -81,7 +81,7 @@ def _load_models(use_gpu: bool = False):
 
 # ── 창 탐지 / 해상도 ──────────────────────────────────────────────────────
 _GAME_CLASSES  = ("MapleStoryClass", "UnityWndClass", "NEXON Plug-in Window")
-_GAME_KEYWORDS = ("maplestory", "메이플", "planet", "worlds")
+_GAME_KEYWORDS = ("maplestory", "메이플스토리", "worlds")
 TARGET_W, TARGET_H = 1920, 1080
 
 def _find_hwnd():
