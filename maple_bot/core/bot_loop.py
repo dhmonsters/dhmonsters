@@ -1973,6 +1973,7 @@ class BotLoop:
 
         # 창 크기 변경 대응: ref 크기로 current를 리사이즈 후 직접 비교.
         # find_template_score(multiscale)는 템플릿 > 스크린샷 시 score=0 오판정 발생.
+        import cv2
         ref_img = cv2.imread(ref_path)
         if ref_img is None:
             return
