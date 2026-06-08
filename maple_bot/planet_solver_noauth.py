@@ -396,8 +396,7 @@ class _MacroThread(threading.Thread):
                         abs_x  = bx + cli_cx
                         abs_y  = by + cli_cy
                         self._sig.log.emit(
-                            f"[도형 감지] {len(boxes)}개 탐지 "
-                            f"score={float(best[4]):.2f} "
+                            f"[도형 감지] score={float(best[4]):.2f} "
                             f"→ 클릭 ({abs_x}, {abs_y})"
                         )
                         _real_click(abs_x, abs_y)
