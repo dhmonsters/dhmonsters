@@ -416,8 +416,12 @@ class _MacroThread(threading.Thread):
                             "width":  int(bw * (DET_X2_R - DET_X1_R)),
                             "height": int(bh * (DET_Y2_R - DET_Y1_R)),
                         }
-                        det_init = cv2.cvtColor(
-                            np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
+                        # 이미 캡처된 client 프레임에서 DET 영역 크롭 (추가 grab 없음)
+                        _dy1 = int(bh * DET_Y1_R)
+                        _dy2 = _dy1 + int(bh * (DET_Y2_R - DET_Y1_R))
+                        _dx1 = int(bw * DET_X1_R)
+                        _dx2 = _dx1 + int(bw * (DET_X2_R - DET_X1_R))
+                        det_init = client[_dy1:_dy2, _dx1:_dx2]
 
                         # M2로 중앙 도형 클래스 분류 (아직 흰색으로 보이는 순간)
                         dh, dw = det_init.shape[:2]
