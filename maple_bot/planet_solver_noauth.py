@@ -249,7 +249,17 @@ class _MacroThread(threading.Thread):
                     if board_mon is None:
                         preview_cnt += 1
                         if preview_cnt % 5 == 0:
-                            self._sig.preview.emit(None)
+                            # 팝업 미감지 — 클라이언트 프레임에 헤더 ROI(주황)만 표시
+                            vis = client.copy()
+                            _hx1 = int(bw * HDR_X1_R); _hy1 = int(bh * HDR_Y1_R)
+                            _hx2 = int(bw * HDR_X2_R); _hy2 = int(bh * HDR_Y2_R)
+                            cv2.rectangle(vis, (_hx1, _hy1), (_hx2, _hy2),
+                                          (0, 140, 255), 2)
+                            cv2.putText(vis, "HDR (팝업 대기)",
+                                        (_hx1 + 4, _hy1 + 14),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                        (0, 140, 255), 1, cv2.LINE_AA)
+                            self._sig.preview.emit(vis)
                         time.sleep(0.033)
                         continue
                     board = cv2.cvtColor(np.array(sct.grab(board_mon)), cv2.COLOR_BGRA2BGR)
@@ -297,21 +307,41 @@ class _MacroThread(threading.Thread):
                     # ── 미리보기 emit (5프레임마다) ───────────────────────
                     preview_cnt += 1
                     if preview_cnt % 5 == 0:
-                        vis = board.copy()
+                        vis = client.copy()
+                        # 주황색: 헤더 감지 영역
+                        _hx1 = int(bw * HDR_X1_R); _hy1 = int(bh * HDR_Y1_R)
+                        _hx2 = int(bw * HDR_X2_R); _hy2 = int(bh * HDR_Y2_R)
+                        cv2.rectangle(vis, (_hx1, _hy1), (_hx2, _hy2),
+                                      (0, 140, 255), 2)
+                        cv2.putText(vis, "HDR", (_hx1 + 4, _hy1 + 14),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                    (0, 140, 255), 1, cv2.LINE_AA)
+                        # 빨간색: 보드 ROI 경계
+                        _blx = board_mon["left"] - bx
+                        _bly = board_mon["top"]  - by
+                        _brx = _blx + board_mon["width"]
+                        _bry = _bly + board_mon["height"]
+                        cv2.rectangle(vis, (_blx, _bly), (_brx, _bry),
+                                      (0, 0, 220), 2)
+                        cv2.putText(vis, "BOARD", (_blx + 4, _bly + 14),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                    (0, 0, 220), 1, cv2.LINE_AA)
+                        # 초록색: M1 detection 박스 (board 좌표 → client 좌표 변환)
                         for b in boxes:
-                            cv2.rectangle(vis,
-                                          (int(b[0]), int(b[1])),
-                                          (int(b[2]), int(b[3])),
-                                          (0, 80, 255), 2)
+                            dx1 = _blx + int(b[0]); dy1 = _bly + int(b[1])
+                            dx2 = _blx + int(b[2]); dy2 = _bly + int(b[3])
+                            cv2.rectangle(vis, (dx1, dy1), (dx2, dy2),
+                                          (80, 255, 0), 2)
                         if len(boxes):
                             best2 = boxes[boxes[:, 4].argmax()]
-                            cx2 = int((best2[0] + best2[2]) / 2)
-                            cy2 = int((best2[1] + best2[3]) / 2)
+                            cx2 = _blx + int((best2[0] + best2[2]) / 2)
+                            cy2 = _bly + int((best2[1] + best2[3]) / 2)
                             cv2.drawMarker(vis, (cx2, cy2),
                                            (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
                             sc = float(best2[4])
                             cv2.putText(vis, f"score={sc:.2f}",
-                                        (4, 16), cv2.FONT_HERSHEY_SIMPLEX,
+                                        (_blx + 4, _bly + 30),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
                                         0.45, (255, 220, 0), 1, cv2.LINE_AA)
                         self._sig.preview.emit(vis)
 
@@ -447,7 +477,7 @@ class PreviewWindow(QWidget):
                        Qt.TransformationMode.SmoothTransformation)
         self.lbl_img.setPixmap(pm)
         self.lbl_img.setText("")
-        self.lbl_info.setText(f"board {w}×{h}")
+        self.lbl_info.setText(f"client {w}×{h}")
 
     def reset(self) -> None:
         self.lbl_img.setPixmap(QPixmap())
