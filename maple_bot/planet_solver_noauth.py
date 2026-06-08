@@ -327,6 +327,7 @@ class _MacroThread(threading.Thread):
         _last_marker_pos = (0, 0)    # _track_once: 직전 프레임 도형 중심 (det 내 좌표)
         CAPCHA_END_MISS_COUNT = 3    # 원본과 동일 — 연속 미탐지 3회 → 퍼즐 종료 판정
         TRACK_INTERVAL = 0.05        # 원본과 동일 — 추적 루프 주기 (20fps)
+        MAX_JUMP = 120               # 프레임 간 허용 최대 이동거리(px) — 초과 시 miss 처리
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -469,22 +470,40 @@ class _MacroThread(threading.Thread):
                         _det_label = "M1 ensemble(fallback)"
                     boxes = detector.detect(det, self.IMGSZ, self.SCORE)
 
+                    # ── _track_once: 박스 선택 (MAX_JUMP 필터 포함) ──────────
+                    _best = None
+                    _select_method = ""
                     if len(boxes):
-                        # ── _track_once: _last_marker_pos에 가장 가까운 박스 선택 ──
-                        if _last_marker_pos != (0, 0) and len(boxes) > 1:
+                        if _last_marker_pos != (0, 0):
                             lx, ly = _last_marker_pos
                             centers = np.array([
                                 ((b[0]+b[2])/2, (b[1]+b[3])/2) for b in boxes
                             ])
                             dists = np.hypot(centers[:,0]-lx, centers[:,1]-ly)
-                            best = boxes[dists.argmin()]
-                            _select_method = f"거리기반(boxes={len(boxes)}개중 최근접)"
+
+                            valid_mask = dists <= MAX_JUMP
+                            if valid_mask.any():
+                                valid_boxes = boxes[valid_mask]
+                                valid_dists = dists[valid_mask]
+                                _best = valid_boxes[valid_dists.argmin()]
+                                _select_method = (
+                                    f"거리기반(유효{valid_mask.sum()}/{len(boxes)}개, "
+                                    f"dist={valid_dists.min():.0f}px)"
+                                )
+                            else:
+                                # 모든 박스가 MAX_JUMP 초과 → miss 처리
+                                self._sig.log.emit(
+                                    f"[점프차단] 최근접 {dists.min():.0f}px "
+                                    f"> {MAX_JUMP}px → miss 처리"
+                                )
                         else:
-                            best = boxes[boxes[:, 4].argmax()]
+                            # 첫 프레임: 마커 없으므로 최고점수 박스 무조건 선택
+                            _best = boxes[boxes[:, 4].argmax()]
                             _select_method = f"최고점수(boxes={len(boxes)})"
 
-                        cx = int((best[0] + best[2]) / 2)
-                        cy = int((best[1] + best[3]) / 2)
+                    if _best is not None:
+                        cx = int((_best[0] + _best[2]) / 2)
+                        cy = int((_best[1] + _best[3]) / 2)
                         _last_marker_pos = (cx, cy)
 
                         abs_x = det_mon["left"] + cx
@@ -495,13 +514,13 @@ class _MacroThread(threading.Thread):
                         if not tracking:
                             tracking = True
                             self._sig.log.emit(
-                                f"[{_det_label}] 첫 감지 score={float(best[4]):.2f} "
+                                f"[{_det_label}] 첫 감지 score={float(_best[4]):.2f} "
                                 f"→ 커서 ({abs_x}, {abs_y})  선택방식={_select_method}"
                             )
                         elif preview_cnt % 30 == 0:
                             # 30프레임(~1.5초)마다 추적 상태 요약
                             self._sig.log.emit(
-                                f"[추적중] {_det_label}  score={float(best[4]):.2f} "
+                                f"[추적중] {_det_label}  score={float(_best[4]):.2f} "
                                 f"pos=({abs_x},{abs_y})  {_select_method}  miss={miss}"
                             )
                             now = time.time()
