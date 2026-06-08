@@ -1970,7 +1970,20 @@ class BotLoop:
         lx, ly, lw, lh = resolved
         px, py, pw, ph = logical_to_physical_coords(lx, ly, lw, lh)
         current = self._screen.capture({"left": px, "top": py, "width": pw, "height": ph})
-        score = self._screen.find_template_score(current, ref_path)
+
+        # 창 크기 변경 대응: ref 크기로 current를 리사이즈 후 직접 비교.
+        # find_template_score(multiscale)는 템플릿 > 스크린샷 시 score=0 오판정 발생.
+        ref_img = cv2.imread(ref_path)
+        if ref_img is None:
+            return
+        rh, rw = ref_img.shape[:2]
+        ch, cw = current.shape[:2]
+        if ch != rh or cw != rw:
+            current_cmp = cv2.resize(current, (rw, rh), interpolation=cv2.INTER_AREA)
+        else:
+            current_cmp = current
+        result = cv2.matchTemplate(current_cmp, ref_img, cv2.TM_CCOEFF_NORMED)
+        score = float(result[0, 0])
 
         threshold = float(cfg.get("threshold", 0.75))
         if score >= threshold:
