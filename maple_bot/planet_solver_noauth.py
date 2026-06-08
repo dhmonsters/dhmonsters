@@ -196,31 +196,36 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
 
     if _POPUP_TMPLS:
         # 1차: 템플릿 매칭 (노란색 HDR 영역)
-        # 템플릿은 2560×1440 기준 캡처 → 현재 HDR 너비 비율로 스케일 보정
+        # 템플릿은 2560×1440 기준 캡처 — 하지만 메이플 UI가 고정 픽셀이면
+        # scale=1.0이 맞을 수도 있으므로 여러 스케일을 시도해 최고 점수 채택
         _HDR_REF_W = int(2560 * (HDR_X2_R - HDR_X1_R))
         hdr_gray = cv2.cvtColor(hdr_crop, cv2.COLOR_BGR2GRAY)
         dh, dw = hdr_gray.shape
-        scale = dw / _HDR_REF_W
+        ratio_scale = dw / _HDR_REF_W   # 해상도 비례 스케일 (1920/2560 ≈ 0.75)
+        # 시도할 스케일 목록: 1.0 (고정 픽셀 UI), 비례 스케일, ±10% 여유
+        _scales = sorted({1.0, ratio_scale,
+                          round(ratio_scale * 1.1, 3),
+                          round(ratio_scale * 0.9, 3)})
         best_score = 0.0
         for (tmpl, th, tw) in _POPUP_TMPLS:
             # HDR 팝업 감지용이 아닌 이미지 제외
             # 팝업 타이틀(01/02/lie_detector): h≥63 — map_name_ref(h=43) 등은 제외
             if tw < 100 or th < 50:
                 continue
-            # 스케일 보정
-            if abs(scale - 1.0) > 0.02:
-                new_w = max(1, round(tw * scale))
-                new_h = max(1, round(th * scale))
-                t = cv2.resize(tmpl, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                th, tw = new_h, new_w
-            else:
-                t = tmpl
-            if th > dh or tw > dw:
-                continue
-            res = cv2.matchTemplate(hdr_gray, t, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, _ = cv2.minMaxLoc(res)
-            if max_val > best_score:
-                best_score = max_val
+            for s in _scales:
+                if abs(s - 1.0) < 0.02:
+                    t = tmpl
+                    _th, _tw = th, tw
+                else:
+                    _tw = max(1, round(tw * s))
+                    _th = max(1, round(th * s))
+                    t = cv2.resize(tmpl, (_tw, _th), interpolation=cv2.INTER_AREA)
+                if _th > dh or _tw > dw:
+                    continue
+                res = cv2.matchTemplate(hdr_gray, t, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, _ = cv2.minMaxLoc(res)
+                if max_val > best_score:
+                    best_score = max_val
         if best_score >= score_thr:
             return board_mon, best_score
         return None, best_score
