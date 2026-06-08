@@ -327,7 +327,8 @@ class _MacroThread(threading.Thread):
         _last_marker_pos = (0, 0)    # _track_once: 직전 프레임 도형 중심 (det 내 좌표)
         CAPCHA_END_MISS_COUNT = 3    # 원본과 동일 — 연속 미탐지 3회 → 퍼즐 종료 판정
         TRACK_INTERVAL = 0.05        # 원본과 동일 — 추적 루프 주기 (20fps)
-        MAX_JUMP = 120               # 프레임 간 허용 최대 이동거리(px) — 초과 시 miss 처리
+        MAX_JUMP = 180               # 프레임 간 허용 최대 이동거리(px) — 초과 시 miss 처리
+        MAX_MISS_RESET = 5           # 연속 miss 이 횟수 도달 시 마커 리셋 → 재획득
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -563,6 +564,12 @@ class _MacroThread(threading.Thread):
                             self._sig.log.emit(
                                 f"[{_det_label}] 미감지 {miss}회 연속 — "
                                 f"마지막 위치 {_last_marker_pos}"
+                            )
+                        # 연속 miss가 MAX_MISS_RESET 도달 → 마커 초기화 후 재획득
+                        if miss >= MAX_MISS_RESET and _last_marker_pos != (0, 0):
+                            _last_marker_pos = (0, 0)
+                            self._sig.log.emit(
+                                f"[재획득] miss {miss}회 → 마커 초기화, 다음 프레임 최고점수로 재획득"
                             )
 
                     # ── 미리보기 emit (5프레임마다) ──────────────────────────
