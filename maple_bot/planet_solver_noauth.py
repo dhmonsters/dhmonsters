@@ -38,11 +38,11 @@ MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
 # ── 팝업 감지 / 보드 ROI 상대 좌표 ─────────────────────────────────────────
 # 참조: 00412.PNG / popup_range.png (게임 클라이언트 1920×1080 기준)
 HDR_X1_R, HDR_X2_R = 0.282, 0.718   # 🟡 노란 영역: 팝업 타이틀바 감지
-HDR_Y1_R, HDR_Y2_R = 0.155, 0.230   # 타이틀바 y≈165~215 / 1009px 기준
-BRD_X1_R, BRD_X2_R = 0.282, 0.718   # 🔴 빨간 영역: 전체 팝업 (타이틀 포함)
-BRD_Y1_R, BRD_Y2_R = 0.150, 0.665
-DET_X1_R, DET_X2_R = 0.292, 0.708   # 🟠 주황 영역: 퍼즐 도형 구역 (타이틀바 아래)
-DET_Y1_R, DET_Y2_R = 0.232, 0.630
+HDR_Y1_R, HDR_Y2_R = 0.216, 0.292
+BRD_X1_R, BRD_X2_R = 0.282, 0.718   # 🔴 빨간 영역: 전체 팝업
+BRD_Y1_R, BRD_Y2_R = 0.292, 0.836
+DET_X1_R, DET_X2_R = 0.292, 0.708   # 🟠 주황 영역: 퍼즐 도형 구역
+DET_Y1_R, DET_Y2_R = 0.310, 0.820
 
 _POPUP_TEMPLATES: list = []
 for _tname in ("minigame.png", "xz.bmp", "xz1.bmp", "xz2.bmp", "xz4.bmp"):
@@ -204,25 +204,30 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
         "height": int(bh * (BRD_Y2_R - BRD_Y1_R)),
     }
 
+    # ── 1. 타이틀바 픽셀 패턴 감지 ──────────────────────────────────────────
+    # "투명 도형 찾기" 타이틀바 = 어두운 회색 배경 + 흰 텍스트
+    # 스케일·해상도 무관, 템플릿 불필요
+    dark_mask   = np.all(hdr_crop < 80,  axis=2)   # 어두운 배경 픽셀
+    bright_mask = np.all(hdr_crop > 180, axis=2)   # 흰 텍스트 픽셀
+    dark_r   = float(dark_mask.mean())
+    bright_r = float(bright_mask.mean())
+    # 타이틀바 패턴: 배경 45% 이상 어둡고 텍스트 2% 이상 밝음
+    pattern_score = dark_r if (dark_r >= 0.45 and bright_r >= 0.02) else 0.0
+
+    # ── 2. 템플릿 매칭 (보조 확인) ──────────────────────────────────────────
+    best_tmpl = 0.0
     if _POPUP_TMPLS:
-        # 1차: 템플릿 매칭 (노란색 HDR 영역)
-        # 템플릿은 2560×1440 기준 캡처 — 하지만 메이플 UI가 고정 픽셀이면
-        # scale=1.0이 맞을 수도 있으므로 여러 스케일을 시도해 최고 점수 채택
         _HDR_REF_W = int(2560 * (HDR_X2_R - HDR_X1_R))
         hdr_gray = cv2.cvtColor(hdr_crop, cv2.COLOR_BGR2GRAY)
         dh, dw = hdr_gray.shape
-        ratio_scale = dw / _HDR_REF_W   # 해상도 비례 스케일 (1920/2560 ≈ 0.75)
-        # 시도할 스케일 목록: 1.0 (고정 픽셀 UI), 비례 스케일, ±10% 여유
+        ratio_scale = dw / _HDR_REF_W
         _scales = sorted({1.0, ratio_scale,
                           round(ratio_scale * 1.1, 3),
                           round(ratio_scale * 0.9, 3)})
-        best_score = 0.0
         for (tmpl, th, tw) in _POPUP_TMPLS:
-            # _reload_templates 에서 이미 소형 이미지 제외됨 — 추가 필터 불필요
             for s in _scales:
                 if abs(s - 1.0) < 0.02:
-                    t = tmpl
-                    _th, _tw = th, tw
+                    t = tmpl; _th, _tw = th, tw
                 else:
                     _tw = max(1, round(tw * s))
                     _th = max(1, round(th * s))
@@ -231,18 +236,15 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
                     continue
                 res = cv2.matchTemplate(hdr_gray, t, cv2.TM_CCOEFF_NORMED)
                 _, max_val, _, _ = cv2.minMaxLoc(res)
-                if max_val > best_score:
-                    best_score = max_val
-        if best_score >= score_thr:
-            return board_mon, best_score
-        return None, best_score
-    else:
-        # 2차 fallback: 템플릿 없을 때 dark pixel 비율 체크
-        dark = np.all(hdr_crop.astype(np.int16) < 80, axis=2)
-        ratio = float(dark.mean())
-        if ratio >= dark_ratio_thr:
-            return board_mon, ratio
-        return None, ratio
+                if max_val > best_tmpl:
+                    best_tmpl = max_val
+
+    # ── 최종 판정 ────────────────────────────────────────────────────────────
+    # 패턴 감지 OR 템플릿 매칭 중 하나라도 기준 충족 시 팝업으로 판정
+    hdr_score = max(pattern_score, best_tmpl)
+    if pattern_score > 0.0 or best_tmpl >= score_thr:
+        return board_mon, hdr_score
+    return None, hdr_score
 
 
 # ── PostMessage 백그라운드 클릭 ───────────────────────────────────────────
