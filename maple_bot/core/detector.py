@@ -135,8 +135,17 @@ class Detector:
         # 색상 픽셀이 존재하는 가장 오른쪽 열 = 채워진 비율
         col_has_match = final_mask.any(axis=0)   # shape (W,)
         cols = np.where(col_has_match)[0]
+
+        # 색상 픽셀 미검출 = 바 캡처 실패(좌표 이탈·UI 가림 등) → 포션 오남용 방지
+        # 진짜 0%라면 캐릭터가 죽으므로 실용적으로 1.0(안전값) 반환
         if len(cols) == 0:
-            return 0.0
+            return 1.0
+
+        # 유효 픽셀이 3개 미만이면 노이즈로 간주 → 안전값 반환
+        total_px = int(final_mask.sum())
+        if total_px < 3:
+            return 1.0
+
         return (int(cols[-1]) + 1) / width
 
     # ── 템플릿 캐시 ───────────────────────────────────────────────────
