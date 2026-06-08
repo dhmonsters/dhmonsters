@@ -37,11 +37,11 @@ MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
 
 # ── 팝업 감지 / 보드 ROI 상대 좌표 ─────────────────────────────────────────
 # 참조: 00412.PNG / popup_range.png (게임 클라이언트 1920×1080 기준)
-HDR_X1_R, HDR_X2_R = 0.252, 0.748   # 헤더 감지 (팝업 존재 여부 판단)
+HDR_X1_R, HDR_X2_R = 0.252, 0.748   # 🟡 노란 영역: 상단 검정바 (팝업 존재 여부 감지)
 HDR_Y1_R, HDR_Y2_R = 0.216, 0.292
-BRD_X1_R, BRD_X2_R = 0.254, 0.748   # 빨간 영역: 미리보기 크롭 범위
+BRD_X1_R, BRD_X2_R = 0.254, 0.748   # 🔴 빨간 영역 x축 (HDR_Y1 ~ BRD_Y2 가 전체 팝업)
 BRD_Y1_R, BRD_Y2_R = 0.292, 0.880
-DET_X1_R, DET_X2_R = 0.270, 0.732   # 노란 영역: 투명도형 실제 감지 구역
+DET_X1_R, DET_X2_R = 0.270, 0.732   # 🟠 주황 영역: 퍼즐 해제 구역 (M1 감지 + 클릭)
 DET_Y1_R, DET_Y2_R = 0.310, 0.862
 
 _POPUP_TEMPLATES: list = []
@@ -248,24 +248,29 @@ class _MacroThread(threading.Thread):
 
                     client = cv2.cvtColor(np.array(sct.grab(client_mon)), cv2.COLOR_BGRA2BGR)
                     board_mon = _detect_popup_board(client, bx, by, bw, bh)
+
+                    # 빨간 영역: 전체 팝업 (HDR_Y1 ~ BRD_Y2) — 항상 캡처해서 미리보기에 사용
+                    _pop_x1 = bx + int(bw * BRD_X1_R)
+                    _pop_y1 = by + int(bh * HDR_Y1_R)
+                    _pop_w  = int(bw * (BRD_X2_R - BRD_X1_R))
+                    _pop_h  = int(bh * (BRD_Y2_R - HDR_Y1_R))
+                    popup_mon = {"left": _pop_x1, "top": _pop_y1,
+                                 "width": _pop_w, "height": _pop_h}
+                    popup = cv2.cvtColor(np.array(sct.grab(popup_mon)), cv2.COLOR_BGRA2BGR)
+
                     if board_mon is None:
                         preview_cnt += 1
                         if preview_cnt % 5 == 0:
-                            # 팝업 없음 — BRD 구역을 그대로 잘라서 "대기 중" 텍스트와 함께 표시
-                            _brd_x1 = int(bw * BRD_X1_R); _brd_y1 = int(bh * BRD_Y1_R)
-                            _brd_x2 = int(bw * BRD_X2_R); _brd_y2 = int(bh * BRD_Y2_R)
-                            standby = client[_brd_y1:_brd_y2, _brd_x1:_brd_x2].copy()
+                            # 팝업 없음 — 전체 팝업 영역에 "대기 중" 텍스트 표시
+                            standby = popup.copy()
                             cv2.putText(standby, "팝업 대기 중",
-                                        (10, 24), cv2.FONT_HERSHEY_SIMPLEX,
-                                        0.7, (0, 215, 255), 2, cv2.LINE_AA)
+                                        (10, 28), cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.8, (0, 215, 255), 2, cv2.LINE_AA)
                             self._sig.preview.emit(standby)
                         time.sleep(0.033)
                         continue
 
-                    # 빨간 영역: 보드 전체 크롭 (미리보기용)
-                    board = cv2.cvtColor(np.array(sct.grab(board_mon)), cv2.COLOR_BGRA2BGR)
-
-                    # 노란 영역: 실제 감지에 쓸 내부 구역
+                    # 주황 영역: 퍼즐 해제 구역 — M1 감지 + 클릭
                     det_mon = {
                         "left":   bx + int(bw * DET_X1_R),
                         "top":    by + int(bh * DET_Y1_R),
@@ -274,10 +279,6 @@ class _MacroThread(threading.Thread):
                     }
                     det = cv2.cvtColor(np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
                     boxes = m1.detect(det, self.IMGSZ, self.SCORE)
-
-                    # board 좌표계 오프셋 (det → board 변환용)
-                    _det_ox = det_mon["left"] - board_mon["left"]
-                    _det_oy = det_mon["top"]  - board_mon["top"]
 
                     if len(boxes):
                         best = boxes[boxes[:, 4].argmax()]
@@ -302,7 +303,7 @@ class _MacroThread(threading.Thread):
                                     full = cv2.cvtColor(
                                         np.array(sct.grab(full_mon)), cv2.COLOR_BGRA2BGR)
                                 except Exception:
-                                    full = board
+                                    full = popup
                                 token, chat = self._tg_token, self._tg_chat
                                 threading.Thread(
                                     target=self._tg_send,
@@ -317,38 +318,48 @@ class _MacroThread(threading.Thread):
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 누적 {success}회")
 
-                    # ── 미리보기 emit: 빨간 영역(board) 크롭 위에 박스 표시 ──
+                    # ── 미리보기 emit: 빨간 영역(전체 팝업) 크롭 위에 박스 표시 ──
                     preview_cnt += 1
                     if preview_cnt % 5 == 0:
-                        vis = board.copy()
-                        bh2, bw2 = vis.shape[:2]
-                        # 노란색: 감지 구역 경계 (board 좌표계)
-                        _det_lx = det_mon["left"] - board_mon["left"]
-                        _det_ly = det_mon["top"]  - board_mon["top"]
+                        vis = popup.copy()
+                        # popup 좌표계 기준 오프셋
+                        _hdr_lx = 0
+                        _hdr_ly = 0
+                        _hdr_rx = _pop_w
+                        _hdr_ry = int(bh * (HDR_Y2_R - HDR_Y1_R))
+                        _det_lx = det_mon["left"] - _pop_x1
+                        _det_ly = det_mon["top"]  - _pop_y1
                         _det_rx = _det_lx + det_mon["width"]
                         _det_ry = _det_ly + det_mon["height"]
+                        # 노란색: 상단 검정바 (팝업 감지 영역)
+                        cv2.rectangle(vis, (_hdr_lx, _hdr_ly), (_hdr_rx, _hdr_ry),
+                                      (0, 230, 255), 2)
+                        cv2.putText(vis, "HDR", (_hdr_lx + 4, _hdr_ly + 14),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                                    (0, 230, 255), 1, cv2.LINE_AA)
+                        # 주황색: 퍼즐 해제 구역 (M1 감지 + 클릭)
                         cv2.rectangle(vis, (_det_lx, _det_ly), (_det_rx, _det_ry),
-                                      (0, 215, 255), 2)
+                                      (0, 140, 255), 2)
                         cv2.putText(vis, "DET", (_det_lx + 4, _det_ly + 14),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4,
-                                    (0, 215, 255), 1, cv2.LINE_AA)
-                        # 초록색: M1 detection 박스 (det 좌표 → board 좌표 변환)
+                                    (0, 140, 255), 1, cv2.LINE_AA)
+                        # 초록색: M1 detection 박스 (det → popup 좌표 변환)
                         for b in boxes:
-                            dx1 = _det_ox + int(b[0]); dy1 = _det_oy + int(b[1])
-                            dx2 = _det_ox + int(b[2]); dy2 = _det_oy + int(b[3])
+                            dx1 = _det_lx + int(b[0]); dy1 = _det_ly + int(b[1])
+                            dx2 = _det_lx + int(b[2]); dy2 = _det_ly + int(b[3])
                             cv2.rectangle(vis, (dx1, dy1), (dx2, dy2),
                                           (80, 255, 0), 2)
                         if len(boxes):
                             best2 = boxes[boxes[:, 4].argmax()]
-                            cx2 = _det_ox + int((best2[0] + best2[2]) / 2)
-                            cy2 = _det_oy + int((best2[1] + best2[3]) / 2)
+                            cx2 = _det_lx + int((best2[0] + best2[2]) / 2)
+                            cy2 = _det_ly + int((best2[1] + best2[3]) / 2)
                             cv2.drawMarker(vis, (cx2, cy2),
                                            (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
                             sc = float(best2[4])
                             cv2.putText(vis, f"score={sc:.2f}",
-                                        (_det_lx + 4, _det_ly + 30),
+                                        (_det_lx + 4, _det_ry - 6),
                                         cv2.FONT_HERSHEY_SIMPLEX,
-                                        0.45, (255, 220, 0), 1, cv2.LINE_AA)
+                                        0.4, (255, 220, 0), 1, cv2.LINE_AA)
                         self._sig.preview.emit(vis)
 
                     time.sleep(0.033)
