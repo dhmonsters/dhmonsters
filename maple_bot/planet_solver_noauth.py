@@ -294,13 +294,20 @@ class _MacroThread(threading.Thread):
         self._sig.log.emit("[*] 메이플 창 탐색...")
         hwnd = _find_hwnd()
         if hwnd is None:
-            self._sig.status.emit("error:메이플 창 없음")
-            return
-        title = win32gui.GetWindowText(hwnd)
-        self._sig.log.emit(f"[✓] 창: {title}")
-
-        _enforce_res(hwnd)
-        bx, by, bw, bh = _client_roi(hwnd)
+            # 테스트 모드: 메이플 창 없으면 모니터 전체를 캡처 영역으로 사용
+            # (팝업 스크린샷을 화면에 띄워서 감지 테스트 가능)
+            self._sig.log.emit("[!] 메이플 창 없음 → 모니터 전체 영역으로 테스트 모드 진행")
+            hwnd = 0
+            import mss as _mss_init
+            with _mss_init.mss() as _s0:
+                _m0 = _s0.monitors[1]
+                bx = _m0["left"]; by = _m0["top"]
+                bw = _m0["width"]; bh = _m0["height"]
+        else:
+            title = win32gui.GetWindowText(hwnd)
+            self._sig.log.emit(f"[✓] 창: {title}")
+            _enforce_res(hwnd)
+            bx, by, bw, bh = _client_roi(hwnd)
         self._sig.log.emit(f"[좌표] {bx},{by}  {bw}×{bh}")
         self._sig.status.emit("running")
 
