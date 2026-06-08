@@ -58,8 +58,15 @@ for _tname in ("minigame.png", "xz.bmp", "xz1.bmp", "xz2.bmp", "xz4.bmp"):
 TMPL_DIR = os.path.join(ROOT, "templates")
 _POPUP_TMPLS: list[tuple[np.ndarray, int, int]] = []  # (gray, h, w)
 
+_TMPL_MIN_W, _TMPL_MIN_H = 100, 50  # 팝업 타이틀 이미지 최소 크기 (소형 이미지 제외)
+
 def _reload_templates() -> int:
-    """templates/ 폴더의 이미지를 그레이스케일로 로드. 로드된 개수 반환."""
+    """templates/ 폴더의 이미지를 그레이스케일로 로드. 로드된 개수 반환.
+
+    크기 필터: 너비 < 100 또는 높이 < 50 이면 로드 제외
+      - 통과: 01.png(213×63), 02.png(928×73), lie_detector_1.png(219×63)
+      - 제외: map_name_ref, monster_capture, name_tag, xz*.bmp 등
+    """
     _POPUP_TMPLS.clear()
     if not os.path.isdir(TMPL_DIR):
         return 0
@@ -71,8 +78,11 @@ def _reload_templates() -> int:
         img = cv2.imread(fpath)
         if img is None:
             continue
+        h, w = img.shape[:2]
+        if w < _TMPL_MIN_W or h < _TMPL_MIN_H:
+            continue  # 팝업 타이틀이 아닌 소형 이미지 제외
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _POPUP_TMPLS.append((gray, gray.shape[0], gray.shape[1]))
+        _POPUP_TMPLS.append((gray, h, w))
     return len(_POPUP_TMPLS)
 
 _n = _reload_templates()
@@ -208,10 +218,7 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
                           round(ratio_scale * 0.9, 3)})
         best_score = 0.0
         for (tmpl, th, tw) in _POPUP_TMPLS:
-            # HDR 팝업 감지용이 아닌 이미지 제외
-            # 팝업 타이틀(01/02/lie_detector): h≥63 — map_name_ref(h=43) 등은 제외
-            if tw < 100 or th < 50:
-                continue
+            # _reload_templates 에서 이미 소형 이미지 제외됨 — 추가 필터 불필요
             for s in _scales:
                 if abs(s - 1.0) < 0.02:
                     t = tmpl
