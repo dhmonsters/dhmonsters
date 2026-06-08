@@ -37,12 +37,12 @@ MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
 
 # ── 팝업 감지 / 보드 ROI 상대 좌표 ─────────────────────────────────────────
 # 참조: 00412.PNG / popup_range.png (게임 클라이언트 1920×1080 기준)
-HDR_X1_R, HDR_X2_R = 0.282, 0.718   # 🟡 노란 영역: 상단 검정바 (팝업 존재 여부 감지)
-HDR_Y1_R, HDR_Y2_R = 0.216, 0.292
-BRD_X1_R, BRD_X2_R = 0.282, 0.718   # 🔴 빨간 영역 x축 (HDR_Y1 ~ BRD_Y2 가 전체 팝업)
-BRD_Y1_R, BRD_Y2_R = 0.292, 0.836
-DET_X1_R, DET_X2_R = 0.292, 0.708   # 🟠 주황 영역: 퍼즐 해제 구역 (M1 감지 + 클릭)
-DET_Y1_R, DET_Y2_R = 0.310, 0.820
+HDR_X1_R, HDR_X2_R = 0.282, 0.718   # 🟡 노란 영역: 팝업 타이틀바 감지
+HDR_Y1_R, HDR_Y2_R = 0.155, 0.230   # 타이틀바 y≈165~215 / 1009px 기준
+BRD_X1_R, BRD_X2_R = 0.282, 0.718   # 🔴 빨간 영역: 전체 팝업 (타이틀 포함)
+BRD_Y1_R, BRD_Y2_R = 0.150, 0.665
+DET_X1_R, DET_X2_R = 0.292, 0.708   # 🟠 주황 영역: 퍼즐 도형 구역 (타이틀바 아래)
+DET_Y1_R, DET_Y2_R = 0.232, 0.630
 
 _POPUP_TEMPLATES: list = []
 for _tname in ("minigame.png", "xz.bmp", "xz1.bmp", "xz2.bmp", "xz4.bmp"):
