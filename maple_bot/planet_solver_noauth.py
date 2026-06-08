@@ -42,7 +42,7 @@ HDR_X1_R, HDR_X2_R = 0.320, 0.678   # 🟡 노란선: 팝업 타이틀바 (HDR �
 HDR_Y1_R, HDR_Y2_R = 0.202, 0.263
 BRD_X1_R, BRD_X2_R = 0.318, 0.680   # 🔴 전체 팝업 영역
 BRD_Y1_R, BRD_Y2_R = 0.188, 0.775
-DET_X1_R, DET_X2_R = 0.322, 0.676   # 🟠 주황선: 퍼즐 도형 구역
+DET_X1_R, DET_X2_R = 0.320, 0.678   # 🟠 주황선: 퍼즐 도형 구역
 DET_Y1_R, DET_Y2_R = 0.265, 0.728
 
 _POPUP_TEMPLATES: list = []
