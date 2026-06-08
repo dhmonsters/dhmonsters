@@ -237,11 +237,14 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
 
 
 # ── PostMessage 백그라운드 클릭 ───────────────────────────────────────────
-def _bg_click(hwnd, cx, cy):
-    lp = (cy & 0xFFFF) << 16 | (cx & 0xFFFF)
-    win32gui.PostMessage(hwnd, 0x0200, 0, lp)
-    win32gui.PostMessage(hwnd, 0x0201, 0x0001, lp)
-    win32gui.PostMessage(hwnd, 0x0202, 0, lp)
+def _real_click(abs_x: int, abs_y: int) -> None:
+    """실제 마우스 커서를 abs 좌표로 이동 후 좌클릭 (PostMessage 대체)."""
+    import win32api, win32con
+    win32api.SetCursorPos((abs_x, abs_y))
+    time.sleep(0.012)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
+    time.sleep(0.012)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
 
 # ── 탐지 스레드 ────────────────────────────────────────────────────────────
 class _Sig(QObject):
@@ -301,6 +304,7 @@ class _MacroThread(threading.Thread):
 
         success = miss = 0
         tracking = False
+        popup_logged = False   # 팝업 감지 첫 로그 중복 방지
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -339,6 +343,7 @@ class _MacroThread(threading.Thread):
                     popup = cv2.cvtColor(np.array(sct.grab(popup_mon)), cv2.COLOR_BGRA2BGR)
 
                     if board_mon is None:
+                        popup_logged = False   # 팝업 사라지면 다음 등장 때 다시 로그
                         preview_cnt += 1
                         # 60프레임(~1초)마다 진단 값을 텍스트 로그에 출력
                         if preview_cnt % 60 == 1:
@@ -364,7 +369,15 @@ class _MacroThread(threading.Thread):
                         time.sleep(0.016)  # 팝업 대기 중 60fps
                         continue
 
-                    # 주황 영역: 퍼즐 해제 구역 — 템플릿 매칭 감지 + 클릭
+                    # ── 팝업 첫 감지 로그 ─────────────────────────────────────
+                    if not popup_logged:
+                        popup_logged = True
+                        self._sig.log.emit(
+                            f"[팝업 감지] score={hdr_score:.2f} "
+                            f"→ DET 영역 캡처 후 M1 도형 탐색 시작"
+                        )
+
+                    # 주황 영역: 퍼즐 해제 구역 — M1 YOLO 도형 감지 + 클릭
                     det_mon = {
                         "left":   bx + int(bw * DET_X1_R),
                         "top":    by + int(bh * DET_Y1_R),
@@ -380,7 +393,14 @@ class _MacroThread(threading.Thread):
                         best = boxes[boxes[:, 4].argmax()]
                         cli_cx = (det_mon["left"] - bx) + int((best[0] + best[2]) / 2)
                         cli_cy = (det_mon["top"]  - by) + int((best[1] + best[3]) / 2)
-                        _bg_click(hwnd, cli_cx, cli_cy)
+                        abs_x  = bx + cli_cx
+                        abs_y  = by + cli_cy
+                        self._sig.log.emit(
+                            f"[도형 감지] {len(boxes)}개 탐지 "
+                            f"score={float(best[4]):.2f} "
+                            f"→ 클릭 ({abs_x}, {abs_y})"
+                        )
+                        _real_click(abs_x, abs_y)
                         miss = 0
                         if not tracking:
                             tracking = True
@@ -405,11 +425,13 @@ class _MacroThread(threading.Thread):
                                 ).start()
                     else:
                         miss += 1
+                        if miss == 1:
+                            self._sig.log.emit("[도형] 미감지 — 퍼즐 대기 중...")
                         if tracking and miss >= 8:
                             tracking = False
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
-                            self._sig.log.emit(f"[✓] 누적 {success}회")
+                            self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
 
                     # ── 미리보기 emit (5프레임마다) ──────────────────────────
                     preview_cnt += 1
