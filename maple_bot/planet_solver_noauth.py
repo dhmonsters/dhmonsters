@@ -185,14 +185,16 @@ def _send_telegram(token: str, chat_id: str, img_bgr, caption: str = "") -> tupl
 # ── 팝업 보드 ROI 감지 ────────────────────────────────────────────────────
 def _detect_popup_board(client_frame, bx, by, bw, bh,
                         score_thr=0.65, dark_ratio_thr=0.50):
-    """노란색 HDR 영역 템플릿 매칭으로 팝업 감지.
+    """노란색 HDR 영역으로 팝업 감지.
 
-    반환: (board_mon, hdr_score)
-      - board_mon: 팝업 감지 시 BRD mss mon dict, 미감지 시 None
-      - hdr_score: 최고 매칭 점수 (0.0~1.0, 미리보기 표시용)
+    반환: (board_mon, hdr_score, gray_r, bright_r)
+      - board_mon : 팝업 감지 시 BRD mss mon dict, 미감지 시 None
+      - hdr_score : 최고 감지 점수 (0.0~1.0, 미리보기 표시용)
+      - gray_r    : 저채도(회색) 픽셀 비율 (진단용)
+      - bright_r  : 흰색 픽셀 비율 (진단용)
 
-    1차: templates/ 폴더 이미지로 TM_CCOEFF_NORMED 매칭 (score_thr 이상 시 감지 확정)
-    2차 fallback: 템플릿 없을 때 dark pixel 비율 체크 (dark_ratio_thr)
+    1차: 저채도 회색 배경 + 흰 텍스트 픽셀 비율 (다크/미디엄 그레이 모두 감지)
+    2차: 템플릿 매칭 (보조)
     """
     hx1 = int(bw * HDR_X1_R); hy1 = int(bh * HDR_Y1_R)
     hx2 = int(bw * HDR_X2_R); hy2 = int(bh * HDR_Y2_R)
@@ -206,14 +208,19 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
     }
 
     # ── 1. 타이틀바 픽셀 패턴 감지 ──────────────────────────────────────────
-    # "투명 도형 찾기" 타이틀바 = 어두운 회색 배경 + 흰 텍스트
-    # 스케일·해상도 무관, 템플릿 불필요
-    dark_mask   = np.all(hdr_crop < 80,  axis=2)   # 어두운 배경 픽셀
-    bright_mask = np.all(hdr_crop > 180, axis=2)   # 흰 텍스트 픽셀
-    dark_r   = float(dark_mask.mean())
+    # 타이틀바는 회색(저채도), 게임 배경은 컬러(고채도) → 채도로 구분
+    # 어두운 회색(50,50,50)·중간 회색(100,120,100) 둘 다 감지 가능
+    _f = hdr_crop.astype(np.float32)
+    _max_c = _f.max(axis=2)                           # 밝기(Value)
+    _min_c = _f.min(axis=2)
+    _sat   = (_max_c - _min_c) / (_max_c + 1.0)      # 채도 0~1
+    # 회색 픽셀: 채도 낮음(<0.25) + 매우 어둡지도 매우 밝지도 않음
+    gray_mask   = (_sat < 0.25) & (_max_c > 30) & (_max_c < 220)
+    bright_mask = np.all(hdr_crop > 175, axis=2)      # 흰 텍스트
+    gray_r   = float(gray_mask.mean())
     bright_r = float(bright_mask.mean())
-    # 타이틀바 패턴: 배경 45% 이상 어둡고 텍스트 2% 이상 밝음
-    pattern_score = dark_r if (dark_r >= 0.45 and bright_r >= 0.02) else 0.0
+    # 타이틀바: 회색 배경 35% 이상 + 흰 텍스트 1% 이상
+    pattern_score = gray_r if (gray_r >= 0.35 and bright_r >= 0.01) else 0.0
 
     # ── 2. 템플릿 매칭 (보조 확인) ──────────────────────────────────────────
     best_tmpl = 0.0
@@ -241,11 +248,10 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
                     best_tmpl = max_val
 
     # ── 최종 판정 ────────────────────────────────────────────────────────────
-    # 패턴 감지 OR 템플릿 매칭 중 하나라도 기준 충족 시 팝업으로 판정
     hdr_score = max(pattern_score, best_tmpl)
     if pattern_score > 0.0 or best_tmpl >= score_thr:
-        return board_mon, hdr_score
-    return None, hdr_score
+        return board_mon, hdr_score, gray_r, bright_r
+    return None, hdr_score, gray_r, bright_r
 
 
 # ── PostMessage 백그라운드 클릭 ───────────────────────────────────────────
@@ -332,7 +338,7 @@ class _MacroThread(threading.Thread):
                             pass
 
                     client = cv2.cvtColor(np.array(sct.grab(client_mon)), cv2.COLOR_BGRA2BGR)
-                    board_mon, hdr_score = _detect_popup_board(client, bx, by, bw, bh)
+                    board_mon, hdr_score, _dbg_gray, _dbg_bright = _detect_popup_board(client, bx, by, bw, bh)
 
                     # 빨간 영역: 전체 팝업 (HDR_Y1 ~ BRD_Y2) — 항상 캡처해서 미리보기에 사용
                     _pop_x1 = bx + int(bw * BRD_X1_R)
@@ -345,6 +351,12 @@ class _MacroThread(threading.Thread):
 
                     if board_mon is None:
                         preview_cnt += 1
+                        # 60프레임(~1초)마다 진단 값을 텍스트 로그에 출력
+                        if preview_cnt % 60 == 1:
+                            self._sig.log.emit(
+                                f"[HDR 진단] gray={_dbg_gray:.2f} bright={_dbg_bright:.2f}"
+                                f" score={hdr_score:.2f}  (기준: gray≥0.35, bright≥0.01)"
+                            )
                         if preview_cnt % 5 == 0:
                             # 팝업 없음 — HDR 노란 테두리 + score + "대기 중" 표시
                             standby = popup.copy()
@@ -353,7 +365,7 @@ class _MacroThread(threading.Thread):
                             cv2.rectangle(standby, (0, 0), (_sb_pop_w, _sb_hdr_ry),
                                           (0, 230, 255), 2)
                             cv2.putText(standby,
-                                        f"HDR score={hdr_score:.2f} / thr=0.65",
+                                        f"HDR score={hdr_score:.2f}  gray={_dbg_gray:.2f}  bright={_dbg_bright:.2f}",
                                         (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                         (0, 230, 255), 1, cv2.LINE_AA)
                             cv2.putText(standby, "팝업 대기 중",
