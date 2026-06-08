@@ -192,12 +192,23 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
 
     if _POPUP_TMPLS:
         # 1차: 템플릿 매칭 (노란색 HDR 영역)
+        # 템플릿은 1920×1080 기준 캡처 → 현재 HDR 너비 비율로 스케일 보정
+        _HDR_REF_W = int(1920 * (HDR_X2_R - HDR_X1_R))  # ~953px (기준 해상도)
         hdr_gray = cv2.cvtColor(hdr_crop, cv2.COLOR_BGR2GRAY)
         dh, dw = hdr_gray.shape
+        scale = dw / _HDR_REF_W  # 현재 해상도/DPI 보정 비율
         for (tmpl, th, tw) in _POPUP_TMPLS:
+            # 스케일 보정: scale ≠ 1.0 이면 템플릿 resize
+            if abs(scale - 1.0) > 0.02:
+                new_w = max(1, round(tw * scale))
+                new_h = max(1, round(th * scale))
+                t = cv2.resize(tmpl, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                th, tw = new_h, new_w
+            else:
+                t = tmpl
             if th > dh or tw > dw:
                 continue
-            res = cv2.matchTemplate(hdr_gray, tmpl, cv2.TM_CCOEFF_NORMED)
+            res = cv2.matchTemplate(hdr_gray, t, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, _ = cv2.minMaxLoc(res)
             if max_val >= score_thr:
                 return board_mon
