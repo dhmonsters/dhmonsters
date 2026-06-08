@@ -65,7 +65,7 @@ def _reload_templates() -> int:
     """templates/ 폴더의 이미지를 그레이스케일로 로드. 로드된 개수 반환.
 
     크기 필터: 너비 < 100 또는 높이 < 50 이면 로드 제외
-      - 통과: 01.png(213×63), 02.png(928×73), lie_detector_1.png(219×63)
+      - 통과: 01.png(213×63), 02.png(928×73), 03.png(675×53), lie_detector_1.png(219×63)
       - 제외: map_name_ref, monster_capture, name_tag, xz*.bmp 등
     """
     _POPUP_TMPLS.clear()
