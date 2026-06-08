@@ -203,8 +203,9 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
         scale = dw / _HDR_REF_W
         best_score = 0.0
         for (tmpl, th, tw) in _POPUP_TMPLS:
-            # 소형 이미지(xz*.bmp 등) 제외
-            if tw < 50 or th < 20:
+            # HDR 팝업 감지용이 아닌 이미지 제외
+            # 팝업 타이틀(01/02/lie_detector): h≥63 — map_name_ref(h=43) 등은 제외
+            if tw < 100 or th < 50:
                 continue
             # 스케일 보정
             if abs(scale - 1.0) > 0.02:
