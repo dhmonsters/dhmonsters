@@ -92,17 +92,28 @@ _n = _reload_templates()
 from planet_yolo_verify import M1Ensemble, HyungYolo
 
 def _load_models(use_gpu: bool = False):
-    m1 = M1Ensemble(
-        os.path.join(ASSETS, "hyung_m1.param"),
+    param = os.path.join(ASSETS, "hyung_m1.param")
+
+    # M1 specialists: bin a/b/c/d 각각이 cls 0/1/2/3 전담 탐지기
+    # target_cls 확정 후 m1_specialists[target_cls] 하나만 사용 (원본 정통 방식)
+    m1_specialists = [
+        HyungYolo(param, os.path.join(ASSETS, f"hyung_m1_{s}.bin"),
+                  num_cls=1, use_gpu=use_gpu)
+        for s in "abcd"
+    ]
+    # M1 ensemble: target_cls 미확정 시 fallback
+    m1_ensemble = M1Ensemble(
+        param,
         [os.path.join(ASSETS, f"hyung_m1_{s}.bin") for s in "abcd"],
         use_gpu=use_gpu,
     )
+
     m2_raw = HyungYolo(
         os.path.join(ASSETS, "hyung_m2.param"),
         os.path.join(ASSETS, "hyung_m2.bin"),
         num_cls=4, use_gpu=use_gpu,
     )
-    # mypyc 버전은 classify_crop(img, score_thr), fallback은 classify_crop(img, imgsz, score_thr)
+    # mypyc 버전은 classify_crop(img, score_thr), 일반은 classify_crop(img, imgsz, score_thr)
     import inspect
     sig = inspect.signature(m2_raw.classify_crop)
     if len(sig.parameters) == 2:
@@ -115,7 +126,7 @@ def _load_models(use_gpu: bool = False):
         m2 = _M2Wrap()
     else:
         m2 = m2_raw
-    return m1, m2
+    return m1_specialists, m1_ensemble, m2
 
 # ── 창 탐지 / 해상도 ──────────────────────────────────────────────────────
 _GAME_CLASSES  = ("MapleStoryClass", "UnityWndClass", "NEXON Plug-in Window")
@@ -237,14 +248,21 @@ def _detect_popup_board(client_frame, bx, by, bw, bh,
 
 
 # ── PostMessage 백그라운드 클릭 ───────────────────────────────────────────
+def _focus_game(hwnd: int) -> None:
+    """게임 창 포그라운드 확보 (추적 시작 시 1회만 호출)."""
+    if hwnd:
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+            time.sleep(0.05)
+        except Exception:
+            pass
+
 def _real_click(abs_x: int, abs_y: int) -> None:
-    """실제 마우스 커서를 abs 좌표로 이동 후 좌클릭 (PostMessage 대체)."""
-    import win32api, win32con
-    win32api.SetCursorPos((abs_x, abs_y))
-    time.sleep(0.012)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0)
-    time.sleep(0.012)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0)
+    """커서를 지정 좌표로 이동 (원본과 동일 — fg_move 방식, 클릭 없음)."""
+    try:
+        win32api.SetCursorPos((abs_x, abs_y))
+    except Exception:
+        pass
 
 # ── 탐지 스레드 ────────────────────────────────────────────────────────────
 class _Sig(QObject):
@@ -254,7 +272,7 @@ class _Sig(QObject):
     preview = pyqtSignal(object)  # annotated board BGR ndarray | None
 
 class _MacroThread(threading.Thread):
-    IMGSZ = 96    # 192→96: 픽셀 수 1/4 → M1 추론 ~3~4배 빠름
+    IMGSZ = 160   # 원본 M1Ensemble 상수값 (96으로 낮추면 정확도 손실)
     SCORE = 0.2
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
@@ -277,7 +295,7 @@ class _MacroThread(threading.Thread):
         self._sig.log.emit(f"[*] 템플릿 {n}개 로드 완료 ({TMPL_DIR})")
         self._sig.log.emit("[*] 모델 로드 중...")
         try:
-            m1, m2 = _load_models(self._gpu)
+            m1_specialists, m1_ensemble, m2 = _load_models(self._gpu)
         except Exception as e:
             self._sig.status.emit(f"error:모델 로드 실패: {e}")
             return
@@ -304,7 +322,11 @@ class _MacroThread(threading.Thread):
 
         success = miss = 0
         tracking = False
-        popup_logged = False   # 팝업 감지 첫 로그 중복 방지
+        popup_logged = False         # 팝업 감지 첫 로그 중복 방지
+        _target_cls      = None      # _on_trigger_start: M2 분류한 도형 클래스 ID
+        _last_marker_pos = (0, 0)    # _track_once: 직전 프레임 도형 중심 (det 내 좌표)
+        CAPCHA_END_MISS_COUNT = 3    # 원본과 동일 — 연속 미탐지 3회 → 퍼즐 종료 판정
+        TRACK_INTERVAL = 0.05        # 원본과 동일 — 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -343,7 +365,15 @@ class _MacroThread(threading.Thread):
                     popup = cv2.cvtColor(np.array(sct.grab(popup_mon)), cv2.COLOR_BGRA2BGR)
 
                     if board_mon is None:
-                        popup_logged = False   # 팝업 사라지면 다음 등장 때 다시 로그
+                        # 팝업 사라짐 → 추적 중이었으면 퍼즐 완료 판정
+                        if tracking:
+                            tracking = False
+                            _last_marker_pos = (0, 0)
+                            _target_cls = None
+                            success += 1
+                            self._sig.capcha.emit(success % 100, success)
+                            self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
+                        popup_logged = False
                         preview_cnt += 1
                         # 60프레임(~1초)마다 진단 값을 텍스트 로그에 출력
                         if preview_cnt % 60 == 1:
@@ -369,15 +399,42 @@ class _MacroThread(threading.Thread):
                         time.sleep(0.016)  # 팝업 대기 중 60fps
                         continue
 
-                    # ── 팝업 첫 감지 로그 ─────────────────────────────────────
+                    # ── 팝업 첫 감지 → _on_trigger_start ────────────────────
                     if not popup_logged:
                         popup_logged = True
+
+                        det_mon = {
+                            "left":   bx + int(bw * DET_X1_R),
+                            "top":    by + int(bh * DET_Y1_R),
+                            "width":  int(bw * (DET_X2_R - DET_X1_R)),
+                            "height": int(bh * (DET_Y2_R - DET_Y1_R)),
+                        }
+                        det_init = cv2.cvtColor(
+                            np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
+
+                        # M2로 중앙 도형 클래스 분류 (아직 흰색으로 보이는 순간)
+                        dh, dw = det_init.shape[:2]
+                        center_crop = det_init[dh//4:3*dh//4, dw//4:3*dw//4]
+                        try:
+                            if center_crop.shape[0] >= 32 and center_crop.shape[1] >= 32:
+                                _target_cls = m2.classify_crop(center_crop, 192)
+                            else:
+                                _target_cls = None
+                                self._sig.log.emit(
+                                    f"[M2] center_crop 너무 작음 {center_crop.shape[:2]} → 분류 스킵"
+                                )
+                        except Exception as e:
+                            _target_cls = None
+                            self._sig.log.emit(f"[M2] 분류 실패: {e}")
+                        _last_marker_pos = (dw // 2, dh // 2)
+
                         self._sig.log.emit(
                             f"[팝업 감지] score={hdr_score:.2f} "
-                            f"→ DET 영역 캡처 후 M1 도형 탐색 시작"
+                            f"→ 도형 클래스={_target_cls}, 추적 시작"
                         )
+                        _focus_game(hwnd)  # 게임 창 포그라운드 (1회)
 
-                    # 주황 영역: 퍼즐 해제 구역 — M1 YOLO 도형 감지 + 클릭
+                    # 주황 영역: 퍼즐 해제 구역 — M1 YOLO 도형 감지
                     det_mon = {
                         "left":   bx + int(bw * DET_X1_R),
                         "top":    by + int(bh * DET_Y1_R),
@@ -386,29 +443,48 @@ class _MacroThread(threading.Thread):
                     }
                     det = cv2.cvtColor(np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
 
-                    # M1 도형 감지 (IMGSZ=96, 192 대비 ~3~4배 빠름)
-                    boxes = m1.detect(det, self.IMGSZ, self.SCORE)
+                    # target_cls 확정 시 전담 specialist, 미확정 시 ensemble fallback
+                    # 원본 정통: M2 cls 분류 → M1[cls] specialist 하나만 사용
+                    if _target_cls is not None and 0 <= _target_cls <= 3:
+                        detector = m1_specialists[_target_cls]
+                    else:
+                        detector = m1_ensemble
+                    boxes = detector.detect(det, self.IMGSZ, self.SCORE)
 
                     if len(boxes):
-                        best = boxes[boxes[:, 4].argmax()]
-                        cli_cx = (det_mon["left"] - bx) + int((best[0] + best[2]) / 2)
-                        cli_cy = (det_mon["top"]  - by) + int((best[1] + best[3]) / 2)
-                        abs_x  = bx + cli_cx
-                        abs_y  = by + cli_cy
-                        self._sig.log.emit(
-                            f"[도형 감지] score={float(best[4]):.2f} "
-                            f"→ 클릭 ({abs_x}, {abs_y})"
-                        )
+                        # ── _track_once: _last_marker_pos에 가장 가까운 박스 선택 ──
+                        if _last_marker_pos != (0, 0) and len(boxes) > 1:
+                            lx, ly = _last_marker_pos
+                            centers = np.array([
+                                ((b[0]+b[2])/2, (b[1]+b[3])/2) for b in boxes
+                            ])
+                            dists = np.hypot(centers[:,0]-lx, centers[:,1]-ly)
+                            best = boxes[dists.argmin()]
+                        else:
+                            best = boxes[boxes[:, 4].argmax()]
+
+                        cx = int((best[0] + best[2]) / 2)
+                        cy = int((best[1] + best[3]) / 2)
+                        _last_marker_pos = (cx, cy)
+
+                        abs_x = det_mon["left"] + cx
+                        abs_y = det_mon["top"]  + cy
                         _real_click(abs_x, abs_y)
                         miss = 0
+
                         if not tracking:
                             tracking = True
+                            self._sig.log.emit(
+                                f"[도형 감지] score={float(best[4]):.2f} "
+                                f"→ ({abs_x}, {abs_y})"
+                            )
                             now = time.time()
                             if self._sound and now - last_alert > 2.0:
                                 last_alert = now
-                                threading.Thread(
-                                    target=lambda: [winsound.Beep(1000, 200) for _ in range(2)],
-                                    daemon=True).start()
+                                def _beep():
+                                    for _ in range(2):
+                                        winsound.Beep(1000, 200)
+                                threading.Thread(target=_beep, daemon=True).start()
                             if self._tg and now - last_tg > 30.0:
                                 last_tg = now
                                 try:
@@ -423,14 +499,14 @@ class _MacroThread(threading.Thread):
                                     daemon=True,
                                 ).start()
                     else:
+                        # M1 미감지 — 커서를 마지막 위치에 유지 (fg_move 방식과 동일)
+                        if tracking and _last_marker_pos != (0, 0):
+                            abs_x = det_mon["left"] + _last_marker_pos[0]
+                            abs_y = det_mon["top"]  + _last_marker_pos[1]
+                            _real_click(abs_x, abs_y)
                         miss += 1
                         if miss == 1:
-                            self._sig.log.emit("[도형] 미감지 — 퍼즐 대기 중...")
-                        if tracking and miss >= 8:
-                            tracking = False
-                            success += 1
-                            self._sig.capcha.emit(success % 100, success)
-                            self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
+                            self._sig.log.emit("[도형] 미감지 — 마지막 위치 유지 중...")
 
                     # ── 미리보기 emit (5프레임마다) ──────────────────────────
                     preview_cnt += 1
@@ -473,7 +549,8 @@ class _MacroThread(threading.Thread):
                                         0.4, (255, 220, 0), 1, cv2.LINE_AA)
                         self._sig.preview.emit(vis)
 
-                    time.sleep(0.016)  # ~60fps
+                    # 추적 중: TRACK_INTERVAL(0.05s=20fps), 대기 중: 60fps
+                    time.sleep(TRACK_INTERVAL if tracking else 0.016)
 
                 except Exception as e:
                     self._sig.log.emit(f"[!] {e}")
