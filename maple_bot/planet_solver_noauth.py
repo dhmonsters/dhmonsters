@@ -226,7 +226,7 @@ class _Sig(QObject):
     preview = pyqtSignal(object)  # annotated board BGR ndarray | None
 
 class _MacroThread(threading.Thread):
-    IMGSZ = 192
+    IMGSZ = 96    # 192→96: 픽셀 수 1/4 → M1 추론 ~3~4배 빠름
     SCORE = 0.2
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
@@ -327,25 +327,23 @@ class _MacroThread(threading.Thread):
                     }
                     det = cv2.cvtColor(np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
 
-                    # 템플릿 매칭 (~3ms, M1 대비 ~30x 빠름)
-                    tmpl_result = _tmpl_detect(det)
-                    det_cx = det_cy = score = None
-                    if tmpl_result:
-                        det_cx, det_cy, score = tmpl_result
-                        cli_cx = (det_mon["left"] - bx) + det_cx
-                        cli_cy = (det_mon["top"]  - by) + det_cy
+                    # M1 도형 감지 (IMGSZ=96, 192 대비 ~3~4배 빠름)
+                    boxes = m1.detect(det, self.IMGSZ, self.SCORE)
+
+                    if len(boxes):
+                        best = boxes[boxes[:, 4].argmax()]
+                        cli_cx = (det_mon["left"] - bx) + int((best[0] + best[2]) / 2)
+                        cli_cy = (det_mon["top"]  - by) + int((best[1] + best[3]) / 2)
                         _bg_click(hwnd, cli_cx, cli_cy)
                         miss = 0
                         if not tracking:
                             tracking = True
                             now = time.time()
-                            # 소리 알람
                             if self._sound and now - last_alert > 2.0:
                                 last_alert = now
                                 threading.Thread(
                                     target=lambda: [winsound.Beep(1000, 200) for _ in range(2)],
                                     daemon=True).start()
-                            # 텔레그램 전송 (감지 첫 프레임, 30초 쿨다운)
                             if self._tg and now - last_tg > 30.0:
                                 last_tg = now
                                 try:
@@ -388,19 +386,26 @@ class _MacroThread(threading.Thread):
                         cv2.putText(vis, "DET", (_det_lx + 4, _det_ly + 14),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                     (0, 140, 255), 1, cv2.LINE_AA)
-                        # 초록 십자: 템플릿 매칭 결과
-                        if det_cx is not None:
-                            _mx = _det_lx + det_cx
-                            _my = _det_ly + det_cy
-                            cv2.drawMarker(vis, (_mx, _my),
+                        # 초록색: M1 detection 박스 (det → popup 좌표 변환)
+                        for b in boxes:
+                            dx1 = _det_lx + int(b[0]); dy1 = _det_ly + int(b[1])
+                            dx2 = _det_lx + int(b[2]); dy2 = _det_ly + int(b[3])
+                            cv2.rectangle(vis, (dx1, dy1), (dx2, dy2),
+                                          (80, 255, 0), 2)
+                        if len(boxes):
+                            best2 = boxes[boxes[:, 4].argmax()]
+                            cx2 = _det_lx + int((best2[0] + best2[2]) / 2)
+                            cy2 = _det_ly + int((best2[1] + best2[3]) / 2)
+                            cv2.drawMarker(vis, (cx2, cy2),
                                            (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
-                            cv2.putText(vis, f"sc={score:.2f}",
+                            sc = float(best2[4])
+                            cv2.putText(vis, f"score={sc:.2f}",
                                         (_det_lx + 4, _det_ry - 6),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.4, (255, 220, 0), 1, cv2.LINE_AA)
                         self._sig.preview.emit(vis)
 
-                    time.sleep(0.008)  # ~120fps (템플릿 매칭은 빠름)
+                    time.sleep(0.016)  # ~60fps
 
                 except Exception as e:
                     self._sig.log.emit(f"[!] {e}")
