@@ -430,14 +430,36 @@ class _MacroThread(threading.Thread):
 
                         # M2로 중앙 도형 클래스 분류 (아직 흰색으로 보이는 순간)
                         dh, dw = det_init.shape[:2]
-                        center_crop = det_init[dh//4:3*dh//4, dw//4:3*dw//4]
+
+                        # 커서 inpaint — 커서가 DET 안에 있으면 배경으로 복원 후 crop
+                        try:
+                            import win32api as _w32
+                            _det_left = bx + _dx1
+                            _det_top  = by + _dy1
+                            _mcx, _mcy = _w32.GetCursorPos()
+                            _mrx = _mcx - _det_left
+                            _mry = _mcy - _det_top
+                            _cursor_r = max(20, int(min(dw, dh) * 0.05))
+                            if 0 <= _mrx < dw and 0 <= _mry < dh:
+                                _cmask = np.zeros((dh, dw), dtype=np.uint8)
+                                cv2.circle(_cmask, (_mrx, _mry), _cursor_r, 255, -1)
+                                det_m2 = cv2.inpaint(det_init, _cmask, 5, cv2.INPAINT_TELEA)
+                                self._sig.log.emit(
+                                    f"[M2] 커서 inpaint — 커서=({_mcx},{_mcy}) "
+                                    f"DET상대=({_mrx},{_mry}) 반경={_cursor_r}px"
+                                )
+                            else:
+                                det_m2 = det_init
+                        except Exception:
+                            det_m2 = det_init
+                        center_crop = det_m2[dh//4:3*dh//4, dw//4:3*dw//4]
                         # ── M2 디버그 이미지 저장 (m2_debug 폴더) ──────────────
                         try:
                             import datetime
                             _dbg_dir = os.path.join(ROOT, "m2_debug")
                             os.makedirs(_dbg_dir, exist_ok=True)
                             _ts = datetime.datetime.now().strftime("%H%M%S_%f")[:9]
-                            cv2.imwrite(os.path.join(_dbg_dir, f"{_ts}_det.png"), det_init)
+                            cv2.imwrite(os.path.join(_dbg_dir, f"{_ts}_det.png"), det_m2)
                             cv2.imwrite(os.path.join(_dbg_dir, f"{_ts}_crop.png"), center_crop)
                         except Exception:
                             pass
