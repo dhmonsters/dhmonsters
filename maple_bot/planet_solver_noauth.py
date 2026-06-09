@@ -325,6 +325,8 @@ class _MacroThread(threading.Thread):
         popup_logged = False         # 팝업 감지 첫 로그 중복 방지
         _target_cls      = None      # _on_trigger_start: M2 분류한 도형 클래스 ID
         _last_marker_pos = (0, 0)    # _track_once: 직전 프레임 도형 중심 (det 내 좌표)
+        _vel_x = 0.0                 # 도형 속도 추정 x (px/frame, EMA) — 투명 구간 예측용
+        _vel_y = 0.0                 # 도형 속도 추정 y
         CAPCHA_END_MISS_COUNT = 3    # 원본과 동일 — 연속 미탐지 3회 → 퍼즐 종료 판정
         TRACK_INTERVAL = 0.05        # 원본과 동일 — 추적 루프 주기 (20fps)
         MAX_JUMP = 180               # 프레임 간 허용 최대 이동거리(px) — 초과 시 miss 처리
@@ -332,7 +334,7 @@ class _MacroThread(threading.Thread):
         # 박스 크기 필터 비율 (DET 단변 기준)
         # 실측: 2560x1440 기준 도형 167x166px / DET 916x667px → 도형≈18% DET너비
         BOX_MIN_RATIO = 0.15         # 하한: DET 단변의 15% (도형 크기의 약 82%)
-        BOX_MAX_RATIO = 0.50         # 상한: DET 단변의 50% (도형 크기의 약 2.7배)
+        BOX_MAX_RATIO = 0.30         # 상한: DET 단변의 30% (도형 크기의 약 1.65배)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -375,6 +377,8 @@ class _MacroThread(threading.Thread):
                         if tracking:
                             tracking = False
                             _last_marker_pos = (0, 0)
+                            _vel_x = 0.0
+                            _vel_y = 0.0
                             _target_cls = None
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
@@ -559,6 +563,13 @@ class _MacroThread(threading.Thread):
                     if _best is not None:
                         cx = int((_best[0] + _best[2]) / 2)
                         cy = int((_best[1] + _best[3]) / 2)
+                        # 속도 EMA 업데이트 — 직전 위치와의 차이로 이동 벡터 추적
+                        if tracking and _last_marker_pos != (0, 0):
+                            _dvx = cx - _last_marker_pos[0]
+                            _dvy = cy - _last_marker_pos[1]
+                            if abs(_dvx) <= MAX_JUMP and abs(_dvy) <= MAX_JUMP:
+                                _vel_x = _vel_x * 0.6 + _dvx * 0.4
+                                _vel_y = _vel_y * 0.6 + _dvy * 0.4
                         _last_marker_pos = (cx, cy)
 
                         abs_x = det_mon["left"] + cx
@@ -599,24 +610,33 @@ class _MacroThread(threading.Thread):
                                     daemon=True,
                                 ).start()
                     else:
-                        # M1 미감지 — 커서를 마지막 위치에 유지 (fg_move 방식과 동일)
+                        # M1 미감지 (투명 구간) — 속도 예측으로 위치 전진 후 클릭 유지
+                        miss += 1
                         if tracking and _last_marker_pos != (0, 0):
+                            # 직전 속도로 다음 위치 예측
+                            _pred_x = int(_last_marker_pos[0] + _vel_x)
+                            _pred_y = int(_last_marker_pos[1] + _vel_y)
+                            _pred_x = max(0, min(det_mon["width"] - 1, _pred_x))
+                            _pred_y = max(0, min(det_mon["height"] - 1, _pred_y))
+                            _last_marker_pos = (_pred_x, _pred_y)
+                            # 장기 예측 오류 누적 방지: 속도 점진 감쇠
+                            _vel_x *= 0.92
+                            _vel_y *= 0.92
                             abs_x = det_mon["left"] + _last_marker_pos[0]
                             abs_y = det_mon["top"]  + _last_marker_pos[1]
                             _real_click(abs_x, abs_y)
-                        miss += 1
                         if miss == 1:
                             self._sig.log.emit(
                                 f"[{_det_label}] 미감지(1회) — "
-                                f"마지막 위치 {_last_marker_pos} 유지 중..."
+                                f"속도예측 시작 vel=({_vel_x:.1f},{_vel_y:.1f})"
                             )
                         elif miss % 10 == 0:
                             self._sig.log.emit(
                                 f"[{_det_label}] 미감지 {miss}회 연속 — "
-                                f"마지막 위치 {_last_marker_pos}"
+                                f"예측위치={_last_marker_pos} vel=({_vel_x:.1f},{_vel_y:.1f})"
                             )
-                        # 연속 miss가 MAX_MISS_RESET 도달 → 마커 초기화 후 재획득
-                        if miss >= MAX_MISS_RESET and _last_marker_pos != (0, 0):
+                        # tracking 전(초기 획득 실패)에만 마커 리셋 — tracking 중엔 금지
+                        if not tracking and miss >= MAX_MISS_RESET and _last_marker_pos != (0, 0):
                             _last_marker_pos = (0, 0)
                             self._sig.log.emit(
                                 f"[재획득] miss {miss}회 → 마커 초기화, 다음 프레임 최고점수로 재획득"
