@@ -329,8 +329,10 @@ class _MacroThread(threading.Thread):
         TRACK_INTERVAL = 0.05        # 원본과 동일 — 추적 루프 주기 (20fps)
         MAX_JUMP = 180               # 프레임 간 허용 최대 이동거리(px) — 초과 시 miss 처리
         MAX_MISS_RESET = 5           # 연속 miss 이 횟수 도달 시 마커 리셋 → 재획득
-        BOX_MIN_SIZE = 15            # 박스 최소 너비/높이(px) — 미만이면 노이즈로 제거
-        BOX_MAX_SIZE = 300           # 박스 최대 너비/높이(px) — 초과이면 오감지로 제거
+        # 박스 크기 필터 비율 (DET 단변 기준)
+        # 실측: 2560x1440 기준 도형 167x166px / DET 916x667px → 도형≈18% DET너비
+        BOX_MIN_RATIO = 0.15         # 하한: DET 단변의 15% (도형 크기의 약 82%)
+        BOX_MAX_RATIO = 0.50         # 상한: DET 단변의 50% (도형 크기의 약 2.7배)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -488,13 +490,16 @@ class _MacroThread(threading.Thread):
                         _det_label = "M1 ensemble(fallback)"
                     boxes = detector.detect(det, self.IMGSZ, self.SCORE)
 
-                    # 박스 크기 필터 (노이즈 및 과대 오감지 제거)
+                    # 박스 크기 필터 — DET 영역 크기 비례 동적 계산 (해상도 독립적)
                     if len(boxes):
+                        _det_short = min(det_mon["width"], det_mon["height"])
+                        _box_min = int(_det_short * BOX_MIN_RATIO)
+                        _box_max = int(_det_short * BOX_MAX_RATIO)
                         _bw = boxes[:, 2] - boxes[:, 0]
                         _bh = boxes[:, 3] - boxes[:, 1]
                         _size_mask = (
-                            (_bw >= BOX_MIN_SIZE) & (_bh >= BOX_MIN_SIZE) &
-                            (_bw <= BOX_MAX_SIZE) & (_bh <= BOX_MAX_SIZE)
+                            (_bw >= _box_min) & (_bh >= _box_min) &
+                            (_bw <= _box_max) & (_bh <= _box_max)
                         )
                         boxes = boxes[_size_mask]
 
