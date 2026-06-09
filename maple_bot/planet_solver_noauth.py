@@ -456,7 +456,23 @@ class _MacroThread(threading.Thread):
                                 det_m2 = det_init
                         except Exception:
                             det_m2 = det_init
-                        center_crop = det_m2[dh//4:3*dh//4, dw//4:3*dw//4]
+                        # 흰 픽셀(도형) 위치 기반 타이트 크롭 — 도형이 치우쳐 있어도 M2에 중앙 정렬
+                        try:
+                            _gray_m2 = cv2.cvtColor(det_m2, cv2.COLOR_BGR2GRAY)
+                            _, _wmask = cv2.threshold(_gray_m2, 200, 255, cv2.THRESH_BINARY)
+                            _wpts = cv2.findNonZero(_wmask)
+                            if _wpts is not None and len(_wpts) > 50:
+                                _wx, _wy, _ww, _wh = cv2.boundingRect(_wpts)
+                                _wpad = max(_ww, _wh)   # 도형 크기만큼 여백
+                                _cx1 = max(0, _wx - _wpad)
+                                _cy1 = max(0, _wy - _wpad)
+                                _cx2 = min(dw, _wx + _ww + _wpad)
+                                _cy2 = min(dh, _wy + _wh + _wpad)
+                                center_crop = det_m2[_cy1:_cy2, _cx1:_cx2]
+                            else:
+                                center_crop = det_m2[dh//4:3*dh//4, dw//4:3*dw//4]
+                        except Exception:
+                            center_crop = det_m2[dh//4:3*dh//4, dw//4:3*dw//4]
                         # ── M2 디버그 이미지 저장 (m2_debug 폴더) ──────────────
                         try:
                             import datetime
