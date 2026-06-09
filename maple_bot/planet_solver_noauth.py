@@ -329,6 +329,8 @@ class _MacroThread(threading.Thread):
         TRACK_INTERVAL = 0.05        # 원본과 동일 — 추적 루프 주기 (20fps)
         MAX_JUMP = 180               # 프레임 간 허용 최대 이동거리(px) — 초과 시 miss 처리
         MAX_MISS_RESET = 5           # 연속 miss 이 횟수 도달 시 마커 리셋 → 재획득
+        BOX_MIN_SIZE = 15            # 박스 최소 너비/높이(px) — 미만이면 노이즈로 제거
+        BOX_MAX_SIZE = 300           # 박스 최대 너비/높이(px) — 초과이면 오감지로 제거
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -427,6 +429,17 @@ class _MacroThread(threading.Thread):
                         # M2로 중앙 도형 클래스 분류 (아직 흰색으로 보이는 순간)
                         dh, dw = det_init.shape[:2]
                         center_crop = det_init[dh//4:3*dh//4, dw//4:3*dw//4]
+                        # ── M2 디버그 이미지 저장 (m2_debug 폴더) ──────────────
+                        try:
+                            import datetime
+                            _dbg_dir = os.path.join(ROOT, "m2_debug")
+                            os.makedirs(_dbg_dir, exist_ok=True)
+                            _ts = datetime.datetime.now().strftime("%H%M%S_%f")[:9]
+                            cv2.imwrite(os.path.join(_dbg_dir, f"{_ts}_det.png"), det_init)
+                            cv2.imwrite(os.path.join(_dbg_dir, f"{_ts}_crop.png"), center_crop)
+                        except Exception:
+                            pass
+                        # ────────────────────────────────────────────────────────
                         self._sig.log.emit(
                             f"[M2] DET 영역 캡처 완료 ({dw}x{dh}px) "
                             f"→ center_crop {center_crop.shape[1]}x{center_crop.shape[0]}px 분류 중..."
@@ -474,6 +487,16 @@ class _MacroThread(threading.Thread):
                         detector = m1_ensemble
                         _det_label = "M1 ensemble(fallback)"
                     boxes = detector.detect(det, self.IMGSZ, self.SCORE)
+
+                    # 박스 크기 필터 (노이즈 및 과대 오감지 제거)
+                    if len(boxes):
+                        _bw = boxes[:, 2] - boxes[:, 0]
+                        _bh = boxes[:, 3] - boxes[:, 1]
+                        _size_mask = (
+                            (_bw >= BOX_MIN_SIZE) & (_bh >= BOX_MIN_SIZE) &
+                            (_bw <= BOX_MAX_SIZE) & (_bh <= BOX_MAX_SIZE)
+                        )
+                        boxes = boxes[_size_mask]
 
                     # ── _track_once: 박스 선택 (MAX_JUMP 필터 포함) ──────────
                     _best = None
