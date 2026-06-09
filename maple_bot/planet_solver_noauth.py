@@ -32,6 +32,7 @@ EXTRACT     = os.path.join(ROOT, "_planet_solver_extract",
                            "Planet_solver_v1.0.5.exe_extracted")
 ASSETS      = os.path.join(EXTRACT, "assets")
 CONFIG_FILE = os.path.join(ROOT, "planet_solver_config.json")
+VIT_MODEL_PATH = os.path.join(ROOT, "models", "transparent", "vittrack.onnx")
 MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
@@ -90,6 +91,7 @@ _n = _reload_templates()
 
 # ── 탐지 엔진 로드 ─────────────────────────────────────────────────────────
 from planet_yolo_verify import M1Ensemble, HyungYolo
+from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
 
 def _load_models(use_gpu: bool = False):
     param = os.path.join(ASSETS, "hyung_m1.param")
@@ -300,6 +302,14 @@ class _MacroThread(threading.Thread):
             self._sig.status.emit(f"error:모델 로드 실패: {e}")
             return
 
+        # ViT 추적기 로드 — 투명 도형 추적 본체. 실패 시 추적 비활성(팝업 감지만)
+        try:
+            _vit = VitShapeTracker(VIT_MODEL_PATH)
+            self._sig.log.emit("[*] ViT 추적기 로드 완료")
+        except Exception as e:
+            _vit = None
+            self._sig.log.emit(f"[!] ViT 추적기 로드 실패: {e} → 추적 비활성")
+
         self._sig.log.emit("[*] 메이플 창 탐색...")
         hwnd = _find_hwnd()
         if hwnd is None:
@@ -320,21 +330,12 @@ class _MacroThread(threading.Thread):
         self._sig.log.emit(f"[좌표] {bx},{by}  {bw}×{bh}")
         self._sig.status.emit("running")
 
-        success = miss = 0
+        success = 0
         tracking = False
         popup_logged = False         # 팝업 감지 첫 로그 중복 방지
-        _target_cls      = None      # _on_trigger_start: M2 분류한 도형 클래스 ID
-        _last_marker_pos = (0, 0)    # _track_once: 직전 프레임 도형 중심 (det 내 좌표)
-        _vel_x = 0.0                 # 도형 속도 추정 x (px/frame, EMA) — 투명 구간 예측용
-        _vel_y = 0.0                 # 도형 속도 추정 y
-        CAPCHA_END_MISS_COUNT = 3    # 원본과 동일 — 연속 미탐지 3회 → 퍼즐 종료 판정
-        TRACK_INTERVAL = 0.05        # 원본과 동일 — 추적 루프 주기 (20fps)
-        MAX_JUMP = 180               # 프레임 간 허용 최대 이동거리(px) — 초과 시 miss 처리
-        MAX_MISS_RESET = 5           # 연속 miss 이 횟수 도달 시 마커 리셋 → 재획득
-        # 박스 크기 필터 비율 (DET 단변 기준)
-        # 실측: 2560x1440 기준 도형 167x166px / DET 916x667px → 도형≈18% DET너비
-        BOX_MIN_RATIO = 0.15         # 하한: DET 단변의 15% (도형 크기의 약 82%)
-        BOX_MAX_RATIO = 0.30         # 상한: DET 단변의 30% (도형 크기의 약 1.65배)
+        _vit_active = False          # 현재 팝업에 대해 ViT 추적기가 초기화됐는지
+        _last_marker_pos = (0, 0)    # 직전 프레임 도형 중심 (det 내 좌표) — 미리보기/클릭용
+        TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
         preview_cnt  = 0     # 미리보기 emit 카운터 (5프레임마다 1회)
@@ -353,7 +354,7 @@ class _MacroThread(threading.Thread):
             while not self._stop.is_set():
                 try:
                     # 60회마다 좌표 갱신
-                    if (success + miss) % 60 == 0 and (success + miss) > 0:
+                    if preview_cnt % 60 == 0 and preview_cnt > 0:
                         try:
                             bx, by, bw, bh = _client_roi(hwnd)
                             client_mon = {"left": bx, "top": by, "width": bw, "height": bh}
@@ -376,10 +377,8 @@ class _MacroThread(threading.Thread):
                         # 팝업 사라짐 → 추적 중이었으면 퍼즐 완료 판정
                         if tracking:
                             tracking = False
+                            _vit_active = False
                             _last_marker_pos = (0, 0)
-                            _vel_x = 0.0
-                            _vel_y = 0.0
-                            _target_cls = None
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -409,110 +408,16 @@ class _MacroThread(threading.Thread):
                         time.sleep(0.016)  # 팝업 대기 중 60fps
                         continue
 
-                    # ── 팝업 첫 감지 → _on_trigger_start ────────────────────
+                    # ── 팝업 첫 감지 → 게임 창 포그라운드 1회 ────────────────
                     if not popup_logged:
                         popup_logged = True
-                        _CLS_NAMES = {0: "원", 1: "사각형", 2: "삼각형", 3: "별"}
-
                         self._sig.log.emit(
                             f"[팝업 감지] HDR score={hdr_score:.2f} (임계값 0.65 초과) "
-                            f"→ _on_trigger_start 진입"
+                            f"→ ViT 추적 시작"
                         )
-
-                        det_mon = {
-                            "left":   bx + int(bw * DET_X1_R),
-                            "top":    by + int(bh * DET_Y1_R),
-                            "width":  int(bw * (DET_X2_R - DET_X1_R)),
-                            "height": int(bh * (DET_Y2_R - DET_Y1_R)),
-                        }
-                        # 이미 캡처된 client 프레임에서 DET 영역 크롭 (추가 grab 없음)
-                        _dy1 = int(bh * DET_Y1_R)
-                        _dy2 = _dy1 + int(bh * (DET_Y2_R - DET_Y1_R))
-                        _dx1 = int(bw * DET_X1_R)
-                        _dx2 = _dx1 + int(bw * (DET_X2_R - DET_X1_R))
-                        det_init = client[_dy1:_dy2, _dx1:_dx2]
-
-                        # M2로 중앙 도형 클래스 분류 (아직 흰색으로 보이는 순간)
-                        dh, dw = det_init.shape[:2]
-
-                        # 커서 inpaint — 커서가 DET 안에 있으면 배경으로 복원 후 crop
-                        try:
-                            import win32api as _w32
-                            _det_left = bx + _dx1
-                            _det_top  = by + _dy1
-                            _mcx, _mcy = _w32.GetCursorPos()
-                            _mrx = _mcx - _det_left
-                            _mry = _mcy - _det_top
-                            _cursor_r = max(20, int(min(dw, dh) * 0.05))
-                            if 0 <= _mrx < dw and 0 <= _mry < dh:
-                                _cmask = np.zeros((dh, dw), dtype=np.uint8)
-                                cv2.circle(_cmask, (_mrx, _mry), _cursor_r, 255, -1)
-                                det_m2 = cv2.inpaint(det_init, _cmask, 5, cv2.INPAINT_TELEA)
-                                self._sig.log.emit(
-                                    f"[M2] 커서 inpaint — 커서=({_mcx},{_mcy}) "
-                                    f"DET상대=({_mrx},{_mry}) 반경={_cursor_r}px"
-                                )
-                            else:
-                                det_m2 = det_init
-                        except Exception:
-                            det_m2 = det_init
-                        # 흰 픽셀(도형) 위치 기반 타이트 크롭 — 도형이 치우쳐 있어도 M2에 중앙 정렬
-                        try:
-                            _gray_m2 = cv2.cvtColor(det_m2, cv2.COLOR_BGR2GRAY)
-                            _, _wmask = cv2.threshold(_gray_m2, 200, 255, cv2.THRESH_BINARY)
-                            _wpts = cv2.findNonZero(_wmask)
-                            if _wpts is not None and len(_wpts) > 50:
-                                _wx, _wy, _ww, _wh = cv2.boundingRect(_wpts)
-                                _wpad = max(_ww, _wh)   # 도형 크기만큼 여백
-                                _cx1 = max(0, _wx - _wpad)
-                                _cy1 = max(0, _wy - _wpad)
-                                _cx2 = min(dw, _wx + _ww + _wpad)
-                                _cy2 = min(dh, _wy + _wh + _wpad)
-                                center_crop = det_m2[_cy1:_cy2, _cx1:_cx2]
-                            else:
-                                center_crop = det_m2[dh//4:3*dh//4, dw//4:3*dw//4]
-                        except Exception:
-                            center_crop = det_m2[dh//4:3*dh//4, dw//4:3*dw//4]
-                        # ── M2 디버그 이미지 저장 (m2_debug 폴더) ──────────────
-                        try:
-                            import datetime
-                            _dbg_dir = os.path.join(ROOT, "m2_debug")
-                            os.makedirs(_dbg_dir, exist_ok=True)
-                            _ts = datetime.datetime.now().strftime("%H%M%S_%f")[:9]
-                            cv2.imwrite(os.path.join(_dbg_dir, f"{_ts}_det.png"), det_m2)
-                            cv2.imwrite(os.path.join(_dbg_dir, f"{_ts}_crop.png"), center_crop)
-                        except Exception:
-                            pass
-                        # ────────────────────────────────────────────────────────
-                        self._sig.log.emit(
-                            f"[M2] DET 영역 캡처 완료 ({dw}x{dh}px) "
-                            f"→ center_crop {center_crop.shape[1]}x{center_crop.shape[0]}px 분류 중..."
-                        )
-                        try:
-                            if center_crop.shape[0] >= 32 and center_crop.shape[1] >= 32:
-                                _target_cls = m2.classify_crop(center_crop, 192)
-                                cls_name = _CLS_NAMES.get(_target_cls, "알수없음") if _target_cls is not None else "None"
-                                self._sig.log.emit(
-                                    f"[M2] 분류 완료 → target_cls={_target_cls} ({cls_name}) "
-                                    f"→ M1 {'specialist[' + str(_target_cls) + ']' if _target_cls is not None else 'ensemble(fallback)'} 사용"
-                                )
-                            else:
-                                _target_cls = None
-                                self._sig.log.emit(
-                                    f"[M2] center_crop 너무 작음 {center_crop.shape[:2]} → 분류 스킵, ensemble 사용"
-                                )
-                        except Exception as e:
-                            _target_cls = None
-                            self._sig.log.emit(f"[M2] 분류 실패: {e} → ensemble fallback")
-                        _last_marker_pos = (dw // 2, dh // 2)
-
                         _focus_game(hwnd)  # 게임 창 포그라운드 (1회)
-                        self._sig.log.emit(
-                            f"[포그라운드] 게임 창 활성화 → 추적 시작 "
-                            f"(초기 마커 중앙 {_last_marker_pos})"
-                        )
 
-                    # 주황 영역: 퍼즐 해제 구역 — M1 YOLO 도형 감지
+                    # DET(퍼즐 해제 구역) 캡처
                     det_mon = {
                         "left":   bx + int(bw * DET_X1_R),
                         "top":    by + int(bh * DET_Y1_R),
@@ -520,91 +425,54 @@ class _MacroThread(threading.Thread):
                         "height": int(bh * (DET_Y2_R - DET_Y1_R)),
                     }
                     det = cv2.cvtColor(np.array(sct.grab(det_mon)), cv2.COLOR_BGRA2BGR)
+                    _dh, _dw = det.shape[:2]
 
-                    # target_cls 확정 시 전담 specialist, 미확정 시 ensemble fallback
-                    # 원본 정통: M2 cls 분류 → M1[cls] specialist 하나만 사용
-                    _CLS_NAMES = {0: "원", 1: "사각형", 2: "삼각형", 3: "별"}
-                    if _target_cls is not None and 0 <= _target_cls <= 3:
-                        detector = m1_specialists[_target_cls]
-                        _det_label = f"M1 specialist[{_target_cls}]({_CLS_NAMES[_target_cls]})"
-                    else:
-                        detector = m1_ensemble
-                        _det_label = "M1 ensemble(fallback)"
-                    boxes = detector.detect(det, self.IMGSZ, self.SCORE)
+                    # 커서 제거 — 우리 마우스가 도형 위에 있으면 ViT가 커서를 쫓음. 매 프레임 inpaint
+                    det_masked = det
+                    try:
+                        _mcx, _mcy = win32api.GetCursorPos()
+                        _mrx = _mcx - det_mon["left"]
+                        _mry = _mcy - det_mon["top"]
+                        if 0 <= _mrx < _dw and 0 <= _mry < _dh:
+                            _cr = max(20, int(min(_dw, _dh) * 0.05))
+                            _cmask = np.zeros((_dh, _dw), dtype=np.uint8)
+                            cv2.circle(_cmask, (_mrx, _mry), _cr, 255, -1)
+                            det_masked = cv2.inpaint(det, _cmask, 5, cv2.INPAINT_TELEA)
+                    except Exception:
+                        det_masked = det
 
-                    # 박스 크기 필터 — DET 영역 크기 비례 동적 계산 (해상도 독립적)
-                    if len(boxes):
-                        _det_short = min(det_mon["width"], det_mon["height"])
-                        _box_min = int(_det_short * BOX_MIN_RATIO)
-                        _box_max = int(_det_short * BOX_MAX_RATIO)
-                        _bw = boxes[:, 2] - boxes[:, 0]
-                        _bh = boxes[:, 3] - boxes[:, 1]
-                        _size_mask = (
-                            (_bw >= _box_min) & (_bh >= _box_min) &
-                            (_bw <= _box_max) & (_bh <= _box_max)
-                        )
-                        boxes = boxes[_size_mask]
-
-                    # ── _track_once: 박스 선택 (MAX_JUMP 필터 포함) ──────────
-                    _best = None
-                    _select_method = ""
-                    if len(boxes):
-                        if _last_marker_pos != (0, 0):
-                            lx, ly = _last_marker_pos
-                            centers = np.array([
-                                ((b[0]+b[2])/2, (b[1]+b[3])/2) for b in boxes
-                            ])
-                            dists = np.hypot(centers[:,0]-lx, centers[:,1]-ly)
-
-                            valid_mask = dists <= MAX_JUMP
-                            if valid_mask.any():
-                                valid_boxes = boxes[valid_mask]
-                                valid_dists = dists[valid_mask]
-                                _best = valid_boxes[valid_dists.argmin()]
-                                _select_method = (
-                                    f"거리기반(유효{valid_mask.sum()}/{len(boxes)}개, "
-                                    f"dist={valid_dists.min():.0f}px)"
-                                )
-                            else:
-                                # 모든 박스가 MAX_JUMP 초과 → miss 처리
-                                self._sig.log.emit(
-                                    f"[점프차단] 최근접 {dists.min():.0f}px "
-                                    f"> {MAX_JUMP}px → miss 처리"
-                                )
+                    # ── ViT 추적: 흰색 락온 → 매 프레임 추적(무동결 복구) ──────
+                    track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
+                    if _vit is not None:
+                        if not _vit_active:
+                            _bbox = acquire_white(det_masked)
+                            if _bbox is not None and _bbox[2] >= 20:
+                                _vit.init(det_masked, _bbox)
+                                _vit_active = True
+                                tracking = True
+                                track_pos = (_bbox[0] + _bbox[2] / 2,
+                                             _bbox[1] + _bbox[3] / 2)
+                                self._sig.log.emit(f"[ViT] 흰색 락온 bbox={_bbox} → 추적 시작")
                         else:
-                            # 첫 프레임: 마커 없으므로 최고점수 박스 무조건 선택
-                            _best = boxes[boxes[:, 4].argmax()]
-                            _select_method = f"최고점수(boxes={len(boxes)})"
+                            _tcx, _tcy, _tsc, _tacc = _vit.update(det_masked)
+                            track_pos = (_tcx, _tcy)
+                            if _vit.needs_reacquire():
+                                _bbox = acquire_white(det_masked)
+                                if _bbox is not None and _bbox[2] >= 20:
+                                    _vit.init(det_masked, _bbox)
+                                    self._sig.log.emit(f"[ViT] 재획득 — acquire_white bbox={_bbox}")
 
-                    if _best is not None:
-                        cx = int((_best[0] + _best[2]) / 2)
-                        cy = int((_best[1] + _best[3]) / 2)
-                        # 속도 EMA 업데이트 — 직전 위치와의 차이로 이동 벡터 추적
-                        if tracking and _last_marker_pos != (0, 0):
-                            _dvx = cx - _last_marker_pos[0]
-                            _dvy = cy - _last_marker_pos[1]
-                            if abs(_dvx) <= MAX_JUMP and abs(_dvy) <= MAX_JUMP:
-                                _vel_x = _vel_x * 0.6 + _dvx * 0.4
-                                _vel_y = _vel_y * 0.6 + _dvy * 0.4
+                    # ── 마우스 이동(클릭) + 상태 로그 ────────────────────────
+                    if track_pos is not None:
+                        cx = int(max(0, min(det_mon["width"] - 1, track_pos[0])))
+                        cy = int(max(0, min(det_mon["height"] - 1, track_pos[1])))
                         _last_marker_pos = (cx, cy)
-
                         abs_x = det_mon["left"] + cx
                         abs_y = det_mon["top"]  + cy
                         _real_click(abs_x, abs_y)
-                        miss = 0
 
-                        if not tracking:
-                            tracking = True
-                            self._sig.log.emit(
-                                f"[{_det_label}] 첫 감지 score={float(_best[4]):.2f} "
-                                f"→ 커서 ({abs_x}, {abs_y})  선택방식={_select_method}"
-                            )
-                        elif preview_cnt % 30 == 0:
-                            # 30프레임(~1.5초)마다 추적 상태 요약
-                            self._sig.log.emit(
-                                f"[추적중] {_det_label}  score={float(_best[4]):.2f} "
-                                f"pos=({abs_x},{abs_y})  {_select_method}  miss={miss}"
-                            )
+                        if _vit_active and preview_cnt % 30 == 0:
+                            self._sig.log.emit(f"[추적중] pos=({abs_x},{abs_y})")
                             now = time.time()
                             if self._sound and now - last_alert > 2.0:
                                 last_alert = now
@@ -625,38 +493,6 @@ class _MacroThread(threading.Thread):
                                     args=(full, token, chat, success + 1),
                                     daemon=True,
                                 ).start()
-                    else:
-                        # M1 미감지 (투명 구간) — 속도 예측으로 위치 전진 후 클릭 유지
-                        miss += 1
-                        if tracking and _last_marker_pos != (0, 0):
-                            # 직전 속도로 다음 위치 예측
-                            _pred_x = int(_last_marker_pos[0] + _vel_x)
-                            _pred_y = int(_last_marker_pos[1] + _vel_y)
-                            _pred_x = max(0, min(det_mon["width"] - 1, _pred_x))
-                            _pred_y = max(0, min(det_mon["height"] - 1, _pred_y))
-                            _last_marker_pos = (_pred_x, _pred_y)
-                            # 장기 예측 오류 누적 방지: 속도 점진 감쇠
-                            _vel_x *= 0.92
-                            _vel_y *= 0.92
-                            abs_x = det_mon["left"] + _last_marker_pos[0]
-                            abs_y = det_mon["top"]  + _last_marker_pos[1]
-                            _real_click(abs_x, abs_y)
-                        if miss == 1:
-                            self._sig.log.emit(
-                                f"[{_det_label}] 미감지(1회) — "
-                                f"속도예측 시작 vel=({_vel_x:.1f},{_vel_y:.1f})"
-                            )
-                        elif miss % 10 == 0:
-                            self._sig.log.emit(
-                                f"[{_det_label}] 미감지 {miss}회 연속 — "
-                                f"예측위치={_last_marker_pos} vel=({_vel_x:.1f},{_vel_y:.1f})"
-                            )
-                        # tracking 전(초기 획득 실패)에만 마커 리셋 — tracking 중엔 금지
-                        if not tracking and miss >= MAX_MISS_RESET and _last_marker_pos != (0, 0):
-                            _last_marker_pos = (0, 0)
-                            self._sig.log.emit(
-                                f"[재획득] miss {miss}회 → 마커 초기화, 다음 프레임 최고점수로 재획득"
-                            )
 
                     # ── 미리보기 emit (5프레임마다) ──────────────────────────
                     preview_cnt += 1
@@ -680,20 +516,13 @@ class _MacroThread(threading.Thread):
                         cv2.putText(vis, "DET", (_det_lx + 4, _det_ly + 14),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                     (0, 140, 255), 1, cv2.LINE_AA)
-                        # 초록색: M1 detection 박스 (det → popup 좌표 변환)
-                        for b in boxes:
-                            dx1 = _det_lx + int(b[0]); dy1 = _det_ly + int(b[1])
-                            dx2 = _det_lx + int(b[2]); dy2 = _det_ly + int(b[3])
-                            cv2.rectangle(vis, (dx1, dy1), (dx2, dy2),
-                                          (80, 255, 0), 2)
-                        if len(boxes):
-                            best2 = boxes[boxes[:, 4].argmax()]
-                            cx2 = _det_lx + int((best2[0] + best2[2]) / 2)
-                            cy2 = _det_ly + int((best2[1] + best2[3]) / 2)
-                            cv2.drawMarker(vis, (cx2, cy2),
+                        # 초록색: ViT 추적 위치 마커 (det → popup 좌표 변환)
+                        if track_pos is not None:
+                            mcx = _det_lx + int(track_pos[0])
+                            mcy = _det_ly + int(track_pos[1])
+                            cv2.drawMarker(vis, (mcx, mcy),
                                            (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
-                            sc = float(best2[4])
-                            cv2.putText(vis, f"score={sc:.2f}",
+                            cv2.putText(vis, "ViT" if _vit_active else "WAIT",
                                         (_det_lx + 4, _det_ry - 6),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.4, (255, 220, 0), 1, cv2.LINE_AA)
