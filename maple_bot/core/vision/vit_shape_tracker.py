@@ -83,11 +83,13 @@ class ResidualMotionDetector:
     배경과 다르게 움직이는 타겟만 잔차로 남는다. 외형이 아닌 '움직임'으로 검출."""
 
     def __init__(self):
-        self._prev = None       # 직전 프레임 gray float32
-        self._saliency = None   # 최신 잔차 saliency 맵
+        self._prev = None        # 직전 프레임 gray float32
+        self._prev_cmask = None  # 직전 프레임 커서 마스크 — 커서 '꼬리' 잔차 제거용
+        self._saliency = None    # 최신 잔차 saliency 맵
 
     def reset(self):
         self._prev = None
+        self._prev_cmask = None
         self._saliency = None
 
     def update(self, gray_f32, cursor_mask=None):
@@ -100,10 +102,16 @@ class ResidualMotionDetector:
             diff = cv2.absdiff(gray_f32, warped)
             b = RES_BORDER
             diff[:b, :] = 0; diff[-b:, :] = 0; diff[:, :b] = 0; diff[:, -b:] = 0
+            # 직전+현재 커서 마스크 합집합 제거 — diff는 두 프레임 차이라
+            # 직전 커서 위치(inpaint 인공물)에도 가짜 잔차가 생긴다. 현재 것만 지우면
+            # 커서 '꼬리'를 타겟으로 오인 → 추적기가 커서를 역추적하는 폭주 발생(라이브 실증)
             if cursor_mask is not None:
-                diff[cursor_mask > 0] = 0   # 커서 이동 잔차 제거(자기 마우스 오인 방지)
+                diff[cursor_mask > 0] = 0
+            if self._prev_cmask is not None:
+                diff[self._prev_cmask > 0] = 0
             self._saliency = cv2.GaussianBlur(diff, (RES_BLUR, RES_BLUR), 0)
         self._prev = gray_f32
+        self._prev_cmask = cursor_mask
 
     def find(self, pred_cx, pred_cy, roi_half=RES_ROI_HALF, min_signal=RES_MIN_SIGNAL):
         """예측 위치 ROI 내 잔차 가중 centroid 반환 (cx, cy, strength) | None.
@@ -202,13 +210,16 @@ class VitShapeTracker:
         lx, ly = self._history[-1]
         return np.hypot(cx - lx, cy - ly) <= self._max_jump
 
-    def update(self, frame_bgr, cursor_mask=None):
+    def update(self, frame_bgr, cursor_mask=None, residual_bgr=None):
         """프레임당 1회 — (cx, cy, score, accepted) 반환. 절대 멈추지 않음.
-        cursor_mask: 커서 영역 255 마스크(잔차 검출에서 자기 마우스 제외용, 선택)."""
+        cursor_mask: 커서 영역 255 마스크(잔차에서 자기 마우스 제외용, 커서 실크기 권장).
+        residual_bgr: 잔차 계산용 원본 프레임 — inpaint 프레임은 합성 내용이 매 프레임
+        달라져 깜빡임 잔차(커서 꼬리 오인 폭주)를 만들므로 원본 사용 권장. 없으면 frame_bgr."""
         H, W = frame_bgr.shape[:2]
         if self._mode == "residual":
             # 잔차 상태는 연속성이 필요 — ViT 채택 여부와 무관하게 매 프레임 갱신
-            gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            src = residual_bgr if residual_bgr is not None else frame_bgr
+            gray = cv2.cvtColor(src, cv2.COLOR_BGR2GRAY).astype(np.float32)
             self._residual.update(gray, cursor_mask)
         ok, box = self._tracker.update(frame_bgr)
         try:

@@ -45,7 +45,7 @@ def run(video, mode):
                 tr.init(clean, bb); inited = True
             continue
         t0 = time.time()
-        cx, cy, sc, acc = tr.update(clean, cmask)
+        cx, cy, sc, acc = tr.update(clean, cmask, det)
         t_upd.append((time.time()-t0)*1000)
         if tr.needs_reacquire():
             bb = acquire_white(clean)
