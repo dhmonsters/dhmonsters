@@ -92,6 +92,7 @@ _n = _reload_templates()
 # ── 탐지 엔진 로드 ─────────────────────────────────────────────────────────
 from planet_yolo_verify import M1Ensemble, HyungYolo
 from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
+from core.shape_yolo import ShapeYolo
 
 def _load_models(use_gpu: bool = False):
     param = os.path.join(ASSETS, "hyung_m1.param")
@@ -310,6 +311,17 @@ class _MacroThread(threading.Thread):
             _vit = None
             self._sig.log.emit(f"[!] ViT 추적기 로드 실패: {e} → 추적 비활성")
 
+        # YOLO 주 검출기 — 직접 학습한 모델(models/shape_yolo.param/.bin) 있으면 우선 사용
+        try:
+            _syolo = ShapeYolo()
+            if _syolo.enabled:
+                self._sig.log.emit("[*] ShapeYolo 로드 완료 — YOLO 주 검출 활성 (ViT는 폴백)")
+            else:
+                self._sig.log.emit("[*] ShapeYolo 모델 없음 — ViT 추적만 사용")
+        except Exception as e:
+            _syolo = None
+            self._sig.log.emit(f"[!] ShapeYolo 로드 실패: {e} → ViT 추적만 사용")
+
         self._sig.log.emit("[*] 메이플 창 탐색...")
         hwnd = _find_hwnd()
         if hwnd is None:
@@ -459,8 +471,21 @@ class _MacroThread(threading.Thread):
                                              _bbox[1] + _bbox[3] / 2)
                                 self._sig.log.emit(f"[ViT] 흰색 락온 bbox={_bbox} → 추적 시작")
                         else:
+                            # ViT는 매 프레임 갱신(상태 연속) — YOLO 미검출 시 폴백 좌표
                             _tcx, _tcy, _tsc, _tacc = _vit.update(det_masked, _cmask_res, det)
                             track_pos = (_tcx, _tcy)
+                            # YOLO 주 검출 — 직전 위치 120px 게이트 내 최근접 후보 우선
+                            if _syolo is not None and _syolo.enabled:
+                                _best = None
+                                _best_d = 120.0
+                                for _ycx, _ycy, _ysc in _syolo.detect_all(det):
+                                    _d = ((_ycx - _last_marker_pos[0]) ** 2 +
+                                          (_ycy - _last_marker_pos[1]) ** 2) ** 0.5
+                                    if _d < _best_d:
+                                        _best_d = _d
+                                        _best = (_ycx, _ycy)
+                                if _best is not None:
+                                    track_pos = _best
                             if _vit.needs_reacquire():
                                 _bbox = acquire_white(det_masked)
                                 if _bbox is not None and _bbox[2] >= 20:
