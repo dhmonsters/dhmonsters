@@ -20,11 +20,12 @@ def pink(roi):
 
 def mask_cursor(img):
     # 오프라인 전용 — 핑크 커서 HSV inpaint (라이브는 GetCursorPos 경로)
+    # 반환: (inpaint 이미지, 팽창 커서 마스크 — 잔차 검출 제외용, 없으면 None)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     m = cv2.inRange(hsv, np.array([140,80,80]), np.array([175,255,255]))
-    if cv2.countNonZero(m) == 0: return img
-    m = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_RECT, (9,9)))
-    return cv2.inpaint(img, m, 3, cv2.INPAINT_TELEA)
+    if cv2.countNonZero(m) == 0: return img, None
+    md = cv2.dilate(m, cv2.getStructuringElement(cv2.MORPH_RECT, (9,9)))
+    return cv2.inpaint(img, md, 3, cv2.INPAINT_TELEA), md
 
 def run(video, mode):
     cap = cv2.VideoCapture(video)
@@ -37,14 +38,14 @@ def run(video, mode):
     while True:
         f += 1; ok, fr = cap.read()
         if not ok or f > 1300: break
-        det = fr[dy1:dy2, dx1:dx2]; gt = pink(det); clean = mask_cursor(det)
+        det = fr[dy1:dy2, dx1:dx2]; gt = pink(det); clean, cmask = mask_cursor(det)
         if not inited:
             bb = acquire_white(clean)
             if bb and bb[2] >= 20:
                 tr.init(clean, bb); inited = True
             continue
         t0 = time.time()
-        cx, cy, sc, acc = tr.update(clean)
+        cx, cy, sc, acc = tr.update(clean, cmask)
         t_upd.append((time.time()-t0)*1000)
         if tr.needs_reacquire():
             bb = acquire_white(clean)
@@ -54,8 +55,8 @@ def run(video, mode):
             err.append(math.hypot(cx-gt[0], cy-gt[1]))
     cap.release()
     a = np.array(err)
-    print(f'  [{mode:7s}] n={len(a)} '
-          f'median={np.median(a):.0f} mean={a.mean():.0f} p90={np.percentile(a,90):.0f} '
+    print(f'  [{mode:8s}] n={len(a)} '
+          f'median={np.median(a):.0f} mean={a.mean():.0f} p95={np.percentile(a,95):.0f} '
           f'<40px:{(a<40).mean()*100:.0f}% <80px:{(a<80).mean()*100:.0f}%  '
           f'white재획득={reinit_white}  update={np.mean(t_upd):.1f}ms')
     return a
@@ -63,5 +64,5 @@ def run(video, mode):
 print('=== VitShapeTracker 복구 모드 비교 검증 ===')
 print('(베이스라인 동결: median 45px, <40px 47%, <80px 57%)')
 vid = os.path.join(ROOT, 'sample_transparent_shape.mp4')
-for m in ('freeze', 'physics', 'inertia', 'frosted'):
+for m in ('freeze', 'physics', 'residual'):
     run(vid, m)

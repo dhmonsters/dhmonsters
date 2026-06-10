@@ -429,6 +429,7 @@ class _MacroThread(threading.Thread):
 
                     # 커서 제거 — 우리 마우스가 도형 위에 있으면 ViT가 커서를 쫓음. 매 프레임 inpaint
                     det_masked = det
+                    _cmask = None   # 잔차 복구 검출에서 커서 영역 제외용
                     try:
                         _mcx, _mcy = win32api.GetCursorPos()
                         _mrx = _mcx - det_mon["left"]
@@ -440,6 +441,7 @@ class _MacroThread(threading.Thread):
                             det_masked = cv2.inpaint(det, _cmask, 5, cv2.INPAINT_TELEA)
                     except Exception:
                         det_masked = det
+                        _cmask = None
 
                     # ── ViT 추적: 흰색 락온 → 매 프레임 추적(무동결 복구) ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
@@ -454,7 +456,7 @@ class _MacroThread(threading.Thread):
                                              _bbox[1] + _bbox[3] / 2)
                                 self._sig.log.emit(f"[ViT] 흰색 락온 bbox={_bbox} → 추적 시작")
                         else:
-                            _tcx, _tcy, _tsc, _tacc = _vit.update(det_masked)
+                            _tcx, _tcy, _tsc, _tacc = _vit.update(det_masked, _cmask)
                             track_pos = (_tcx, _tcy)
                             if _vit.needs_reacquire():
                                 _bbox = acquire_white(det_masked)
