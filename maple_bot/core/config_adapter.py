@@ -114,6 +114,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         pet_interval=pet_interval,
         pet_count=pet_count,
         attack_interval=float(attack.get("delay_sec") if attack.get("delay_sec") is not None else 0.4),
+        jump_key=str(mm.get("jump_key", "alt") or "alt"),
+        jump_while_move=bool(attack.get("jump_while_move", False)),
         hits_to_kill=int(attack.get("hits_to_kill", 1)),
         skill_cast_sec=float(attack.get("skill_cast_sec") if attack.get("skill_cast_sec") is not None else 0.6),
         hunt_stay_threshold=int(attack.get("density_stay", 3)),

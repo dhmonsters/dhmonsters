@@ -35,6 +35,7 @@ class BlockRunner:
 
     def __init__(self, humanizer, pos_fn: Callable[[], tuple[int, int]],
                  jump_key: str = "alt", teleport_key: str = "space",
+                 jump_while_move: bool = False,
                  sleep_fn: Callable[[float], None] | None = None,
                  stop_fn: Callable[[], bool] | None = None,
                  dwell_fn: Callable[[], bool] | None = None,
@@ -46,6 +47,7 @@ class BlockRunner:
         self._h = humanizer
         self._pos = pos_fn
         self._jump_key = jump_key
+        self._jump_while_move = jump_while_move   # 걷기 동안 점프키 홀드(바니합)
         self._tele_key = teleport_key
         self._sleep = sleep_fn or time.sleep
         self._stop = stop_fn or (lambda: False)
@@ -204,26 +206,38 @@ class BlockRunner:
         return True
 
     # ── 이동 ──────────────────────────────────────────────────────────
-    def _exec_move(self, block: Block, max_steps: int) -> bool:
+    def _exec_move(self, block: Block, max_steps: int,
+                   allow_jump_hold: bool = True) -> bool:
         """target_x 까지 walk/teleport 로 접근. TOLERANCE 이내 도달 시 True.
 
         '진척 기반' 끼임 판정: 목표까지 거리가 한 번이라도 줄면 리셋. MOVE_STUCK_POLLS회
         (≈1.5초) 동안 한 번도 가까워지지 않으면 포기 — 거친 미니맵에서 캐릭터가 느리게
-        움직여 x가 잠깐 안 변해도 거짓 '멈춤'이 안 되게 한다(벽일 때만 포기)."""
+        움직여 x가 잠깐 안 변해도 거짓 '멈춤'이 안 되게 한다(벽일 때만 포기).
+
+        jump_while_move 설정 시 걷기 동안 점프키를 누른 채 유지(바니합).
+        텔레포트 이동·사다리 접근(allow_jump_hold=False)엔 적용하지 않는다."""
+        jump_hold = (self._jump_while_move and allow_jump_hold
+                     and block.move_type != "teleport")
+
+        def _stop_move_keys():
+            self._h.release_dir()
+            if jump_hold:
+                self._h.release(self._jump_key)
+
         best = None
         no_progress = 0
         for _ in range(max_steps):
             # 밀집 사냥(DWELL) 중엔 이동키 떼고 제자리 정지 — 메인 틱이 공격. 해제되면 이동 재개.
             while self._dwell() and not self._stop():
-                self._h.release_dir()
+                _stop_move_keys()
                 self._jsleep(self._poll)
             if self._stop():
-                self._h.release_dir()
+                _stop_move_keys()
                 return False
             x, _y = self._pos()
             dist = block.target_x - x
             if abs(dist) <= TOLERANCE:
-                self._h.release_dir()   # 도착 시 이동키 떼기 → 목표 지나침(overshoot) 방지·정지
+                _stop_move_keys()   # 도착 시 이동키 떼기 → 목표 지나침(overshoot) 방지·정지
                 return True   # 도착 (폐루프 종료)
 
             if best is None or abs(dist) < best:
@@ -232,7 +246,7 @@ class BlockRunner:
             else:
                 no_progress += 1
                 if no_progress >= MOVE_STUCK_POLLS:
-                    self._h.release_dir()   # 포기 시 이동키 떼기(눌림 방지)
+                    _stop_move_keys()   # 포기 시 이동키 떼기(눌림 방지)
                     self._log_once(
                         f"⚠ 이동 멈춤: x={x}→목표 {block.target_x} 진척 없음(벽/좌표 확인)")
                     return False
@@ -243,6 +257,8 @@ class BlockRunner:
             # 좌우 이동키는 '한 번 누르고 계속 유지'(C _walk_to_x). 방향이 바뀌면
             # hold_dir가 기존 키를 떼고 새 키를 누른다. 도착 전까진 떼지 않는다.
             self._h.hold_dir(direction)
+            if jump_hold:
+                self._h.hold(self._jump_key)   # 걷는 동안 점프키도 누른 채 유지
             if use_tele:
                 # 방향 유지한 채 텔포 키 (C _teleport_to_x)
                 self._h.perform(Intent(action="key", key=self._tele_key, base_hold_sec=0.05))
@@ -286,7 +302,7 @@ class BlockRunner:
                 # 같은 층(사다리 밑): 사다리 X로 가서 ↑만
                 self._log_once(f"사다리 등반(같은층) x={block.ladder_x}, y {y}→{block.y_top}")
                 self._exec_move(Block(type="move", target_x=block.ladder_x, move_type="walk"),
-                                max_steps)
+                                max_steps, allow_jump_hold=False)   # 점프하며 접근 시 밧줄 못 잡음
                 ok = self._climb_hold_until(block.ladder_x, block.y_top, max_steps, side)
             else:
                 self._log_once(

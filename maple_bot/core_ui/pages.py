@@ -316,6 +316,7 @@ def build_pages(config) -> list[QWidget]:
         IntField("공격 범위(px)", c, ("attack", "range_px"), 0, 2000, default=350),
         CheckField("공격 전 점프", c, ("attack", "jump_before_attack")),
         TextField("점프 키", c, ("minimap", "jump_key"), default="alt"),
+        CheckField("이동 시 점프 (걷는 동안 점프키 홀드)", c, ("attack", "jump_while_move")),
         CheckField("HP 물약 사용", c, ("recovery", "hp_potion", "enabled")),
         IntField("HP 물약 임계%", c, ("recovery", "hp_potion", "threshold"), 0, 100, default=65),
         TextField("HP 물약 키", c, ("recovery", "hp_potion", "key")),

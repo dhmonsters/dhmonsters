@@ -64,6 +64,9 @@ class RuntimeConfig:
     pet_interval: float = 600.0
     pet_count: int = 1
     attack_interval: float = 0.4   # 공격키 재누름 최소 간격(초) — 매 틱 도배 방지(스킬 딜레이)
+    # 이동 점프 — 좌우 걷기 동안 점프키를 누른 채 유지(바니합). 사다리·텔레포트 이동엔 미적용
+    jump_key: str = "alt"
+    jump_while_move: bool = False
     # 홀드 = 목표 방수 × 스킬1회 시간 (몹이 몇 방에 죽는지에 맞춰 그만큼 길게 누름)
     hits_to_kill: int = 1          # 몹 처치에 필요한 타격 수
     skill_cast_sec: float = 0.6    # 스킬 1회 시전 시간(초) — 1방 나가는 시간
@@ -195,6 +198,8 @@ class BotRuntime:
         self.block_runner = BlockRunner(
             humanizer=self.humanizer,
             pos_fn=lambda: self.orchestrator.state.get_position() or (0, 0),
+            jump_key=config.jump_key or "alt",
+            jump_while_move=config.jump_while_move,
             stop_fn=lambda: not self._route_can_run(),   # 안전모드·정지 시 루트 폴링루프 즉시 이탈
             dwell_fn=lambda: self.hunt_director.is_dwelling(),  # 밀집 시 이동 park
             floor_judge=self.floor_judge, recovery_graph=_recovery_graph,
