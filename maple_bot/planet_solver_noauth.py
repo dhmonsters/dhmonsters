@@ -33,6 +33,9 @@ EXTRACT     = os.path.join(ROOT, "_planet_solver_extract",
 ASSETS      = os.path.join(EXTRACT, "assets")
 CONFIG_FILE = os.path.join(ROOT, "planet_solver_config.json")
 VIT_MODEL_PATH = os.path.join(ROOT, "models", "transparent", "vittrack.onnx")
+# 적응형 2단 임계 (투명도형 YOLO) — 강한 후보는 자유 선택, 약한 후보는 직전 위치 근처만
+SHAPE_STRONG_THR = 0.30   # 이 score 이상이면 안정 검출로 보고 게이트 없이 채택
+SHAPE_WEAK_GATE  = 110    # 약한 후보(0.2~0.3)는 직전 위치 이 거리(px) 이내만 채택(벽 가짜 차단)
 MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
@@ -464,19 +467,30 @@ class _MacroThread(threading.Thread):
                     # ── 추적: YOLO 주 검출 (학습 모델 있으면) / 없으면 ViT 폴백 ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
                     if _syolo is not None and _syolo.enabled:
-                        # YOLO 후보 중 직전 위치 최근접(첫 검출은 score 최고) 채택
-                        _cands = _syolo.detect_all(det)
-                        if _cands:
+                        # 적응형 2단 임계 — 강한 후보(≥0.3)는 자유 선택(초반·안정),
+                        # 약한 후보(0.2~0.3)는 직전 위치 게이트 내에서만(투명 구간 회수, 벽 가짜 차단)
+                        _cands = _syolo.detect_all(det)   # score_thr=0.2 기본
+                        _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]
+                        _bc = None
+                        if _strong:
                             if _last_marker_pos != (0, 0):
-                                _bc = min(_cands, key=lambda c: (c[0] - _last_marker_pos[0]) ** 2
-                                                              + (c[1] - _last_marker_pos[1]) ** 2)
+                                _bc = min(_strong, key=lambda c: (c[0] - _last_marker_pos[0]) ** 2
+                                                               + (c[1] - _last_marker_pos[1]) ** 2)
                             else:
-                                _bc = max(_cands, key=lambda c: c[2])
+                                _bc = max(_strong, key=lambda c: c[2])
+                        elif _cands and _last_marker_pos != (0, 0):
+                            # 약한 후보만 — 직전 위치 SHAPE_WEAK_GATE 이내일 때만 채택
+                            _w = min(_cands, key=lambda c: (c[0] - _last_marker_pos[0]) ** 2
+                                                         + (c[1] - _last_marker_pos[1]) ** 2)
+                            if ((_w[0] - _last_marker_pos[0]) ** 2
+                                    + (_w[1] - _last_marker_pos[1]) ** 2) <= SHAPE_WEAK_GATE ** 2:
+                                _bc = _w
+                        if _bc is not None:
                             track_pos = (_bc[0], _bc[1])
                             tracking = True
                             _miss_run = 0
                         elif _last_marker_pos != (0, 0):
-                            # 미검출 — 짧은 끊김은 직전 위치 유지(최대 15프레임)
+                            # 미검출/게이트 밖 — 짧은 끊김은 직전 위치 유지(최대 15프레임)
                             _miss_run += 1
                             if _miss_run <= 15:
                                 track_pos = _last_marker_pos
@@ -484,7 +498,8 @@ class _MacroThread(threading.Thread):
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
                             _dets = " ".join(f"({int(c[0])},{int(c[1])}:{c[2]:.2f})" for c in _cands[:5])
-                            self._sig.log.emit(f"[진단] YOLO {len(_cands)}개 [{_dets}] → track={_tp}")
+                            self._sig.log.emit(
+                                f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) [{_dets}] → track={_tp}")
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:

@@ -67,15 +67,18 @@ def run(video):
         total += 1
         # ViT 폴백 좌표 (planet_solver와 동일하게 매 프레임 갱신)
         vcx, vcy, _, _ = vit.update(clean, cmask, det)
-        # YOLO 후보 → 게이트 내 최근접
+        # 적응형 2단 임계 (planet_solver와 동일 로직) — 강한(≥0.3) 자유선택, 약한(0.2~0.3) 게이트 내만
         t0 = time.time()
         cands = yolo.detect_all(det)
         t_det.append((time.time()-t0)*1000)
-        best = None; best_d = GATE
-        for ycx, ycy, ysc in cands:
-            d = math.hypot(ycx - last[0], ycy - last[1])
-            if d < best_d:
-                best_d = d; best = (ycx, ycy)
+        strong = [c for c in cands if c[2] >= 0.30]
+        best = None
+        if strong:
+            best = min(strong, key=lambda c: math.hypot(c[0]-last[0], c[1]-last[1]))[:2]
+        elif cands:
+            w = min(cands, key=lambda c: math.hypot(c[0]-last[0], c[1]-last[1]))
+            if math.hypot(w[0]-last[0], w[1]-last[1]) <= 110:
+                best = (w[0], w[1])
         if best is not None:
             det_n += 1
             fused = best
