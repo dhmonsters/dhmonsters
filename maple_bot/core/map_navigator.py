@@ -45,9 +45,11 @@ class MapNavigator:
         self._attack_key: str = "ctrl"
         self._monster_template: str = ""
         self._jump_before_attack: bool = False
+        self._jump_while_move: bool = False   # 순찰 걷기 동안 점프키 홀드(바니합)
 
         # 현재 꾹 누르고 있는 방향키
         self._held_direction: str | None = None
+        self._jump_held: bool = False         # 이동 점프키 홀드 중 여부
 
         # 밧줄 스테이트 머신
         self._state: str = _PATROL
@@ -108,14 +110,32 @@ class MapNavigator:
         self._hold_direction(direction)
 
     def set_attack(self, key: str, monster_template: str = "",
-                   jump_before_attack: bool = False) -> None:
+                   jump_before_attack: bool = False,
+                   jump_while_move: bool = False) -> None:
         self._attack_key = key
         self._monster_template = monster_template
         self._jump_before_attack = jump_before_attack
+        self._jump_while_move = jump_while_move
 
     # ── 방향키 꾹 누르기 관리 ─────────────────────────────────────────
+    def _jump_key(self) -> str:
+        return (self._minimap.config.jump_key or "alt") if self._minimap.config else "alt"
+
+    def _sync_jump_hold(self) -> None:
+        """이동 점프키 홀드 동기화 — 순찰 걷기 중에만 누르고, 그 외 상태에선 뗀다.
+        밧줄 접근/등반 중 점프가 눌려 있으면 잡기·등반이 깨지므로 _PATROL로 한정."""
+        want = (self._jump_while_move and self._held_direction is not None
+                and self._state == _PATROL)
+        if want and not self._jump_held:
+            self._input.key_down(self._jump_key())
+            self._jump_held = True
+        elif not want and self._jump_held:
+            self._jump_held = False
+            self._input.key_up(self._jump_key())
+
     def _hold_direction(self, direction: str) -> None:
         if self._held_direction == direction:
+            self._sync_jump_hold()   # 상태 전환(순찰↔접근) 시 점프 홀드 갱신
             return
         if self._held_direction:
             old = self._held_direction
@@ -124,8 +144,12 @@ class MapNavigator:
             time.sleep(_rnd(0.001, 0.011))
         self._held_direction = direction
         self._input.key_down(direction)
+        self._sync_jump_hold()
 
     def release_direction(self) -> None:
+        if self._jump_held:
+            self._jump_held = False
+            self._input.key_up(self._jump_key())
         if self._held_direction:
             old = self._held_direction
             self._held_direction = None   # keepalive 재전송 차단 후 키업
@@ -135,6 +159,8 @@ class MapNavigator:
         """현재 방향키 key_down 재전송 — 스킬 사이 이동 유지용."""
         if self._held_direction:
             self._input.key_down(self._held_direction)
+            if self._jump_held:
+                self._input.key_down(self._jump_key())
 
     # ── 메인 스텝 ─────────────────────────────────────────────────────
     def run_one_step(self) -> None:

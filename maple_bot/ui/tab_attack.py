@@ -65,6 +65,20 @@ class TabAttack(QWidget):
         row_opt.addStretch()
         layout.addLayout(row_opt)
 
+        # 이동 점프 — 걷는 동안 점프키를 누른 채 유지 (좌표 탭 점프 키와 동일 설정 공유)
+        row_jump = QHBoxLayout()
+        row_jump.addWidget(QLabel("점프 키"))
+        self.edit_jump_key = QLineEdit("alt")
+        self.edit_jump_key.setFixedWidth(60)
+        self.edit_jump_key.setToolTip("점프에 사용할 키 (예: alt, space) — 좌표 탭과 동일 설정")
+        row_jump.addWidget(self.edit_jump_key)
+        row_jump.addSpacing(12)
+        self.chk_jump_move = QCheckBox("이동 시 점프 (걷는 동안 점프키 홀드)")
+        self.chk_jump_move.setToolTip("좌우 이동 중 점프키를 누른 채 유지. 사다리 접근·텔레포트엔 미적용")
+        row_jump.addWidget(self.chk_jump_move)
+        row_jump.addStretch()
+        layout.addLayout(row_jump)
+
         btn_save = QPushButton("저장")
         btn_save.clicked.connect(self.save_to_config)
         layout.addWidget(btn_save)
@@ -203,6 +217,8 @@ class TabAttack(QWidget):
                         self.edit_monster_folder.text().strip())
         self.config.set("attack", "jump_before_attack", self.chk_jump_attack.isChecked())
         self.config.set("attack", "riding_on_rope",     self.chk_riding.isChecked())
+        self.config.set("attack", "jump_while_move",    self.chk_jump_move.isChecked())
+        self.config.set("minimap", "jump_key",          self.edit_jump_key.text().strip() or "alt")
 
         self.config.set("attack", "normal_buffs", [
             {"enabled": rd["chk"].isChecked(),
@@ -225,6 +241,9 @@ class TabAttack(QWidget):
         self.edit_monster_folder.setText(a.get("monster_folder", ""))
         self.chk_jump_attack.setChecked(a.get("jump_before_attack", False))
         self.chk_riding.setChecked(a.get("riding_on_rope", False))
+        self.chk_jump_move.setChecked(a.get("jump_while_move", False))
+        mm = self.config.get("minimap") or {}
+        self.edit_jump_key.setText(mm.get("jump_key", "alt"))
 
         self._clear_buff_rows("normal")
         for item in (a.get("normal_buffs") or []):

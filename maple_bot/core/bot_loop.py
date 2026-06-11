@@ -280,6 +280,7 @@ class BotLoop:
             key=attack_key,
             monster_template=monster_tpl,
             jump_before_attack=jump_before_attack,
+            jump_while_move=atk_cfg.get("jump_while_move", False),
         )
 
         if zones:
