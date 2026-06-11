@@ -23,10 +23,13 @@ BIN_PATH   = os.path.join(_MODEL_DIR, "shape_yolo.bin")
 IMGSZ      = 192
 SCORE_THR  = 0.3
 IOU_THR    = 0.45
-NUM_CLS    = 1
+NUM_CLS    = 2
+# 클래스 인덱스(data.yaml names 순서): 0=mouse, 1=transparent-game.
+# 봇은 도형 위치만 필요하므로 도형(1)만 사용하고 커서(0)는 버린다.
+SHAPE_CLASS_IDX = 1
 # ultralytics ncnn export는 Detect 후처리를 그래프에 구워 단일 "out0"(4+nc, anchors) 출력.
-# 우리 모델은 1클래스 → out0 형태 = (5, 756): 행0~3=cx,cy,w,h(레터박스 px), 행4=클래스 score.
-OUT_ROWS   = 4 + NUM_CLS  # 5
+# 2클래스 → out0 형태 = (6, A): 행0~3=cx,cy,w,h(레터박스 px), 행4=mouse score, 행5=shape score.
+OUT_ROWS   = 4 + NUM_CLS  # 6
 
 
 class ShapeYolo:
@@ -77,12 +80,13 @@ class ShapeYolo:
     # ── 디코드 (이미 디코딩된 단일 out0 파싱) ─────────────────────────
     @staticmethod
     def _decode(out0, score_thr):
-        """out0 (5, A) → [x1,y1,x2,y2,score] Nx5 (레터박스 px). DFL은 그래프에 구워져 불필요."""
+        """out0 (6, A) → [x1,y1,x2,y2,score] Nx5 (레터박스 px). 도형(class 1) score만 사용.
+        커서(class 0)는 무시 — 봇은 도형 위치만 필요. DFL은 그래프에 구워져 불필요."""
         a = np.asarray(out0, dtype=np.float32)
         if a.ndim != 2 or a.shape[0] != OUT_ROWS:
             return np.zeros((0, 5), np.float32)
         cx, cy, w, h = a[0], a[1], a[2], a[3]
-        score = a[4]
+        score = a[4 + SHAPE_CLASS_IDX]   # 도형 클래스 score (행5)
         keep = score > score_thr
         if not keep.any():
             return np.zeros((0, 5), np.float32)
