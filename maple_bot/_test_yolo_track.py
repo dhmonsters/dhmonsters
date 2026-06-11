@@ -52,6 +52,8 @@ def run(video):
     vit = VitShapeTracker(MODEL)
     inited = False; f = 335
     last = None                 # 융합 추적의 직전 위치(게이트 기준)
+    miss = 0                    # 연속 미채택 (게이트 확장용)
+    oog_pos = None; oog_run = 0 # 게이트 밖 강한 후보 지속 추적(스냅)
     err_solo = []; err_fused = []
     det_n = 0; total = 0; t_det = []
     while True:
@@ -67,22 +69,35 @@ def run(video):
         total += 1
         # ViT 폴백 좌표 (planet_solver와 동일하게 매 프레임 갱신)
         vcx, vcy, _, _ = vit.update(clean, cmask, det)
-        # 적응형 2단 임계 (planet_solver와 동일 로직) — 강한(≥0.3) 자유선택, 약한(0.2~0.3) 게이트 내만
+        # planet_solver와 동일 — 전 후보 점프 게이트(miss 비례 확장) + 강(≥0.5) 게이트밖 지속 스냅
         t0 = time.time()
         cands = yolo.detect_all(det)
         t_det.append((time.time()-t0)*1000)
-        strong = [c for c in cands if c[2] >= 0.30]
+        strong = [c for c in cands if c[2] >= 0.50]
+        d = lambda c: math.hypot(c[0]-last[0], c[1]-last[1])
+        gate = min(280, 110 + 12 * miss)
+        ing = [c for c in cands if d(c) <= gate]
+        ing_strong = [c for c in ing if c[2] >= 0.50]
         best = None
-        if strong:
-            best = min(strong, key=lambda c: math.hypot(c[0]-last[0], c[1]-last[1]))[:2]
-        elif cands:
-            w = min(cands, key=lambda c: math.hypot(c[0]-last[0], c[1]-last[1]))
-            if math.hypot(w[0]-last[0], w[1]-last[1]) <= 110:
-                best = (w[0], w[1])
+        if ing_strong:
+            best = min(ing_strong, key=d)[:2]
+        elif ing:
+            best = min(ing, key=d)[:2]
+        elif strong:
+            og = min(strong, key=d)
+            if oog_pos is not None and math.hypot(og[0]-oog_pos[0], og[1]-oog_pos[1]) <= 60:
+                oog_run += 1
+            else:
+                oog_run = 1
+            oog_pos = (og[0], og[1])
+            if oog_run >= 20:
+                best = (og[0], og[1])
         if best is not None:
             det_n += 1
             fused = best
+            miss = 0; oog_pos = None; oog_run = 0
         else:
+            miss += 1
             fused = (vcx, vcy)
         last = fused
         if vit.needs_reacquire():

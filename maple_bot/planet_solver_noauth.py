@@ -33,9 +33,12 @@ EXTRACT     = os.path.join(ROOT, "_planet_solver_extract",
 ASSETS      = os.path.join(EXTRACT, "assets")
 CONFIG_FILE = os.path.join(ROOT, "planet_solver_config.json")
 VIT_MODEL_PATH = os.path.join(ROOT, "models", "transparent", "vittrack.onnx")
-# 적응형 2단 임계 (투명도형 YOLO) — 강한 후보는 자유 선택, 약한 후보는 직전 위치 근처만
-SHAPE_STRONG_THR = 0.30   # 이 score 이상이면 안정 검출로 보고 게이트 없이 채택
-SHAPE_WEAK_GATE  = 110    # 약한 후보(0.2~0.3)는 직전 위치 이 거리(px) 이내만 채택(벽 가짜 차단)
+# 적응형 2단 임계 (투명도형 YOLO) — 모든 후보에 점프 게이트, 확실한 것만 강 등급
+SHAPE_STRONG_THR = 0.50   # 강 등급 기준 — 게이트 내 우선 채택 + 게이트 밖 지속 시 스냅 대상
+SHAPE_WEAK_GATE  = 110    # 점프 게이트 기본 반경(px) — 도형은 ~2px/frame이라 순간 점프는 가짜
+SHAPE_GATE_GROW  = 12     # 미검출 1프레임당 게이트 확장(px) — 오래 놓치면 점점 넓게 재탐색
+SHAPE_GATE_MAX   = 280    # 게이트 확장 상한(px)
+SHAPE_SNAP_FRAMES = 20    # 게이트 밖 강한 후보가 같은 자리 이 프레임 연속 → 재발견으로 보고 스냅
 MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
@@ -350,8 +353,10 @@ class _MacroThread(threading.Thread):
         popup_logged = False         # 팝업 감지 첫 로그 중복 방지
         _vit_active = False          # 현재 팝업에 대해 ViT 추적기가 초기화됐는지
         _last_marker_pos = (0, 0)    # 직전 프레임 도형 중심 (det 내 좌표) — 미리보기/클릭용
-        _miss_run = 0                # YOLO 연속 미검출 카운트 (직전 위치 유지 한계용)
+        _miss_run = 0                # YOLO 연속 미검출 카운트 (직전 위치 유지·게이트 확장용)
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
+        _oog_pos = None              # 게이트 밖 강한 후보 직전 위치 (재발견 스냅 판정용)
+        _oog_run = 0                 # 게이트 밖 강한 후보 연속 프레임 수
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -397,6 +402,8 @@ class _MacroThread(threading.Thread):
                             _vit_active = False
                             _last_marker_pos = (0, 0)
                             _miss_run = 0
+                            _oog_pos = None
+                            _oog_run = 0
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -467,28 +474,47 @@ class _MacroThread(threading.Thread):
                     # ── 추적: YOLO 주 검출 (학습 모델 있으면) / 없으면 ViT 폴백 ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
                     if _syolo is not None and _syolo.enabled:
-                        # 적응형 2단 임계 — 강한 후보(≥0.3)는 자유 선택(초반·안정),
-                        # 약한 후보(0.2~0.3)는 직전 위치 게이트 내에서만(투명 구간 회수, 벽 가짜 차단)
+                        # 전 후보 공통 점프 게이트 — 도형은 ~2px/frame이라 순간 점프는 가짜.
+                        # 미검출이 길어지면 게이트를 점점 넓혀 재탐색(동결 방지).
+                        # 게이트 밖 강한 후보(≥0.5)가 같은 자리 연속이면 재발견으로 스냅.
                         _cands = _syolo.detect_all(det)   # score_thr=0.2 기본
                         _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]
+                        _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
+                                         + (c[1] - _last_marker_pos[1]) ** 2)
                         _bc = None
-                        if _strong:
-                            if _last_marker_pos != (0, 0):
-                                _bc = min(_strong, key=lambda c: (c[0] - _last_marker_pos[0]) ** 2
-                                                               + (c[1] - _last_marker_pos[1]) ** 2)
-                            else:
+                        if _last_marker_pos == (0, 0):
+                            if _strong:   # 첫 검출 — 확실한 것만 score 최고로
                                 _bc = max(_strong, key=lambda c: c[2])
-                        elif _cands and _last_marker_pos != (0, 0):
-                            # 약한 후보만 — 직전 위치 SHAPE_WEAK_GATE 이내일 때만 채택
-                            _w = min(_cands, key=lambda c: (c[0] - _last_marker_pos[0]) ** 2
-                                                         + (c[1] - _last_marker_pos[1]) ** 2)
-                            if ((_w[0] - _last_marker_pos[0]) ** 2
-                                    + (_w[1] - _last_marker_pos[1]) ** 2) <= SHAPE_WEAK_GATE ** 2:
-                                _bc = _w
+                        else:
+                            _gate = min(SHAPE_GATE_MAX,
+                                        SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
+                            _ing = [c for c in _cands if _d2(c) <= _gate * _gate]
+                            _ing_strong = [c for c in _ing if c[2] >= SHAPE_STRONG_THR]
+                            if _ing_strong:
+                                _bc = min(_ing_strong, key=_d2)
+                            elif _ing:
+                                _bc = min(_ing, key=_d2)
+                            elif _strong:
+                                # 게이트 밖 강한 후보 — 같은 자리(60px) 연속 지속 시 스냅
+                                _og = min(_strong, key=_d2)
+                                if (_oog_pos is not None and
+                                        (_og[0] - _oog_pos[0]) ** 2
+                                        + (_og[1] - _oog_pos[1]) ** 2 <= 60 ** 2):
+                                    _oog_run += 1
+                                else:
+                                    _oog_run = 1
+                                _oog_pos = (_og[0], _og[1])
+                                if _oog_run >= SHAPE_SNAP_FRAMES:
+                                    _bc = _og
+                                    self._sig.log.emit(
+                                        f"[진단] 게이트 밖 강한 후보 {_oog_run}프레임 지속 "
+                                        f"→ 재발견 스냅 ({int(_og[0])},{int(_og[1])}:{_og[2]:.2f})")
                         if _bc is not None:
                             track_pos = (_bc[0], _bc[1])
                             tracking = True
                             _miss_run = 0
+                            _oog_pos = None
+                            _oog_run = 0
                         elif _last_marker_pos != (0, 0):
                             # 미검출/게이트 밖 — 짧은 끊김은 직전 위치 유지(최대 15프레임)
                             _miss_run += 1
@@ -499,7 +525,8 @@ class _MacroThread(threading.Thread):
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
                             _dets = " ".join(f"({int(c[0])},{int(c[1])}:{c[2]:.2f})" for c in _cands[:5])
                             self._sig.log.emit(
-                                f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) [{_dets}] → track={_tp}")
+                                f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
+                                f"[{_dets}] → track={_tp}")
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
