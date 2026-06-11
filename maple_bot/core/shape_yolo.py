@@ -155,12 +155,14 @@ class ShapeYolo:
 
     def detect_all(self, board_bgr: np.ndarray,
                    score_thr: float = SCORE_THR) -> list:
-        """모든 후보 [(cx, cy, score), ...] — 호출측이 움직임 게이트로 선택. 비활성 시 []."""
+        """모든 후보 [(cx, cy, score, w, h), ...] — 호출측이 움직임 게이트로 선택.
+        w/h는 미리보기 박스 표시용(앞 3개 인덱스만 쓰는 기존 호출과 호환). 비활성 시 []."""
         if not self._enabled or board_bgr is None or board_bgr.size == 0:
             return []
         try:
             boxes = self._infer(board_bgr, score_thr)
-            return [(int((b[0] + b[2]) / 2), int((b[1] + b[3]) / 2), float(b[4]))
+            return [(int((b[0] + b[2]) / 2), int((b[1] + b[3]) / 2), float(b[4]),
+                     int(b[2] - b[0]), int(b[3] - b[1]))
                     for b in boxes]
         except Exception as exc:
             logger.debug("ShapeYolo.detect_all 실패: %s", exc)

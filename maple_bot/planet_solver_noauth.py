@@ -473,6 +473,7 @@ class _MacroThread(threading.Thread):
 
                     # ── 추적: YOLO 주 검출 (학습 모델 있으면) / 없으면 ViT 폴백 ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
+                    _cands = []             # YOLO 후보 (미리보기 박스 표시용)
                     if _syolo is not None and _syolo.enabled:
                         # 전 후보 공통 점프 게이트 — 도형은 ~2px/frame이라 순간 점프는 가짜.
                         # 미검출이 길어지면 게이트를 점점 넓혀 재탐색(동결 방지).
@@ -601,13 +602,31 @@ class _MacroThread(threading.Thread):
                         cv2.putText(vis, "DET", (_det_lx + 4, _det_ly + 14),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4,
                                     (0, 140, 255), 1, cv2.LINE_AA)
-                        # 초록색: ViT 추적 위치 마커 (det → popup 좌표 변환)
+                        # 초록색: YOLO 검출 박스 전부 표시 (det → popup 좌표 변환)
+                        # 채택된 후보=굵은 밝은 초록+score, 나머지=얇은 초록 (어디를 잡는지 가시화)
+                        for _ycx, _ycy, _ysc, _yw, _yh in _cands:
+                            _x1 = _det_lx + int(_ycx - _yw / 2)
+                            _y1 = _det_ly + int(_ycy - _yh / 2)
+                            _x2 = _det_lx + int(_ycx + _yw / 2)
+                            _y2 = _det_ly + int(_ycy + _yh / 2)
+                            _sel = (track_pos is not None
+                                    and abs(_ycx - track_pos[0]) < 2
+                                    and abs(_ycy - track_pos[1]) < 2)
+                            _col = (0, 255, 80) if _sel else (0, 190, 0)
+                            cv2.rectangle(vis, (_x1, _y1), (_x2, _y2),
+                                          _col, 2 if _sel else 1)
+                            cv2.putText(vis, f"{_ysc:.2f}", (_x1, _y1 - 3),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.38,
+                                        _col, 1, cv2.LINE_AA)
+                        # 추적 위치 십자 마커
                         if track_pos is not None:
                             mcx = _det_lx + int(track_pos[0])
                             mcy = _det_ly + int(track_pos[1])
                             cv2.drawMarker(vis, (mcx, mcy),
                                            (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
-                            cv2.putText(vis, "ViT" if _vit_active else "WAIT",
+                            _eng = ("YOLO" if (_syolo is not None and _syolo.enabled)
+                                    else ("ViT" if _vit_active else "WAIT"))
+                            cv2.putText(vis, _eng,
                                         (_det_lx + 4, _det_ry - 6),
                                         cv2.FONT_HERSHEY_SIMPLEX,
                                         0.4, (255, 220, 0), 1, cv2.LINE_AA)
