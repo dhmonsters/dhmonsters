@@ -49,13 +49,14 @@ def run(video):
     dx1=int(W*dx1r); dx2=int(W*dx2r); dy1=int(H*dy1r); dy2=int(H*dy2r)
     cap.set(cv2.CAP_PROP_POS_FRAMES, 336)
 
-    vit = VitShapeTracker(MODEL)
+    from core.vision.vit_shape_tracker import ResidualMotionDetector
+    resd = ResidualMotionDetector()
     inited = False; f = 335
     last = None                 # 융합 추적의 직전 위치(게이트 기준)
     miss = 0                    # 연속 미채택 (게이트 확장용)
     oog_pos = None; oog_run = 0 # 게이트 밖 강한 후보 지속 추적(스냅)
     err_solo = []; err_fused = []
-    det_n = 0; total = 0; t_det = []
+    det_n = 0; res_n = 0; total = 0; t_det = []
     while True:
         f += 1; ok, fr = cap.read()
         if not ok or f > 1300: break
@@ -63,15 +64,15 @@ def run(video):
         if not inited:
             bb = acquire_white(clean)
             if bb and bb[2] >= 20:
-                vit.init(clean, bb); inited = True
+                inited = True
                 last = (bb[0] + bb[2]/2, bb[1] + bb[3]/2)
             continue
         total += 1
-        # ViT 폴백 좌표 (planet_solver와 동일하게 매 프레임 갱신)
-        vcx, vcy, _, _ = vit.update(clean, cmask, det)
-        # planet_solver와 동일 — 전 후보 점프 게이트(miss 비례 확장) + 강(≥0.5) 게이트밖 지속 스냅
+        # planet_solver와 동일 — 잔차 상태 매 프레임 갱신 + YOLO 2단 게이트 + 잔차 보정
+        gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        resd.update(gray, cmask)
         t0 = time.time()
-        cands = yolo.detect_all(det)
+        cands = yolo.detect_all(det, score_thr=0.10)
         t_det.append((time.time()-t0)*1000)
         strong = [c for c in cands if c[2] >= 0.50]
         d = lambda c: math.hypot(c[0]-last[0], c[1]-last[1])
@@ -98,16 +99,24 @@ def run(video):
             miss = 0; oog_pos = None; oog_run = 0
         else:
             miss += 1
-            fused = (vcx, vcy)
+            rf = resd.find(last[0], last[1])
+            if rf is not None:
+                rcx, rcy, _ = rf
+                rd = math.hypot(rcx-last[0], rcy-last[1])
+                if rd > 30:
+                    rcx = last[0] + (rcx-last[0])*30/rd
+                    rcy = last[1] + (rcy-last[1])*30/rd
+                fused = (rcx, rcy)
+                res_n += 1
+            else:
+                fused = last   # 잔차 침묵 — 직전 위치 유지
         last = fused
-        if vit.needs_reacquire():
-            bb = acquire_white(clean)
-            if bb and bb[2] >= 20: vit.init(clean, bb)
         if gt:
             err_fused.append(math.hypot(fused[0]-gt[0], fused[1]-gt[1]))
             if best is not None:
                 err_solo.append(math.hypot(best[0]-gt[0], best[1]-gt[1]))
     cap.release()
+    print(f"(잔차 보정 사용 프레임: {res_n}/{total})")
     print('=== ShapeYolo 오프라인 검증 (기준: residual 융합 median 43px <80px 88%) ===')
     report('YOLO검출만', err_solo, det_n, total, np.mean(t_det))
     report('YOLO+폴백', err_fused, det_n, total, np.mean(t_det))

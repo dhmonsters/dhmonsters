@@ -35,6 +35,7 @@ CONFIG_FILE = os.path.join(ROOT, "planet_solver_config.json")
 VIT_MODEL_PATH = os.path.join(ROOT, "models", "transparent", "vittrack.onnx")
 # 적응형 2단 임계 (투명도형 YOLO) — 모든 후보에 점프 게이트, 확실한 것만 강 등급
 SHAPE_STRONG_THR = 0.50   # 강 등급 기준 — 게이트 내 우선 채택 + 게이트 밖 지속 시 스냅 대상
+SHAPE_WEAK_THR   = 0.10   # 약 후보 하한 — 비상관화 모델은 배경 FP 1%라 0.1까지 안전(게이트 내 한정)
 SHAPE_WEAK_GATE  = 110    # 점프 게이트 기본 반경(px) — 도형은 ~2px/frame이라 순간 점프는 가짜
 SHAPE_GATE_GROW  = 12     # 미검출 1프레임당 게이트 확장(px) — 오래 놓치면 점점 넓게 재탐색
 SHAPE_GATE_MAX   = 280    # 게이트 확장 상한(px)
@@ -97,7 +98,8 @@ _n = _reload_templates()
 
 # ── 탐지 엔진 로드 ─────────────────────────────────────────────────────────
 from planet_yolo_verify import M1Ensemble, HyungYolo
-from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
+from core.vision.vit_shape_tracker import (VitShapeTracker, acquire_white,
+                                           ResidualMotionDetector)
 from core.shape_yolo import ShapeYolo
 
 def _load_models(use_gpu: bool = False):
@@ -357,6 +359,7 @@ class _MacroThread(threading.Thread):
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
         _oog_pos = None              # 게이트 밖 강한 후보 직전 위치 (재발견 스냅 판정용)
         _oog_run = 0                 # 게이트 밖 강한 후보 연속 프레임 수
+        _resd = ResidualMotionDetector()   # 모션 잔차 — YOLO 실명(완전투명) 구간 보정
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -404,6 +407,7 @@ class _MacroThread(threading.Thread):
                             _miss_run = 0
                             _oog_pos = None
                             _oog_run = 0
+                            _resd.reset()
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -478,7 +482,10 @@ class _MacroThread(threading.Thread):
                         # 전 후보 공통 점프 게이트 — 도형은 ~2px/frame이라 순간 점프는 가짜.
                         # 미검출이 길어지면 게이트를 점점 넓혀 재탐색(동결 방지).
                         # 게이트 밖 강한 후보(≥0.5)가 같은 자리 연속이면 재발견으로 스냅.
-                        _cands = _syolo.detect_all(det)   # score_thr=0.2 기본
+                        # 잔차(모션) 상태는 매 프레임 갱신 — YOLO 실명 구간 보정용(연속성 필요)
+                        _gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                        _resd.update(_gray, _cmask_res)
+                        _cands = _syolo.detect_all(det, score_thr=SHAPE_WEAK_THR)
                         _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]
                         _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
                                          + (c[1] - _last_marker_pos[1]) ** 2)
@@ -516,18 +523,32 @@ class _MacroThread(threading.Thread):
                             _miss_run = 0
                             _oog_pos = None
                             _oog_run = 0
-                        elif _last_marker_pos != (0, 0):
-                            # 미검출/게이트 밖 — 짧은 끊김은 직전 위치 유지(최대 15프레임)
+                        _res_used = False
+                        if _bc is None and _last_marker_pos != (0, 0):
+                            # YOLO 실명 — 잔차(모션) 보정으로 도형 따라 계속 이동.
+                            # 배경 보상 후 '혼자 움직이는' 신호의 무게중심. 점프는 30px 클램프
                             _miss_run += 1
-                            if _miss_run <= 15:
+                            _rf = _resd.find(_last_marker_pos[0], _last_marker_pos[1])
+                            if _rf is not None:
+                                _rcx, _rcy, _ = _rf
+                                _rd = ((_rcx - _last_marker_pos[0]) ** 2
+                                       + (_rcy - _last_marker_pos[1]) ** 2) ** 0.5
+                                if _rd > 30:
+                                    _rcx = _last_marker_pos[0] + (_rcx - _last_marker_pos[0]) * 30 / _rd
+                                    _rcy = _last_marker_pos[1] + (_rcy - _last_marker_pos[1]) * 30 / _rd
+                                track_pos = (_rcx, _rcy)
+                                _res_used = True
+                            elif _miss_run <= 15:
+                                # 잔차도 침묵(도형 일시정지 등) — 직전 위치 잠깐 유지
                                 track_pos = _last_marker_pos
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
                             _dets = " ".join(f"({int(c[0])},{int(c[1])}:{c[2]:.2f})" for c in _cands[:5])
+                            _src = "잔차" if _res_used else ("YOLO" if _bc is not None else "유지")
                             self._sig.log.emit(
                                 f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
-                                f"[{_dets}] → track={_tp}")
+                                f"[{_dets}] → track={_tp} ({_src})")
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
