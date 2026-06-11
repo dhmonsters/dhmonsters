@@ -347,6 +347,8 @@ class _MacroThread(threading.Thread):
         popup_logged = False         # 팝업 감지 첫 로그 중복 방지
         _vit_active = False          # 현재 팝업에 대해 ViT 추적기가 초기화됐는지
         _last_marker_pos = (0, 0)    # 직전 프레임 도형 중심 (det 내 좌표) — 미리보기/클릭용
+        _miss_run = 0                # YOLO 연속 미검출 카운트 (직전 위치 유지 한계용)
+        _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -391,6 +393,7 @@ class _MacroThread(threading.Thread):
                             tracking = False
                             _vit_active = False
                             _last_marker_pos = (0, 0)
+                            _miss_run = 0
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -458,9 +461,31 @@ class _MacroThread(threading.Thread):
                         det_masked = det
                         _cmask_res = None
 
-                    # ── ViT 추적: 흰색 락온 → 매 프레임 추적(무동결 복구) ──────
+                    # ── 추적: YOLO 주 검출 (학습 모델 있으면) / 없으면 ViT 폴백 ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
-                    if _vit is not None:
+                    if _syolo is not None and _syolo.enabled:
+                        # YOLO 후보 중 직전 위치 최근접(첫 검출은 score 최고) 채택
+                        _cands = _syolo.detect_all(det)
+                        if _cands:
+                            if _last_marker_pos != (0, 0):
+                                _bc = min(_cands, key=lambda c: (c[0] - _last_marker_pos[0]) ** 2
+                                                              + (c[1] - _last_marker_pos[1]) ** 2)
+                            else:
+                                _bc = max(_cands, key=lambda c: c[2])
+                            track_pos = (_bc[0], _bc[1])
+                            tracking = True
+                            _miss_run = 0
+                        elif _last_marker_pos != (0, 0):
+                            # 미검출 — 짧은 끊김은 직전 위치 유지(최대 15프레임)
+                            _miss_run += 1
+                            if _miss_run <= 15:
+                                track_pos = _last_marker_pos
+                        _diag_cnt += 1
+                        if _diag_cnt % 30 == 0:
+                            _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
+                            self._sig.log.emit(f"[진단] YOLO검출={len(_cands)}개 track={_tp}")
+                    elif _vit is not None:
+                        # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
                             _bbox = acquire_white(det_masked)
                             if _bbox is not None and _bbox[2] >= 20:
@@ -471,21 +496,8 @@ class _MacroThread(threading.Thread):
                                              _bbox[1] + _bbox[3] / 2)
                                 self._sig.log.emit(f"[ViT] 흰색 락온 bbox={_bbox} → 추적 시작")
                         else:
-                            # ViT는 매 프레임 갱신(상태 연속) — YOLO 미검출 시 폴백 좌표
                             _tcx, _tcy, _tsc, _tacc = _vit.update(det_masked, _cmask_res, det)
                             track_pos = (_tcx, _tcy)
-                            # YOLO 주 검출 — 직전 위치 120px 게이트 내 최근접 후보 우선
-                            if _syolo is not None and _syolo.enabled:
-                                _best = None
-                                _best_d = 120.0
-                                for _ycx, _ycy, _ysc in _syolo.detect_all(det):
-                                    _d = ((_ycx - _last_marker_pos[0]) ** 2 +
-                                          (_ycy - _last_marker_pos[1]) ** 2) ** 0.5
-                                    if _d < _best_d:
-                                        _best_d = _d
-                                        _best = (_ycx, _ycy)
-                                if _best is not None:
-                                    track_pos = _best
                             if _vit.needs_reacquire():
                                 _bbox = acquire_white(det_masked)
                                 if _bbox is not None and _bbox[2] >= 20:
