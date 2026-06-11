@@ -21,7 +21,7 @@ PARAM_PATH = os.path.join(_MODEL_DIR, "shape_yolo.param")
 BIN_PATH   = os.path.join(_MODEL_DIR, "shape_yolo.bin")
 
 IMGSZ      = 192
-SCORE_THR  = 0.3
+SCORE_THR  = 0.2
 IOU_THR    = 0.45
 NUM_CLS    = 2
 # 클래스 인덱스(data.yaml names 순서): 0=mouse, 1=transparent-game.
