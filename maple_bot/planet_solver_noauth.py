@@ -481,9 +481,10 @@ class _MacroThread(threading.Thread):
                             if _miss_run <= 15:
                                 track_pos = _last_marker_pos
                         _diag_cnt += 1
-                        if _diag_cnt % 30 == 0:
+                        if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
-                            self._sig.log.emit(f"[진단] YOLO검출={len(_cands)}개 track={_tp}")
+                            _dets = " ".join(f"({int(c[0])},{int(c[1])}:{c[2]:.2f})" for c in _cands[:5])
+                            self._sig.log.emit(f"[진단] YOLO {len(_cands)}개 [{_dets}] → track={_tp}")
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
