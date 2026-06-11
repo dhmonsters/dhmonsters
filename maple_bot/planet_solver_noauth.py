@@ -347,8 +347,9 @@ class _MacroThread(threading.Thread):
         popup_logged = False         # 팝업 감지 첫 로그 중복 방지
         _vit_active = False          # 현재 팝업에 대해 ViT 추적기가 초기화됐는지
         _last_marker_pos = (0, 0)    # 직전 프레임 도형 중심 (det 내 좌표) — 미리보기/클릭용
-        _miss_run = 0                # YOLO 연속 미검출 카운트 (직전 위치 유지 한계용)
+        _miss_run = 0                # YOLO 연속 미검출 카운트 (관성 유지 한계용)
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
+        _tvx = _tvy = 0.0            # 추적 속도 EMA — 미검출 시 관성 이동용
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -394,6 +395,7 @@ class _MacroThread(threading.Thread):
                             _vit_active = False
                             _last_marker_pos = (0, 0)
                             _miss_run = 0
+                            _tvx = _tvy = 0.0
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -464,26 +466,46 @@ class _MacroThread(threading.Thread):
                     # ── 추적: YOLO 주 검출 (학습 모델 있으면) / 없으면 ViT 폴백 ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
                     if _syolo is not None and _syolo.enabled:
-                        # YOLO 후보 중 직전 위치 최근접(첫 검출은 score 최고) 채택
-                        _cands = _syolo.detect_all(det)
-                        if _cands:
+                        # 2단 임계: 강한 후보(>=0.30)는 전역 최근접, 약한 후보(>=0.10)는
+                        # 직전 위치 90px 게이트 내에서만 — 종반 완전투명의 저신뢰 검출 회수
+                        _cands = _syolo.detect_all(det, score_thr=0.10)
+                        _strong = [c for c in _cands if c[2] >= 0.30]
+                        _bc = None
+                        if _last_marker_pos != (0, 0):
+                            _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
+                                             + (c[1] - _last_marker_pos[1]) ** 2)
+                            if _strong:
+                                _bc = min(_strong, key=_d2)
+                            elif _cands:
+                                _w = min(_cands, key=_d2)
+                                if _d2(_w) <= 90 ** 2:
+                                    _bc = _w
+                        elif _strong:
+                            _bc = max(_strong, key=lambda c: c[2])
+                        if _bc is not None:
                             if _last_marker_pos != (0, 0):
-                                _bc = min(_cands, key=lambda c: (c[0] - _last_marker_pos[0]) ** 2
-                                                              + (c[1] - _last_marker_pos[1]) ** 2)
-                            else:
-                                _bc = max(_cands, key=lambda c: c[2])
+                                _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
+                                _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
+                            if _miss_run > 3:
+                                self._sig.log.emit(f"[진단] YOLO 재검출 (miss {_miss_run}프레임 후)")
                             track_pos = (_bc[0], _bc[1])
                             tracking = True
                             _miss_run = 0
                         elif _last_marker_pos != (0, 0):
-                            # 미검출 — 짧은 끊김은 직전 위치 유지(최대 15프레임)
+                            # 미검출 — 멈추지 않고 속도 관성으로 계속 이동(최대 30프레임)
                             _miss_run += 1
-                            if _miss_run <= 15:
-                                track_pos = _last_marker_pos
+                            if _miss_run == 1:
+                                self._sig.log.emit("[진단] YOLO 미검출 — 관성 이동")
+                            if _miss_run <= 30:
+                                track_pos = (_last_marker_pos[0] + _tvx,
+                                             _last_marker_pos[1] + _tvy)
+                                _tvx *= 0.95
+                                _tvy *= 0.95
                         _diag_cnt += 1
                         if _diag_cnt % 30 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
-                            self._sig.log.emit(f"[진단] YOLO검출={len(_cands)}개 track={_tp}")
+                            _sc = 0.0 if _bc is None else _bc[2]
+                            self._sig.log.emit(f"[진단] YOLO검출={len(_cands)}개 score={_sc:.2f} track={_tp}")
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
