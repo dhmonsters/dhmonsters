@@ -16,10 +16,13 @@ class PotionManager:
         input_ctrl: InputController,
         detector: Detector,
         on_status: Callable[[str], None] | None = None,
+        on_before_use: Callable[[], None] | None = None,
     ):
         self._input = input_ctrl
         self._detector = detector
         self._on_status = on_status or (lambda msg: None)
+        # 실제 포션 키를 누르기 직전 호출 — 이동 점프 홀드 일시 해제용(공중 씹힘 방지)
+        self._on_before_use = on_before_use or (lambda: None)
 
         self._hp_cfg: dict = {}
         self._mp_cfg: dict = {}
@@ -72,6 +75,7 @@ class PotionManager:
 
         if ratio < threshold:
             hold = random.uniform(0.03, 0.20)
+            self._on_before_use()   # 이동 점프 잠깐 해제 → 포션이 공중에서 씹히지 않게
             self._input.press_key(key, hold_sec=hold)
             self._on_status(f"{label} 포션 사용 [{key}] ({ratio * 100:.0f}%)")
             logger.info("%s 포션: ratio=%.2f key=%s", label, ratio, key)

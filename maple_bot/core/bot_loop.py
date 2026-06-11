@@ -83,6 +83,7 @@ class BotLoop:
             input_ctrl=self._input,
             detector=self._detector,
             on_status=self._status,
+            on_before_use=lambda: self._map_navigator.suppress_jump_briefly(),
         )
 
         self._floor_hunter = FloorHunter(self._input, on_status=self._status)
@@ -1417,6 +1418,7 @@ class BotLoop:
                                 )
                             pet_logged = True
                         if now - last_pet >= interval_sec:
+                            self._map_navigator.suppress_jump_briefly(0.6)  # 공중 씹힘 방지
                             for _ in range(count):
                                 self._input.press_key(key, hold_sec=0.35)
                                 time.sleep(0.15)
@@ -1440,6 +1442,7 @@ class BotLoop:
                         key_id   = (btype, i)
                         interval = float(buff.get("interval_sec", 180))
                         if now - last_buffs.get(key_id, 0.0) >= interval:
+                            self._map_navigator.suppress_jump_briefly(1.0)  # 버프 모션 동안 점프 해제
                             self._input.press_key(buff["key"].strip(), hold_sec=0.8)
                             last_buffs[key_id] = time.time()
                             self._last_buff_time = time.time()  # 밧줄 오르기 연장 판단용
