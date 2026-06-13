@@ -362,6 +362,7 @@ class _MacroThread(threading.Thread):
         _tvx = _tvy = 0.0            # 추적 속도 EMA — 교차(겹침) 시 데칼 갈아타기 방지용 예측
         _trace_buf = collections.deque(maxlen=90)  # 점진 표류→멈춤 진단용 궤적 ring buffer
         _stall_dumped = False        # 멈춤 궤적 덤프 중복 방지(판당 1회)
+        _drift_last = -999           # 마지막 점진표류 덤프 프레임(쿨다운용)
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -569,6 +570,34 @@ class _MacroThread(threading.Thread):
                                 pass
                         elif _miss_run == 0:
                             _stall_dumped = False   # 재획득 시 다음 멈춤도 잡도록 리셋
+                        # 점진 표류 감지 — 최근 8프레임 track이 '한 방향'으로 누적 이동
+                        # (데칼로 매 프레임 조금씩 흘러감). 멈춤도 급점프도 아닌 갈아타기 패턴.
+                        if (track_pos is not None and len(_trace_buf) >= 9
+                                and preview_cnt - _drift_last > 40):
+                            _pts = [t["track"] for t in list(_trace_buf)[-9:]
+                                    if t["track"] is not None]
+                            if len(_pts) >= 9:
+                                _cum = sum(((_pts[k + 1][0] - _pts[k][0]) ** 2
+                                            + (_pts[k + 1][1] - _pts[k][1]) ** 2) ** 0.5
+                                           for k in range(len(_pts) - 1))
+                                _net = ((_pts[-1][0] - _pts[0][0]) ** 2
+                                        + (_pts[-1][1] - _pts[0][1]) ** 2) ** 0.5
+                                # 누적 크고 + 직선성 높음(왕복 아닌 한 방향) = 표류
+                                if _cum > 50 and _net > 40 and _net > _cum * 0.7:
+                                    _drift_last = preview_cnt
+                                    try:
+                                        _dr_dir = os.path.join(ROOT, "_drift_debug")
+                                        os.makedirs(_dr_dir, exist_ok=True)
+                                        _ts = f"{success:03d}_{preview_cnt:05d}"
+                                        cv2.imwrite(os.path.join(_dr_dir, f"{_ts}.png"), det)
+                                        with open(os.path.join(_dr_dir, f"{_ts}.json"),
+                                                  "w", encoding="utf-8") as _jf:
+                                            json.dump(list(_trace_buf), _jf, ensure_ascii=False)
+                                        self._sig.log.emit(
+                                            f"[표류캡처] 8프레임 {_net:.0f}px 한방향 이동 "
+                                            f"→ _drift_debug/{_ts}")
+                                    except Exception:
+                                        pass
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
