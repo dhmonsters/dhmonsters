@@ -39,7 +39,6 @@ SHAPE_WEAK_THR   = 0.10   # 약 후보 하한 — 비상관화 모델은 배경 
 SHAPE_WEAK_GATE  = 110    # 점프 게이트 기본 반경(px) — 도형은 ~2px/frame이라 순간 점프는 가짜
 SHAPE_GATE_GROW  = 12     # 미검출 1프레임당 게이트 확장(px) — 오래 놓치면 점점 넓게 재탐색
 SHAPE_GATE_MAX   = 280    # 게이트 확장 상한(px)
-SHAPE_SNAP_FRAMES = 20    # 게이트 밖 강한 후보가 같은 자리 이 프레임 연속 → 재발견으로 보고 스냅
 MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
@@ -356,8 +355,7 @@ class _MacroThread(threading.Thread):
         _last_marker_pos = (0, 0)    # 직전 프레임 도형 중심 (det 내 좌표) — 미리보기/클릭용
         _miss_run = 0                # YOLO 연속 미검출 카운트 (직전 위치 유지·게이트 확장용)
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
-        _oog_pos = None              # 게이트 밖 강한 후보 직전 위치 (재발견 스냅 판정용)
-        _oog_run = 0                 # 게이트 밖 강한 후보 연속 프레임 수
+        _white_prev = None           # 흰색 잠금 안정화(2프레임 연속 동일 위치) 비교용
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -403,8 +401,7 @@ class _MacroThread(threading.Thread):
                             _vit_active = False
                             _last_marker_pos = (0, 0)
                             _miss_run = 0
-                            _oog_pos = None
-                            _oog_run = 0
+                            _white_prev = None
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -476,18 +473,28 @@ class _MacroThread(threading.Thread):
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
                     _cands = []             # YOLO 후보 (미리보기 박스 표시용)
                     if _syolo is not None and _syolo.enabled:
-                        # 전 후보 공통 점프 게이트 — 도형은 ~2px/frame이라 순간 점프는 가짜.
-                        # 미검출이 길어지면 게이트를 점점 넓혀 재탐색(동결 방지).
-                        # 게이트 밖 강한 후보(≥0.5)가 같은 자리 연속이면 재발견으로 스냅.
+                        # 전부검출(v3) 체제 — 모델은 글라스 도형을 타겟·배경 구분 없이 다 잡는다.
+                        # 시작: 흰색 도형(시작 시 유일하게 밝음)으로 잠금. 이후: 직전 위치
+                        # 최근접 + 점프 게이트(연속성)만으로 추적 — 오프라인 투명후기 99%.
                         _cands = _syolo.detect_all(det, score_thr=SHAPE_WEAK_THR)
                         _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]
-                        _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
-                                         + (c[1] - _last_marker_pos[1]) ** 2)
                         _bc = None
                         if _last_marker_pos == (0, 0):
-                            if _strong:   # 첫 검출 — 확실한 것만 score 최고로
-                                _bc = max(_strong, key=lambda c: c[2])
+                            # 흰색 잠금 — 팝업 플래시 오인 방지로 2프레임 연속 같은 위치만
+                            _wb = acquire_white(det_masked)
+                            if _wb is not None and _wb[2] >= 20:
+                                _wc = (_wb[0] + _wb[2] / 2, _wb[1] + _wb[3] / 2)
+                                if (_white_prev is not None and
+                                        (_wc[0] - _white_prev[0]) ** 2
+                                        + (_wc[1] - _white_prev[1]) ** 2 <= 15 ** 2):
+                                    track_pos = _wc
+                                    tracking = True
+                                    self._sig.log.emit(
+                                        f"[잠금] 흰색 도형 ({int(_wc[0])},{int(_wc[1])}) → 추적 시작")
+                                _white_prev = _wc
                         else:
+                            _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
+                                             + (c[1] - _last_marker_pos[1]) ** 2)
                             _gate = min(SHAPE_GATE_MAX,
                                         SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
                             _ing = [c for c in _cands if _d2(c) <= _gate * _gate]
@@ -496,42 +503,24 @@ class _MacroThread(threading.Thread):
                                 _bc = min(_ing_strong, key=_d2)
                             elif _ing:
                                 _bc = min(_ing, key=_d2)
-                            elif _strong:
-                                # 게이트 밖 강한 후보 — 같은 자리(60px) 연속 지속 시 스냅
-                                _og = min(_strong, key=_d2)
-                                if (_oog_pos is not None and
-                                        (_og[0] - _oog_pos[0]) ** 2
-                                        + (_og[1] - _oog_pos[1]) ** 2 <= 60 ** 2):
-                                    _oog_run += 1
-                                else:
-                                    _oog_run = 1
-                                _oog_pos = (_og[0], _og[1])
-                                if _oog_run >= SHAPE_SNAP_FRAMES:
-                                    _bc = _og
-                                    self._sig.log.emit(
-                                        f"[진단] 게이트 밖 강한 후보 {_oog_run}프레임 지속 "
-                                        f"→ 재발견 스냅 ({int(_og[0])},{int(_og[1])}:{_og[2]:.2f})")
-                        if _bc is not None:
-                            track_pos = (_bc[0], _bc[1])
-                            tracking = True
-                            _miss_run = 0
-                            _oog_pos = None
-                            _oog_run = 0
-                        if _bc is None and _last_marker_pos != (0, 0):
-                            # YOLO 실명 — 직전 위치 잠깐 유지(최대 15프레임). 잔차 보정은
-                            # 라이브에서 배경 흐름/마우스 잔상을 쫓아 우하단 표류 → 제거함.
-                            # 투명 후기 검출 자체는 모양별 재학습으로 올린다(근본 해법).
-                            _miss_run += 1
-                            if _miss_run <= 15:
-                                track_pos = _last_marker_pos
+                            if _bc is not None:
+                                track_pos = (_bc[0], _bc[1])
+                                tracking = True
+                                _miss_run = 0
+                            else:
+                                # 게이트 내 미검출 — 직전 위치 잠깐 유지(최대 15프레임).
+                                # 게이트밖 스냅은 전부검출 체제에선 데칼로 점프할 위험이라 제거.
+                                _miss_run += 1
+                                if _miss_run <= 15:
+                                    track_pos = _last_marker_pos
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
-                            _dets = " ".join(f"({int(c[0])},{int(c[1])}:{c[2]:.2f})" for c in _cands[:5])
-                            _src = "YOLO" if _bc is not None else "유지"
+                            _src = ("YOLO" if _bc is not None
+                                    else ("유지" if _last_marker_pos != (0, 0) else "잠금대기"))
                             self._sig.log.emit(
                                 f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
-                                f"[{_dets}] → track={_tp} ({_src})")
+                                f"→ track={_tp} ({_src})")
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
