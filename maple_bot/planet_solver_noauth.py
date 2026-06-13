@@ -34,7 +34,9 @@ ASSETS      = os.path.join(EXTRACT, "assets")
 CONFIG_FILE = os.path.join(ROOT, "planet_solver_config.json")
 VIT_MODEL_PATH = os.path.join(ROOT, "models", "transparent", "vittrack.onnx")
 # 적응형 2단 임계 (투명도형 YOLO) — 모든 후보에 점프 게이트, 확실한 것만 강 등급
-SHAPE_STRONG_THR = 0.50   # 진단 로그의 '강N' 표기용 (선택 로직엔 미사용 — v3 전부검출 체제)
+SHAPE_STRONG_THR = 0.50   # 진단 로그의 '강N' 표기용
+SHAPE_PICK_THR   = 0.30   # 선택 후보 필터 — 노이즈 제거용. 반투명 타겟(score~0.47)을
+                          #   제외 안 하도록 0.3 (0.5면 약해진 타겟 빠져 데칼로 갈아탐)
 SHAPE_SCORE_W   = 60.0    # 선택 결합 점수의 score 가중(px/score) — 예측거리−λ·score, 오프라인 최적
 SHAPE_WEAK_THR   = 0.10   # 약 후보 하한 — 비상관화 모델은 배경 FP 1%라 0.1까지 안전(게이트 내 한정)
 SHAPE_WEAK_GATE  = 110    # 점프 게이트 기본 반경(px) — 도형은 ~2px/frame이라 순간 점프는 가짜
@@ -480,7 +482,8 @@ class _MacroThread(threading.Thread):
                         # 시작: 흰색 도형(시작 시 유일하게 밝음)으로 잠금. 이후: 직전 위치
                         # 최근접 + 점프 게이트(연속성)만으로 추적 — 오프라인 투명후기 99%.
                         _cands = _syolo.detect_all(det, score_thr=SHAPE_WEAK_THR)
-                        _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]
+                        _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]  # 진단 표기용
+                        _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 선택 후보(0.3)
                         _bc = None
                         if _last_marker_pos == (0, 0):
                             # 흰색 잠금 — 팝업 플래시 오인 방지로 2프레임 연속 같은 위치만
@@ -506,8 +509,9 @@ class _MacroThread(threading.Thread):
                             _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
                             _gate = min(SHAPE_GATE_MAX,
                                         SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
-                            # 확실한 후보(score≥0.5)만 + 게이트 내 → 예측 위치 최근접(score 무관)
-                            _ing = [c for c in _strong if _d2(c) <= _gate * _gate]
+                            # 후보(score≥0.3) + 게이트 내 → 예측 위치 최근접(score 무관).
+                            # 0.3 필터라 반투명 타겟(score~0.47)도 포함 — 0.5면 빠져 데칼로 갈아탐.
+                            _ing = [c for c in _pick if _d2(c) <= _gate * _gate]
                             if _ing:
                                 _bc = min(_ing, key=_dp)
                             if _bc is not None:
