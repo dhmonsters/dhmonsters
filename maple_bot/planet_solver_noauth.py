@@ -12,7 +12,7 @@ Planet_solver_v1.0.5.exe 의 GUI/UX를 그대로 유지하되:
 """
 from __future__ import annotations
 
-import ctypes, json, os, sys, threading, time, winsound
+import collections, ctypes, json, os, sys, threading, time, winsound
 # Qt6가 자체적으로 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 설정 → 별도 호출 불필요
 # (SetProcessDPIAware 중복 호출 시 Qt 경고 발생)
 import win32api, win32con, win32gui
@@ -360,6 +360,8 @@ class _MacroThread(threading.Thread):
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
         _white_prev = None           # 흰색 잠금 안정화(2프레임 연속 동일 위치) 비교용
         _tvx = _tvy = 0.0            # 추적 속도 EMA — 교차(겹침) 시 데칼 갈아타기 방지용 예측
+        _trace_buf = collections.deque(maxlen=90)  # 점진 표류→멈춤 진단용 궤적 ring buffer
+        _stall_dumped = False        # 멈춤 궤적 덤프 중복 방지(판당 1회)
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -541,6 +543,32 @@ class _MacroThread(threading.Thread):
                             self._sig.log.emit(
                                 f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
                                 f"→ track={_tp} ({_src})")
+                        # 점진 표류 진단: 매 프레임 궤적 기록 + 멈춤(track 소실) 시 직전 90프레임 덤프
+                        _trace_buf.append({
+                            "i": preview_cnt,
+                            "track": (None if track_pos is None
+                                      else [int(track_pos[0]), int(track_pos[1])]),
+                            "vel": [round(_tvx, 1), round(_tvy, 1)],
+                            "miss": _miss_run,
+                            "n": len(_cands),
+                            "cands": [[int(c[0]), int(c[1]), round(c[2], 2)] for c in _cands],
+                        })
+                        if _miss_run == 16 and not _stall_dumped:
+                            _stall_dumped = True
+                            try:
+                                _st_dir = os.path.join(ROOT, "_stall_debug")
+                                os.makedirs(_st_dir, exist_ok=True)
+                                _ts = f"{success:03d}_{preview_cnt:05d}"
+                                cv2.imwrite(os.path.join(_st_dir, f"{_ts}.png"), det)
+                                with open(os.path.join(_st_dir, f"{_ts}.json"),
+                                          "w", encoding="utf-8") as _jf:
+                                    json.dump(list(_trace_buf), _jf, ensure_ascii=False)
+                                self._sig.log.emit(
+                                    f"[멈춤캡처] track 소실 → _stall_debug/{_ts} (직전 {len(_trace_buf)}프레임)")
+                            except Exception:
+                                pass
+                        elif _miss_run == 0:
+                            _stall_dumped = False   # 재획득 시 다음 멈춤도 잡도록 리셋
                     elif _vit is not None:
                         # YOLO 모델 없을 때만 기존 ViT 경로 (회귀 방지)
                         if not _vit_active:
