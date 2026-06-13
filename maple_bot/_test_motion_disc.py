@@ -67,6 +67,7 @@ def run(video, mode):
     f = 335
     last = (0, 0)
     white_prev = None   # 흰색 잠금 안정화(2프레임 연속) 비교용
+    vel = (0.0, 0.0)    # pred 모드 — 속도 EMA
     miss = 0
     errs = {"흰~페이드": [], "투명초기": [], "투명후기": [], "전체": []}
     t_upd = []
@@ -95,6 +96,22 @@ def run(video, mode):
             lt = None if last == (0, 0) else last
             r = disc.update(gray, cands, lt, gate)
             pick = None if r is None else (r[0], r[1])
+        elif mode == "pred":
+            # 속도 예측 선택 — 교차(겹침) 순간 데칼 갈아타기 방지
+            if last == (0, 0):
+                pick = None
+            else:
+                px, py = last[0] + vel[0], last[1] + vel[1]
+                dp = lambda c: (c[0] - px) ** 2 + (c[1] - py) ** 2
+                gate = min(280, 110 + 12 * miss)
+                ing = [c for c in cands
+                       if (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2 <= gate * gate]
+                ing_strong = [c for c in ing if c[2] >= 0.50]
+                pool = ing_strong or ing
+                pick = min(pool, key=dp)[:2] if pool else None
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
         else:
             pick = select_current(cands, last, miss)
         t_upd.append((time.time() - t0) * 1000)
@@ -131,6 +148,7 @@ if __name__ == "__main__":
     vid = os.path.join(ROOT, "sample_transparent_shape.mp4")
     print("=== 모션 분별 vs 현행 선택 ===")
     cur = run(vid, "current")
+    prd = run(vid, "pred")
     dis = run(vid, "disc")
     if cur and dis:
         # 흰~페이드 구간은 GT(업체 커서)가 아직 도형으로 이동 중이라 평가 제외(측정 함정)

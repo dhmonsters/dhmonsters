@@ -356,6 +356,7 @@ class _MacroThread(threading.Thread):
         _miss_run = 0                # YOLO 연속 미검출 카운트 (직전 위치 유지·게이트 확장용)
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
         _white_prev = None           # 흰색 잠금 안정화(2프레임 연속 동일 위치) 비교용
+        _tvx = _tvy = 0.0            # 추적 속도 EMA — 교차(겹침) 시 데칼 갈아타기 방지용 예측
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -402,6 +403,7 @@ class _MacroThread(threading.Thread):
                             _last_marker_pos = (0, 0)
                             _miss_run = 0
                             _white_prev = None
+                            _tvx = _tvy = 0.0
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -493,17 +495,24 @@ class _MacroThread(threading.Thread):
                                         f"[잠금] 흰색 도형 ({int(_wc[0])},{int(_wc[1])}) → 추적 시작")
                                 _white_prev = _wc
                         else:
+                            # 게이트는 직전 위치 기준, 선택은 '예측 위치(직전+속도)' 최근접 —
+                            # 타겟이 데칼과 교차하는 순간에도 진행 방향을 따라가 갈아타기 방지
                             _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
                                              + (c[1] - _last_marker_pos[1]) ** 2)
+                            _px = _last_marker_pos[0] + _tvx
+                            _py = _last_marker_pos[1] + _tvy
+                            _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
                             _gate = min(SHAPE_GATE_MAX,
                                         SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
                             _ing = [c for c in _cands if _d2(c) <= _gate * _gate]
                             _ing_strong = [c for c in _ing if c[2] >= SHAPE_STRONG_THR]
                             if _ing_strong:
-                                _bc = min(_ing_strong, key=_d2)
+                                _bc = min(_ing_strong, key=_dp)
                             elif _ing:
-                                _bc = min(_ing, key=_d2)
+                                _bc = min(_ing, key=_dp)
                             if _bc is not None:
+                                _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
+                                _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
                                 track_pos = (_bc[0], _bc[1])
                                 tracking = True
                                 _miss_run = 0
