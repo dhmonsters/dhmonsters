@@ -123,3 +123,109 @@ class MotionDiscriminator:
             return None
         best = max(pool, key=lambda t: t.uniq_sum() + SCORE_W * t.score)
         return (best.x, best.y, best.uniq_sum())
+
+
+# ── 트랙 ID 타겟 락 (교차 갈아타기 해결) ──────────────────────────────────
+# MotionDiscriminator(특이성 최고 재선택)와 달리, 흰색 잠금한 타겟에 ID를 부여하고
+# 모든 후보를 트랙으로 동시 추적하며 그 ID를 끝까지 '이어간다'. 각 트랙이 자기 운동으로
+# 예측하므로, 교차해도 타겟 트랙은 자기 방향 후보를 가져가 데칼과 섞이지 않는다.
+TRK_MATCH_R = 45      # 트랙-후보 연계 반경(px) — 예측 위치 기준이라 작게
+TRK_MISS_MAX = 10     # 비타겟 트랙 제거 전 허용 미매칭
+TRK_HOLD_MAX = 15     # 타겟 트랙 미검출 유지 한계(프레임)
+
+
+class _IdTrack:
+    __slots__ = ("tid", "x", "y", "vx", "vy", "miss", "age")
+
+    def __init__(self, tid, x, y):
+        self.tid = tid
+        self.x = float(x); self.y = float(y)
+        self.vx = 0.0; self.vy = 0.0
+        self.miss = 0; self.age = 0
+
+
+class TargetTracker:
+    """흰색 잠금 타겟에 ID 부여 → 모든 후보 동시 트랙 추적 → 그 ID를 이어간다."""
+
+    def __init__(self, match_r=TRK_MATCH_R):
+        self._prev = None
+        self._tracks: list[_IdTrack] = []
+        self._tid = None      # 타겟 트랙 ID
+        self._next = 0
+        self._mr = match_r
+
+    def reset(self):
+        self._prev = None
+        self._tracks = []
+        self._tid = None
+        self._next = 0
+
+    @property
+    def locked(self):
+        return self._tid is not None
+
+    @property
+    def track_count(self):
+        return len(self._tracks)
+
+    def _new(self, x, y):
+        t = _IdTrack(self._next, x, y)
+        self._next += 1
+        self._tracks.append(t)
+        return t
+
+    def lock(self, x, y):
+        """흰색 도형 위치에서 가장 가까운 트랙을 타겟으로 지정(없으면 생성)."""
+        best, bd = None, self._mr * self._mr
+        for t in self._tracks:
+            d = (t.x - x) ** 2 + (t.y - y) ** 2
+            if d < bd:
+                bd = d; best = t
+        if best is None:
+            best = self._new(x, y)
+        self._tid = best.tid
+
+    def update(self, gray_f32, cands):
+        """매 프레임 — 배경 변위 측정 + 트랙 연계 갱신. 타겟 트랙 위치 (x,y)|None 반환.
+        잠금 전에도 호출해 데칼 트랙을 쌓아둔다(잠금 시 정체성 즉시 확보)."""
+        bx = by = 0.0
+        if self._prev is not None and gray_f32.shape == self._prev.shape:
+            (bx, by), _ = cv2.phaseCorrelate(self._prev, gray_f32)
+        self._prev = gray_f32
+
+        free = list(cands)
+        # 타겟 최우선 → 나이 많은 순. 타겟이 자기 방향 후보를 먼저 가져간다.
+        order = sorted(self._tracks, key=lambda t: (t.tid != self._tid, -t.age))
+        for t in order:
+            # 예측 = 직전 + 자기 속도(관측 이력 있으면) / 없으면 배경 변위
+            if t.age > 0:
+                px, py = t.x + t.vx, t.y + t.vy
+            else:
+                px, py = t.x + bx, t.y + by
+            r = self._mr + 3.0 * t.miss   # 놓친 동안 넓게 재탐색
+            best, bd = None, r * r
+            for c in free:
+                d = (c[0] - px) ** 2 + (c[1] - py) ** 2
+                if d < bd:
+                    bd = d; best = c
+            if best is not None:
+                free.remove(best)
+                nvx, nvy = best[0] - t.x, best[1] - t.y
+                t.vx = t.vx * 0.6 + nvx * 0.4
+                t.vy = t.vy * 0.6 + nvy * 0.4
+                t.x, t.y = float(best[0]), float(best[1])
+                t.miss = 0; t.age += 1
+            else:
+                t.x, t.y = px, py   # coast (예측으로 전진)
+                t.miss += 1
+
+        for c in free:
+            self._new(float(c[0]), float(c[1]))
+        # 비타겟 트랙만 정리
+        self._tracks = [t for t in self._tracks
+                        if t.miss <= TRK_MISS_MAX or t.tid == self._tid]
+
+        for t in self._tracks:
+            if t.tid == self._tid:
+                return (t.x, t.y) if t.miss <= TRK_HOLD_MAX else None
+        return None
