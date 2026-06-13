@@ -93,7 +93,39 @@ def run(video, mode):
                                                          wc[1] - white_prev[1]) <= 15:
                     last = wc
                 white_prev = wc
-        if mode == "trk":
+        if mode == "ud":
+            # 사용자 설계: 평소 작은반경 이어가기(score 무관) + 놓침 시만 배경비동조 재획득
+            gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            bx = by = 0.0
+            if prev_gray is not None and gray.shape == prev_gray.shape:
+                (bx, by), _ = cv2.phaseCorrelate(prev_gray, gray)
+            if last == (0, 0):
+                pick = None
+            else:
+                px, py = last[0] + vel[0], last[1] + vel[1]
+                near = [c for c in cands
+                        if (c[0] - px) ** 2 + (c[1] - py) ** 2 <= 60 ** 2]
+                if near:
+                    b = min(near, key=lambda c: (c[0] - px) ** 2 + (c[1] - py) ** 2)
+                    pick = (b[0], b[1])
+                else:
+                    # 놓침 — 놓친 위치 80px 내에서 배경과 가장 다르게 움직인 후보
+                    wide = [c for c in cands
+                            if (c[0] - px) ** 2 + (c[1] - py) ** 2 <= 80 ** 2]
+                    def _nonconf(c):
+                        if not prev_cands:
+                            return 0.0
+                        pc = min(prev_cands,
+                                 key=lambda p: (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2)
+                        return math.hypot((c[0] - pc[0]) - bx, (c[1] - pc[1]) - by)
+                    b = max(wide, key=_nonconf) if wide else None
+                    pick = (b[0], b[1]) if b is not None else None
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
+            prev_gray = gray
+            prev_cands = cands
+        elif mode == "trk":
             # 트랙 ID 타겟 락 — 매 프레임 트랙 갱신, 흰색 잠금 시 lock, 이후 그 ID 이어감
             gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
             if last != (0, 0) and not trk.locked:
@@ -240,10 +272,10 @@ if __name__ == "__main__":
     vid = os.path.join(ROOT, "sample_transparent_shape.mp4")
     print("=== 트랙 ID 타겟 락 vs 현행 (combo60) ===")
     cur = run(vid, "combo60")     # 현행 솔버 (기준)
-    trk = run(vid, "trk")         # 트랙 ID 타겟 락
-    if cur and trk:
+    ud = run(vid, "ud")           # 사용자 설계: 이어가기 + 놓침 시 배경비동조
+    if cur and ud:
         import numpy as _np
-        b = _np.concatenate([trk["투명초기"], trk["투명후기"]])
-        lc, lt = cur["투명후기"], trk["투명후기"]
+        b = _np.concatenate([ud["투명초기"], ud["투명후기"]])
+        lc, lu = cur["투명후기"], ud["투명후기"]
         print(f"\n[비교] 투명후기 <80px {(lc<80).mean()*100:.0f}%(combo60) → "
-              f"{(lt<80).mean()*100:.0f}%(trk) | trk max {b.max():.0f}")
+              f"{(lu<80).mean()*100:.0f}%(ud) | ud max {b.max():.0f}")
