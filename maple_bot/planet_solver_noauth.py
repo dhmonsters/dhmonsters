@@ -365,6 +365,7 @@ class _MacroThread(threading.Thread):
         _drift_last = -999           # 마지막 점진표류 덤프 프레임(쿨다운용)
         _rec_writer = None           # 판 전 구간 녹화 VideoWriter (흰색 잠금~팝업 종료)
         _rec_jf = None               # 판 궤적 jsonl 파일 핸들
+        _rec_size = None             # 녹화 프레임 크기 (w,h) — VideoWriter.get()은 0이라 직접 보관
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -526,10 +527,11 @@ class _MacroThread(threading.Thread):
                                         os.makedirs(_rc_dir, exist_ok=True)
                                         _stamp = time.strftime("%m%d_%H%M%S")
                                         _rc_base = os.path.join(_rc_dir, f"{success:03d}_{_stamp}")
+                                        _rec_size = (det.shape[1], det.shape[0])
                                         _rec_writer = cv2.VideoWriter(
                                             _rc_base + ".mp4",
                                             cv2.VideoWriter_fourcc(*"mp4v"),
-                                            20.0, (det.shape[1], det.shape[0]))
+                                            20.0, _rec_size)
                                         _rec_jf = open(_rc_base + ".jsonl", "w", encoding="utf-8")
                                         self._sig.log.emit(f"[녹화시작] _record_debug/{success:03d}_{_stamp}")
                                     except Exception:
@@ -587,14 +589,13 @@ class _MacroThread(threading.Thread):
                         if _rec_writer is not None:
                             try:
                                 _wf = det
-                                if (det.shape[1], det.shape[0]) != (
-                                        int(_rec_writer.get(3)), int(_rec_writer.get(4))):
-                                    _wf = cv2.resize(det, (int(_rec_writer.get(3)),
-                                                           int(_rec_writer.get(4))))
+                                if (det.shape[1], det.shape[0]) != _rec_size:
+                                    _wf = cv2.resize(det, _rec_size)
                                 _rec_writer.write(_wf)
                                 _rec_jf.write(json.dumps(_frame_rec, ensure_ascii=False) + "\n")
-                            except Exception:
-                                pass
+                                _rec_jf.flush()
+                            except Exception as _re:
+                                self._sig.log.emit(f"[녹화오류] {_re}")
                         if _miss_run == 16 and not _stall_dumped:
                             _stall_dumped = True
                             try:
