@@ -481,7 +481,14 @@ class _MacroThread(threading.Thread):
                         # 전부검출(v3) 체제 — 모델은 글라스 도형을 타겟·배경 구분 없이 다 잡는다.
                         # 시작: 흰색 도형(시작 시 유일하게 밝음)으로 잠금. 이후: 직전 위치
                         # 최근접 + 점프 게이트(연속성)만으로 추적 — 오프라인 투명후기 99%.
-                        _cands = _syolo.detect_all(det, score_thr=SHAPE_WEAK_THR)
+                        # 커서가 타겟을 정통으로 덮으면(우리가 커서로 도형을 쫓으니 늘 그럼)
+                        # 원본 det 검출은 score 0.02로 미검출 → 데칼로 갈아탐. 작은 커서
+                        # 마스크(14px)로 inpaint하면 타겟이 score 0.6+로 복원(큰 23px는 도형까지 지움).
+                        if _cmask_res is not None:
+                            det_detect = cv2.inpaint(det, _cmask_res, 5, cv2.INPAINT_TELEA)
+                        else:
+                            det_detect = det
+                        _cands = _syolo.detect_all(det_detect, score_thr=SHAPE_WEAK_THR)
                         _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]  # 진단 표기용
                         _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 선택 후보(0.3)
                         _bc = None

@@ -82,7 +82,14 @@ def run(video, mode):
             break
         det = fr[dy1:dy2, dx1:dx2]
         gt = pink(det)
-        cands = yolo.detect_all(det, score_thr=0.10)
+        # 솔버 일치: 커서(=핑크) 작은 마스크 inpaint 후 검출 — 커서가 타겟을 가려도 복원
+        if gt is not None:
+            _cm = np.zeros(det.shape[:2], np.uint8)
+            cv2.circle(_cm, (int(gt[0]), int(gt[1])), 14, 255, -1)
+            det_d = cv2.inpaint(det, _cm, 5, cv2.INPAINT_TELEA)
+        else:
+            det_d = det
+        cands = yolo.detect_all(det_d, score_thr=0.10)
         t0 = time.time()
         # 첫 잠금: 흰색 도형(밝기) — 시작 시 타겟만 유일하게 밝다 (사용자 설계 1단계).
         # 팝업 등장 프레임의 플래시 오인 방지: 2프레임 연속 같은 위치(15px)일 때만 잠금
