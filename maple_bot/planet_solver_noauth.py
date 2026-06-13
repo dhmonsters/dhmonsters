@@ -496,8 +496,9 @@ class _MacroThread(threading.Thread):
                                         f"[잠금] 흰색 도형 ({int(_wc[0])},{int(_wc[1])}) → 추적 시작")
                                 _white_prev = _wc
                         else:
-                            # 게이트는 직전 위치 기준, 선택은 '예측 위치(직전+속도)' 최근접 —
-                            # 타겟이 데칼과 교차하는 순간에도 진행 방향을 따라가 갈아타기 방지
+                            # score는 '필터'로만(노이즈 제거), 선택은 score 순이 아니라
+                            # 예측 위치 최근접 — 주변 강한 데칼로 갈아타지 않고 처음 도형 유지.
+                            # 흰색 도형(score 0.83)이 데칼(0.92)보다 낮아도, 가까우면 흰색 선택.
                             _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
                                              + (c[1] - _last_marker_pos[1]) ** 2)
                             _px = _last_marker_pos[0] + _tvx
@@ -505,13 +506,10 @@ class _MacroThread(threading.Thread):
                             _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
                             _gate = min(SHAPE_GATE_MAX,
                                         SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
-                            # 결합 점수 = 예측거리(px) − λ·score. 거리·score를 둘 다 반영해
-                            # ① 타겟 약해져도(score↓) 가까우면 유지(데칼 갈아타기 방지)
-                            # ② 가까운 약한 데칼은 score 보너스로 배제. λ=60이 오프라인 최적.
-                            _ing = [c for c in _cands if _d2(c) <= _gate * _gate]
+                            # 확실한 후보(score≥0.5)만 + 게이트 내 → 예측 위치 최근접(score 무관)
+                            _ing = [c for c in _strong if _d2(c) <= _gate * _gate]
                             if _ing:
-                                _bc = min(_ing, key=lambda c: _dp(c) ** 0.5
-                                          - SHAPE_SCORE_W * c[2])
+                                _bc = min(_ing, key=_dp)
                             if _bc is not None:
                                 _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
                                 _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4

@@ -71,6 +71,7 @@ def run(video, mode):
     prev_gray = None    # cbg 모드 — 배경 변위/동조 판정용
     prev_cands = []
     trk = TargetTracker()   # trk 모드 — 트랙 ID 타겟 락
+    rvx = rvy = 0.0     # rel 모드 — 타겟 누적 상대속도(배경 대비)
     miss = 0
     errs = {"흰~페이드": [], "투명초기": [], "투명후기": [], "전체": []}
     t_upd = []
@@ -93,7 +94,58 @@ def run(video, mode):
                                                          wc[1] - white_prev[1]) <= 15:
                     last = wc
                 white_prev = wc
-        if mode == "ud":
+        if mode.startswith("pg"):
+            # combo60 + 게이트를 속도 크기에 비례 확장 — 급가속 타겟 이탈 방지
+            ksp = float(mode[2:]) if len(mode) > 2 else 0.0
+            if last == (0, 0):
+                pick = None
+            else:
+                px, py = last[0] + vel[0], last[1] + vel[1]
+                spd = math.hypot(vel[0], vel[1])
+                gate = min(300, 110 + 12 * miss + ksp * spd)   # last 중심, 속도 비례 확장
+                ing = [c for c in cands
+                       if (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2 <= gate * gate]
+                if ing:
+                    b = min(ing, key=lambda c: math.hypot(c[0] - px, c[1] - py) - 60.0 * c[2])
+                    pick = (b[0], b[1])
+                else:
+                    pick = None
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
+        elif mode.startswith("rel"):
+            # 배경 대비 상대운동 매칭: 후보를 '타겟 누적 상대속도'와 일치하는지로 선택.
+            # 점수 = 예측거리 + W·|후보의 타겟기준 상대변위 − 타겟 누적상대속도|
+            W = float(mode[3:])
+            gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            bx = by = 0.0
+            if prev_gray is not None and gray.shape == prev_gray.shape:
+                (bx, by), _ = cv2.phaseCorrelate(prev_gray, gray)
+            if last == (0, 0):
+                pick = None
+            else:
+                px, py = last[0] + vel[0], last[1] + vel[1]
+                gate = min(280, 110 + 12 * miss)
+                ing = [c for c in cands
+                       if (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2 <= gate * gate]
+                def _mis(c):
+                    rdx = (c[0] - last[0]) - bx
+                    rdy = (c[1] - last[1]) - by
+                    return math.hypot(rdx - rvx, rdy - rvy)
+                if ing:
+                    # combo60(예측거리−60·score) 베이스 + 상대운동 불일치 페널티
+                    b = min(ing, key=lambda c: math.hypot(c[0] - px, c[1] - py)
+                            - 60.0 * c[2] + W * _mis(c))
+                    pick = (b[0], b[1])
+                else:
+                    pick = None
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
+                rvx = rvx * 0.7 + ((pick[0] - last[0]) - bx) * 0.3
+                rvy = rvy * 0.7 + ((pick[1] - last[1]) - by) * 0.3
+            prev_gray = gray
+        elif mode == "ud":
             # 사용자 설계: 평소 작은반경 이어가기(score 무관) + 놓침 시만 배경비동조 재획득
             gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
             bx = by = 0.0
@@ -205,15 +257,24 @@ def run(video, mode):
             if pick is not None and last != (0, 0):
                 vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
                        vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
-        elif mode == "near":
-            # 직전 위치 최근접 + score 무관 (D)
+        elif mode.startswith("nf"):
+            # score 필터(노이즈 제거) + 예측위치 최근접 (score 순 아님) — 사용자 설계
+            sthr = float(mode[2:]) if len(mode) > 2 else 0.5
             if last == (0, 0):
                 pick = None
             else:
-                d2 = lambda c: (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2
+                px, py = last[0] + vel[0], last[1] + vel[1]
                 gate = min(280, 110 + 12 * miss)
-                ing = [c for c in cands if d2(c) <= gate * gate]
-                pick = min(ing, key=d2)[:2] if ing else None
+                ing = [c for c in cands if c[2] >= sthr
+                       and (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2 <= gate * gate]
+                if ing:
+                    b = min(ing, key=lambda c: (c[0] - px) ** 2 + (c[1] - py) ** 2)
+                    pick = (b[0], b[1])
+                else:
+                    pick = None
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
         elif mode == "pred":
             # 속도 예측 선택 — 교차(겹침) 순간 데칼 갈아타기 방지
             if last == (0, 0):
@@ -271,11 +332,6 @@ def run(video, mode):
 if __name__ == "__main__":
     vid = os.path.join(ROOT, "sample_transparent_shape.mp4")
     print("=== 트랙 ID 타겟 락 vs 현행 (combo60) ===")
-    cur = run(vid, "combo60")     # 현행 솔버 (기준)
-    ud = run(vid, "ud")           # 사용자 설계: 이어가기 + 놓침 시 배경비동조
-    if cur and ud:
-        import numpy as _np
-        b = _np.concatenate([ud["투명초기"], ud["투명후기"]])
-        lc, lu = cur["투명후기"], ud["투명후기"]
-        print(f"\n[비교] 투명후기 <80px {(lc<80).mean()*100:.0f}%(combo60) → "
-              f"{(lu<80).mean()*100:.0f}%(ud) | ud max {b.max():.0f}")
+    run(vid, "combo60")           # 기준 — score 가중(데칼 갈아타기)
+    for s in (0.3, 0.5, 0.7):
+        run(vid, f"nf{s}")        # score 필터 + 예측 최근접 (score 순 아님)
