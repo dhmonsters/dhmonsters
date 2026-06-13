@@ -35,9 +35,7 @@ CONFIG_FILE = os.path.join(ROOT, "planet_solver_config.json")
 VIT_MODEL_PATH = os.path.join(ROOT, "models", "transparent", "vittrack.onnx")
 # 적응형 2단 임계 (투명도형 YOLO) — 모든 후보에 점프 게이트, 확실한 것만 강 등급
 SHAPE_STRONG_THR = 0.50   # 진단 로그의 '강N' 표기용 (선택 로직엔 미사용 — v3 전부검출 체제)
-SHAPE_SCORE_W   = 60.0    # (구) 결합 점수 score 가중 — 현재 ud 설계에선 미사용
-UD_NEAR = 60              # 평소 트랙 이어가기 반경(px) — 예측 위치 기준, score 무관
-UD_WIDE = 90              # 놓침 시 배경비동조 재획득 반경(px)
+SHAPE_SCORE_W   = 60.0    # 선택 결합 점수의 score 가중(px/score) — 예측거리−λ·score, 오프라인 최적
 SHAPE_WEAK_THR   = 0.10   # 약 후보 하한 — 비상관화 모델은 배경 FP 1%라 0.1까지 안전(게이트 내 한정)
 SHAPE_WEAK_GATE  = 110    # 점프 게이트 기본 반경(px) — 도형은 ~2px/frame이라 순간 점프는 가짜
 SHAPE_GATE_GROW  = 12     # 미검출 1프레임당 게이트 확장(px) — 오래 놓치면 점점 넓게 재탐색
@@ -360,8 +358,6 @@ class _MacroThread(threading.Thread):
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
         _white_prev = None           # 흰색 잠금 안정화(2프레임 연속 동일 위치) 비교용
         _tvx = _tvy = 0.0            # 추적 속도 EMA — 교차(겹침) 시 데칼 갈아타기 방지용 예측
-        _prev_gray = None            # 배경 변위(phaseCorrelate) 측정용 직전 프레임
-        _prev_cands = []             # 놓침 시 배경비동조 재획득용 직전 후보
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -409,8 +405,6 @@ class _MacroThread(threading.Thread):
                             _miss_run = 0
                             _white_prev = None
                             _tvx = _tvy = 0.0
-                            _prev_gray = None
-                            _prev_cands = []
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
@@ -487,13 +481,7 @@ class _MacroThread(threading.Thread):
                         # 최근접 + 점프 게이트(연속성)만으로 추적 — 오프라인 투명후기 99%.
                         _cands = _syolo.detect_all(det, score_thr=SHAPE_WEAK_THR)
                         _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]
-                        # 배경 변위 — 매 프레임 측정해 둔다(놓침 시 배경비동조 재획득용)
-                        _gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
-                        _bx = _by = 0.0
-                        if _prev_gray is not None and _gray.shape == _prev_gray.shape:
-                            (_bx, _by), _ = cv2.phaseCorrelate(_prev_gray, _gray)
                         _bc = None
-                        _src_tag = "잠금대기"
                         if _last_marker_pos == (0, 0):
                             # 흰색 잠금 — 팝업 플래시 오인 방지로 2프레임 연속 같은 위치만
                             _wb = acquire_white(det_masked)
@@ -508,31 +496,22 @@ class _MacroThread(threading.Thread):
                                         f"[잠금] 흰색 도형 ({int(_wc[0])},{int(_wc[1])}) → 추적 시작")
                                 _white_prev = _wc
                         else:
-                            # 사용자 설계: 평소엔 작은 반경으로 트랙 '이어가기'(score 무관) —
-                            # 타겟을 놓쳤을 때만 배경 도형들과 다르게 움직이는 후보로 재획득.
+                            # 게이트는 직전 위치 기준, 선택은 '예측 위치(직전+속도)' 최근접 —
+                            # 타겟이 데칼과 교차하는 순간에도 진행 방향을 따라가 갈아타기 방지
+                            _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
+                                             + (c[1] - _last_marker_pos[1]) ** 2)
                             _px = _last_marker_pos[0] + _tvx
                             _py = _last_marker_pos[1] + _tvy
-                            _near = [c for c in _cands
-                                     if (c[0] - _px) ** 2 + (c[1] - _py) ** 2 <= UD_NEAR ** 2]
-                            if _near:
-                                # 이어가기 — 예측 위치 최근접
-                                _bc = min(_near, key=lambda c: (c[0] - _px) ** 2
-                                                              + (c[1] - _py) ** 2)
-                                _src_tag = "이어가기"
-                            else:
-                                # 놓침 — 놓친 위치 주변에서 배경과 가장 다르게 움직인 후보
-                                _wide = [c for c in _cands
-                                         if (c[0] - _px) ** 2 + (c[1] - _py) ** 2 <= UD_WIDE ** 2]
-                                def _nonconf(c):
-                                    if not _prev_cands:
-                                        return 0.0
-                                    p = min(_prev_cands, key=lambda q: (q[0] - c[0]) ** 2
-                                                                      + (q[1] - c[1]) ** 2)
-                                    return ((c[0] - p[0] - _bx) ** 2
-                                            + (c[1] - p[1] - _by) ** 2) ** 0.5
-                                if _wide:
-                                    _bc = max(_wide, key=_nonconf)
-                                    _src_tag = "배경분별"
+                            _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
+                            _gate = min(SHAPE_GATE_MAX,
+                                        SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
+                            # 결합 점수 = 예측거리(px) − λ·score. 거리·score를 둘 다 반영해
+                            # ① 타겟 약해져도(score↓) 가까우면 유지(데칼 갈아타기 방지)
+                            # ② 가까운 약한 데칼은 score 보너스로 배제. λ=60이 오프라인 최적.
+                            _ing = [c for c in _cands if _d2(c) <= _gate * _gate]
+                            if _ing:
+                                _bc = min(_ing, key=lambda c: _dp(c) ** 0.5
+                                          - SHAPE_SCORE_W * c[2])
                             if _bc is not None:
                                 _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
                                 _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
@@ -540,17 +519,16 @@ class _MacroThread(threading.Thread):
                                 tracking = True
                                 _miss_run = 0
                             else:
-                                # 후보 전무 — 직전 위치 잠깐 유지(최대 15프레임)
+                                # 게이트 내 미검출 — 직전 위치 잠깐 유지(최대 15프레임).
+                                # 게이트밖 스냅은 전부검출 체제에선 데칼로 점프할 위험이라 제거.
                                 _miss_run += 1
-                                _src_tag = "유지"
                                 if _miss_run <= 15:
                                     track_pos = _last_marker_pos
-                        _prev_gray = _gray
-                        _prev_cands = _cands
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
-                            _src = _src_tag
+                            _src = ("YOLO" if _bc is not None
+                                    else ("유지" if _last_marker_pos != (0, 0) else "잠금대기"))
                             self._sig.log.emit(
                                 f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
                                 f"→ track={_tp} ({_src})")
@@ -573,6 +551,33 @@ class _MacroThread(threading.Thread):
                                 if _bbox is not None and _bbox[2] >= 20:
                                     _vit.init(det_masked, _bbox)
                                     self._sig.log.emit(f"[ViT] 재획득 — acquire_white bbox={_bbox}")
+
+                    # ── 갈아타기 순간 자동 캡처 (디버그) — track 급점프 시 데이터 저장 ──
+                    if (track_pos is not None and _last_marker_pos != (0, 0)
+                            and _syolo is not None and _syolo.enabled):
+                        _jump = ((track_pos[0] - _last_marker_pos[0]) ** 2
+                                 + (track_pos[1] - _last_marker_pos[1]) ** 2) ** 0.5
+                        if _jump > 60:   # 급점프 = 갈아타기 의심
+                            try:
+                                _sw_dir = os.path.join(ROOT, "_switch_debug")
+                                os.makedirs(_sw_dir, exist_ok=True)
+                                _ts = f"{success:03d}_{preview_cnt:05d}"
+                                cv2.imwrite(os.path.join(_sw_dir, f"{_ts}.png"), det)
+                                _meta = {
+                                    "jump_px": round(_jump, 1),
+                                    "from": [int(_last_marker_pos[0]), int(_last_marker_pos[1])],
+                                    "to": [int(track_pos[0]), int(track_pos[1])],
+                                    "vel": [round(_tvx, 1), round(_tvy, 1)],
+                                    "cands": [[int(c[0]), int(c[1]), round(c[2], 2)]
+                                              for c in _cands],
+                                }
+                                with open(os.path.join(_sw_dir, f"{_ts}.json"),
+                                          "w", encoding="utf-8") as _jf:
+                                    json.dump(_meta, _jf, ensure_ascii=False)
+                                self._sig.log.emit(
+                                    f"[갈아타기캡처] {_jump:.0f}px 점프 → _switch_debug/{_ts}")
+                            except Exception:
+                                pass
 
                     # ── 마우스 이동(클릭) + 상태 로그 ────────────────────────
                     if track_pos is not None:
