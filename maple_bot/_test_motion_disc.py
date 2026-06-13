@@ -68,6 +68,8 @@ def run(video, mode):
     last = (0, 0)
     white_prev = None   # 흰색 잠금 안정화(2프레임 연속) 비교용
     vel = (0.0, 0.0)    # pred 모드 — 속도 EMA
+    prev_gray = None    # cbg 모드 — 배경 변위/동조 판정용
+    prev_cands = []
     miss = 0
     errs = {"흰~페이드": [], "투명초기": [], "투명후기": [], "전체": []}
     t_upd = []
@@ -96,6 +98,55 @@ def run(video, mode):
             lt = None if last == (0, 0) else last
             r = disc.update(gray, cands, lt, gate)
             pick = None if r is None else (r[0], r[1])
+        elif mode.startswith("cmom"):
+            # 결합 + 운동 관성: 점수 = 예측거리 − 60·score + γ·|새속도 − 기존속도|
+            # 데칼 갈아타기는 위치가 튀어 속도 급변 → 페널티. 내 트랙 운동만 봄(데칼 조밀 무관).
+            gam = float(mode[4:])
+            if last == (0, 0):
+                pick = None
+            else:
+                px, py = last[0] + vel[0], last[1] + vel[1]
+                d2 = lambda c: (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2
+                gate = min(280, 110 + 12 * miss)
+                ing = [c for c in cands if d2(c) <= gate * gate]
+                def _sc(c):
+                    base = math.hypot(c[0] - px, c[1] - py) - 60.0 * c[2]
+                    nvx, nvy = c[0] - last[0], c[1] - last[1]
+                    mom = math.hypot(nvx - vel[0], nvy - vel[1])
+                    return base + gam * mom
+                b = min(ing, key=_sc) if ing else None
+                pick = None if b is None else (b[0], b[1])
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
+        elif mode.startswith("cbg"):
+            # 결합 + 배경동조 페널티: 점수 = 예측거리 − 60·score + μ·(배경따라 이동?)
+            # 데칼은 '직전위치+배경변위=현재'라 conform=True → 페널티. 타겟은 상대이동이라 면제.
+            mu = float(mode[3:])
+            gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            bx = by = 0.0
+            if prev_gray is not None and gray.shape == prev_gray.shape:
+                (bx, by), _ = cv2.phaseCorrelate(prev_gray, gray)
+            if last == (0, 0):
+                pick = None
+            else:
+                px, py = last[0] + vel[0], last[1] + vel[1]
+                d2 = lambda c: (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2
+                gate = min(280, 110 + 12 * miss)
+                ing = [c for c in cands if d2(c) <= gate * gate]
+                def _sc(c):
+                    base = math.hypot(c[0] - px, c[1] - py) - 60.0 * c[2]
+                    tx, ty = c[0] - bx, c[1] - by
+                    conform = any((p[0] - tx) ** 2 + (p[1] - ty) ** 2 <= 8 ** 2
+                                  for p in prev_cands)
+                    return base + (mu if conform else 0.0)
+                b = min(ing, key=_sc) if ing else None
+                pick = None if b is None else (b[0], b[1])
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
+            prev_gray = gray
+            prev_cands = cands
         elif mode.startswith("combo"):
             # 결합: 점수 = 예측거리(px) - λ·score. 거리·score 둘 다 고려
             lam = float(mode[5:])
@@ -172,16 +223,9 @@ def run(video, mode):
 if __name__ == "__main__":
     vid = os.path.join(ROOT, "sample_transparent_shape.mp4")
     print("=== 모션 분별 vs 현행 선택 ===")
-    cur = run(vid, "current")     # A: strong 이진 우선 (기준 99%)
-    dis = run(vid, "combo60")     # 채택: 결합 점수 λ=60 (솔버와 동일)
-    if cur and dis:
-        import numpy as _np
-        b = _np.concatenate([dis["투명초기"], dis["투명후기"]])
-        l_cur, l_dis = cur["투명후기"], dis["투명후기"]
-        print(f"\n[게이트·투명구간] combo60 <80px {(b<80).mean()*100:.0f}%(기준 88) → "
-              f"{'합격' if (b<80).mean()>=0.88 else '미달'} | "
-              f"투명후기 {(l_cur<80).mean()*100:.0f}%→{(l_dis<80).mean()*100:.0f}% | "
-              f"max {b.max():.0f}")
+    run(vid, "combo60")           # 현행 솔버 (기준 99%)
+    for gam in (0.5, 1.0, 2.0):
+        run(vid, f"cmom{gam}")    # 운동 관성 γ 스윕
     if cur and dis:
         # 흰~페이드 구간은 GT(업체 커서)가 아직 도형으로 이동 중이라 평가 제외(측정 함정)
         import numpy as _np
