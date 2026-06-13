@@ -96,6 +96,33 @@ def run(video, mode):
             lt = None if last == (0, 0) else last
             r = disc.update(gray, cands, lt, gate)
             pick = None if r is None else (r[0], r[1])
+        elif mode.startswith("combo"):
+            # 결합: 점수 = 예측거리(px) - λ·score. 거리·score 둘 다 고려
+            lam = float(mode[5:])
+            if last == (0, 0):
+                pick = None
+            else:
+                px, py = last[0] + vel[0], last[1] + vel[1]
+                d2 = lambda c: (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2
+                gate = min(280, 110 + 12 * miss)
+                ing = [c for c in cands if d2(c) <= gate * gate]
+                if ing:
+                    b = min(ing, key=lambda c: math.hypot(c[0] - px, c[1] - py) - lam * c[2])
+                    pick = (b[0], b[1])
+                else:
+                    pick = None
+            if pick is not None and last != (0, 0):
+                vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
+                       vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
+        elif mode == "near":
+            # 직전 위치 최근접 + score 무관 (D)
+            if last == (0, 0):
+                pick = None
+            else:
+                d2 = lambda c: (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2
+                gate = min(280, 110 + 12 * miss)
+                ing = [c for c in cands if d2(c) <= gate * gate]
+                pick = min(ing, key=d2)[:2] if ing else None
         elif mode == "pred":
             # 속도 예측 선택 — 교차(겹침) 순간 데칼 갈아타기 방지
             if last == (0, 0):
@@ -106,9 +133,7 @@ def run(video, mode):
                 gate = min(280, 110 + 12 * miss)
                 ing = [c for c in cands
                        if (c[0] - last[0]) ** 2 + (c[1] - last[1]) ** 2 <= gate * gate]
-                ing_strong = [c for c in ing if c[2] >= 0.50]
-                pool = ing_strong or ing
-                pick = min(pool, key=dp)[:2] if pool else None
+                pick = min(ing, key=dp)[:2] if ing else None   # score 우선 제거, 예측 최근접
             if pick is not None and last != (0, 0):
                 vel = (vel[0] * 0.6 + (pick[0] - last[0]) * 0.4,
                        vel[1] * 0.6 + (pick[1] - last[1]) * 0.4)
@@ -147,9 +172,16 @@ def run(video, mode):
 if __name__ == "__main__":
     vid = os.path.join(ROOT, "sample_transparent_shape.mp4")
     print("=== 모션 분별 vs 현행 선택 ===")
-    cur = run(vid, "current")
-    prd = run(vid, "pred")
-    dis = run(vid, "disc")
+    cur = run(vid, "current")     # A: strong 이진 우선 (기준 99%)
+    dis = run(vid, "combo60")     # 채택: 결합 점수 λ=60 (솔버와 동일)
+    if cur and dis:
+        import numpy as _np
+        b = _np.concatenate([dis["투명초기"], dis["투명후기"]])
+        l_cur, l_dis = cur["투명후기"], dis["투명후기"]
+        print(f"\n[게이트·투명구간] combo60 <80px {(b<80).mean()*100:.0f}%(기준 88) → "
+              f"{'합격' if (b<80).mean()>=0.88 else '미달'} | "
+              f"투명후기 {(l_cur<80).mean()*100:.0f}%→{(l_dis<80).mean()*100:.0f}% | "
+              f"max {b.max():.0f}")
     if cur and dis:
         # 흰~페이드 구간은 GT(업체 커서)가 아직 도형으로 이동 중이라 평가 제외(측정 함정)
         import numpy as _np
