@@ -43,3 +43,9 @@ models/
 dataset/
 dataset_yolo/
 .superpowers/
+
+# 투명도형 추적 디버그 산출물(영상/캡처/궤적)
+_switch_debug/
+_stall_debug/
+_drift_debug/
+_record_debug/

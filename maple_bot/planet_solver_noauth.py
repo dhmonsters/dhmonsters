@@ -363,6 +363,8 @@ class _MacroThread(threading.Thread):
         _trace_buf = collections.deque(maxlen=90)  # 점진 표류→멈춤 진단용 궤적 ring buffer
         _stall_dumped = False        # 멈춤 궤적 덤프 중복 방지(판당 1회)
         _drift_last = -999           # 마지막 점진표류 덤프 프레임(쿨다운용)
+        _rec_writer = None           # 판 전 구간 녹화 VideoWriter (흰색 잠금~팝업 종료)
+        _rec_jf = None               # 판 궤적 jsonl 파일 핸들
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -412,6 +414,17 @@ class _MacroThread(threading.Thread):
                             _tvx = _tvy = 0.0
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
+                            # 판 종료 — 녹화 마감
+                            if _rec_writer is not None:
+                                try:
+                                    _rec_writer.release()
+                                    _rec_jf.close()
+                                    self._sig.log.emit("[녹화종료] 판 완료 — 영상 저장됨")
+                                except Exception:
+                                    pass
+                                _rec_writer = None
+                                _rec_jf = None
+                                _stall_dumped = False
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
                         popup_logged = False
                         preview_cnt += 1
@@ -507,6 +520,21 @@ class _MacroThread(threading.Thread):
                                     tracking = True
                                     self._sig.log.emit(
                                         f"[잠금] 흰색 도형 ({int(_wc[0])},{int(_wc[1])}) → 추적 시작")
+                                    # 이 판 전 구간 녹화 시작(영상+궤적) — 시작부터 끝까지 기록
+                                    try:
+                                        _rc_dir = os.path.join(ROOT, "_record_debug")
+                                        os.makedirs(_rc_dir, exist_ok=True)
+                                        _stamp = time.strftime("%m%d_%H%M%S")
+                                        _rc_base = os.path.join(_rc_dir, f"{success:03d}_{_stamp}")
+                                        _rec_writer = cv2.VideoWriter(
+                                            _rc_base + ".mp4",
+                                            cv2.VideoWriter_fourcc(*"mp4v"),
+                                            20.0, (det.shape[1], det.shape[0]))
+                                        _rec_jf = open(_rc_base + ".jsonl", "w", encoding="utf-8")
+                                        self._sig.log.emit(f"[녹화시작] _record_debug/{success:03d}_{_stamp}")
+                                    except Exception:
+                                        _rec_writer = None
+                                        _rec_jf = None
                                 _white_prev = _wc
                         else:
                             # score는 '필터'로만(노이즈 제거), 선택은 score 순이 아니라
@@ -545,7 +573,7 @@ class _MacroThread(threading.Thread):
                                 f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
                                 f"→ track={_tp} ({_src})")
                         # 점진 표류 진단: 매 프레임 궤적 기록 + 멈춤(track 소실) 시 직전 90프레임 덤프
-                        _trace_buf.append({
+                        _frame_rec = {
                             "i": preview_cnt,
                             "track": (None if track_pos is None
                                       else [int(track_pos[0]), int(track_pos[1])]),
@@ -553,7 +581,20 @@ class _MacroThread(threading.Thread):
                             "miss": _miss_run,
                             "n": len(_cands),
                             "cands": [[int(c[0]), int(c[1]), round(c[2], 2)] for c in _cands],
-                        })
+                        }
+                        _trace_buf.append(_frame_rec)
+                        # 판 전 구간 녹화 — 영상 프레임 + 궤적 한 줄
+                        if _rec_writer is not None:
+                            try:
+                                _wf = det
+                                if (det.shape[1], det.shape[0]) != (
+                                        int(_rec_writer.get(3)), int(_rec_writer.get(4))):
+                                    _wf = cv2.resize(det, (int(_rec_writer.get(3)),
+                                                           int(_rec_writer.get(4))))
+                                _rec_writer.write(_wf)
+                                _rec_jf.write(json.dumps(_frame_rec, ensure_ascii=False) + "\n")
+                            except Exception:
+                                pass
                         if _miss_run == 16 and not _stall_dumped:
                             _stall_dumped = True
                             try:
@@ -736,6 +777,13 @@ class _MacroThread(threading.Thread):
                     self._sig.log.emit(f"[!] {e}")
                     time.sleep(0.5)
 
+        # 스레드 종료 — 녹화 중이던 판 안전 마감(사용자 중지 시 영상 보존)
+        if _rec_writer is not None:
+            try:
+                _rec_writer.release()
+                _rec_jf.close()
+            except Exception:
+                pass
         self._sig.status.emit("stopped")
 
     def _tg_send(self, img, token, chat, count):
