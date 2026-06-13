@@ -555,7 +555,7 @@ class _MacroThread(threading.Thread):
                             and _syolo is not None and _syolo.enabled):
                         _jump = ((track_pos[0] - _last_marker_pos[0]) ** 2
                                  + (track_pos[1] - _last_marker_pos[1]) ** 2) ** 0.5
-                        if _jump > 60:   # 급점프 = 갈아타기 의심
+                        if _jump > 30:   # 30px+ 점프 = 이탈 의심(점진 이탈 45px도 포착)
                             try:
                                 _sw_dir = os.path.join(ROOT, "_switch_debug")
                                 os.makedirs(_sw_dir, exist_ok=True)
