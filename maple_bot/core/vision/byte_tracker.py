@@ -15,7 +15,7 @@ BT_HIGH_THR     = 0.30   # 1단계 high score
 BT_LOW_THR      = 0.10   # 2단계 low score 하한(반투명 타겟 0.18이 여기서 ID 유지)
 BT_LOST_MAX     = 15     # 타겟 lost coast 유지 한계(프레임)
 BT_TRK_MISS_MAX = 10     # 비타겟 트랙 제거 전 허용 미매칭
-BT_DECAL_MIN    = 4      # 배경 중앙값 최소 데칼 수(부족 시 phaseCorrelate 폴백)
+BT_DECAL_N      = 3      # 배경 계산에 쓸 대표 데칼 수(age 큰 상위 N개 — 전부 불필요)
 BT_DECAL_AGE    = 3      # 배경 중앙값에 넣을 데칼 최소 age
 
 
@@ -157,14 +157,16 @@ class ByteTracker:
         for di in ud1:
             self._new(high[di][0], high[di][1], high[di][2])
 
-        # 배경 공통속도 = 데칼(타겟제외·age≥3·이번 매칭) 속도 중앙값. 부족 시 phaseCorrelate.
-        dvx = [t.vx for t in self._tracks
-               if t.tid != self._tid and t.age >= BT_DECAL_AGE and t.miss == 0]
-        dvy = [t.vy for t in self._tracks
-               if t.tid != self._tid and t.age >= BT_DECAL_AGE and t.miss == 0]
-        if len(dvx) >= BT_DECAL_MIN:
-            self._bgvx = float(np.median(dvx))
-            self._bgvy = float(np.median(dvy))
+        # 배경 공통속도 = 데칼 대표 3개(age 큰=오래 추적돼 안정) 속도 중앙값. 데칼 전부는
+        # 불필요(3개로 전체와 동일 정확도, 인게임 확인) — 사용자 설계: 타겟1 + 데칼3 = 4개,
+        # 데칼 많으면 상위 3개만. 타겟 위치와 무관한 독립 샘플. 2개 미만이면 phaseCorrelate.
+        _decals = sorted(
+            (t for t in self._tracks
+             if t.tid != self._tid and t.age >= BT_DECAL_AGE and t.miss == 0),
+            key=lambda t: -t.age)[:BT_DECAL_N]
+        if len(_decals) >= 2:
+            self._bgvx = float(np.median([t.vx for t in _decals]))
+            self._bgvy = float(np.median([t.vy for t in _decals]))
         else:
             self._bgvx, self._bgvy = bx, by
 
