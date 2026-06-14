@@ -621,14 +621,6 @@ class _MacroThread(threading.Thread):
                                                  _last_marker_pos[1] + _tvy)
                                     _tvx *= 0.9
                                     _tvy *= 0.9
-                        # 마우스를 감지 도형 '중앙'에 — track 근처(22px) YOLO 박스 중심으로
-                        # 미세 스냅. 흰색 밝기중심·예측위치가 도형 중심과 어긋날 때 보정.
-                        if track_pos is not None and _pick:
-                            _nc = min(_pick, key=lambda c: (c[0] - track_pos[0]) ** 2
-                                      + (c[1] - track_pos[1]) ** 2)
-                            if ((_nc[0] - track_pos[0]) ** 2
-                                    + (_nc[1] - track_pos[1]) ** 2) <= 22 * 22:
-                                track_pos = (_nc[0], _nc[1])
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
