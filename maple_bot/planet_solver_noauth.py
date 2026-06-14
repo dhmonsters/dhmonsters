@@ -600,11 +600,16 @@ class _MacroThread(threading.Thread):
                                 tracking = True
                                 _miss_run = 0
                             else:
-                                # 게이트 내 미검출 — 직전 위치 잠깐 유지(최대 15프레임).
-                                # 게이트밖 스냅은 전부검출 체제에선 데칼로 점프할 위험이라 제거.
+                                # 미검출/배경동조거부 — 예측 전진 coast(최대 15프레임).
+                                # 제자리 멈춤이면 타겟이 배경동조로 거부될 때 못 따라가 멈춤
+                                # (인게임 확인). 직전 속도로 전진해 운동 방향 유지, vel 감쇠로
+                                # 폭주 방지. 게이트밖 스냅은 데칼 점프 위험이라 여전히 안 함.
                                 _miss_run += 1
                                 if _miss_run <= 15:
-                                    track_pos = _last_marker_pos
+                                    track_pos = (_last_marker_pos[0] + _tvx,
+                                                 _last_marker_pos[1] + _tvy)
+                                    _tvx *= 0.85
+                                    _tvy *= 0.85
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
