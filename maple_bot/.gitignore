@@ -49,3 +49,6 @@ _switch_debug/
 _stall_debug/
 _drift_debug/
 _record_debug/
+
+# GT 라벨 프레임(사용자 빨간점 — 로컬)
+_gt_frames/
