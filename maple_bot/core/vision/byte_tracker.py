@@ -189,9 +189,15 @@ class ByteTracker:
                 tgt.miss = 1
                 tgt.vx *= 0.9; tgt.vy *= 0.9
 
-        # 타겟 흐림(lost) → 배경과 다른 속도(이상) 트랙으로 ID 승계
+        # 타겟 흐림(lost) → 배경과 다른 속도(이상) 트랙으로 ID 승계.
+        # 멀리 점프 차단: 재선택 거리를 직전 속도+여유로 제한(먼 비동조 데칼 승계 방지).
         if tgt is not None and tgt.miss > 0:
-            r2 = min(BT_GATE_MAX, BT_GATE + BT_GATE_GROW * tgt.miss)
+            _gate = min(BT_GATE_MAX, BT_GATE + BT_GATE_GROW * tgt.miss)
+            # 거리 = 속도+여유 + 놓친 만큼 확장(분리 직후 miss작음→좁아 갈아타기 차단,
+            # 오래 놓침 miss큼→넓어 빠른 도형 재포착)
+            _jlim = ((tgt.vx * tgt.vx + tgt.vy * tgt.vy) ** 0.5
+                     + BT_JUMP_CAP + BT_GATE_GROW * tgt.miss * 0.5)
+            r2 = min(_gate, _jlim)
             pool = [t for t in self._tracks
                     if t.tid != self._tid and t.miss == 0
                     and (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 <= r2 * r2
