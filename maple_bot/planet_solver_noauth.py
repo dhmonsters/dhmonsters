@@ -46,6 +46,7 @@ SHAPE_BG_REJECT  = 12     # 배경동조 판정 반경(px) — 후보가 '직전
                           #   흘러온 데칼)에서 이 거리 이상이면 '배경과 다른 움직임'(비동조=타겟 후보)
 SHAPE_PRED_GATE  = 30     # ID 추적 예측위치 게이트(px) — 좁게 잡아 같은 객체만 연결(데칼 튐 방지)
 SHAPE_PRED_GROW  = 8      # 미검출 1프레임당 예측 게이트 확장(px) — 놓치면 점점 넓게 재포착
+SHAPE_JUMP_CAP   = 15     # 한 프레임 점프 상한(직전속도 위 여유, px) — 초과는 갈아타기로 거부
 MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
@@ -602,8 +603,16 @@ class _MacroThread(threading.Thread):
                                 _pool = _nonbg if _nonbg else _ing   # ① 비동조 우선 ② 없으면 전체
                                 if _pool:
                                     _bc = min(_pool, key=_dp)
+                                    # 점프 상한: 타겟은 느린데(~4.5px/f) 직전위치에서 속도+여유를
+                                    # 넘는 점프는 옆 도형으로 갈아타기다(회전 배경에서 데칼이 순간
+                                    # 비동조로 보일 때) → 거부하고 coast로 원 궤적 유지.
+                                    _mv = ((_bc[0] - _last_marker_pos[0]) ** 2
+                                           + (_bc[1] - _last_marker_pos[1]) ** 2) ** 0.5
+                                    _spd = (_tvx * _tvx + _tvy * _tvy) ** 0.5
+                                    if _mv > _spd + SHAPE_JUMP_CAP:
+                                        _bc = None
                                 if _bc is None:
-                                    _bg_rejected = True   # 진단: 게이트 내 후보 없음 → 칼만 coast
+                                    _bg_rejected = True   # 진단: 후보 없음/점프거부 → 칼만 coast
                             if _bc is not None:
                                 _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
                                 _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
