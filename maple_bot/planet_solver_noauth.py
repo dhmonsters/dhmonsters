@@ -276,9 +276,17 @@ def _focus_game(hwnd: int) -> None:
             pass
 
 def _real_click(abs_x: int, abs_y: int) -> None:
-    """커서를 지정 좌표로 이동 (원본과 동일 — fg_move 방식, 클릭 없음)."""
+    """커서를 지정 좌표로 이동. 게임/OS가 좌표를 다르게 인식하면(DPI 스케일·가속 등
+    실제 위치 ≠ 목표) GetCursorPos로 오차를 확인해 목표를 보정 재이동(중심 정확히)."""
     try:
-        win32api.SetCursorPos((abs_x, abs_y))
+        _tx, _ty = abs_x, abs_y
+        for _ in range(3):
+            win32api.SetCursorPos((int(_tx), int(_ty)))
+            _rx, _ry = win32api.GetCursorPos()
+            _dx, _dy = abs_x - _rx, abs_y - _ry
+            if _dx * _dx + _dy * _dy <= 4:   # 2px 이내면 정확
+                break
+            _tx += _dx; _ty += _dy           # 오차만큼 목표 조정(스케일 오차도 수렴)
     except Exception:
         pass
 
