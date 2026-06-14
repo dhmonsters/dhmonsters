@@ -567,8 +567,18 @@ class _MacroThread(threading.Thread):
                                 _wcy = _wb2[1] + _wb2[3] / 2.0
                                 if ((_wcx - _last_marker_pos[0]) ** 2
                                         + (_wcy - _last_marker_pos[1]) ** 2) <= 35 ** 2:
-                                    _bc = (_wcx, _wcy, 1.0)
-                                    _via_white = True
+                                    # vel 일관성: 운동 중(|vel|>3)인데 흰색이 직전 운동과
+                                    # 반대로 튀면, 투명화 순간 track 근처에 생긴 가짜 흰색이다
+                                    # (진짜 도형은 운동 방향으로 계속 감) → 거부하고 예측전진.
+                                    _wdot = ((_wcx - _last_marker_pos[0]) * _tvx
+                                             + (_wcy - _last_marker_pos[1]) * _tvy)
+                                    _wmv = ((_wcx - _last_marker_pos[0]) ** 2
+                                            + (_wcy - _last_marker_pos[1]) ** 2) ** 0.5
+                                    if (_tvx * _tvx + _tvy * _tvy) > 9 and _wdot < 0 and _wmv > 6:
+                                        pass   # 가짜 흰색(역행) 거부 → YOLO/coast
+                                    else:
+                                        _bc = (_wcx, _wcy, 1.0)
+                                        _via_white = True
                             # ② 흰색 안 보이면(투명) YOLO 연속성 — score≥0.3 필터 + 게이트 내
                             #    예측 위치 최근접. 0.3 필터라 반투명 타겟(~0.47)도 포함.
                             if _bc is None:
