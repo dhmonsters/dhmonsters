@@ -592,14 +592,17 @@ class _MacroThread(threading.Thread):
                                 _ing = [c for c in _pick if _d2(c) <= _gate * _gate]
                                 if _ing:
                                     _bc = min(_ing, key=_dp)
-                                # 배경동조 거부: 선택 후보가 '직전위치+배경변위'(=배경 따라
-                                # 흘러온 데칼) 근처면 타겟 아님 → 거부하고 coast. 진짜 타겟은
-                                # 배경과 다르게 움직여 이 위치에서 벗어나 있다(인게임 입증).
+                                # 배경동조 거부: 후보가 '타겟 운동 예측'보다 '배경 흐름
+                                # 예측(직전+배경변위)'에 더 부합하면 배경 따라 흘러온 데칼이다.
+                                # 단순 "배경동조위치 15px내 거부"는 타겟이 배경과 같은 방향일 때
+                                # 진짜 타겟까지 거부해 멈춤(인게임 확인) → 예측위치와 비교해,
+                                # 배경동조위치에 '더 가까울' 때만 거부(예측에 더 가까우면 타겟 허용).
                                 if _bc is not None:
                                     _bgcx = _last_marker_pos[0] + _bgx
                                     _bgcy = _last_marker_pos[1] + _bgy
-                                    if ((_bc[0] - _bgcx) ** 2 + (_bc[1] - _bgcy) ** 2
-                                            < SHAPE_BG_REJECT ** 2):
+                                    _dbg = ((_bc[0] - _bgcx) ** 2 + (_bc[1] - _bgcy) ** 2) ** 0.5
+                                    _dpr = ((_bc[0] - _px) ** 2 + (_bc[1] - _py) ** 2) ** 0.5
+                                    if _dbg < _dpr and _dbg < SHAPE_BG_REJECT:
                                         _bc = None
                                         _via_white = False  # 진단: 배경동조거부 표시
                                         _bg_rejected = True
@@ -618,8 +621,8 @@ class _MacroThread(threading.Thread):
                                 if _miss_run <= 15:
                                     track_pos = (_last_marker_pos[0] + _tvx,
                                                  _last_marker_pos[1] + _tvy)
-                                    _tvx *= 0.85
-                                    _tvy *= 0.85
+                                    _tvx *= 0.9
+                                    _tvy *= 0.9
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
