@@ -107,6 +107,7 @@ _n = _reload_templates()
 from planet_yolo_verify import M1Ensemble, HyungYolo
 from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
 from core.shape_yolo import ShapeYolo
+from core.vision.byte_tracker import ByteTracker
 
 def _load_models(use_gpu: bool = False):
     param = os.path.join(ASSETS, "hyung_m1.param")
@@ -367,6 +368,7 @@ class _MacroThread(threading.Thread):
         _tvx = _tvy = 0.0            # 추적 속도 EMA — 교차(겹침) 시 데칼 갈아타기 방지용 예측
         _prev_gray = None           # 직전 프레임 gray(배경 변위 측정용)
         _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
+        _bt = ByteTracker()         # ByteTrack MOT — 모든 후보 ID 트랙 + 배경 이상탐지
         _trace_buf = collections.deque(maxlen=90)  # 점진 표류→멈춤 진단용 궤적 ring buffer
         _stall_dumped = False        # 멈춤 궤적 덤프 중복 방지(판당 1회)
         _drift_last = -999           # 마지막 점진표류 덤프 프레임(쿨다운용)
@@ -420,6 +422,7 @@ class _MacroThread(threading.Thread):
                             _miss_run = 0
                             _white_prev = None
                             _tvx = _tvy = 0.0
+                            _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
                             success += 1
                             self._sig.capcha.emit(success % 100, success)
                             # 판 종료 — 녹화 마감
@@ -523,23 +526,38 @@ class _MacroThread(threading.Thread):
                             det_detect = det
                         _cands = _syolo.detect_all(det_detect, score_thr=SHAPE_WEAK_THR)
                         _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]  # 진단 표기용
-                        _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 선택 후보(0.3)
-                        _bc = None
+                        _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 진단 표기용
+                        _dets = [(c[0], c[1], c[2]) for c in _cands]   # ByteTracker 입력
                         _via_white = False   # 이번 프레임 선택이 흰색(밝기) 추적인지
-                        _bg_rejected = False # 이번 프레임 후보가 배경동조로 거부됐는지
-                        if _last_marker_pos == (0, 0):
-                            # 흰색 잠금 — 팝업 플래시 오인 방지로 2프레임 연속 같은 위치만
-                            _wb = acquire_white(det_masked)
-                            if _wb is not None and _wb[2] >= 20:
-                                _wc = (_wb[0] + _wb[2] / 2, _wb[1] + _wb[3] / 2)
+                        _bg_rejected = False # 타겟 트랙 소실(coast 한계) 여부
+                        # 흰색 도형 검출(밝기). 잠금용 ≥20, 가시 보정용 ≥50.
+                        _wb = acquire_white(det_masked)
+                        _wc = None
+                        if _wb is not None and _wb[2] >= 20:
+                            _wc = (_wb[0] + _wb[2] / 2.0, _wb[1] + _wb[3] / 2.0)
+                        # 흰색이 크게(≥50) 보이고 잠금 타겟 근처면 밝기 위치로 보정(흰색 우선).
+                        # 흰색 단계는 밝기 GT가 완벽 — ByteTracker 타겟 트랙을 그 위치로 끌어준다.
+                        if (_bt.locked and _wc is not None
+                                and _wb[2] >= 50 and _wb[3] >= 50):
+                            _tg = next((t for t in _bt._tracks if t.tid == _bt._tid), None)
+                            if _tg is not None and ((_wc[0] - _tg.x) ** 2
+                                                    + (_wc[1] - _tg.y) ** 2) <= 35 ** 2:
+                                _bt.nudge(_wc[0], _wc[1])
+                                _via_white = True
+                        # ByteTrack MOT — 모든 후보 ID 트랙 + 2단계 association + 배경 이상탐지
+                        _pos = _bt.update(_cur_gray, _dets)
+                        if not _bt.locked:
+                            # 흰색 잠금 — 2프레임 연속 같은 위치(팝업 플래시 오인 방지)
+                            if _wc is not None:
                                 if (_white_prev is not None and
                                         (_wc[0] - _white_prev[0]) ** 2
                                         + (_wc[1] - _white_prev[1]) ** 2 <= 15 ** 2):
+                                    _bt.lock(_wc[0], _wc[1])
                                     track_pos = _wc
                                     tracking = True
                                     self._sig.log.emit(
                                         f"[잠금] 흰색 도형 ({int(_wc[0])},{int(_wc[1])}) → 추적 시작")
-                                    # 이 판 전 구간 녹화 시작(영상+궤적) — 시작부터 끝까지 기록
+                                    # 이 판 전 구간 녹화 시작(영상+궤적)
                                     try:
                                         _rc_dir = os.path.join(ROOT, "_record_debug")
                                         os.makedirs(_rc_dir, exist_ok=True)
@@ -557,88 +575,29 @@ class _MacroThread(threading.Thread):
                                         _rec_jf = None
                                 _white_prev = _wc
                         else:
-                            # ① 흰색 도형이 아직 밝게 보이면(투명화 전) 밝기 추적 우선.
-                            #    진짜 타겟은 흰색이 ~2초 보이는데, YOLO 최근접은 빽빽한 데칼
-                            #    사이에서 vel 자기강화로 폭주함(인게임 _record_debug 확인).
-                            #    흰색 단계는 밝기 위치가 완벽하므로 그걸로 따라간다.
-                            # 크기 게이트(≥50): 완전투명 후 acquire_white가 커서 근처
-                            # 작은 밝은 픽셀(48→26px)을 가짜 흰색으로 오인해 마우스 따라 폭주
-                            # → 진짜 도형 크기(60)일 때만 신뢰. 위치 게이트(≤35px): 가짜의 점프 거부.
-                            _wb2 = acquire_white(det_masked)
-                            if _wb2 is not None and _wb2[2] >= 50 and _wb2[3] >= 50:
-                                _wcx = _wb2[0] + _wb2[2] / 2.0
-                                _wcy = _wb2[1] + _wb2[3] / 2.0
-                                if ((_wcx - _last_marker_pos[0]) ** 2
-                                        + (_wcy - _last_marker_pos[1]) ** 2) <= 35 ** 2:
-                                    # vel 일관성: 운동 중(|vel|>3)인데 흰색이 직전 운동과
-                                    # 반대로 튀면, 투명화 순간 track 근처에 생긴 가짜 흰색이다
-                                    # (진짜 도형은 운동 방향으로 계속 감) → 거부하고 예측전진.
-                                    _wdot = ((_wcx - _last_marker_pos[0]) * _tvx
-                                             + (_wcy - _last_marker_pos[1]) * _tvy)
-                                    _wmv = ((_wcx - _last_marker_pos[0]) ** 2
-                                            + (_wcy - _last_marker_pos[1]) ** 2) ** 0.5
-                                    if (_tvx * _tvx + _tvy * _tvy) > 9 and _wdot < 0 and _wmv > 6:
-                                        pass   # 가짜 흰색(역행) 거부 → YOLO/coast
-                                    else:
-                                        _bc = (_wcx, _wcy, 1.0)
-                                        _via_white = True
-                            # ② 흰색 안 보이면(투명) ID 추적 — 예측위치(직전+속도) 좁은 게이트
-                            #    안에서만 연결해 '같은 객체'를 이어간다(넓은 게이트는 데칼로 튐).
-                            #    우선순위(사용자 설계): ① 배경과 다르게 움직이는 후보(비동조)
-                            #    ② 없으면 게이트 내 최근접, 게이트 내 없으면 칼만(예측) coast.
-                            if _bc is None:
-                                _px = _last_marker_pos[0] + _tvx
-                                _py = _last_marker_pos[1] + _tvy
-                                _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
-                                # 예측위치 기준 좁은 게이트(놓치면 확장) — ID 연속성의 핵심
-                                _pgate = min(SHAPE_GATE_MAX,
-                                             SHAPE_PRED_GATE + SHAPE_PRED_GROW * _miss_run)
-                                _ing = [c for c in _pick if _dp(c) <= _pgate * _pgate]
-                                # 배경동조위치(직전+배경변위)에서 먼 후보 = 배경과 다른 움직임
-                                _bgcx = _last_marker_pos[0] + _bgx
-                                _bgcy = _last_marker_pos[1] + _bgy
-                                _nonbg = [c for c in _ing
-                                          if ((c[0] - _bgcx) ** 2 + (c[1] - _bgcy) ** 2)
-                                          >= SHAPE_BG_REJECT ** 2]
-                                _pool = _nonbg if _nonbg else _ing   # ① 비동조 우선 ② 없으면 전체
-                                if _pool:
-                                    _bc = min(_pool, key=_dp)
-                                    # 점프 상한: 타겟은 느린데(~4.5px/f) 직전위치에서 속도+여유를
-                                    # 넘는 점프는 옆 도형으로 갈아타기다(회전 배경에서 데칼이 순간
-                                    # 비동조로 보일 때) → 거부하고 coast로 원 궤적 유지.
-                                    _mv = ((_bc[0] - _last_marker_pos[0]) ** 2
-                                           + (_bc[1] - _last_marker_pos[1]) ** 2) ** 0.5
-                                    _spd = (_tvx * _tvx + _tvy * _tvy) ** 0.5
-                                    if _mv > _spd + SHAPE_JUMP_CAP:
-                                        _bc = None
-                                if _bc is None:
-                                    _bg_rejected = True   # 진단: 후보 없음/점프거부 → 칼만 coast
-                            if _bc is not None:
-                                _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
-                                _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
-                                track_pos = (_bc[0], _bc[1])
+                            # 잠금됨: 흰색 우선(밝기) / ByteTracker ID 추적 / 소실
+                            if _via_white:
+                                track_pos = _wc
                                 tracking = True
-                                _miss_run = 0
+                            elif _pos is not None:
+                                track_pos = (_pos[0], _pos[1])
+                                tracking = True
                             else:
-                                # 미검출/배경동조거부 — 예측 전진 coast(최대 15프레임).
-                                # 제자리 멈춤이면 타겟이 배경동조로 거부될 때 못 따라가 멈춤
-                                # (인게임 확인). 직전 속도로 전진해 운동 방향 유지, vel 감쇠로
-                                # 폭주 방지. 게이트밖 스냅은 데칼 점프 위험이라 여전히 안 함.
-                                _miss_run += 1
-                                if _miss_run <= 15:
-                                    track_pos = (_last_marker_pos[0] + _tvx,
-                                                 _last_marker_pos[1] + _tvy)
-                                    _tvx *= 0.9
-                                    _tvy *= 0.9
+                                _bg_rejected = True   # 타겟 트랙 lost(coast 한계 초과)
+                        # 진단/트레이스/캡처 호환 — 타겟 트랙에서 속도·miss 동기화
+                        _tg = next((t for t in _bt._tracks if t.tid == _bt._tid), None)
+                        if _tg is not None:
+                            _tvx, _tvy = _tg.vx, _tg.vy
+                            _miss_run = _tg.miss
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
-                            _src = (("흰색" if _via_white else "YOLO") if _bc is not None
-                                    else ("배경거부" if _bg_rejected
-                                          else ("유지" if _last_marker_pos != (0, 0) else "잠금대기")))
+                            _src = ("흰색" if _via_white
+                                    else ("ByteTrack" if track_pos is not None
+                                          else ("소실" if _bt.locked else "잠금대기")))
                             self._sig.log.emit(
-                                f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
-                                f"→ track={_tp} ({_src})")
+                                f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
+                                f"miss={_miss_run} → track={_tp} ({_src})")
                         # 점진 표류 진단: 매 프레임 궤적 기록 + 멈춤(track 소실) 시 직전 90프레임 덤프
                         _frame_rec = {
                             "i": preview_cnt,

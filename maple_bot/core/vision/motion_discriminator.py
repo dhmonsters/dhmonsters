@@ -125,13 +125,20 @@ class MotionDiscriminator:
         return (best.x, best.y, best.uniq_sum())
 
 
-# ── 트랙 ID 타겟 락 (교차 갈아타기 해결) ──────────────────────────────────
-# MotionDiscriminator(특이성 최고 재선택)와 달리, 흰색 잠금한 타겟에 ID를 부여하고
-# 모든 후보를 트랙으로 동시 추적하며 그 ID를 끝까지 '이어간다'. 각 트랙이 자기 운동으로
-# 예측하므로, 교차해도 타겟 트랙은 자기 방향 후보를 가져가 데칼과 섞이지 않는다.
-TRK_MATCH_R = 45      # 트랙-후보 연계 반경(px) — 예측 위치 기준이라 작게
-TRK_MISS_MAX = 10     # 비타겟 트랙 제거 전 허용 미매칭
-TRK_HOLD_MAX = 15     # 타겟 트랙 미검출 유지 한계(프레임)
+# ── 트랙 ID 타겟 락 (MOT — 데칼 속도 중앙값 배경 추정 + 흐림 재선택) ──────────
+# 흰색 잠금 타겟에 ID를 부여하고 모든 후보를 트랙으로 동시 추적한다. 데칼 다수의
+# 속도 중앙값으로 배경을 추정(회전 배경 대응 — 전역 phaseCorrelate의 곡률 약점 보완)
+# 하고, 타겟이 흐려지면(미검출) 배경과 다른 속도 트랙으로 ID를 승계한다.
+# 사용자 설계: 데칼 넘버링 → 배경 추정 → 비동조 재선택, 없으면 칼만 coast.
+TRK_MATCH_R   = 30     # 예측 게이트 기본 반경(px) — 좁게(같은 객체만 연계, 데칼 튐 방지)
+TRK_GATE_GROW = 8      # 미검출 1프레임당 게이트 확장(px) — 놓치면 점점 넓게 재포착
+TRK_GATE_MAX  = 280    # 게이트 확장 상한(px)
+TRK_JUMP_CAP  = 15     # 점프 상한(직전속도 위 여유, px) — 초과 매칭 거부(갈아타기 차단)
+TRK_REL_MIN   = 7.0    # 배경과 다른 속도 임계(px/f) — 재선택 시 타겟 후보 기준(실측 타겟13/데칼0)
+TRK_MISS_MAX  = 10     # 비타겟 트랙 제거 전 허용 미매칭
+TRK_HOLD_MAX  = 15     # 타겟 트랙 미검출 유지 한계(프레임)
+TRK_DECAL_MIN = 4      # 배경 속도 중앙값 최소 데칼 수(부족 시 phaseCorrelate 폴백)
+TRK_DECAL_AGE = 3      # 배경 중앙값에 넣을 데칼 최소 age(속도 EMA 안정 후)
 
 
 class _IdTrack:
@@ -145,7 +152,7 @@ class _IdTrack:
 
 
 class TargetTracker:
-    """흰색 잠금 타겟에 ID 부여 → 모든 후보 동시 트랙 추적 → 그 ID를 이어간다."""
+    """흰색 잠금 타겟 ID + 모든 후보 트랙 + 데칼 중앙값 배경 + 흐림 재선택."""
 
     def __init__(self, match_r=TRK_MATCH_R):
         self._prev = None
@@ -153,12 +160,14 @@ class TargetTracker:
         self._tid = None      # 타겟 트랙 ID
         self._next = 0
         self._mr = match_r
+        self._bgvx = 0.0; self._bgvy = 0.0   # 배경 속도(데칼 중앙값)
 
     def reset(self):
         self._prev = None
         self._tracks = []
         self._tid = None
         self._next = 0
+        self._bgvx = 0.0; self._bgvy = 0.0
 
     @property
     def locked(self):
@@ -167,6 +176,10 @@ class TargetTracker:
     @property
     def track_count(self):
         return len(self._tracks)
+
+    @property
+    def bg_vel(self):
+        return (self._bgvx, self._bgvy)
 
     def _new(self, x, y):
         t = _IdTrack(self._next, x, y)
@@ -185,47 +198,92 @@ class TargetTracker:
             best = self._new(x, y)
         self._tid = best.tid
 
-    def update(self, gray_f32, cands):
-        """매 프레임 — 배경 변위 측정 + 트랙 연계 갱신. 타겟 트랙 위치 (x,y)|None 반환.
-        잠금 전에도 호출해 데칼 트랙을 쌓아둔다(잠금 시 정체성 즉시 확보)."""
-        bx = by = 0.0
-        if self._prev is not None and gray_f32.shape == self._prev.shape:
-            (bx, by), _ = cv2.phaseCorrelate(self._prev, gray_f32)
-        self._prev = gray_f32
+    def nudge(self, x, y):
+        """흰색 가시 구간 — 타겟 트랙 위치를 신뢰 위치(밝기 중심)로 보정."""
+        for t in self._tracks:
+            if t.tid == self._tid:
+                t.x = float(x); t.y = float(y); t.miss = 0
+                return
 
+    def update(self, gray_f32, cands):
+        """매 프레임 — 트랙 연계 + 데칼 중앙값 배경 + 흐림 재선택. 타겟 위치 (x,y)|None.
+        gray_f32=None이면 phaseCorrelate 생략(jsonl 재시뮬용, 데칼 중앙값만 사용).
+        잠금 전에도 호출해 데칼 트랙을 쌓아둔다(잠금 시 정체성 즉시 확보)."""
+        # 1) 배경 전역 변위(phaseCorrelate) — 데칼 부족 시 폴백용
+        bx = by = 0.0
+        if (gray_f32 is not None and self._prev is not None
+                and gray_f32.shape == self._prev.shape):
+            (bx, by), _ = cv2.phaseCorrelate(self._prev, gray_f32)
+        if gray_f32 is not None:
+            self._prev = gray_f32
+
+        # 2) 트랙-후보 연계 (타겟 최우선 → 나이 많은 순)
         free = list(cands)
-        # 타겟 최우선 → 나이 많은 순. 타겟이 자기 방향 후보를 먼저 가져간다.
         order = sorted(self._tracks, key=lambda t: (t.tid != self._tid, -t.age))
         for t in order:
-            # 예측 = 직전 + 자기 속도(관측 이력 있으면) / 없으면 배경 변위
             if t.age > 0:
                 px, py = t.x + t.vx, t.y + t.vy
             else:
                 px, py = t.x + bx, t.y + by
-            r = self._mr + 3.0 * t.miss   # 놓친 동안 넓게 재탐색
+            r = min(TRK_GATE_MAX, self._mr + TRK_GATE_GROW * t.miss)
             best, bd = None, r * r
             for c in free:
                 d = (c[0] - px) ** 2 + (c[1] - py) ** 2
                 if d < bd:
                     bd = d; best = c
+            # 타겟 트랙 점프 상한 — 속도+여유 초과 매칭은 갈아타기로 거부
+            if best is not None and t.tid == self._tid:
+                mv = ((best[0] - t.x) ** 2 + (best[1] - t.y) ** 2) ** 0.5
+                spd = (t.vx * t.vx + t.vy * t.vy) ** 0.5
+                if mv > spd + TRK_JUMP_CAP:
+                    best = None
             if best is not None:
                 free.remove(best)
-                nvx, nvy = best[0] - t.x, best[1] - t.y
-                t.vx = t.vx * 0.6 + nvx * 0.4
-                t.vy = t.vy * 0.6 + nvy * 0.4
+                t.vx = t.vx * 0.6 + (best[0] - t.x) * 0.4
+                t.vy = t.vy * 0.6 + (best[1] - t.y) * 0.4
                 t.x, t.y = float(best[0]), float(best[1])
                 t.miss = 0; t.age += 1
             else:
                 t.x, t.y = px, py   # coast (예측으로 전진)
                 t.miss += 1
+                if t.tid == self._tid:   # 타겟 coast 시 속도 감쇠(폭주 방지)
+                    t.vx *= 0.9; t.vy *= 0.9
 
         for c in free:
             self._new(float(c[0]), float(c[1]))
-        # 비타겟 트랙만 정리
+
+        # 3) 배경 속도 = 데칼(타겟제외·age≥3·이번 매칭) 속도 중앙값. 부족 시 phaseCorrelate.
+        dvx = [t.vx for t in self._tracks
+               if t.tid != self._tid and t.age >= TRK_DECAL_AGE and t.miss == 0]
+        dvy = [t.vy for t in self._tracks
+               if t.tid != self._tid and t.age >= TRK_DECAL_AGE and t.miss == 0]
+        if len(dvx) >= TRK_DECAL_MIN:
+            self._bgvx = float(np.median(dvx))
+            self._bgvy = float(np.median(dvy))
+        else:
+            self._bgvx, self._bgvy = bx, by
+
+        # 4) 타겟 흐림(미검출) → 배경과 다른 속도 트랙으로 ID 승계
+        tgt = next((t for t in self._tracks if t.tid == self._tid), None)
+        if tgt is not None and tgt.miss > 0:
+            r2 = min(TRK_GATE_MAX, self._mr + TRK_GATE_GROW * tgt.miss)
+            pool = [t for t in self._tracks
+                    if t.tid != self._tid and t.miss == 0
+                    and (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 <= r2 * r2
+                    and ((t.vx - self._bgvx) ** 2
+                         + (t.vy - self._bgvy) ** 2) ** 0.5 >= TRK_REL_MIN]
+            if pool:
+                # 타겟 예측 위치 최근접 + age 큰 것(오래 추적된 트랙 우선)
+                best = min(pool, key=lambda t: (t.x - tgt.x) ** 2
+                           + (t.y - tgt.y) ** 2 - t.age)
+                self._tid = best.tid
+                tgt = best
+
+        # 5) 비타겟 트랙 정리
         self._tracks = [t for t in self._tracks
                         if t.miss <= TRK_MISS_MAX or t.tid == self._tid]
 
-        for t in self._tracks:
-            if t.tid == self._tid:
-                return (t.x, t.y) if t.miss <= TRK_HOLD_MAX else None
+        # 6) 타겟 위치 반환
+        if tgt is not None:
+            return (tgt.x, tgt.y) if tgt.miss <= TRK_HOLD_MAX else None
         return None
