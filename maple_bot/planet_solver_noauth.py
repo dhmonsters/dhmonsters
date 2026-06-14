@@ -276,17 +276,9 @@ def _focus_game(hwnd: int) -> None:
             pass
 
 def _real_click(abs_x: int, abs_y: int) -> None:
-    """커서를 지정 좌표로 이동. 게임/OS가 좌표를 다르게 인식하면(DPI 스케일·가속 등
-    실제 위치 ≠ 목표) GetCursorPos로 오차를 확인해 목표를 보정 재이동(중심 정확히)."""
+    """커서를 지정 좌표로 이동 (원본과 동일 — fg_move 방식, 클릭 없음)."""
     try:
-        _tx, _ty = abs_x, abs_y
-        for _ in range(3):
-            win32api.SetCursorPos((int(_tx), int(_ty)))
-            _rx, _ry = win32api.GetCursorPos()
-            _dx, _dy = abs_x - _rx, abs_y - _ry
-            if _dx * _dx + _dy * _dy <= 4:   # 2px 이내면 정확
-                break
-            _tx += _dx; _ty += _dy           # 오차만큼 목표 조정(스케일 오차도 수렴)
+        win32api.SetCursorPos((abs_x, abs_y))
     except Exception:
         pass
 
@@ -733,6 +725,17 @@ class _MacroThread(threading.Thread):
                         abs_x = det_mon["left"] + cx
                         abs_y = det_mon["top"]  + cy
                         _real_click(abs_x, abs_y)
+                        # 좌표 인식 오차 진단 — 보정 루프는 발산해 제거, 실제 위치만 측정.
+                        # 오차가 상수면 상수 보정, 좌표 비례면 스케일 보정으로 대응.
+                        if preview_cnt % 20 == 0:
+                            try:
+                                _rx, _ry = win32api.GetCursorPos()
+                                if abs(_rx - abs_x) > 5 or abs(_ry - abs_y) > 5:
+                                    self._sig.log.emit(
+                                        f"[좌표오차] 목표({abs_x},{abs_y}) 실제({_rx},{_ry}) "
+                                        f"차이({abs_x - _rx},{abs_y - _ry})")
+                            except Exception:
+                                pass
 
                         if _vit_active and preview_cnt % 30 == 0:
                             self._sig.log.emit(f"[추적중] pos=({abs_x},{abs_y})")
