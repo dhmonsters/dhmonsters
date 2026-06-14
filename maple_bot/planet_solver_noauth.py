@@ -544,12 +544,15 @@ class _MacroThread(threading.Thread):
                             #    진짜 타겟은 흰색이 ~2초 보이는데, YOLO 최근접은 빽빽한 데칼
                             #    사이에서 vel 자기강화로 폭주함(인게임 _record_debug 확인).
                             #    흰색 단계는 밝기 위치가 완벽하므로 그걸로 따라간다.
+                            # 크기 게이트(≥50): 완전투명 후 acquire_white가 커서 근처
+                            # 작은 밝은 픽셀(48→26px)을 가짜 흰색으로 오인해 마우스 따라 폭주
+                            # → 진짜 도형 크기(60)일 때만 신뢰. 위치 게이트(≤35px): 가짜의 점프 거부.
                             _wb2 = acquire_white(det_masked)
-                            if _wb2 is not None and _wb2[2] >= 18 and _wb2[3] >= 18:
+                            if _wb2 is not None and _wb2[2] >= 50 and _wb2[3] >= 50:
                                 _wcx = _wb2[0] + _wb2[2] / 2.0
                                 _wcy = _wb2[1] + _wb2[3] / 2.0
                                 if ((_wcx - _last_marker_pos[0]) ** 2
-                                        + (_wcy - _last_marker_pos[1]) ** 2) <= 60 ** 2:
+                                        + (_wcy - _last_marker_pos[1]) ** 2) <= 35 ** 2:
                                     _bc = (_wcx, _wcy, 1.0)
                                     _via_white = True
                             # ② 흰색 안 보이면(투명) YOLO 연속성 — score≥0.3 필터 + 게이트 내
