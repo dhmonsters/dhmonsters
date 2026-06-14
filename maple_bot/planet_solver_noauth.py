@@ -42,6 +42,8 @@ SHAPE_WEAK_THR   = 0.10   # 약 후보 하한 — 비상관화 모델은 배경 
 SHAPE_WEAK_GATE  = 110    # 점프 게이트 기본 반경(px) — 도형은 ~2px/frame이라 순간 점프는 가짜
 SHAPE_GATE_GROW  = 12     # 미검출 1프레임당 게이트 확장(px) — 오래 놓치면 점점 넓게 재탐색
 SHAPE_GATE_MAX   = 280    # 게이트 확장 상한(px)
+SHAPE_BG_REJECT  = 15     # 배경동조 거부 반경(px) — 투명 단계 후보가 '직전위치+배경변위'
+                          #   근처(=배경 따라 흘러온 데칼)면 거부+coast. 인게임 입증(특이성 3배차)
 MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
@@ -360,6 +362,8 @@ class _MacroThread(threading.Thread):
         _diag_cnt = 0                # YOLO 검출 진단 로그 카운터
         _white_prev = None           # 흰색 잠금 안정화(2프레임 연속 동일 위치) 비교용
         _tvx = _tvy = 0.0            # 추적 속도 EMA — 교차(겹침) 시 데칼 갈아타기 방지용 예측
+        _prev_gray = None           # 직전 프레임 gray(배경 변위 측정용)
+        _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
         _trace_buf = collections.deque(maxlen=90)  # 점진 표류→멈춤 진단용 궤적 ring buffer
         _stall_dumped = False        # 멈춤 궤적 덤프 중복 방지(판당 1회)
         _drift_last = -999           # 마지막 점진표류 덤프 프레임(쿨다운용)
@@ -491,6 +495,15 @@ class _MacroThread(threading.Thread):
                         det_masked = det
                         _cmask_res = None
 
+                    # 배경 전역 변위(phaseCorrelate) — 데칼 다수가 지배하므로 배경 흐름 측정.
+                    # 투명 단계에서 '배경 따라 흘러온' 후보(데칼)를 거부하는 데 쓴다.
+                    _cur_gray = cv2.cvtColor(det, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                    if _prev_gray is not None and _prev_gray.shape == _cur_gray.shape:
+                        (_bgx, _bgy), _ = cv2.phaseCorrelate(_prev_gray, _cur_gray)
+                    else:
+                        _bgx = _bgy = 0.0
+                    _prev_gray = _cur_gray
+
                     # ── 추적: YOLO 주 검출 (학습 모델 있으면) / 없으면 ViT 폴백 ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
                     _cands = []             # YOLO 후보 (미리보기 박스 표시용)
@@ -510,6 +523,7 @@ class _MacroThread(threading.Thread):
                         _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 선택 후보(0.3)
                         _bc = None
                         _via_white = False   # 이번 프레임 선택이 흰색(밝기) 추적인지
+                        _bg_rejected = False # 이번 프레임 후보가 배경동조로 거부됐는지
                         if _last_marker_pos == (0, 0):
                             # 흰색 잠금 — 팝업 플래시 오인 방지로 2프레임 연속 같은 위치만
                             _wb = acquire_white(det_masked)
@@ -568,6 +582,17 @@ class _MacroThread(threading.Thread):
                                 _ing = [c for c in _pick if _d2(c) <= _gate * _gate]
                                 if _ing:
                                     _bc = min(_ing, key=_dp)
+                                # 배경동조 거부: 선택 후보가 '직전위치+배경변위'(=배경 따라
+                                # 흘러온 데칼) 근처면 타겟 아님 → 거부하고 coast. 진짜 타겟은
+                                # 배경과 다르게 움직여 이 위치에서 벗어나 있다(인게임 입증).
+                                if _bc is not None:
+                                    _bgcx = _last_marker_pos[0] + _bgx
+                                    _bgcy = _last_marker_pos[1] + _bgy
+                                    if ((_bc[0] - _bgcx) ** 2 + (_bc[1] - _bgcy) ** 2
+                                            < SHAPE_BG_REJECT ** 2):
+                                        _bc = None
+                                        _via_white = False  # 진단: 배경동조거부 표시
+                                        _bg_rejected = True
                             if _bc is not None:
                                 _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
                                 _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
@@ -584,7 +609,8 @@ class _MacroThread(threading.Thread):
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
                             _src = (("흰색" if _via_white else "YOLO") if _bc is not None
-                                    else ("유지" if _last_marker_pos != (0, 0) else "잠금대기"))
+                                    else ("배경거부" if _bg_rejected
+                                          else ("유지" if _last_marker_pos != (0, 0) else "잠금대기")))
                             self._sig.log.emit(
                                 f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
                                 f"→ track={_tp} ({_src})")
