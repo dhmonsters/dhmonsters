@@ -282,6 +282,25 @@ def _real_click(abs_x: int, abs_y: int) -> None:
     except Exception:
         pass
 
+def _detect_cursor(bgr):
+    """화면 마우스 커서(핑크) 중심 검출 — GetCursorPos가 게임 가로챔으로 부정확하므로
+    실제 표시되는 커서 위치를 색으로 직접 인지(det 좌표). 없으면 None."""
+    try:
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        m = cv2.inRange(hsv, np.array([140, 80, 80]), np.array([175, 255, 255]))
+        cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not cnts:
+            return None
+        c = max(cnts, key=cv2.contourArea)
+        if cv2.contourArea(c) < 15:
+            return None
+        M = cv2.moments(c)
+        if M["m00"] == 0:
+            return None
+        return (M["m10"] / M["m00"], M["m01"] / M["m00"])
+    except Exception:
+        return None
+
 # ── 탐지 스레드 ────────────────────────────────────────────────────────────
 class _Sig(QObject):
     log     = pyqtSignal(str)
@@ -369,6 +388,7 @@ class _MacroThread(threading.Thread):
         _prev_gray = None           # 직전 프레임 gray(배경 변위 측정용)
         _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
         _bt = ByteTracker()         # ByteTrack MOT — 모든 후보 ID 트랙 + 배경 이상탐지
+        _cursor_off_x = _cursor_off_y = 0.0   # 게임 좌표 오프셋(핑크 커서 검출로 학습)
         _trace_buf = collections.deque(maxlen=90)  # 점진 표류→멈춤 진단용 궤적 ring buffer
         _stall_dumped = False        # 멈춤 궤적 덤프 중복 방지(판당 1회)
         _drift_last = -999           # 마지막 점진표류 덤프 프레임(쿨다운용)
@@ -722,20 +742,18 @@ class _MacroThread(threading.Thread):
                         cx = int(max(0, min(det_mon["width"] - 1, track_pos[0])))
                         cy = int(max(0, min(det_mon["height"] - 1, track_pos[1])))
                         _last_marker_pos = (cx, cy)
-                        abs_x = det_mon["left"] + cx
-                        abs_y = det_mon["top"]  + cy
+                        # 화면 실제 커서(핑크) 검출 → 게임 좌표 오프셋 학습(GetCursorPos는
+                        # 게임 가로챔으로 부정확). 목표(도형중심 cx,cy)와 실제 커서 위치 차이를
+                        # 누적 오프셋에 EMA 반영 → 마우스를 도형 중심으로 끌어온다(±200 발산한계).
+                        _cur = _detect_cursor(det)
+                        if _cur is not None:
+                            _cursor_off_x += (cx - _cur[0]) * 0.5
+                            _cursor_off_y += (cy - _cur[1]) * 0.5
+                            _cursor_off_x = max(-200.0, min(200.0, _cursor_off_x))
+                            _cursor_off_y = max(-200.0, min(200.0, _cursor_off_y))
+                        abs_x = det_mon["left"] + int(cx + _cursor_off_x)
+                        abs_y = det_mon["top"]  + int(cy + _cursor_off_y)
                         _real_click(abs_x, abs_y)
-                        # 좌표 인식 오차 진단 — 보정 루프는 발산해 제거, 실제 위치만 측정.
-                        # 오차가 상수면 상수 보정, 좌표 비례면 스케일 보정으로 대응.
-                        if preview_cnt % 20 == 0:
-                            try:
-                                _rx, _ry = win32api.GetCursorPos()
-                                if abs(_rx - abs_x) > 5 or abs(_ry - abs_y) > 5:
-                                    self._sig.log.emit(
-                                        f"[좌표오차] 목표({abs_x},{abs_y}) 실제({_rx},{_ry}) "
-                                        f"차이({abs_x - _rx},{abs_y - _ry})")
-                            except Exception:
-                                pass
 
                         if _vit_active and preview_cnt % 30 == 0:
                             self._sig.log.emit(f"[추적중] pos=({abs_x},{abs_y})")
