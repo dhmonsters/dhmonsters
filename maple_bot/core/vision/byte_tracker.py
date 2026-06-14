@@ -11,6 +11,7 @@ BT_GATE_MAX     = 280    # 게이트 상한(px)
 BT_JUMP_CAP     = 30     # 타겟 점프 상한(직전속도 위 여유, px) — 빠른 도형 매칭 위해 30
                          #   (GT 채점: 15→30으로 035137 평균오차 186→80px)
 BT_REL_MIN      = 7.0    # 배경과 다른 속도 임계(px/f) — 흐림 재선택(이상탐지)
+BT_REL_EMA      = 0.3    # rel_ema 현재반영 비율 — 다중가설 누적 증거(클수록 즉각)
 BT_BG_REJECT    = 12     # 타겟 매칭 배경동조 거부(px) — 예측보다 배경흐름에 가까우면 데칼
 BT_HIGH_THR     = 0.30   # 1단계 high score
 BT_LOW_THR      = 0.10   # 2단계 low score 하한(반투명 타겟 0.18이 여기서 ID 유지)
@@ -21,7 +22,7 @@ BT_DECAL_AGE    = 3      # 배경 중앙값에 넣을 데칼 최소 age
 
 
 class _BTrack:
-    __slots__ = ("tid", "x", "y", "vx", "vy", "score", "age", "miss")
+    __slots__ = ("tid", "x", "y", "vx", "vy", "score", "age", "miss", "rel_ema")
 
     def __init__(self, tid, x, y, score):
         self.tid = tid
@@ -29,6 +30,7 @@ class _BTrack:
         self.vx = 0.0; self.vy = 0.0
         self.score = float(score)
         self.age = 0; self.miss = 0
+        self.rel_ema = 0.0   # 배경과 다른 정도의 누적 EMA(다중가설 채택 근거)
 
 
 class ByteTracker:
@@ -175,6 +177,13 @@ class ByteTracker:
         else:
             self._bgvx, self._bgvy = bx, by
 
+        # 다중가설 누적: 모든 트랙의 '배경과 다른 정도'를 EMA로 누적. 데칼은 배경동조라
+        # rel≈0으로 수렴, 진짜 도형은 랜덤이라 rel 누적이 큼 → 재선택 채택 근거(GT 검증:
+        # 분기 후 누적rel 최대 트랙이 진짜 도형. 즉시 최근접 대신 누적 증거로 갈아타기).
+        for t in self._tracks:
+            _r = ((t.vx - self._bgvx) ** 2 + (t.vy - self._bgvy) ** 2) ** 0.5
+            t.rel_ema = t.rel_ema * (1 - BT_REL_EMA) + _r * BT_REL_EMA
+
         # 타겟이 배경동조 데칼을 매칭했으면 취소 → coast (예측보다 배경흐름에 더 가까움).
         # 5초대 회전 배경과 타겟 방향이 겹치는 순간 데칼로 갈아타는 것을 차단(인게임 확인).
         tgt = next((t for t in self._tracks if t.tid == self._tid), None)
@@ -205,8 +214,10 @@ class ByteTracker:
                     and ((t.vx - self._bgvx) ** 2
                          + (t.vy - self._bgvy) ** 2) ** 0.5 >= BT_REL_MIN]
             if pool:
-                best = min(pool, key=lambda t: (t.x - tgt.x) ** 2
-                           + (t.y - tgt.y) ** 2 - t.age)
+                # 다중가설 채택: 누적rel(rel_ema) 최대 = 배경과 가장 다르게 움직인 트랙
+                # = 진짜 도형(GT 검증). 동률 시 예측 가까운 쪽(거리 페널티 소폭).
+                best = max(pool, key=lambda t: t.rel_ema
+                           - ((t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2) ** 0.5 * 0.05)
                 self._tid = best.tid
                 tgt = best
 
