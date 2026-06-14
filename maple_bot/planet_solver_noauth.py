@@ -509,6 +509,7 @@ class _MacroThread(threading.Thread):
                         _strong = [c for c in _cands if c[2] >= SHAPE_STRONG_THR]  # 진단 표기용
                         _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 선택 후보(0.3)
                         _bc = None
+                        _via_white = False   # 이번 프레임 선택이 흰색(밝기) 추적인지
                         if _last_marker_pos == (0, 0):
                             # 흰색 잠금 — 팝업 플래시 오인 방지로 2프레임 연속 같은 위치만
                             _wb = acquire_white(det_masked)
@@ -539,21 +540,31 @@ class _MacroThread(threading.Thread):
                                         _rec_jf = None
                                 _white_prev = _wc
                         else:
-                            # score는 '필터'로만(노이즈 제거), 선택은 score 순이 아니라
-                            # 예측 위치 최근접 — 주변 강한 데칼로 갈아타지 않고 처음 도형 유지.
-                            # 흰색 도형(score 0.83)이 데칼(0.92)보다 낮아도, 가까우면 흰색 선택.
-                            _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
-                                             + (c[1] - _last_marker_pos[1]) ** 2)
-                            _px = _last_marker_pos[0] + _tvx
-                            _py = _last_marker_pos[1] + _tvy
-                            _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
-                            _gate = min(SHAPE_GATE_MAX,
-                                        SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
-                            # 후보(score≥0.3) + 게이트 내 → 예측 위치 최근접(score 무관).
-                            # 0.3 필터라 반투명 타겟(score~0.47)도 포함 — 0.5면 빠져 데칼로 갈아탐.
-                            _ing = [c for c in _pick if _d2(c) <= _gate * _gate]
-                            if _ing:
-                                _bc = min(_ing, key=_dp)
+                            # ① 흰색 도형이 아직 밝게 보이면(투명화 전) 밝기 추적 우선.
+                            #    진짜 타겟은 흰색이 ~2초 보이는데, YOLO 최근접은 빽빽한 데칼
+                            #    사이에서 vel 자기강화로 폭주함(인게임 _record_debug 확인).
+                            #    흰색 단계는 밝기 위치가 완벽하므로 그걸로 따라간다.
+                            _wb2 = acquire_white(det_masked)
+                            if _wb2 is not None and _wb2[2] >= 18 and _wb2[3] >= 18:
+                                _wcx = _wb2[0] + _wb2[2] / 2.0
+                                _wcy = _wb2[1] + _wb2[3] / 2.0
+                                if ((_wcx - _last_marker_pos[0]) ** 2
+                                        + (_wcy - _last_marker_pos[1]) ** 2) <= 60 ** 2:
+                                    _bc = (_wcx, _wcy, 1.0)
+                                    _via_white = True
+                            # ② 흰색 안 보이면(투명) YOLO 연속성 — score≥0.3 필터 + 게이트 내
+                            #    예측 위치 최근접. 0.3 필터라 반투명 타겟(~0.47)도 포함.
+                            if _bc is None:
+                                _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
+                                                 + (c[1] - _last_marker_pos[1]) ** 2)
+                                _px = _last_marker_pos[0] + _tvx
+                                _py = _last_marker_pos[1] + _tvy
+                                _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
+                                _gate = min(SHAPE_GATE_MAX,
+                                            SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
+                                _ing = [c for c in _pick if _d2(c) <= _gate * _gate]
+                                if _ing:
+                                    _bc = min(_ing, key=_dp)
                             if _bc is not None:
                                 _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
                                 _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
@@ -569,7 +580,7 @@ class _MacroThread(threading.Thread):
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
-                            _src = ("YOLO" if _bc is not None
+                            _src = (("흰색" if _via_white else "YOLO") if _bc is not None
                                     else ("유지" if _last_marker_pos != (0, 0) else "잠금대기"))
                             self._sig.log.emit(
                                 f"[진단] YOLO {len(_cands)}개(강{len(_strong)}) miss={_miss_run} "
