@@ -8,7 +8,8 @@ from scipy.optimize import linear_sum_assignment
 BT_GATE         = 30     # 예측위치 매칭 게이트 기본(px)
 BT_GATE_GROW    = 8      # 미검출 1프레임당 게이트 확장(px)
 BT_GATE_MAX     = 280    # 게이트 상한(px)
-BT_JUMP_CAP     = 15     # 타겟 점프 상한(직전속도 위 여유, px) — 갈아타기 차단
+BT_JUMP_CAP     = 30     # 타겟 점프 상한(직전속도 위 여유, px) — 빠른 도형 매칭 위해 30
+                         #   (GT 채점: 15→30으로 035137 평균오차 186→80px)
 BT_REL_MIN      = 7.0    # 배경과 다른 속도 임계(px/f) — 흐림 재선택(이상탐지)
 BT_BG_REJECT    = 12     # 타겟 매칭 배경동조 거부(px) — 예측보다 배경흐름에 가까우면 데칼
 BT_HIGH_THR     = 0.30   # 1단계 high score
