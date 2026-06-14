@@ -42,8 +42,10 @@ SHAPE_WEAK_THR   = 0.10   # 약 후보 하한 — 비상관화 모델은 배경 
 SHAPE_WEAK_GATE  = 110    # 점프 게이트 기본 반경(px) — 도형은 ~2px/frame이라 순간 점프는 가짜
 SHAPE_GATE_GROW  = 12     # 미검출 1프레임당 게이트 확장(px) — 오래 놓치면 점점 넓게 재탐색
 SHAPE_GATE_MAX   = 280    # 게이트 확장 상한(px)
-SHAPE_BG_REJECT  = 15     # 배경동조 거부 반경(px) — 투명 단계 후보가 '직전위치+배경변위'
-                          #   근처(=배경 따라 흘러온 데칼)면 거부+coast. 인게임 입증(특이성 3배차)
+SHAPE_BG_REJECT  = 12     # 배경동조 판정 반경(px) — 후보가 '직전위치+배경변위'(=배경 따라
+                          #   흘러온 데칼)에서 이 거리 이상이면 '배경과 다른 움직임'(비동조=타겟 후보)
+SHAPE_PRED_GATE  = 30     # ID 추적 예측위치 게이트(px) — 좁게 잡아 같은 객체만 연결(데칼 튐 방지)
+SHAPE_PRED_GROW  = 8      # 미검출 1프레임당 예측 게이트 확장(px) — 놓치면 점점 넓게 재포착
 MH_ASSETS   = os.path.join(ROOT, "_maplehunter_extract",
                             "MapleHunter_v3.1.17.exe_extracted", "assets")
 
@@ -579,33 +581,29 @@ class _MacroThread(threading.Thread):
                                     else:
                                         _bc = (_wcx, _wcy, 1.0)
                                         _via_white = True
-                            # ② 흰색 안 보이면(투명) YOLO 연속성 — score≥0.3 필터 + 게이트 내
-                            #    예측 위치 최근접. 0.3 필터라 반투명 타겟(~0.47)도 포함.
+                            # ② 흰색 안 보이면(투명) ID 추적 — 예측위치(직전+속도) 좁은 게이트
+                            #    안에서만 연결해 '같은 객체'를 이어간다(넓은 게이트는 데칼로 튐).
+                            #    우선순위(사용자 설계): ① 배경과 다르게 움직이는 후보(비동조)
+                            #    ② 없으면 게이트 내 최근접, 게이트 내 없으면 칼만(예측) coast.
                             if _bc is None:
-                                _d2 = lambda c: ((c[0] - _last_marker_pos[0]) ** 2
-                                                 + (c[1] - _last_marker_pos[1]) ** 2)
                                 _px = _last_marker_pos[0] + _tvx
                                 _py = _last_marker_pos[1] + _tvy
                                 _dp = lambda c: (c[0] - _px) ** 2 + (c[1] - _py) ** 2
-                                _gate = min(SHAPE_GATE_MAX,
-                                            SHAPE_WEAK_GATE + SHAPE_GATE_GROW * _miss_run)
-                                _ing = [c for c in _pick if _d2(c) <= _gate * _gate]
-                                if _ing:
-                                    _bc = min(_ing, key=_dp)
-                                # 배경동조 거부: 후보가 '타겟 운동 예측'보다 '배경 흐름
-                                # 예측(직전+배경변위)'에 더 부합하면 배경 따라 흘러온 데칼이다.
-                                # 단순 "배경동조위치 15px내 거부"는 타겟이 배경과 같은 방향일 때
-                                # 진짜 타겟까지 거부해 멈춤(인게임 확인) → 예측위치와 비교해,
-                                # 배경동조위치에 '더 가까울' 때만 거부(예측에 더 가까우면 타겟 허용).
-                                if _bc is not None:
-                                    _bgcx = _last_marker_pos[0] + _bgx
-                                    _bgcy = _last_marker_pos[1] + _bgy
-                                    _dbg = ((_bc[0] - _bgcx) ** 2 + (_bc[1] - _bgcy) ** 2) ** 0.5
-                                    _dpr = ((_bc[0] - _px) ** 2 + (_bc[1] - _py) ** 2) ** 0.5
-                                    if _dbg < _dpr and _dbg < SHAPE_BG_REJECT:
-                                        _bc = None
-                                        _via_white = False  # 진단: 배경동조거부 표시
-                                        _bg_rejected = True
+                                # 예측위치 기준 좁은 게이트(놓치면 확장) — ID 연속성의 핵심
+                                _pgate = min(SHAPE_GATE_MAX,
+                                             SHAPE_PRED_GATE + SHAPE_PRED_GROW * _miss_run)
+                                _ing = [c for c in _pick if _dp(c) <= _pgate * _pgate]
+                                # 배경동조위치(직전+배경변위)에서 먼 후보 = 배경과 다른 움직임
+                                _bgcx = _last_marker_pos[0] + _bgx
+                                _bgcy = _last_marker_pos[1] + _bgy
+                                _nonbg = [c for c in _ing
+                                          if ((c[0] - _bgcx) ** 2 + (c[1] - _bgcy) ** 2)
+                                          >= SHAPE_BG_REJECT ** 2]
+                                _pool = _nonbg if _nonbg else _ing   # ① 비동조 우선 ② 없으면 전체
+                                if _pool:
+                                    _bc = min(_pool, key=_dp)
+                                if _bc is None:
+                                    _bg_rejected = True   # 진단: 게이트 내 후보 없음 → 칼만 coast
                             if _bc is not None:
                                 _tvx = _tvx * 0.6 + (_bc[0] - _last_marker_pos[0]) * 0.4
                                 _tvy = _tvy * 0.6 + (_bc[1] - _last_marker_pos[1]) * 0.4
