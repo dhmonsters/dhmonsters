@@ -589,6 +589,12 @@ class _MacroThread(threading.Thread):
                         if _tg is not None:
                             _tvx, _tvy = _tg.vx, _tg.vy
                             _miss_run = _tg.miss
+                        # 트랙 급감 진단 — 잠금 후 트랙이 5개 미만이면 후보 수와 함께 기록
+                        # (후보 많은데 트랙 적으면 _bt 버그, 후보도 적으면 검출 공백)
+                        if _bt.locked and _bt.track_count < 5:
+                            self._sig.log.emit(
+                                f"[트랙급감] 후보{len(_dets)}개(전체{len(_cands)}) "
+                                f"트랙{_bt.track_count} miss={_miss_run}")
                         _diag_cnt += 1
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
