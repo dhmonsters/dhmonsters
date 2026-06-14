@@ -76,9 +76,13 @@ class ByteTracker:
         self._tid = best.tid
 
     def nudge(self, x, y):
-        """흰색 가시 구간 — 타겟 트랙 위치를 밝기 중심으로 보정."""
+        """흰색 가시 구간 — 타겟 트랙 위치를 밝기 중심으로 보정 + 운동(속도) 반영.
+        흰색이 움직이면 그 속도를 타겟 트랙 vx,vy에 EMA로 누적 → 투명 전환 순간
+        운동 방향이 끊기지 않아 진짜 도형을 이어간다(흰색 정지면 vx≈0 유지)."""
         for t in self._tracks:
             if t.tid == self._tid:
+                t.vx = t.vx * 0.6 + (x - t.x) * 0.4
+                t.vy = t.vy * 0.6 + (y - t.y) * 0.4
                 t.x = float(x); t.y = float(y); t.miss = 0
                 return
 
