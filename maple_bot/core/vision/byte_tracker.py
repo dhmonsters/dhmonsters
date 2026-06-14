@@ -10,6 +10,7 @@ BT_GATE_GROW    = 8      # 미검출 1프레임당 게이트 확장(px)
 BT_GATE_MAX     = 280    # 게이트 상한(px)
 BT_JUMP_CAP     = 15     # 타겟 점프 상한(직전속도 위 여유, px) — 갈아타기 차단
 BT_REL_MIN      = 7.0    # 배경과 다른 속도 임계(px/f) — 흐림 재선택(이상탐지)
+BT_BG_REJECT    = 12     # 타겟 매칭 배경동조 거부(px) — 예측보다 배경흐름에 가까우면 데칼
 BT_HIGH_THR     = 0.30   # 1단계 high score
 BT_LOW_THR      = 0.10   # 2단계 low score 하한(반투명 타겟 0.18이 여기서 ID 유지)
 BT_LOST_MAX     = 15     # 타겟 lost coast 유지 한계(프레임)
@@ -117,6 +118,10 @@ class ByteTracker:
     def update(self, gray_f32, dets):
         """매 프레임. dets=[(cx,cy,score),...]. 타겟 트랙 위치 (x,y)|None 반환.
         gray_f32=None이면 phaseCorrelate 생략(jsonl 재시뮬용)."""
+        # 타겟 직전 상태 보관(배경동조 매칭 검증용)
+        _tg0 = next((t for t in self._tracks if t.tid == self._tid), None)
+        _tg0_state = (_tg0.x, _tg0.y, _tg0.vx, _tg0.vy) if _tg0 is not None else None
+
         # 배경 전역 변위(폴백용)
         bx = by = 0.0
         if (gray_f32 is not None and self._prev is not None
@@ -163,8 +168,22 @@ class ByteTracker:
         else:
             self._bgvx, self._bgvy = bx, by
 
-        # 타겟 흐림(lost) → 배경과 다른 속도(이상) 트랙으로 ID 승계
+        # 타겟이 배경동조 데칼을 매칭했으면 취소 → coast (예측보다 배경흐름에 더 가까움).
+        # 5초대 회전 배경과 타겟 방향이 겹치는 순간 데칼로 갈아타는 것을 차단(인게임 확인).
         tgt = next((t for t in self._tracks if t.tid == self._tid), None)
+        if tgt is not None and tgt.miss == 0 and _tg0_state is not None:
+            _px = _tg0_state[0] + _tg0_state[2]
+            _py = _tg0_state[1] + _tg0_state[3]
+            _bgpx = _tg0_state[0] + self._bgvx
+            _bgpy = _tg0_state[1] + self._bgvy
+            _dpr = ((tgt.x - _px) ** 2 + (tgt.y - _py) ** 2) ** 0.5
+            _dbg = ((tgt.x - _bgpx) ** 2 + (tgt.y - _bgpy) ** 2) ** 0.5
+            if _dbg < _dpr and _dbg < BT_BG_REJECT:
+                tgt.x, tgt.y = _px, _py     # 예측 복귀(coast)
+                tgt.miss = 1
+                tgt.vx *= 0.9; tgt.vy *= 0.9
+
+        # 타겟 흐림(lost) → 배경과 다른 속도(이상) 트랙으로 ID 승계
         if tgt is not None and tgt.miss > 0:
             r2 = min(BT_GATE_MAX, BT_GATE + BT_GATE_GROW * tgt.miss)
             pool = [t for t in self._tracks
