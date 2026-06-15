@@ -108,6 +108,12 @@ from planet_yolo_verify import M1Ensemble, HyungYolo
 from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
 from core.shape_yolo import ShapeYolo
 from core.vision.byte_tracker import ByteTracker
+from core.vision.shape_classifier import ShapeClassifier
+
+# 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
+# 모양별 전문은 '그 모양 특화'가 아니라 모델별 분포 민감도 — circle이 범용 강세.
+_SHAPE2MODEL = {"star": "star", "square": "circle",
+                "circle": "circle", "triangle": "circle"}
 
 def _load_models(use_gpu: bool = False):
     param = os.path.join(ASSETS, "hyung_m1.param")
@@ -371,6 +377,13 @@ class _MacroThread(threading.Thread):
         if _syolo_shapes:
             self._sig.log.emit(
                 f"[*] 모양별 전문 검출기 {len(_syolo_shapes)}개 로드: {list(_syolo_shapes)}")
+        # 모양 분류기(YOLO-cls ncnn) — 흰색 도형 crop을 4모양 분류, 검출 score보다 정확.
+        _cls_dir = os.path.join(ROOT, "models", "shape_cls_ncnn_model")
+        _shape_cls = ShapeClassifier(
+            os.path.join(_cls_dir, "model.ncnn.param"),
+            os.path.join(_cls_dir, "model.ncnn.bin"))
+        if _shape_cls.enabled:
+            self._sig.log.emit("[*] 모양 분류기(shape_cls) 로드 완료")
 
         self._sig.log.emit("[*] 메이플 창 탐색...")
         hwnd = _find_hwnd()
@@ -405,8 +418,8 @@ class _MacroThread(threading.Thread):
         _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
         _bt = ByteTracker()         # ByteTrack MOT — 모든 후보 ID 트랙 + 배경 이상탐지
         _target_shape = None        # 흰색 단계 판별된 타겟 모양(이후 전문 검출기 사용)
-        _shape_acc = {}             # 흰색 단계 모양별 score 누적(단일 프레임은 박빙→누적 판별)
-        _shape_cnt = 0              # 흰색 단계 누적 프레임 수(8프레임에 모양 확정)
+        _shape_votes = {}           # 흰색 단계 분류기 투표(3프레임 다수결로 모양 확정)
+        _shape_cnt = 0              # 흰색 단계 분류 프레임 수
         # 검출 모델: 판별 전엔 흰색 누적 1위(없으면 첫 전문가), 판별 후 그 전문가. 통합 미사용.
         _syolo_active = (next(iter(_syolo_shapes.values()))
                          if _syolo_shapes else _syolo)
@@ -466,7 +479,7 @@ class _MacroThread(threading.Thread):
                             _tvx = _tvy = 0.0
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
                             _target_shape = None    # 다음 판 모양 재판별
-                            _shape_acc = {}
+                            _shape_votes = {}
                             _shape_cnt = 0
                             _syolo_active = (next(iter(_syolo_shapes.values()))
                                              if _syolo_shapes else _syolo)
@@ -594,24 +607,26 @@ class _MacroThread(threading.Thread):
                                 _via_white = True
                         # 모양 판별 — 흰색 단계 매 프레임 4 전문가 score 누적, 누적 1위 모델로
                         # 다음 프레임 검출(통합 미사용, 단일 프레임은 박빙이라 누적). 흰색 소실 시 확정.
-                        # 흰색 active는 첫 전문가로 고정(매프레임 교체는 트랙 혼란), 판별만
-                        # 누적 → 초반 8프레임에 확정하면 흰색 나머지+투명을 타겟 모델로 검출.
-                        if _target_shape is None and _syolo_shapes:
+                        # 모양 판별 — 흰색 도형 crop을 분류기로 4모양 분류(검출 score보다
+                        # 정확, 세모/네모도 구분). 3프레임 다수결 확정 → 추적 최적 전문 검출기.
+                        # 흰색 active는 첫 전문가 고정(매프레임 교체는 트랙 혼란), 확정 후 교체.
+                        if _target_shape is None and _shape_cls.enabled and _syolo_shapes:
                             if _wb is not None and _wb[2] >= 50 and _wc is not None:
-                                for _sh, _sy in _syolo_shapes.items():
-                                    _b = 0.0
-                                    for _c in _sy.detect_all(det_detect, score_thr=0.05):
-                                        if ((_c[0] - _wc[0]) ** 2 + (_c[1] - _wc[1]) ** 2
-                                                <= 40 ** 2 and _c[2] > _b):
-                                            _b = _c[2]
-                                    _shape_acc[_sh] = _shape_acc.get(_sh, 0.0) + _b
-                                _shape_cnt += 1
-                                if _shape_cnt >= 8:    # 흰색 초반 8프레임 누적 → 모양 확정
-                                    _target_shape = max(_shape_acc, key=_shape_acc.get)
-                                    _syolo_active = _syolo_shapes[_target_shape]
-                                    self._sig.log.emit(
-                                        f"[모양확정] {_target_shape} "
-                                        f"{({k: round(v, 1) for k, v in _shape_acc.items()})}")
+                                _x0 = max(0, _wb[0] - 10); _y0 = max(0, _wb[1] - 10)
+                                _x1 = min(_dw, _wb[0] + _wb[2] + 10)
+                                _y1 = min(_dh, _wb[1] + _wb[3] + 10)
+                                _sh, _sc = _shape_cls.classify(det[_y0:_y1, _x0:_x1])
+                                if _sh is not None:
+                                    _shape_votes[_sh] = _shape_votes.get(_sh, 0) + 1
+                                    _shape_cnt += 1
+                                    if _shape_cnt >= 3:    # 3프레임 다수결 → 모양 확정
+                                        _target_shape = max(_shape_votes,
+                                                            key=_shape_votes.get)
+                                        _mdl = _SHAPE2MODEL.get(_target_shape, "circle")
+                                        _syolo_active = _syolo_shapes.get(_mdl, _syolo)
+                                        self._sig.log.emit(
+                                            f"[모양확정] {_target_shape} → {_mdl} 검출기 "
+                                            f"{dict(_shape_votes)}")
                         # ByteTrack MOT — 모든 후보 ID 트랙 + 2단계 association + 배경 이상탐지
                         _pos = _bt.update(_cur_gray, _dets)
                         if not _bt.locked:
