@@ -42,6 +42,9 @@ models/
 # 데이터셋
 dataset/
 dataset_yolo/
+dataset_shapes/
+_shape_check/
+_shape_train_work/
 .superpowers/
 
 # 투명도형 추적 디버그 산출물(영상/캡처/궤적)
