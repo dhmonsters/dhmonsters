@@ -319,7 +319,8 @@ class _MacroThread(threading.Thread):
     SCORE = 0.2
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
-                 tg_enabled: bool = False, tg_token: str = "", tg_chat: str = ""):
+                 tg_enabled: bool = False, tg_token: str = "", tg_chat: str = "",
+                 reacq: bool = False):
         super().__init__(daemon=True)
         self._sig      = sig
         self._gpu      = use_gpu
@@ -327,6 +328,7 @@ class _MacroThread(threading.Thread):
         self._tg       = tg_enabled and bool(tg_token) and bool(tg_chat)
         self._tg_token = tg_token
         self._tg_chat  = tg_chat
+        self._reacq    = reacq   # 턴 재획득(orphan re-acquisition) — A/B 실험용 토글
         self._stop     = threading.Event()
 
     def stop(self):
@@ -416,7 +418,8 @@ class _MacroThread(threading.Thread):
         _tvx = _tvy = 0.0            # 추적 속도 EMA — 교차(겹침) 시 데칼 갈아타기 방지용 예측
         _prev_gray = None           # 직전 프레임 gray(배경 변위 측정용)
         _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
-        _bt = ByteTracker()         # ByteTrack MOT — 모든 후보 ID 트랙 + 배경 이상탐지
+        _bt = ByteTracker(reacq=self._reacq)   # ByteTrack MOT(+턴 재획득 토글)
+        self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
         _target_shape = None        # 흰색 단계 판별된 타겟 모양(이후 전문 검출기 사용)
         _shape_votes = {}           # 흰색 단계 분류기 투표(3프레임 다수결로 모양 확정)
         _shape_cnt = 0              # 흰색 단계 분류 프레임 수
@@ -1121,8 +1124,14 @@ class MainUI(QWidget):
         self.chk_gpu   = QCheckBox("GPU 사용 (Vulkan, fp32)")
         self.chk_sound = QCheckBox("소리 알람 (도형찾기 감지 시)")
         self.chk_sound.setChecked(True)
+        self.chk_reacq = QCheckBox("턴 재획득 (실험 · A/B용, 기본 끔)")
+        self.chk_reacq.setToolTip(
+            "투명 단계에서 타겟이 꺾일 때 다른 도형으로 새면, 페이드 자리에서 "
+            "재출현하는 진짜 도형으로 되돌리는 실험 기능. 일부 판을 살리나 일부 판을 "
+            "깰 수 있어 인게임 A/B 검증용. 기본 끔.")
         opt.addWidget(self.chk_gpu)
         opt.addWidget(self.chk_sound)
+        opt.addWidget(self.chk_reacq)
         root.addWidget(opt_card)
 
         # 텔레그램 (UI 유지, 기능은 선택)
@@ -1190,6 +1199,7 @@ class MainUI(QWidget):
             tg_enabled=self.chk_tg.isChecked(),
             tg_token=self.tg_token.text().strip(),
             tg_chat=self.tg_chat.text().strip(),
+            reacq=self.chk_reacq.isChecked(),
         )
         self._macro.start()
 

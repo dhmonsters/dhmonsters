@@ -1,6 +1,7 @@
 # 투명 도형 ByteTrack 경량 MOT — 2단계 헝가리안 association으로 약검출 타겟 ID 유지 + 배경 공통속도 이상탐지
 from __future__ import annotations
 
+import os
 import cv2
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -15,12 +16,46 @@ BT_REL_EMA      = 0.3    # rel_ema 현재반영 비율 — 다중가설 누적 �
 BT_BG_REJECT    = 20     # 타겟 매칭 배경동조 거부(px) — 예측보다 배경흐름에 가까우면 데칼
                          #   (모양별 전문 검출은 후보 2배 → 데칼 매칭↑, 거부 강화로 배제.
                          #    GT 062325(circle): 12→20으로 51→25px, 이탈 0)
+BT_HOLD_JUMP    = 15     # 점프 보류 임계 — 매칭이 직전속도+이 값 초과 점프면 데칼 의심
+BT_HOLD_SCORE   = 0.40   # 약검출 임계 — 점프+이 score 미만이면 즉시 갈아타지 않고 coast
 BT_HIGH_THR     = 0.30   # 1단계 high score
 BT_LOW_THR      = 0.10   # 2단계 low score 하한(반투명 타겟 0.18이 여기서 ID 유지)
 BT_LOST_MAX     = 15     # 타겟 lost coast 유지 한계(프레임)
 BT_TRK_MISS_MAX = 10     # 비타겟 트랙 제거 전 허용 미매칭
 BT_DECAL_N      = 3      # 배경 계산에 쓸 대표 데칼 수(age 큰 상위 N개 — 전부 불필요)
 BT_DECAL_AGE    = 3      # 배경 중앙값에 넣을 데칼 최소 age
+
+# CMC(전역 운동 보상) — 회전 배경을 어파인(회전+균일스케일+이동)으로 모델링.
+# 단일 이동 벡터(데칼 속도 중앙값)는 회전장에서 무의미 → 안정화 좌표계 잔차로 타겟 판별.
+BT_CMC_MIN_PAIRS  = 6     # 데칼 대응쌍 최소(미만이면 ORB 폴백)
+BT_CMC_INLIER     = 0.5   # RANSAC inlier 비율 하한(미만이면 ORB 폴백)
+BT_CMC_MAX_DTHETA = 0.20  # 프레임당 회전각 상한(rad) — 초과 시 reject+coast
+BT_CMC_RANSAC_T   = 3.0   # RANSAC 재투영 임계(px)
+BT_CMC_OMEGA_EMA  = 0.2   # 각속도 ω EMA 반영비
+BT_CMC_ORB_N      = 400   # ORB 특징점 수
+
+# occlusion(겹침) 3-state 상태머신 — NMS가 같은-모양 박스를 IoU>0.45(중심거리 floor~14px,
+# 측정 확증)에서 한 박스로 뭉침. 흡수 구간엔 검출이 타겟인지 데칼인지 구분 불가 → 검출 무관
+# 무조건 coast(v_pre)로 통과해 '겹침 후 갈아타기' 차단. 중심거리 히스테리시스(IoU 불필요).
+BT_OCC_ENTER = 14    # 흡수 진입(px) = NMS floor. 근방 데칼이 검출 잃고 이 거리내면 흡수
+BT_OCC_EXIT  = 25    # 분리(px). 타겟 예측 근방 제2후보 재출현 = split (히스테리시스 갭 11px)
+BT_OCC_NPRE  = 5     # v_pre 평균낼 직전 프레임 수(진입 직전 한 프레임 동조 오염 방지)
+BT_OCC_MAX   = 10    # OCCLUDING 최대 지속(≤BT_TRK_MISS_MAX, 초과 시 강제 종료)
+
+# orphan 재출현 재획득 — 턴 오매칭(타겟이 꺾이며 트랙이 옛방향 데칼로 샘) 복구.
+# 과거연속성 신호(rel/검출지지/v_pre)는 턴에서 전부 죽음(측정) → '페이드 자리에서 새로
+# 태어나 강해지는' 미래신호로 재획득. 공간(anchor)×시간(지속) 이중게이트로 271px 방지.
+BT_REACQ_N          = 5    # anchor = 타겟 트랙 위치 N프레임 전(N3 오염·N8 stale, 측정상 5 최적)
+BT_REACQ_ANCHOR_MAX = 100  # anchor 최근접 orphan 게이트(px) — 회복56~96 통과/데칼>200 거부
+BT_REACQ_AGE        = 4    # orphan young 상한(데칼 지속이라 age 큼 → 컬링)
+BT_REACQ_SCORE      = 0.6  # orphan 강검출 하한
+BT_REACQ_HOLD       = 3    # 같은 orphan 연속 프레임 확정(단발 far 강검출 발동불가 = 271px 방지)
+BT_REACQ_MIN_SEP    = 50   # orphan이 현재 타겟서 이만큼 떨어져야 발동(옆 데칼 오발 차단)
+                           #   035137 진짜재출현은 새는트랙서 72~96px / 백색단계 오발은 ~0px
+BT_REACQ_NUDGE_GAP  = 5    # 마지막 nudge(백색추적) 후 이만큼 지나야 발동 — 백색단계 오발 차단
+                           #   (백색은 밝기추적이 정확, re-acq 불필요. 투명전환 후에만 작동)
+BT_REACQ_TGT_NEAR   = 50   # 현재 타겟이 anchor서 이 안일 때만 발동(트랙 갇힘=샘/스톨 신호).
+                           #   035137 새는트랙 anchor 31~35px / 정상판은 steady 이동해 멀어짐
 
 
 class _BTrack:
@@ -40,16 +75,48 @@ class ByteTracker:
     흰색 잠금 타겟에 ID 부여, 모든 후보를 트랙으로 추적, 약검출(반투명 타겟)도
     2단계 매칭으로 ID 유지. 타겟 흐림 시 배경과 다른 속도 트랙으로 ID 승계."""
 
-    def __init__(self):
+    def __init__(self, cmc: bool = False, occl: bool = False, reacq: bool = False):
+        # cmc=False(기본)면 어파인 보상 일체 비활성 → 원본 ByteTrack 좌표계(속도차) 판별로
+        # 완전 복귀. CMC는 단일 스위치 뒤 격리(부분 켜짐 상태 없음). 실험은 CMC_ON=1 env.
+        self._cmc_on = bool(cmc) or os.environ.get("CMC_ON") == "1"
+        # occl=False(기본)면 occlusion 상태머신 일체 비활성 → IDLE 경로(baseline)만.
+        # 측정상 035137 지배실패는 occlusion 아닌 '턴 오매칭'이라 주력에서 내림. VOT 진짜
+        # 겹침 대비 격리 보관(삭제 아님). 실험은 OCCL_ON=1 env.
+        self._occ_on = bool(occl) or os.environ.get("OCCL_ON") == "1"
+        # reacq=False(기본)면 재획득 비활성. 턴 오매칭 복구 주력(035137). 실험은 REACQ_ON=1.
+        self._reacq_on = bool(reacq) or os.environ.get("REACQ_ON") == "1"
         self._prev = None
         self._tracks: list[_BTrack] = []
         self._tid = None
         self._next = 0
         self._bgvx = 0.0; self._bgvy = 0.0
+        self._H = None         # 현재 프레임 어파인(2×3, 직전→현재)
+        self._H_last = None    # 마지막 정상 H(coast용)
+        self._omega = 0.0      # 등속회전 각속도 EMA(rad/frame)
+        self._cx = 0.0; self._cy = 0.0   # 외삽 회전 중심(프레임 중심)
+        self._orb = None       # ORB 검출기(지연 생성)
+        # occlusion 상태머신
+        self._state = "IDLE"   # IDLE / OCCLUDING / SEPARATING
+        self._occ_ids = set()  # 흡수에 연루된 데칼 tid(컬링 면제 + 분리 시 후보 한정)
+        self._vpre = (0.0, 0.0)  # OCCLUDING 진입 시 스냅샷한 타겟 속도(coast 방향)
+        self._vhist = []       # 최근 타겟 속도 이력(v_pre 평균용)
+        self._occ_cnt = 0      # OCCLUDING 지속 프레임
+        self._near_prev = {}   # 직전 프레임 타겟 근방(검출됨) 데칼 tid→위치(흡수 감지용)
+        # orphan 재획득
+        self._anchor_hist = []  # 타겟 트랙 위치 이력(anchor = N프레임 전)
+        self._reacq_tid = None  # 재획득 후보 orphan tid(지속 확정용)
+        self._reacq_cnt = 0     # 그 후보가 anchor 최근접으로 연속된 프레임 수
+        self._nudge_age = 999   # 마지막 nudge(백색추적) 후 경과 프레임(백색 중 re-acq 차단)
 
     def reset(self):
         self._prev = None; self._tracks = []; self._tid = None
         self._next = 0; self._bgvx = 0.0; self._bgvy = 0.0
+        self._H = None; self._H_last = None; self._omega = 0.0
+        self._cx = 0.0; self._cy = 0.0
+        self._state = "IDLE"; self._occ_ids = set(); self._vpre = (0.0, 0.0)
+        self._vhist = []; self._occ_cnt = 0; self._near_prev = {}
+        self._anchor_hist = []; self._reacq_tid = None; self._reacq_cnt = 0
+        self._nudge_age = 999
 
     @property
     def locked(self):
@@ -84,6 +151,7 @@ class ByteTracker:
         """흰색 가시 구간 — 타겟 트랙 위치를 밝기 중심으로 보정 + 운동(속도) 반영.
         흰색이 움직이면 그 속도를 타겟 트랙 vx,vy에 EMA로 누적 → 투명 전환 순간
         운동 방향이 끊기지 않아 진짜 도형을 이어간다(흰색 정지면 vx≈0 유지)."""
+        self._nudge_age = 0   # 백색 추적 중 — re-acq 차단(투명 전환 후에만 작동)
         for t in self._tracks:
             if t.tid == self._tid:
                 t.vx = t.vx * 0.6 + (x - t.x) * 0.4
@@ -124,12 +192,105 @@ class ByteTracker:
         t.x = float(d[0]); t.y = float(d[1]); t.score = float(d[2])
         t.age += 1; t.miss = 0
 
+    def _warp(self, x, y, bx, by):
+        """배경 예측 위치 = 어파인 H(직전→현재)로 점 워핑. H 없으면 이동 폴백(x+bx, y+by)."""
+        H = self._H
+        if H is None:
+            return x + bx, y + by
+        return (H[0, 0] * x + H[0, 1] * y + H[0, 2],
+                H[1, 0] * x + H[1, 1] * y + H[1, 2])
+
+    @staticmethod
+    def _sane(M):
+        """추정 어파인의 프레임당 회전각이 물리적 범위 내인지."""
+        if M is None:
+            return False, 0.0
+        dtheta = float(np.arctan2(M[1, 0], M[0, 0]))
+        return (abs(dtheta) <= BT_CMC_MAX_DTHETA), dtheta
+
+    def _estimate_cmc(self, prev_pos, prev_gray, cur_gray):
+        """전역 운동 보상 어파인 H(직전→현재) 추정. 3단 폴백: 데칼 대응쌍 → ORB → ω 외삽.
+        prev_pos: {tid:(x,y)} 프레임 시작 스냅샷. 회전하는 배경을 강체 유사변환(4DOF)으로 모델."""
+        # 1) 데칼 대응쌍(비타겟, 이번 프레임 매칭됨, age>=2)
+        src = []; dst = []
+        for t in self._tracks:
+            if (t.tid != self._tid and t.miss == 0 and t.age >= 2
+                    and t.tid in prev_pos):
+                src.append(prev_pos[t.tid]); dst.append((t.x, t.y))
+        if len(src) >= BT_CMC_MIN_PAIRS:
+            M, inl = cv2.estimateAffinePartial2D(
+                np.float32(src), np.float32(dst),
+                method=cv2.RANSAC, ransacReprojThreshold=BT_CMC_RANSAC_T)
+            ratio = float(inl.mean()) if inl is not None else 0.0
+            ok, dtheta = self._sane(M)
+            if M is not None and ratio >= BT_CMC_INLIER and ok:
+                self._accept(M, dtheta); return "decal"
+
+        # 2) ORB 폴백 — 데칼 부족/품질 저하 시(겹침 구간) gray 특징점으로 어파인
+        if prev_gray is not None and cur_gray is not None:
+            M = self._orb_affine(prev_gray, cur_gray)
+            ok, dtheta = self._sane(M)
+            if M is not None and ok:
+                self._accept(M, dtheta); return "orb"
+
+        # 3) 등속회전 ω 외삽 — 둘 다 실패. 직전 H의 이동분 보존 + ω 회전. coast.
+        if abs(self._omega) > 1e-4 and (cur_gray is not None or self._H_last is not None):
+            R = cv2.getRotationMatrix2D((self._cx, self._cy),
+                                        -np.degrees(self._omega), 1.0)
+            if self._H_last is not None:
+                R[0, 2] += self._H_last[0, 2]; R[1, 2] += self._H_last[1, 2]
+            self._H = R; return "omega"
+
+        # 폴백 불가 → H 없음(이동 보상으로 복귀)
+        self._H = self._H_last
+        return "none"
+
+    def _accept(self, M, dtheta):
+        M = M.astype(np.float64)
+        if os.environ.get("CMC_TRANS") == "1":
+            # 길 B — 어파인을 프레임 중심 이동량으로 투영(회전/스케일 제거, 순수 병진 2DOF)
+            tx = M[0, 0] * self._cx + M[0, 1] * self._cy + M[0, 2] - self._cx
+            ty = M[1, 0] * self._cx + M[1, 1] * self._cy + M[1, 2] - self._cy
+            M = np.array([[1.0, 0.0, tx], [0.0, 1.0, ty]], dtype=np.float64)
+            dtheta = 0.0
+        self._H = M
+        self._H_last = self._H
+        self._omega = self._omega * (1 - BT_CMC_OMEGA_EMA) + dtheta * BT_CMC_OMEGA_EMA
+        self._last_dtheta = dtheta
+
+    def _orb_affine(self, prev_gray, cur_gray):
+        """직전/현재 gray ORB 매칭 → RANSAC 어파인. 특징점 부족/매칭 부족 시 None."""
+        try:
+            if self._orb is None:
+                self._orb = cv2.ORB_create(BT_CMC_ORB_N)
+            p8 = prev_gray.astype(np.uint8); c8 = cur_gray.astype(np.uint8)
+            k1, d1 = self._orb.detectAndCompute(p8, None)
+            k2, d2 = self._orb.detectAndCompute(c8, None)
+            if d1 is None or d2 is None or len(k1) < BT_CMC_MIN_PAIRS:
+                return None
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+            matches = bf.match(d1, d2)
+            if len(matches) < BT_CMC_MIN_PAIRS:
+                return None
+            src = np.float32([k1[m.queryIdx].pt for m in matches])
+            dst = np.float32([k2[m.trainIdx].pt for m in matches])
+            M, _ = cv2.estimateAffinePartial2D(
+                src, dst, method=cv2.RANSAC, ransacReprojThreshold=BT_CMC_RANSAC_T)
+            return M
+        except Exception:
+            return None
+
     def update(self, gray_f32, dets):
         """매 프레임. dets=[(cx,cy,score),...]. 타겟 트랙 위치 (x,y)|None 반환.
         gray_f32=None이면 phaseCorrelate 생략(jsonl 재시뮬용)."""
+        self._nudge_age += 1   # 마지막 nudge(백색) 후 경과 — re-acq 백색 차단용
         # 타겟 직전 상태 보관(배경동조 매칭 검증용)
         _tg0 = next((t for t in self._tracks if t.tid == self._tid), None)
         _tg0_state = (_tg0.x, _tg0.y, _tg0.vx, _tg0.vy) if _tg0 is not None else None
+
+        # CMC용 직전 스냅샷 — 각 트랙의 직전 위치(어파인 대응쌍·잔차) + 직전 gray(ORB)
+        prev_pos = {t.tid: (t.x, t.y) for t in self._tracks}
+        prev_gray = self._prev
 
         # 배경 전역 변위(폴백용)
         bx = by = 0.0
@@ -138,6 +299,8 @@ class ByteTracker:
             (bx, by), _ = cv2.phaseCorrelate(self._prev, gray_f32)
         if gray_f32 is not None:
             self._prev = gray_f32
+            _h, _w = gray_f32.shape[:2]
+            self._cx = _w / 2.0; self._cy = _h / 2.0
 
         high = [d for d in dets if d[2] >= BT_HIGH_THR]
         low = [d for d in dets if BT_LOW_THR <= d[2] < BT_HIGH_THR]
@@ -179,53 +342,168 @@ class ByteTracker:
         else:
             self._bgvx, self._bgvy = bx, by
 
+        # [CMC 격리] 켜진 경우만 전역 운동 보상 어파인 H 추정. 꺼지면 H=None 유지(원본 복귀).
+        if self._cmc_on:
+            self._estimate_cmc(prev_pos, prev_gray, gray_f32)
+
         # 다중가설 누적: 모든 트랙의 '배경과 다른 정도'를 EMA로 누적. 데칼은 배경동조라
-        # rel≈0으로 수렴, 진짜 도형은 랜덤이라 rel 누적이 큼 → 재선택 채택 근거(GT 검증:
-        # 분기 후 누적rel 최대 트랙이 진짜 도형. 즉시 최근접 대신 누적 증거로 갈아타기).
+        # rel≈0 수렴, 진짜 도형은 랜덤이라 rel 누적이 큼 → 재선택 채택 근거.
+        #   CMC 켜짐: 안정화 좌표계 위치 잔차 ||현재 - H·직전||.
+        #   CMC 꺼짐: 원본 ByteTrack 속도차 ||(vx-bgvx, vy-bgvy)|| (어파인 이전 베이스라인).
+        _resid = {}
         for t in self._tracks:
-            _r = ((t.vx - self._bgvx) ** 2 + (t.vy - self._bgvy) ** 2) ** 0.5
+            if self._cmc_on:
+                pp = prev_pos.get(t.tid)
+                if pp is None:
+                    continue   # 신규 트랙 — 직전 위치 없음, 이번 프레임 누적 보류
+                _wx, _wy = self._warp(pp[0], pp[1], bx, by)
+                _r = ((t.x - _wx) ** 2 + (t.y - _wy) ** 2) ** 0.5
+            else:
+                _r = ((t.vx - self._bgvx) ** 2 + (t.vy - self._bgvy) ** 2) ** 0.5
+            _resid[t.tid] = _r
             t.rel_ema = t.rel_ema * (1 - BT_REL_EMA) + _r * BT_REL_EMA
 
-        # 타겟이 배경동조 데칼을 매칭했으면 취소 → coast (예측보다 배경흐름에 더 가까움).
-        # 5초대 회전 배경과 타겟 방향이 겹치는 순간 데칼로 갈아타는 것을 차단(인게임 확인).
         tgt = next((t for t in self._tracks if t.tid == self._tid), None)
-        if tgt is not None and tgt.miss == 0 and _tg0_state is not None:
-            _px = _tg0_state[0] + _tg0_state[2]
-            _py = _tg0_state[1] + _tg0_state[3]
-            _bgpx = _tg0_state[0] + self._bgvx
-            _bgpy = _tg0_state[1] + self._bgvy
-            _dpr = ((tgt.x - _px) ** 2 + (tgt.y - _py) ** 2) ** 0.5
-            _dbg = ((tgt.x - _bgpx) ** 2 + (tgt.y - _bgpy) ** 2) ** 0.5
-            if _dbg < _dpr and _dbg < BT_BG_REJECT:
-                tgt.x, tgt.y = _px, _py     # 예측 복귀(coast)
-                tgt.miss = 1
-                tgt.vx *= 0.9; tgt.vy *= 0.9
 
-        # 타겟 흐림(lost) → 배경과 다른 속도(이상) 트랙으로 ID 승계.
-        # 멀리 점프 차단: 재선택 거리를 직전 속도+여유로 제한(먼 비동조 데칼 승계 방지).
-        if tgt is not None and tgt.miss > 0:
-            _gate = min(BT_GATE_MAX, BT_GATE + BT_GATE_GROW * tgt.miss)
-            # 거리 = 속도+여유 + 놓친 만큼 확장(분리 직후 miss작음→좁아 갈아타기 차단,
-            # 오래 놓침 miss큼→넓어 빠른 도형 재포착)
-            _jlim = ((tgt.vx * tgt.vx + tgt.vy * tgt.vy) ** 0.5
-                     + BT_JUMP_CAP + BT_GATE_GROW * tgt.miss * 0.5)
-            r2 = min(_gate, _jlim)
-            pool = [t for t in self._tracks
-                    if t.tid != self._tid and t.miss == 0
-                    and (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 <= r2 * r2
-                    and ((t.vx - self._bgvx) ** 2
-                         + (t.vy - self._bgvy) ** 2) ** 0.5 >= BT_REL_MIN]
-            if pool:
-                # 다중가설 채택: 누적rel(rel_ema) 최대 = 배경과 가장 다르게 움직인 트랙
-                # = 진짜 도형(GT 검증). 동률 시 예측 가까운 쪽(거리 페널티 소폭).
-                best = max(pool, key=lambda t: t.rel_ema
-                           - ((t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2) ** 0.5 * 0.05)
-                self._tid = best.tid
-                tgt = best
+        if self._state == "OCCLUDING" and tgt is not None:
+            # 흡수 구간 — 뭉친 1개 검출이 타겟인지 데칼인지 구분 불가(NMS는 고score 잔류).
+            # 헝가리안 오배정 위험까지 단일 정책으로 차단: score 무관 무조건 v_pre coast.
+            if _tg0_state is not None:
+                tgt.x = _tg0_state[0] + self._vpre[0]
+                tgt.y = _tg0_state[1] + self._vpre[1]
+                tgt.vx, tgt.vy = self._vpre
+                tgt.miss += 1
+            self._occ_cnt += 1
+            # 종료 — 타겟 예측 근방 EXIT 내 제2후보(데칼) 재출현 = split, 또는 최대 지속 초과
+            _sep = any((t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 <= BT_OCC_EXIT ** 2
+                       for t in self._tracks
+                       if t.tid != self._tid and t.miss == 0)
+            if _sep or self._occ_cnt > BT_OCC_MAX:
+                # (3단계 SEPARATING 재결합 자리) 현재는 IDLE 복귀 → 다음 프레임 정상 매칭 재포착
+                self._state = "IDLE"; self._occ_ids = set(); self._occ_cnt = 0
 
-        # 비타겟 트랙 정리
+        elif self._state == "IDLE":
+            # ── 기존 IDLE 경로(baseline 동일) — bg_reject + HOLD 단발 + 흐림 재선택 ──
+            # 타겟이 배경동조 데칼을 매칭했으면 취소 → coast (예측보다 배경흐름에 더 가까움).
+            if tgt is not None and tgt.miss == 0 and _tg0_state is not None:
+                _px = _tg0_state[0] + _tg0_state[2]
+                _py = _tg0_state[1] + _tg0_state[3]
+                # 배경 예측 — CMC 켜짐: 어파인 H 워핑 / 꺼짐: 원본 이동 bgvx,bgvy
+                if self._cmc_on:
+                    _bgpx, _bgpy = self._warp(_tg0_state[0], _tg0_state[1],
+                                              self._bgvx, self._bgvy)
+                else:
+                    _bgpx = _tg0_state[0] + self._bgvx
+                    _bgpy = _tg0_state[1] + self._bgvy
+                _dpr = ((tgt.x - _px) ** 2 + (tgt.y - _py) ** 2) ** 0.5
+                _dbg = ((tgt.x - _bgpx) ** 2 + (tgt.y - _bgpy) ** 2) ** 0.5
+                if _dbg < _dpr and _dbg < BT_BG_REJECT:
+                    tgt.x, tgt.y = _px, _py     # 배경동조 데칼 — 예측 복귀(coast)
+                    tgt.miss = 1
+                    tgt.vx *= 0.9; tgt.vy *= 0.9
+                else:
+                    # 점프 보류 — 매칭이 직전속도 크게 초과(점프) + 약검출이면 데칼 의심,
+                    # 즉시 갈아타지 않고 coast(예측).
+                    _disp = ((tgt.x - _tg0_state[0]) ** 2
+                             + (tgt.y - _tg0_state[1]) ** 2) ** 0.5
+                    _spd = (_tg0_state[2] ** 2 + _tg0_state[3] ** 2) ** 0.5
+                    if _disp > _spd + BT_HOLD_JUMP and tgt.score < BT_HOLD_SCORE:
+                        tgt.x, tgt.y = _px, _py
+                        tgt.miss = 1
+                        tgt.vx *= 0.9; tgt.vy *= 0.9
+
+            # 타겟 흐림(lost) → 배경과 다른 속도(이상) 트랙으로 ID 승계.
+            if tgt is not None and tgt.miss > 0:
+                _gate = min(BT_GATE_MAX, BT_GATE + BT_GATE_GROW * tgt.miss)
+                _jlim = ((tgt.vx * tgt.vx + tgt.vy * tgt.vy) ** 0.5
+                         + BT_JUMP_CAP + BT_GATE_GROW * tgt.miss * 0.5)
+                r2 = min(_gate, _jlim)
+                pool = [t for t in self._tracks
+                        if t.tid != self._tid and t.miss == 0
+                        and (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 <= r2 * r2
+                        and _resid.get(t.tid, 0.0) >= BT_REL_MIN]
+                if pool:
+                    best = max(pool, key=lambda t: t.rel_ema
+                               - ((t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2) ** 0.5 * 0.05)
+                    self._tid = best.tid
+                    tgt = best
+
+            # ── 흡수 진입 감지(방법 A) — 직전 근방(검출됨) 데칼이 검출 잃고 타겟 ENTER 내로 ──
+            if self._occ_on and tgt is not None:
+                _absorbed = {
+                    _did for _did, _ in self._near_prev.items()
+                    for _d in [next((t for t in self._tracks if t.tid == _did), None)]
+                    if _d is not None and _d.miss > 0
+                    and (_d.x - tgt.x) ** 2 + (_d.y - tgt.y) ** 2 <= BT_OCC_ENTER ** 2}
+                if _absorbed:
+                    self._state = "OCCLUDING"
+                    self._occ_ids = _absorbed
+                    self._occ_cnt = 0
+                    if self._vhist:
+                        self._vpre = (float(np.mean([v[0] for v in self._vhist])),
+                                      float(np.mean([v[1] for v in self._vhist])))
+                    else:
+                        self._vpre = (tgt.vx, tgt.vy)
+
+        # ── orphan 재출현 재획득(턴 오매칭 복구) — 035137형 ──────────────────────────
+        # 트랙이 옛방향 데칼로 새면(런타임엔 score 높아 안 보임), 페이드 자리(anchor=N프레임
+        # 전 트랙위치)에서 진짜 타겟이 young+고정+강 orphan으로 재출현. anchor 최근접 orphan이
+        # 3프레임 연속이면 jump-cap 우회해 ID 직접 전환. 공간(anchor)×시간(지속) 이중게이트.
+        if self._reacq_on and tgt is not None and self._nudge_age >= BT_REACQ_NUDGE_GAP:
+            _anchor = (self._anchor_hist[0]
+                       if len(self._anchor_hist) >= BT_REACQ_N else None)
+            _orphans = [t for t in self._tracks
+                        if t.tid != self._tid and t.age <= BT_REACQ_AGE
+                        and t.miss == 0 and t.score > BT_REACQ_SCORE]
+            _cand = None
+            # 현재 타겟이 anchor 근처(트랙이 갇힘=샘/스톨)일 때만 — 정상 이동 중엔 발동 안 함
+            _tgt_stuck = ((tgt.x - _anchor[0]) ** 2 + (tgt.y - _anchor[1]) ** 2
+                          <= BT_REACQ_TGT_NEAR ** 2) if _anchor is not None else False
+            if _anchor is not None and _orphans and _tgt_stuck:
+                _nr = min(_orphans, key=lambda t: (t.x - _anchor[0]) ** 2
+                          + (t.y - _anchor[1]) ** 2)
+                # anchor 최근접 + 현재 타겟서 충분히 떨어짐(옆 데칼 오발 차단, 새는 진짜재출현만)
+                if (((_nr.x - _anchor[0]) ** 2 + (_nr.y - _anchor[1]) ** 2
+                        <= BT_REACQ_ANCHOR_MAX ** 2)
+                        and ((_nr.x - tgt.x) ** 2 + (_nr.y - tgt.y) ** 2
+                             >= BT_REACQ_MIN_SEP ** 2)):
+                    _cand = _nr
+            if _cand is not None and _cand.tid == self._reacq_tid:
+                self._reacq_cnt += 1
+            elif _cand is not None:
+                self._reacq_tid = _cand.tid; self._reacq_cnt = 1
+            else:
+                self._reacq_tid = None; self._reacq_cnt = 0
+            if self._reacq_cnt >= BT_REACQ_HOLD and self._reacq_tid is not None:
+                self._tid = self._reacq_tid     # 재획득 — ID 직접 전환(jump-cap 우회)
+                tgt = next((t for t in self._tracks if t.tid == self._tid), None)
+                self._reacq_tid = None; self._reacq_cnt = 0
+                self._anchor_hist = []          # 새 타겟 기준 anchor 재시작
+
+        # anchor 이력 — 타겟 트랙 위치(재획득 anchor=N프레임 전). 매 프레임 말미 갱신.
+        if self._reacq_on and tgt is not None:
+            self._anchor_hist.append((tgt.x, tgt.y))
+            if len(self._anchor_hist) > BT_REACQ_N:
+                self._anchor_hist.pop(0)
+
+        # v_pre 이력 갱신(IDLE·검출됨 — 진입 전 깨끗한 운동만 평균에 반영) — occlusion 전용
+        if self._occ_on and self._state == "IDLE" and tgt is not None and tgt.miss == 0:
+            self._vhist.append((tgt.vx, tgt.vy))
+            if len(self._vhist) > BT_OCC_NPRE:
+                self._vhist.pop(0)
+
+        # 다음 프레임 흡수 감지용 — 현재 타겟 근방(검출됨) 데칼 스냅샷(EXIT 밴드) — occlusion 전용
+        if self._occ_on and tgt is not None:
+            self._near_prev = {t.tid: (t.x, t.y) for t in self._tracks
+                               if t.tid != self._tid and t.miss == 0
+                               and (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 <= BT_OCC_EXIT ** 2}
+        else:
+            self._near_prev = {}
+
+        # 비타겟 트랙 정리 — occ_ids(흡수 연루 데칼)는 컬링 면제(분리 시 ID 대조 보장)
         self._tracks = [t for t in self._tracks
-                        if t.miss <= BT_TRK_MISS_MAX or t.tid == self._tid]
+                        if t.miss <= BT_TRK_MISS_MAX or t.tid == self._tid
+                        or t.tid in self._occ_ids]
 
         if tgt is not None:
             return (tgt.x, tgt.y) if tgt.miss <= BT_LOST_MAX else None
