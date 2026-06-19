@@ -600,6 +600,7 @@ class _MacroThread(threading.Thread):
                         _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 진단 표기용
                         _dets = [(c[0], c[1], c[2]) for c in _cands]   # ByteTracker 입력
                         _via_white = False   # 이번 프레임 선택이 흰색(밝기) 추적인지
+                        _via_vortex = False  # 이번 프레임 선택이 vortex(투명 광류) 추적인지
                         _bg_rejected = False # 타겟 트랙 소실(coast 한계) 여부
                         # 흰색 도형 검출(밝기). 잠금용 ≥20, 가시 보정용 ≥50.
                         _wb = acquire_white(det_masked)
@@ -688,6 +689,8 @@ class _MacroThread(threading.Thread):
                                 if _vpos is not None:
                                     track_pos = _vpos
                                     tracking = True
+                                    if not _via_white:
+                                        _via_vortex = True   # 투명 단계 vortex가 추적원
                         # 진단/트레이스/캡처 호환 — 타겟 트랙에서 속도·miss 동기화
                         _tg = next((t for t in _bt._tracks if t.tid == _bt._tid), None)
                         if _tg is not None:
@@ -703,8 +706,9 @@ class _MacroThread(threading.Thread):
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
                             _src = ("흰색" if _via_white
-                                    else ("ByteTrack" if track_pos is not None
-                                          else ("소실" if _bt.locked else "잠금대기")))
+                                    else ("vortex" if _via_vortex
+                                          else ("ByteTrack" if track_pos is not None
+                                                else ("소실" if _bt.locked else "잠금대기"))))
                             self._sig.log.emit(
                                 f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
                                 f"miss={_miss_run} → track={_tp} ({_src})")
