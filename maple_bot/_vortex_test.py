@@ -94,5 +94,35 @@ def run(name, motion_thresh=0.6, vortex_thresh=6.0, search_r=70, alpha=0.6, max_
         print(f"  >>> 평균오차 {np.mean(errs):.0f}px  최대 {max(errs):.0f}  (GT {len(errs)}프레임)")
 
 
+def run_continuous(name, motion_thresh=0.3, vortex_thresh=4.0, search_r=70,
+                   alpha=0.6, max_speed=40, winsize=15):
+    """재초기화 없이 첫 GT부터 끝까지 연속 추적 — 진짜 성능. (평균, 최대, n) 반환."""
+    mp4 = os.path.join(ROOT, '_record_debug', name + '.mp4')
+    cap = cv2.VideoCapture(mp4); frs = []
+    while True:
+        ok, f = cap.read()
+        if not ok: break
+        frs.append(f)
+    cap.release()
+    grays = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY) for f in frs]
+    gt = load_gt(name, min_f=0)
+    if not gt:
+        return None
+    fis = sorted(gt); center = list(gt[fis[0]]); errs = []
+    for i in range(fis[0] + 1, len(frs)):
+        flow = cv2.calcOpticalFlowFarneback(grays[i-1], grays[i], None,
+                                            0.5, 3, winsize, 3, 5, 1.2, 0)
+        res, pk = compute_vortex(flow, center, search_r, motion_thresh, vortex_thresh)
+        if res is not None:
+            nx = alpha*center[0] + (1-alpha)*res[0]; ny = alpha*center[1] + (1-alpha)*res[1]
+            d = math.hypot(nx-center[0], ny-center[1])
+            if d > max_speed:
+                nx = center[0]+(nx-center[0])*max_speed/d; ny = center[1]+(ny-center[1])*max_speed/d
+            center = [nx, ny]
+        if i in gt:
+            errs.append(math.hypot(center[0]-gt[i][0], center[1]-gt[i][1]))
+    return (np.mean(errs), max(errs), len(errs)) if errs else None
+
+
 if __name__ == "__main__":
     run(sys.argv[1] if len(sys.argv) > 1 else "000_0615_035137")
