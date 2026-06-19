@@ -108,6 +108,7 @@ from planet_yolo_verify import M1Ensemble, HyungYolo
 from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
 from core.shape_yolo import ShapeYolo
 from core.vision.byte_tracker import ByteTracker
+from core.vision.vortex_tracker import VortexTracker
 from core.vision.shape_classifier import ShapeClassifier
 
 # 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
@@ -320,7 +321,7 @@ class _MacroThread(threading.Thread):
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
                  tg_enabled: bool = False, tg_token: str = "", tg_chat: str = "",
-                 reacq: bool = False):
+                 reacq: bool = False, vortex: bool = False):
         super().__init__(daemon=True)
         self._sig      = sig
         self._gpu      = use_gpu
@@ -329,6 +330,7 @@ class _MacroThread(threading.Thread):
         self._tg_token = tg_token
         self._tg_chat  = tg_chat
         self._reacq    = reacq   # 턴 재획득(orphan re-acquisition) — A/B 실험용 토글
+        self._vortex_on = vortex # vortex 추적(투명 광류 소용돌이) — ByteTrack 대체 토글
         self._stop     = threading.Event()
 
     def stop(self):
@@ -420,6 +422,9 @@ class _MacroThread(threading.Thread):
         _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
         _bt = ByteTracker(reacq=self._reacq)   # ByteTrack MOT(+턴 재획득 토글)
         self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
+        _vortex = VortexTracker() if self._vortex_on else None  # 투명 광류 소용돌이 추적(토글)
+        if self._vortex_on:
+            self._sig.log.emit("[설정] vortex 추적 ON — 투명 단계 광류 소용돌이(ByteTrack 대체)")
         _target_shape = None        # 흰색 단계 판별된 타겟 모양(이후 전문 검출기 사용)
         _shape_votes = {}           # 흰색 단계 분류기 투표(3프레임 다수결로 모양 확정)
         _shape_cnt = 0              # 흰색 단계 분류 프레임 수
@@ -481,6 +486,8 @@ class _MacroThread(threading.Thread):
                             _white_prev = None
                             _tvx = _tvy = 0.0
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
+                            if _vortex is not None:
+                                _vortex.reset()     # vortex 추적도 초기화
                             _target_shape = None    # 다음 판 모양 재판별
                             _shape_votes = {}
                             _shape_cnt = 0
@@ -639,6 +646,8 @@ class _MacroThread(threading.Thread):
                                         (_wc[0] - _white_prev[0]) ** 2
                                         + (_wc[1] - _white_prev[1]) ** 2 <= 15 ** 2):
                                     _bt.lock(_wc[0], _wc[1])
+                                    if _vortex is not None:
+                                        _vortex.lock(_wc[0], _wc[1])
                                     track_pos = _wc
                                     tracking = True
                                     self._sig.log.emit(
@@ -670,6 +679,15 @@ class _MacroThread(threading.Thread):
                                 tracking = True
                             else:
                                 _bg_rejected = True   # 타겟 트랙 lost(coast 한계 초과)
+                            # vortex 모드 — 투명 단계는 ByteTrack 대신 광류 소용돌이로 추적.
+                            # 백색(밝기 보임)이면 그 위치로 잠금, 아니면 소용돌이 추적.
+                            if _vortex is not None:
+                                _gray_u8 = cv2.cvtColor(det_detect, cv2.COLOR_BGR2GRAY)
+                                _wcen = _wc if _via_white else None
+                                _vpos = _vortex.update(_gray_u8, white_center=_wcen)
+                                if _vpos is not None:
+                                    track_pos = _vpos
+                                    tracking = True
                         # 진단/트레이스/캡처 호환 — 타겟 트랙에서 속도·miss 동기화
                         _tg = next((t for t in _bt._tracks if t.tid == _bt._tid), None)
                         if _tg is not None:
@@ -1129,9 +1147,15 @@ class MainUI(QWidget):
             "투명 단계에서 타겟이 꺾일 때 다른 도형으로 새면, 페이드 자리에서 "
             "재출현하는 진짜 도형으로 되돌리는 실험 기능. 일부 판을 살리나 일부 판을 "
             "깰 수 있어 인게임 A/B 검증용. 기본 끔.")
+        self.chk_vortex = QCheckBox("vortex 추적 (실험 · 투명 광류 소용돌이)")
+        self.chk_vortex.setToolTip(
+            "투명 단계를 ByteTrack 대신 광류 소용돌이로 추적. 타겟만 자전→소용돌이, "
+            "배경은 평행이동이라 자동 배제. 오프라인 16판 평균오차 ByteTrack 99px→54px, "
+            "12/16 우세. 검출/분류 불요. 인게임 A/B 검증용. 기본 끔.")
         opt.addWidget(self.chk_gpu)
         opt.addWidget(self.chk_sound)
         opt.addWidget(self.chk_reacq)
+        opt.addWidget(self.chk_vortex)
         root.addWidget(opt_card)
 
         # 텔레그램 (UI 유지, 기능은 선택)
@@ -1200,6 +1224,7 @@ class MainUI(QWidget):
             tg_token=self.tg_token.text().strip(),
             tg_chat=self.tg_chat.text().strip(),
             reacq=self.chk_reacq.isChecked(),
+            vortex=self.chk_vortex.isChecked(),
         )
         self._macro.start()
 
