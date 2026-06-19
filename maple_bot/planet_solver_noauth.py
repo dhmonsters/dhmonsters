@@ -684,13 +684,21 @@ class _MacroThread(threading.Thread):
                             # 백색(밝기 보임)이면 그 위치로 잠금, 아니면 소용돌이 추적.
                             if _vortex is not None:
                                 _gray_u8 = cv2.cvtColor(det_detect, cv2.COLOR_BGR2GRAY)
-                                _wcen = _wc if _via_white else None
+                                # 백색 핸드오프(ByteTrack과 분리) — 큰 흰색이 vortex 중심
+                                # 근처면 밝기 우선(백색 단계). 아니면 투명 vortex.
+                                _wcen = None
+                                if (_wc is not None and _wb is not None
+                                        and _wb[2] >= 50 and _wb[3] >= 50
+                                        and _vortex.locked
+                                        and (_wc[0]-_vortex.center[0]) ** 2
+                                        + (_wc[1]-_vortex.center[1]) ** 2 <= 60 ** 2):
+                                    _wcen = _wc
                                 _vpos = _vortex.update(_gray_u8, white_center=_wcen)
                                 if _vpos is not None:
                                     track_pos = _vpos
                                     tracking = True
-                                    if not _via_white:
-                                        _via_vortex = True   # 투명 단계 vortex가 추적원
+                                    _via_white = (_wcen is not None)   # 명시적 재판정
+                                    _via_vortex = (_wcen is None)
                         # 진단/트레이스/캡처 호환 — 타겟 트랙에서 속도·miss 동기화
                         _tg = next((t for t in _bt._tracks if t.tid == _bt._tid), None)
                         if _tg is not None:
