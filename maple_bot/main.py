@@ -8,6 +8,10 @@ import threading
 _base = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
 os.chdir(_base)
 
+# 관리자 권한 자동 요청 — 게임이 관리자로 돌면 봇도 관리자여야 핫키(GetAsyncKeyState)가 인게임서 동작
+from core.admin_util import ensure_admin
+ensure_admin()
+
 # ── 미처리 예외를 error.log 에 기록 (noconsole 빌드 디버깅용) ───────────
 import traceback
 import datetime

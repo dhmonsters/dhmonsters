@@ -104,6 +104,10 @@ class BotController:
 
 
 def main():
+    # 관리자 권한 자동 요청 — 게임 관리자 실행 시 봇도 관리자여야 핫키 인게임 동작(UIPI)
+    from core.admin_util import ensure_admin
+    ensure_admin()
+
     from PyQt6.QtWidgets import QApplication
     from core_ui.shell import MainShell
     from core_ui.theme import apply_font

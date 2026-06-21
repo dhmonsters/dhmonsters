@@ -6,7 +6,7 @@ Planet_solver_v1.0.5.exe 의 GUI/UX를 그대로 유지하되:
   - 마우스: PostMessage 백그라운드 클릭
   - 창 자동 탐지: win32gui (board_roi.json 불필요)
   - 해상도 강제: 1920×1080
-  - 단축키: F1 시작/정지 (exe와 동일)
+  - 단축키: F1 시작/자동 일시정지·재개, F3 녹화 정지/종료
 
 실행: python planet_solver_noauth.py
 """
@@ -332,9 +332,20 @@ class _MacroThread(threading.Thread):
         self._reacq    = reacq   # 턴 재획득(orphan re-acquisition) — A/B 실험용 토글
         self._vortex_on = vortex # vortex 추적(투명 광류 소용돌이) — ByteTrack 대체 토글
         self._stop     = threading.Event()
+        self._auto     = threading.Event(); self._auto.set()  # 자동(마우스) 제어 on. clear=일시정지(캡처·녹화는 유지)
+        self._stop_rec = threading.Event()                    # 녹화 즉시 마감 신호(수동 정지 버튼)
 
     def stop(self):
         self._stop.set()
+
+    def pause_auto(self):
+        self._auto.clear()
+
+    def resume_auto(self):
+        self._auto.set()
+
+    def stop_recording(self):
+        self._stop_rec.set()
 
     def run(self):
         # 시작마다 templates/ 폴더 재로드 (파일 추가 후 재시작하면 반영)
@@ -404,7 +415,13 @@ class _MacroThread(threading.Thread):
         else:
             title = win32gui.GetWindowText(hwnd)
             self._sig.log.emit(f"[✓] 창: {title}")
-            _enforce_res(hwnd)
+            try:
+                _enforce_res(hwnd)                       # 1920×1080 강제(실패해도 계속)
+            except Exception as _ee:
+                self._sig.log.emit(
+                    f"[!] 창 크기 자동조정 실패({_ee}) — 게임이 관리자 권한이면 창 조작이 막힙니다. "
+                    f"게임 해상도를 직접 1920×1080으로 맞추거나, 이 프로그램을 관리자 권한으로 실행하세요. "
+                    f"현재 창 크기로 계속 진행합니다.")
             bx, by, bw, bh = _client_roi(hwnd)
         self._sig.log.emit(f"[좌표] {bx},{by}  {bw}×{bh}")
         self._sig.status.emit("running")
@@ -438,6 +455,8 @@ class _MacroThread(threading.Thread):
         _rec_writer = None           # 판 전 구간 녹화 VideoWriter (흰색 잠금~팝업 종료)
         _rec_jf = None               # 판 궤적 jsonl 파일 핸들
         _rec_size = None             # 녹화 프레임 크기 (w,h) — VideoWriter.get()은 0이라 직접 보관
+        _rec_png_dir = None          # 무손실 PNG 프레임 폴더(압축 없음 — ⑥/광류 검증용)
+        _rec_fi = 0                  # PNG 프레임 인덱스
         TRACK_INTERVAL = 0.05        # 추적 루프 주기 (20fps)
         last_alert = 0.0
         last_tg      = 0.0   # 텔레그램 전송 쿨다운
@@ -456,6 +475,16 @@ class _MacroThread(threading.Thread):
 
             while not self._stop.is_set():
                 try:
+                    # 수동 '녹화 정지' 신호 — 즉시 녹화 마감(스레드·캡처는 계속)
+                    if self._stop_rec.is_set():
+                        self._stop_rec.clear()
+                        if _rec_writer is not None:
+                            try:
+                                _rec_writer.release(); _rec_jf.close()
+                                self._sig.log.emit("[녹화종료] 수동 정지 — 영상 저장됨")
+                            except Exception:
+                                pass
+                            _rec_writer = None; _rec_jf = None; _rec_png_dir = None
                     # 60회마다 좌표 갱신
                     if preview_cnt % 60 == 0 and preview_cnt > 0:
                         try:
@@ -505,6 +534,7 @@ class _MacroThread(threading.Thread):
                                     pass
                                 _rec_writer = None
                                 _rec_jf = None
+                                _rec_png_dir = None
                                 _stall_dumped = False
                             self._sig.log.emit(f"[✓] 퍼즐 완료 — 누적 {success}회")
                         popup_logged = False
@@ -665,10 +695,15 @@ class _MacroThread(threading.Thread):
                                             cv2.VideoWriter_fourcc(*"mp4v"),
                                             20.0, _rec_size)
                                         _rec_jf = open(_rc_base + ".jsonl", "w", encoding="utf-8")
-                                        self._sig.log.emit(f"[녹화시작] _record_debug/{success:03d}_{_stamp}")
+                                        # 무손실 PNG 프레임 폴더(압축 없음 — 라이브와 동일 품질)
+                                        _rec_png_dir = _rc_base + "_png"
+                                        os.makedirs(_rec_png_dir, exist_ok=True)
+                                        _rec_fi = 0
+                                        self._sig.log.emit(f"[녹화시작] _record_debug/{success:03d}_{_stamp} (+무손실PNG)")
                                     except Exception:
                                         _rec_writer = None
                                         _rec_jf = None
+                                        _rec_png_dir = None
                                 _white_prev = _wc
                         else:
                             # 잠금됨: 흰색 우선(밝기) / ByteTracker ID 추적 / 소실
@@ -738,6 +773,10 @@ class _MacroThread(threading.Thread):
                                 if (det.shape[1], det.shape[0]) != _rec_size:
                                     _wf = cv2.resize(det, _rec_size)
                                 _rec_writer.write(_wf)
+                                # 무손실 PNG 프레임(라이브 동일 품질 — ⑥/광류 검증)
+                                if _rec_png_dir is not None:
+                                    cv2.imwrite(os.path.join(_rec_png_dir, f"f{_rec_fi:04d}.png"), _wf)
+                                    _rec_fi += 1
                                 _rec_jf.write(json.dumps(_frame_rec, ensure_ascii=False) + "\n")
                                 _rec_jf.flush()
                             except Exception as _re:
@@ -841,17 +880,19 @@ class _MacroThread(threading.Thread):
                         # 화면 실제 커서(핑크) 검출 → 게임 좌표 오프셋 학습(GetCursorPos는
                         # 게임 가로챔으로 부정확). 목표(도형중심 cx,cy)와 실제 커서 위치 차이를
                         # 누적 오프셋에 EMA 반영 → 마우스를 도형 중심으로 끌어온다(±200 발산한계).
-                        _cur = _detect_cursor(det)
-                        if _cur is not None:
-                            _cursor_off_x += (cx - _cur[0]) * 0.5
-                            _cursor_off_y += (cy - _cur[1]) * 0.5
-                            _cursor_off_x = max(-200.0, min(200.0, _cursor_off_x))
-                            _cursor_off_y = max(-200.0, min(200.0, _cursor_off_y))
-                        abs_x = det_mon["left"] + int(cx + _cursor_off_x)
-                        abs_y = det_mon["top"]  + int(cy + _cursor_off_y)
-                        _real_click(abs_x, abs_y)
+                        # 자동 일시정지(F1) 시엔 마우스 제어 건너뜀 — 캡처·녹화만 계속(수동 플레이 녹화)
+                        if self._auto.is_set():
+                            _cur = _detect_cursor(det)
+                            if _cur is not None:
+                                _cursor_off_x += (cx - _cur[0]) * 0.5
+                                _cursor_off_y += (cy - _cur[1]) * 0.5
+                                _cursor_off_x = max(-200.0, min(200.0, _cursor_off_x))
+                                _cursor_off_y = max(-200.0, min(200.0, _cursor_off_y))
+                            abs_x = det_mon["left"] + int(cx + _cursor_off_x)
+                            abs_y = det_mon["top"]  + int(cy + _cursor_off_y)
+                            _real_click(abs_x, abs_y)
 
-                        if _vit_active and preview_cnt % 30 == 0:
+                        if self._auto.is_set() and _vit_active and preview_cnt % 30 == 0:
                             self._sig.log.emit(f"[추적중] pos=({abs_x},{abs_y})")
                             now = time.time()
                             if self._sound and now - last_alert > 2.0:
@@ -1080,6 +1121,7 @@ class MainUI(QWidget):
         super().__init__()
         self._macro: _MacroThread | None = None
         self._is_running = False
+        self._auto_on = True              # 자동(마우스) 제어 on 여부 (F1로 토글)
         self._start_time: float | None = None
 
         self._sig = _Sig()
@@ -1194,12 +1236,24 @@ class MainUI(QWidget):
         btn_preview.clicked.connect(self._open_preview)
         root.addWidget(btn_preview)
 
-        # 토글 버튼
+        # 토글 버튼 (F1) — 자동(마우스) 시작 / 일시정지·재개. 녹화는 유지
         self.toggle_btn = QPushButton("▶  시작  (F1)")
         self.toggle_btn.setObjectName("toggle")
         self.toggle_btn.setProperty("state", "idle")
         self.toggle_btn.clicked.connect(self.on_toggle)
         root.addWidget(self.toggle_btn)
+
+        # 녹화 정지/종료 버튼 — 녹화 마감 + 프로그램 완전 종료 (F1과 분리)
+        self.rec_stop_btn = QPushButton("⏹  녹화 정지 / 종료  (F3)")
+        self.rec_stop_btn.setStyleSheet(
+            "QPushButton { background: rgba(60,40,46,220); color:#FF9BA3; "
+            "border:1px solid rgba(255,120,130,40); border-radius:10px; font-size:12px; }"
+            "QPushButton:hover { color:#FFFFFF; border-color:rgba(255,120,130,90); }"
+            "QPushButton:disabled { color:#5A6068; border-color:rgba(255,255,255,12); }"
+        )
+        self.rec_stop_btn.setEnabled(False)
+        self.rec_stop_btn.clicked.connect(self.on_rec_stop)
+        root.addWidget(self.rec_stop_btn)
 
         # 로그
         self.log = QPlainTextEdit()
@@ -1209,23 +1263,49 @@ class MainUI(QWidget):
 
     # ── 핫키 폴링 ──────────────────────────────────────────────────────────
     def _poll_f1(self):
-        if win32api.GetAsyncKeyState(0x70) & 0x8000:  # VK_F1
+        if win32api.GetAsyncKeyState(0x70) & 0x8000:  # VK_F1 — 시작/자동 일시정지·재개
             self.on_toggle()
             # 연속 토글 방지 — 키 올라올 때까지 대기
             for _ in range(20):
                 time.sleep(0.05)
                 if not (win32api.GetAsyncKeyState(0x70) & 0x8000):
                     break
+        if win32api.GetAsyncKeyState(0x72) & 0x8000:  # VK_F3 — 녹화 정지/종료
+            if self._is_running:
+                self.on_rec_stop()
+            for _ in range(20):
+                time.sleep(0.05)
+                if not (win32api.GetAsyncKeyState(0x72) & 0x8000):
+                    break
 
-    # ── 시작/정지 ──────────────────────────────────────────────────────────
+    # ── 시작 / 자동 일시정지·재개 (F1) ─────────────────────────────────────
     def on_toggle(self):
-        if self._is_running:
-            self._stop()
+        if not self._is_running:
+            self._start()                       # 대기 → 시작(자동 on)
+        elif self._auto_on:
+            # 실행 중 → 자동(마우스) 일시정지. 캡처·녹화는 계속(수동 플레이 녹화)
+            if self._macro:
+                self._macro.pause_auto()
+            self._auto_on = False
+            self.status_label.setText("자동 멈춤 (녹화중)")
+            self.toggle_btn.setText("▶  자동 재개  (F1)")
         else:
-            self._start()
+            # 일시정지 → 자동 재개
+            if self._macro:
+                self._macro.resume_auto()
+            self._auto_on = True
+            self.status_label.setText("자동 중")
+            self.toggle_btn.setText("■  자동 정지  (F1)")
+
+    # ── 녹화 정지 + 완전 종료 (F1과 분리된 별도 버튼) ──────────────────────
+    def on_rec_stop(self):
+        if self._macro:
+            self._macro.stop_recording()        # 녹화 즉시 마감
+            self._macro.stop()                  # 스레드 완전 종료 → 대기
 
     def _start(self):
         self._is_running = True
+        self._auto_on = True
         self.toggle_btn.setEnabled(False)
         self.log.clear()
         self._macro = _MacroThread(
@@ -1248,13 +1328,17 @@ class MainUI(QWidget):
     def _on_status(self, status: str):
         if status == "running":
             self._start_time = time.time()
+            self._auto_on = True
             self.status_label.setText("자동 중")
             self.status_label.setProperty("state", "running")
-            self.toggle_btn.setText("■  정지  (F1)")
+            self.toggle_btn.setText("■  자동 정지  (F1)")
             self.toggle_btn.setProperty("state", "running")
             self.toggle_btn.setEnabled(True)
+            self.rec_stop_btn.setEnabled(True)
         elif status == "stopped":
             self._is_running = False
+            self._auto_on = True
+            self.rec_stop_btn.setEnabled(False)
             self._start_time = None
             self.status_label.setText("대기 중")
             self.status_label.setProperty("state", "idle")
@@ -1263,6 +1347,8 @@ class MainUI(QWidget):
             self.toggle_btn.setEnabled(True)
         elif status.startswith("error:"):
             self._is_running = False
+            self._auto_on = True
+            self.rec_stop_btn.setEnabled(False)
             msg = status[6:]
             self.status_label.setText(f"오류: {msg}")
             self.status_label.setProperty("state", "error")
@@ -1336,6 +1422,9 @@ class MainUI(QWidget):
 
 
 if __name__ == "__main__":
+    # 관리자 권한 자동 요청 — 게임 관리자 실행 시 봇도 관리자여야 핫키 인게임 동작(UIPI)
+    from core.admin_util import ensure_admin
+    ensure_admin()
     app = QApplication(sys.argv)
     ui = MainUI()
     ui.show()
