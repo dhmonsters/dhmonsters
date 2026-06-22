@@ -109,6 +109,7 @@ from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
 from core.shape_yolo import ShapeYolo
 from core.vision.byte_tracker import ByteTracker
 from core.vision.vortex_tracker import VortexTracker
+from core.vision.periodic_tracker import PeriodicTracker
 from core.vision.shape_classifier import ShapeClassifier
 
 # 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
@@ -321,7 +322,7 @@ class _MacroThread(threading.Thread):
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
                  tg_enabled: bool = False, tg_token: str = "", tg_chat: str = "",
-                 reacq: bool = False, vortex: bool = False):
+                 reacq: bool = False, vortex: bool = False, idea6: bool = False):
         super().__init__(daemon=True)
         self._sig      = sig
         self._gpu      = use_gpu
@@ -331,6 +332,7 @@ class _MacroThread(threading.Thread):
         self._tg_chat  = tg_chat
         self._reacq    = reacq   # 턴 재획득(orphan re-acquisition) — A/B 실험용 토글
         self._vortex_on = vortex # vortex 추적(투명 광류 소용돌이) — ByteTrack 대체 토글
+        self._idea6_on = idea6   # ⑥ 주기차분 추적(검출무관) — 인게임 권장 토글
         self._stop     = threading.Event()
         self._auto     = threading.Event(); self._auto.set()  # 자동(마우스) 제어 on. clear=일시정지(캡처·녹화는 유지)
         self._stop_rec = threading.Event()                    # 녹화 즉시 마감 신호(수동 정지 버튼)
@@ -442,6 +444,9 @@ class _MacroThread(threading.Thread):
         _vortex = VortexTracker() if self._vortex_on else None  # 투명 광류 소용돌이 추적(토글)
         if self._vortex_on:
             self._sig.log.emit("[설정] vortex 추적 ON — 투명 단계 광류 소용돌이(ByteTrack 대체)")
+        _idea6 = PeriodicTracker() if self._idea6_on else None  # ⑥ 주기차분 추적(검출무관, 토글)
+        if self._idea6_on:
+            self._sig.log.emit("[설정] ⑥ 주기차분 추적 ON — frame[t]−frame[t−T] 잔차(검출무관)")
         _target_shape = None        # 흰색 단계 판별된 타겟 모양(이후 전문 검출기 사용)
         _shape_votes = {}           # 흰색 단계 분류기 투표(3프레임 다수결로 모양 확정)
         _shape_cnt = 0              # 흰색 단계 분류 프레임 수
@@ -517,6 +522,8 @@ class _MacroThread(threading.Thread):
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
                             if _vortex is not None:
                                 _vortex.reset()     # vortex 추적도 초기화
+                            if _idea6 is not None:
+                                _idea6.reset()      # ⑥ 주기차분도 초기화
                             _target_shape = None    # 다음 판 모양 재판별
                             _shape_votes = {}
                             _shape_cnt = 0
@@ -631,6 +638,7 @@ class _MacroThread(threading.Thread):
                         _dets = [(c[0], c[1], c[2]) for c in _cands]   # ByteTracker 입력
                         _via_white = False   # 이번 프레임 선택이 흰색(밝기) 추적인지
                         _via_vortex = False  # 이번 프레임 선택이 vortex(투명 광류) 추적인지
+                        _via_idea6 = False   # 이번 프레임 선택이 ⑥ 주기차분 추적인지
                         _bg_rejected = False # 타겟 트랙 소실(coast 한계) 여부
                         # 흰색 도형 검출(밝기). 잠금용 ≥20, 가시 보정용 ≥50.
                         _wb = acquire_white(det_masked)
@@ -679,6 +687,8 @@ class _MacroThread(threading.Thread):
                                     _bt.lock(_wc[0], _wc[1])
                                     if _vortex is not None:
                                         _vortex.lock(_wc[0], _wc[1])
+                                    if _idea6 is not None:
+                                        _idea6.lock(_wc[0], _wc[1])
                                     track_pos = _wc
                                     tracking = True
                                     self._sig.log.emit(
@@ -734,6 +744,22 @@ class _MacroThread(threading.Thread):
                                     tracking = True
                                     _via_white = (_wcen is not None)   # 명시적 재판정
                                     _via_vortex = (_wcen is None)
+                            # ⑥ 주기차분 모드 — 투명 단계는 frame[t]−frame[t−T] 잔차 peak로 추적.
+                            if _idea6 is not None:
+                                _gray_i6 = cv2.cvtColor(det_detect, cv2.COLOR_BGR2GRAY)
+                                _wcen6 = None     # 백색 핸드오프(큰 흰색이 ⑥ 중심 근처면 밝기 우선)
+                                if (_wc is not None and _wb is not None
+                                        and _wb[2] >= 50 and _wb[3] >= 50
+                                        and _idea6.locked
+                                        and (_wc[0]-_idea6.center[0]) ** 2
+                                        + (_wc[1]-_idea6.center[1]) ** 2 <= 60 ** 2):
+                                    _wcen6 = _wc
+                                _ipos = _idea6.update(_gray_i6, white_center=_wcen6)
+                                if _ipos is not None:
+                                    track_pos = _ipos
+                                    tracking = True
+                                    _via_white = (_wcen6 is not None)
+                                    _via_idea6 = (_wcen6 is None)
                         # 진단/트레이스/캡처 호환 — 타겟 트랙에서 속도·miss 동기화
                         _tg = next((t for t in _bt._tracks if t.tid == _bt._tid), None)
                         if _tg is not None:
@@ -749,9 +775,10 @@ class _MacroThread(threading.Thread):
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
                             _src = ("흰색" if _via_white
-                                    else ("vortex" if _via_vortex
-                                          else ("ByteTrack" if track_pos is not None
-                                                else ("소실" if _bt.locked else "잠금대기"))))
+                                    else ("주기차분" if _via_idea6
+                                          else ("vortex" if _via_vortex
+                                                else ("ByteTrack" if track_pos is not None
+                                                      else ("소실" if _bt.locked else "잠금대기")))))
                             self._sig.log.emit(
                                 f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
                                 f"miss={_miss_run} → track={_tp} ({_src})")
@@ -1206,10 +1233,16 @@ class MainUI(QWidget):
             "투명 단계를 ByteTrack 대신 광류 소용돌이로 추적. 타겟만 자전→소용돌이, "
             "배경은 평행이동이라 자동 배제. 오프라인 16판 평균오차 ByteTrack 99px→54px, "
             "12/16 우세. 검출/분류 불요. 인게임 A/B 검증용. 기본 끔.")
+        self.chk_idea6 = QCheckBox("⑥ 주기차분 추적 (검출무관 · 인게임 권장)")
+        self.chk_idea6.setToolTip(
+            "투명 단계를 frame[t]−정렬(frame[t−T]) 잔차로 추적. 배경은 주기 T로 반복돼 "
+            "상쇄되고 타겟만 잔차로 남음. 검출·연속성 불요라 턴 갈아타기에 안 갇힘. "
+            "인게임 무손실 평가서 v2(304px)·vortex(78px) 대비 24~71px로 최강. 기본 끔.")
         opt.addWidget(self.chk_gpu)
         opt.addWidget(self.chk_sound)
         opt.addWidget(self.chk_reacq)
         opt.addWidget(self.chk_vortex)
+        opt.addWidget(self.chk_idea6)
         root.addWidget(opt_card)
 
         # 텔레그램 (UI 유지, 기능은 선택)
@@ -1317,6 +1350,7 @@ class MainUI(QWidget):
             tg_chat=self.tg_chat.text().strip(),
             reacq=self.chk_reacq.isChecked(),
             vortex=self.chk_vortex.isChecked(),
+            idea6=self.chk_idea6.isChecked(),
         )
         self._macro.start()
 
