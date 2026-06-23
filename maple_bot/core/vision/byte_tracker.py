@@ -25,6 +25,23 @@ BT_TRK_MISS_MAX = 10     # 비타겟 트랙 제거 전 허용 미매칭
 BT_DECAL_N      = 3      # 배경 계산에 쓸 대표 데칼 수(age 큰 상위 N개 — 전부 불필요)
 BT_DECAL_AGE    = 3      # 배경 중앙값에 넣을 데칼 최소 age
 
+# 호모그래피 강체위반 약한 사전(hviol) — 데칼 점구름에 RANSAC 호모그래피 정합 후 각 트랙
+# 재투영오차=강체위반. 데칼은 배경정렬돼 ~0, 타겟만 큼(검출점 7x, 픽셀무관). 단독 최대화는
+# 스푸리어스 데칼에 발산하므로, 타겟 lost 시 공간게이트 내 '흐림 재선택' 랭킹에만 약하게 주입.
+BT_VIOL_EMA   = 0.3   # viol_ema 현재반영 비율(누적 증거)
+BT_VIOL_MIN   = 6.0   # 재선택 풀 위반 하한(px) — 미만은 배경동조 데칼
+BT_VIOL_PAIRS = 8     # 호모그래피 추정 최소 데칼 대응쌍
+
+# rel-bg 이상도 복구(relrec) — 갈아타기 락아웃 해제. 타겟이 데칼로 새면 트랙 rel_ema(배경
+# 대비 속도차)가 낮아지고, 진짜 타겟은 배경과 달라 rel_ema 높음(035137 타겟25 vs 데칼15 측정).
+# 현재 타겟보다 rel_ema가 마진 이상 큰 근처 트랙이 K프레임 지속되면 점프상한 우회 ID전환.
+# 자기게이팅(더 이질적인 것으로만) — 단 타겟이 배경동행인 판에선 멀쩡한 타겟 이탈 위험 → 토글 격리.
+BT_RELREC_MARGIN = 7.0    # 근처 트랙 순간 rel이 현재 타겟보다 이만큼 커야 후보
+BT_RELREC_MIN    = 16.0   # 후보 순간 rel 절대 하한(노이즈 단발 방지)
+BT_RELREC_R      = 100.0  # 복구 탐색 반경(px) — 반대로 멀어지는 진짜 타겟 도달용
+BT_RELREC_HOLD   = 2      # 같은 후보 연속 프레임 확정(1~2 지연 허용)
+BT_RELREC_AGE    = 2      # 후보 최소 age(순간 vel 안정 — 새 트랙 age0은 vel=0)
+
 # CMC(전역 운동 보상) — 회전 배경을 어파인(회전+균일스케일+이동)으로 모델링.
 # 단일 이동 벡터(데칼 속도 중앙값)는 회전장에서 무의미 → 안정화 좌표계 잔차로 타겟 판별.
 BT_CMC_MIN_PAIRS  = 6     # 데칼 대응쌍 최소(미만이면 ORB 폴백)
@@ -59,7 +76,7 @@ BT_REACQ_TGT_NEAR   = 50   # 현재 타겟이 anchor서 이 안일 때만 발동
 
 
 class _BTrack:
-    __slots__ = ("tid", "x", "y", "vx", "vy", "score", "age", "miss", "rel_ema")
+    __slots__ = ("tid", "x", "y", "vx", "vy", "score", "age", "miss", "rel_ema", "viol_ema")
 
     def __init__(self, tid, x, y, score):
         self.tid = tid
@@ -68,6 +85,7 @@ class _BTrack:
         self.score = float(score)
         self.age = 0; self.miss = 0
         self.rel_ema = 0.0   # 배경과 다른 정도의 누적 EMA(다중가설 채택 근거)
+        self.viol_ema = 0.0  # 호모그래피 강체위반 누적 EMA(hviol — 검출점 7x 신호)
 
 
 class ByteTracker:
@@ -75,7 +93,8 @@ class ByteTracker:
     흰색 잠금 타겟에 ID 부여, 모든 후보를 트랙으로 추적, 약검출(반투명 타겟)도
     2단계 매칭으로 ID 유지. 타겟 흐림 시 배경과 다른 속도 트랙으로 ID 승계."""
 
-    def __init__(self, cmc: bool = False, occl: bool = False, reacq: bool = False):
+    def __init__(self, cmc: bool = False, occl: bool = False, reacq: bool = False,
+                 hviol: bool = False, relrec: bool = False):
         # cmc=False(기본)면 어파인 보상 일체 비활성 → 원본 ByteTrack 좌표계(속도차) 판별로
         # 완전 복귀. CMC는 단일 스위치 뒤 격리(부분 켜짐 상태 없음). 실험은 CMC_ON=1 env.
         self._cmc_on = bool(cmc) or os.environ.get("CMC_ON") == "1"
@@ -85,6 +104,12 @@ class ByteTracker:
         self._occ_on = bool(occl) or os.environ.get("OCCL_ON") == "1"
         # reacq=False(기본)면 재획득 비활성. 턴 오매칭 복구 주력(035137). 실험은 REACQ_ON=1.
         self._reacq_on = bool(reacq) or os.environ.get("REACQ_ON") == "1"
+        # hviol=False(기본)면 호모그래피 위반 약한사전 비활성(원본 rel_ema 재선택). 실험은 HVIOL_ON=1.
+        self._hviol_on = bool(hviol) or os.environ.get("HVIOL_ON") == "1"
+        # relrec=False(기본)면 rel-bg 이상도 복구 비활성. 갈아타기 락아웃 해제. 실험은 RELREC_ON=1.
+        self._relrec_on = bool(relrec) or os.environ.get("RELREC_ON") == "1"
+        self._relrec_tid = None   # 복구 후보 트랙 tid(지속 확정용)
+        self._relrec_cnt = 0      # 그 후보가 마진 우세로 연속된 프레임 수
         self._prev = None
         self._tracks: list[_BTrack] = []
         self._tid = None
@@ -117,6 +142,7 @@ class ByteTracker:
         self._vhist = []; self._occ_cnt = 0; self._near_prev = {}
         self._anchor_hist = []; self._reacq_tid = None; self._reacq_cnt = 0
         self._nudge_age = 999
+        self._relrec_tid = None; self._relrec_cnt = 0
 
     @property
     def locked(self):
@@ -280,6 +306,33 @@ class ByteTracker:
         except Exception:
             return None
 
+    def _homography_viol(self, prev_pos):
+        """배경 데칼 대응쌍(직전→현재)에 RANSAC 호모그래피 → 각 트랙 재투영오차=강체위반.
+        데칼은 배경정렬돼 ~0, 타겟은 큰 위반(검출점 기반, 픽셀/희미함 무관). {tid: 위반px}."""
+        src = []; dst = []; ids = []
+        for t in self._tracks:
+            pp = prev_pos.get(t.tid)
+            if pp is None:
+                continue
+            ids.append((t.tid, pp, (t.x, t.y)))
+            if t.tid != self._tid and t.miss == 0 and t.age >= 2:
+                src.append(pp); dst.append((t.x, t.y))
+        if len(src) < BT_VIOL_PAIRS:
+            return {}
+        try:
+            H, _ = cv2.findHomography(np.float32(src).reshape(-1, 1, 2),
+                                      np.float32(dst).reshape(-1, 1, 2),
+                                      cv2.RANSAC, 4.0)
+        except cv2.error:
+            return {}
+        if H is None:
+            return {}
+        pts = np.float32([pp for _, pp, _ in ids]).reshape(-1, 1, 2)
+        proj = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
+        return {ids[k][0]: float(np.hypot(proj[k, 0] - ids[k][2][0],
+                                          proj[k, 1] - ids[k][2][1]))
+                for k in range(len(ids))}
+
     def update(self, gray_f32, dets):
         """매 프레임. dets=[(cx,cy,score),...]. 타겟 트랙 위치 (x,y)|None 반환.
         gray_f32=None이면 phaseCorrelate 생략(jsonl 재시뮬용)."""
@@ -363,6 +416,13 @@ class ByteTracker:
             _resid[t.tid] = _r
             t.rel_ema = t.rel_ema * (1 - BT_REL_EMA) + _r * BT_REL_EMA
 
+        # [hviol] 호모그래피 강체위반 누적(약한 사전) — 재선택 랭킹에만 쓰임.
+        if self._hviol_on:
+            _viol = self._homography_viol(prev_pos)
+            for t in self._tracks:
+                if t.tid in _viol:
+                    t.viol_ema = t.viol_ema * (1 - BT_VIOL_EMA) + _viol[t.tid] * BT_VIOL_EMA
+
         tgt = next((t for t in self._tracks if t.tid == self._tid), None)
 
         if self._state == "OCCLUDING" and tgt is not None:
@@ -418,12 +478,18 @@ class ByteTracker:
                 _jlim = ((tgt.vx * tgt.vx + tgt.vy * tgt.vy) ** 0.5
                          + BT_JUMP_CAP + BT_GATE_GROW * tgt.miss * 0.5)
                 r2 = min(_gate, _jlim)
+                # hviol: 누적 호모그래피 위반(7x)으로 풀 필터·랭킹. 꺼지면 원본 rel_ema.
+                if self._hviol_on:
+                    _val = lambda t: t.viol_ema; _thr = BT_VIOL_MIN
+                else:
+                    _val = lambda t: _resid.get(t.tid, 0.0); _thr = BT_REL_MIN
+                _ev = (lambda t: t.viol_ema) if self._hviol_on else (lambda t: t.rel_ema)
                 pool = [t for t in self._tracks
                         if t.tid != self._tid and t.miss == 0
                         and (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 <= r2 * r2
-                        and _resid.get(t.tid, 0.0) >= BT_REL_MIN]
+                        and _val(t) >= _thr]
                 if pool:
-                    best = max(pool, key=lambda t: t.rel_ema
+                    best = max(pool, key=lambda t: _ev(t)
                                - ((t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2) ** 0.5 * 0.05)
                     self._tid = best.tid
                     tgt = best
@@ -485,6 +551,40 @@ class ByteTracker:
             self._anchor_hist.append((tgt.x, tgt.y))
             if len(self._anchor_hist) > BT_REACQ_N:
                 self._anchor_hist.pop(0)
+
+        # ── rel-bg 이상도 복구 — 갈아타기 락아웃 해제(035137형) ───────────────────────
+        # 타겟이 데칼로 새면 트랙 rel_ema↓, 진짜 타겟은 배경과 달라 rel_ema↑. 현재 타겟보다
+        # rel_ema가 마진 이상 큰 근처 트랙이 K프레임 지속되면 점프상한 우회해 그리로 전환.
+        if self._relrec_on and tgt is not None and self._nudge_age >= BT_REACQ_NUDGE_GAP:
+            # 이상도 = raw 프레임속도(현재−직전위치) − 배경(phaseCorrelate bx,by). 트랙 EMA속도·
+            # 데칼중앙값 bg는 신호를 뭉개므로(검증), raw·phaseCorr로 직접 계산.
+            def _ranom(t):
+                pp = prev_pos.get(t.tid)
+                if pp is None:
+                    return 0.0
+                return ((t.x - pp[0] - bx) ** 2 + (t.y - pp[1] - by) ** 2) ** 0.5
+            base = _ranom(tgt)
+            cand = None; bestr = base + BT_RELREC_MARGIN
+            for t in self._tracks:
+                if t.tid == self._tid or t.miss != 0 or t.age < BT_RELREC_AGE:
+                    continue
+                if (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 > BT_RELREC_R ** 2:
+                    continue
+                rt = _ranom(t)
+                if rt >= BT_RELREC_MIN and rt > bestr:
+                    bestr = rt; cand = t
+            if cand is not None and cand.tid == self._relrec_tid:
+                self._relrec_cnt += 1
+            elif cand is not None:
+                self._relrec_tid = cand.tid; self._relrec_cnt = 1
+            else:
+                self._relrec_tid = None; self._relrec_cnt = 0
+            if self._relrec_cnt >= BT_RELREC_HOLD and self._relrec_tid is not None:
+                self._tid = self._relrec_tid       # 복구 — jump-cap 우회 ID전환
+                tgt = next((t for t in self._tracks if t.tid == self._tid), None)
+                self._relrec_tid = None; self._relrec_cnt = 0
+                if self._reacq_on:
+                    self._anchor_hist = []
 
         # v_pre 이력 갱신(IDLE·검출됨 — 진입 전 깨끗한 운동만 평균에 반영) — occlusion 전용
         if self._occ_on and self._state == "IDLE" and tgt is not None and tgt.miss == 0:
