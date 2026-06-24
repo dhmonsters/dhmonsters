@@ -108,8 +108,6 @@ from planet_yolo_verify import M1Ensemble, HyungYolo
 from core.vision.vit_shape_tracker import VitShapeTracker, acquire_white
 from core.shape_yolo import ShapeYolo
 from core.vision.byte_tracker import ByteTracker
-from core.vision.vortex_tracker import VortexTracker
-from core.vision.periodic_tracker import PeriodicTracker
 from core.vision.shape_classifier import ShapeClassifier
 from core.vision.transparent_puzzle_engine import (
     PuzzleEngineInput,
@@ -329,7 +327,7 @@ class _MacroThread(threading.Thread):
 
     def __init__(self, sig: _Sig, use_gpu: bool, sound: bool,
                  tg_enabled: bool = False, tg_token: str = "", tg_chat: str = "",
-                 reacq: bool = False, vortex: bool = False, idea6: bool = False):
+                 reacq: bool = False):
         super().__init__(daemon=True)
         self._sig      = sig
         self._gpu      = use_gpu
@@ -338,8 +336,6 @@ class _MacroThread(threading.Thread):
         self._tg_token = tg_token
         self._tg_chat  = tg_chat
         self._reacq    = reacq   # 턴 재획득(orphan re-acquisition) — A/B 실험용 토글
-        self._vortex_on = vortex # vortex 추적(투명 광류 소용돌이) — ByteTrack 대체 토글
-        self._idea6_on = idea6   # ⑥ 주기차분 추적(검출무관) — 인게임 권장 토글
         self._stop     = threading.Event()
         self._auto     = threading.Event(); self._auto.set()  # 자동(마우스) 제어 on. clear=일시정지(캡처·녹화는 유지)
         self._stop_rec = threading.Event()                    # 녹화 즉시 마감 신호(수동 정지 버튼)
@@ -452,12 +448,8 @@ class _MacroThread(threading.Thread):
         self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
         self._sig.log.emit("[setting] transparent box selector ON")
         self._sig.log.emit("[setting] transparent puzzle engine shadow ON")
-        _vortex = VortexTracker() if self._vortex_on else None  # 투명 광류 소용돌이 추적(토글)
-        if self._vortex_on:
-            self._sig.log.emit("[설정] vortex 추적 ON — 투명 단계 광류 소용돌이(ByteTrack 대체)")
-        _idea6 = PeriodicTracker() if self._idea6_on else None  # ⑥ 주기차분 추적(검출무관, 토글)
-        if self._idea6_on:
-            self._sig.log.emit("[설정] ⑥ 주기차분 추적 ON — frame[t]−frame[t−T] 잔차(검출무관)")
+        _vortex = None
+        _idea6 = None
         _target_shape = None        # 흰색 단계 판별된 타겟 모양(이후 전문 검출기 사용)
         _shape_votes = {}           # 흰색 단계 분류기 투표(3프레임 다수결로 모양 확정)
         _shape_cnt = 0              # 흰색 단계 분류 프레임 수
@@ -533,10 +525,6 @@ class _MacroThread(threading.Thread):
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
                             _boxsel.reset()
                             _transparent_engine.reset()
-                            if _vortex is not None:
-                                _vortex.reset()     # vortex 추적도 초기화
-                            if _idea6 is not None:
-                                _idea6.reset()      # ⑥ 주기차분도 초기화
                             _target_shape = None    # 다음 판 모양 재판별
                             _shape_votes = {}
                             _shape_cnt = 0
@@ -651,8 +639,6 @@ class _MacroThread(threading.Thread):
                         _pick = [c for c in _cands if c[2] >= SHAPE_PICK_THR]      # 진단 표기용
                         _dets = [(c[0], c[1], c[2]) for c in _cands]   # ByteTracker 입력
                         _via_white = False   # 이번 프레임 선택이 흰색(밝기) 추적인지
-                        _via_vortex = False  # 이번 프레임 선택이 vortex(투명 광류) 추적인지
-                        _via_idea6 = False   # 이번 프레임 선택이 ⑥ 주기차분 추적인지
                         _bg_rejected = False # 타겟 트랙 소실(coast 한계) 여부
                         _box_mode = None
                         _box_innov = 0.0
@@ -716,10 +702,6 @@ class _MacroThread(threading.Thread):
                                         (_wc[0] - _white_prev[0]) ** 2
                                         + (_wc[1] - _white_prev[1]) ** 2 <= 15 ** 2):
                                     _bt.lock(_wc[0], _wc[1])
-                                    if _vortex is not None:
-                                        _vortex.lock(_wc[0], _wc[1])
-                                    if _idea6 is not None:
-                                        _idea6.lock(_wc[0], _wc[1])
                                     _boxsel.reset(_wc)
                                     _transparent_engine.reset()
                                     track_pos = _wc
@@ -802,7 +784,7 @@ class _MacroThread(threading.Thread):
                         if track_pos is not None:
                             _box_dec = _boxsel.update(
                                 _cands, track_pos,
-                                force_fallback=(_via_white or _via_vortex or _via_idea6))
+                                force_fallback=_via_white)
                         elif _bt.locked:
                             _box_dec = _boxsel.update(_cands, None)
                         if _box_dec is not None:
@@ -820,10 +802,8 @@ class _MacroThread(threading.Thread):
                         if _diag_cnt % 15 == 0:
                             _tp = None if track_pos is None else (int(track_pos[0]), int(track_pos[1]))
                             _src = ("흰색" if _via_white
-                                    else ("주기차분" if _via_idea6
-                                          else ("vortex" if _via_vortex
-                                                else ("ByteTrack" if track_pos is not None
-                                                      else ("소실" if _bt.locked else "잠금대기")))))
+                                    else ("ByteTrack" if track_pos is not None
+                                          else ("소실" if _bt.locked else "잠금대기")))
                             self._sig.log.emit(
                                 f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
                                 f"miss={_miss_run} → track={_tp} ({_src}) "

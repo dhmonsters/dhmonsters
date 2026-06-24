@@ -20,3 +20,5 @@
 - Task 6에서 `planet_solver_noauth.py`에 shadow mode를 연결했다.
 - live mouse target은 기존 `track_pos`를 그대로 사용한다.
 - 새 엔진 결과는 녹화 JSONL의 `engine` 필드에만 기록한다.
+- 추가 정리로 `vortex`와 `PeriodicTracker` import, 생성자 토글, UI 전달 경로를 제거했다.
+- 큰 분기 본문은 인코딩 매칭 문제 때문에 이번 패스에서 완전 삭제하지 않고 `_vortex = None`, `_idea6 = None` 죽은 경로로 고정했다.
