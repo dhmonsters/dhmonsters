@@ -111,6 +111,13 @@ from core.vision.byte_tracker import ByteTracker
 from core.vision.vortex_tracker import VortexTracker
 from core.vision.periodic_tracker import PeriodicTracker
 from core.vision.shape_classifier import ShapeClassifier
+from core.vision.transparent_puzzle_engine import (
+    PuzzleEngineInput,
+    TransparentPuzzleEngine,
+    candidate_from_live_row,
+)
+from core.vision.transparent_box_selector import TransparentBoxSelector
+from core.vision.tracking_alert import should_emit_tracking_alert
 
 # 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
 # 모양별 전문은 '그 모양 특화'가 아니라 모델별 분포 민감도 — circle이 범용 강세.
@@ -440,7 +447,11 @@ class _MacroThread(threading.Thread):
         _prev_gray = None           # 직전 프레임 gray(배경 변위 측정용)
         _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
         _bt = ByteTracker(reacq=self._reacq)   # ByteTrack MOT(+턴 재획득 토글)
+        _boxsel = TransparentBoxSelector()
+        _transparent_engine = TransparentPuzzleEngine()
         self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
+        self._sig.log.emit("[setting] transparent box selector ON")
+        self._sig.log.emit("[setting] transparent puzzle engine shadow ON")
         _vortex = VortexTracker() if self._vortex_on else None  # 투명 광류 소용돌이 추적(토글)
         if self._vortex_on:
             self._sig.log.emit("[설정] vortex 추적 ON — 투명 단계 광류 소용돌이(ByteTrack 대체)")
@@ -520,6 +531,8 @@ class _MacroThread(threading.Thread):
                             _white_prev = None
                             _tvx = _tvy = 0.0
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
+                            _boxsel.reset()
+                            _transparent_engine.reset()
                             if _vortex is not None:
                                 _vortex.reset()     # vortex 추적도 초기화
                             if _idea6 is not None:
@@ -620,6 +633,7 @@ class _MacroThread(threading.Thread):
                     # ── 추적: YOLO 주 검출 (학습 모델 있으면) / 없으면 ViT 폴백 ──────
                     track_pos = None        # (cx, cy) in det 좌표 — 클릭/미리보기용
                     _cands = []             # YOLO 후보 (미리보기 박스 표시용)
+                    _engine_out = None      # 새 투명 퍼즐 엔진 shadow 결과
                     if _syolo is not None and _syolo.enabled:
                         # 전부검출(v3) 체제 — 모델은 글라스 도형을 타겟·배경 구분 없이 다 잡는다.
                         # 시작: 흰색 도형(시작 시 유일하게 밝음)으로 잠금. 이후: 직전 위치
@@ -640,11 +654,28 @@ class _MacroThread(threading.Thread):
                         _via_vortex = False  # 이번 프레임 선택이 vortex(투명 광류) 추적인지
                         _via_idea6 = False   # 이번 프레임 선택이 ⑥ 주기차분 추적인지
                         _bg_rejected = False # 타겟 트랙 소실(coast 한계) 여부
+                        _box_mode = None
+                        _box_innov = 0.0
                         # 흰색 도형 검출(밝기). 잠금용 ≥20, 가시 보정용 ≥50.
                         _wb = acquire_white(det_masked)
                         _wc = None
                         if _wb is not None and _wb[2] >= 20:
                             _wc = (_wb[0] + _wb[2] / 2.0, _wb[1] + _wb[3] / 2.0)
+                        try:
+                            _engine_white = (
+                                _wc if (_wb is not None and _wb[2] >= 50 and _wb[3] >= 50)
+                                else None
+                            )
+                            _engine_out = _transparent_engine.update(PuzzleEngineInput(
+                                frame_index=preview_cnt,
+                                candidates=[candidate_from_live_row(c) for c in _cands if len(c) >= 5],
+                                white_anchor=_engine_white,
+                                gray_frame=_cur_gray,
+                            ))
+                        except Exception as _eng_exc:
+                            _engine_out = None
+                            if _diag_cnt % 60 == 0:
+                                self._sig.log.emit(f"[engine-shadow-error] {_eng_exc}")
                         # 흰색이 크게(≥50) 보이고 잠금 타겟 근처면 밝기 위치로 보정(흰색 우선).
                         # 흰색 단계는 밝기 GT가 완벽 — ByteTracker 타겟 트랙을 그 위치로 끌어준다.
                         if (_bt.locked and _wc is not None
@@ -689,6 +720,8 @@ class _MacroThread(threading.Thread):
                                         _vortex.lock(_wc[0], _wc[1])
                                     if _idea6 is not None:
                                         _idea6.lock(_wc[0], _wc[1])
+                                    _boxsel.reset(_wc)
+                                    _transparent_engine.reset()
                                     track_pos = _wc
                                     tracking = True
                                     self._sig.log.emit(
@@ -765,6 +798,18 @@ class _MacroThread(threading.Thread):
                         if _tg is not None:
                             _tvx, _tvy = _tg.vx, _tg.vy
                             _miss_run = _tg.miss
+                        _box_dec = None
+                        if track_pos is not None:
+                            _box_dec = _boxsel.update(
+                                _cands, track_pos,
+                                force_fallback=(_via_white or _via_vortex or _via_idea6))
+                        elif _bt.locked:
+                            _box_dec = _boxsel.update(_cands, None)
+                        if _box_dec is not None:
+                            track_pos = _box_dec.point
+                            tracking = True
+                            _box_mode = _box_dec.mode
+                            _box_innov = _box_dec.innovation
                         # 트랙 급감 진단 — 잠금 후 트랙이 5개 미만이면 후보 수와 함께 기록
                         # (후보 많은데 트랙 적으면 _bt 버그, 후보도 적으면 검출 공백)
                         if _bt.locked and _bt.track_count < 5:
@@ -781,7 +826,8 @@ class _MacroThread(threading.Thread):
                                                       else ("소실" if _bt.locked else "잠금대기")))))
                             self._sig.log.emit(
                                 f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
-                                f"miss={_miss_run} → track={_tp} ({_src})")
+                                f"miss={_miss_run} → track={_tp} ({_src}) "
+                                f"box={_box_mode or '-'}:{_box_innov:.0f}")
                         # 점진 표류 진단: 매 프레임 궤적 기록 + 멈춤(track 소실) 시 직전 90프레임 덤프
                         _frame_rec = {
                             "i": preview_cnt,
@@ -790,7 +836,17 @@ class _MacroThread(threading.Thread):
                             "vel": [round(_tvx, 1), round(_tvy, 1)],
                             "miss": _miss_run,
                             "n": len(_cands),
-                            "cands": [[int(c[0]), int(c[1]), round(c[2], 2)] for c in _cands],
+                            "box": (None if _box_mode is None
+                                    else {"mode": _box_mode,
+                                          "innov": round(_box_innov, 1)}),
+                            "engine": (None if _engine_out is None
+                                       else {"track": (None if _engine_out.x is None
+                                                       else [int(_engine_out.x), int(_engine_out.y)]),
+                                             "confidence": round(_engine_out.confidence, 2),
+                                             "candidate": _engine_out.candidate_index,
+                                             "state": _engine_out.state}),
+                            "cands": [[int(c[0]), int(c[1]), round(c[2], 2),
+                                       int(c[3]), int(c[4])] for c in _cands],
                         }
                         _trace_buf.append(_frame_rec)
                         # 판 전 구간 녹화 — 영상 프레임 + 궤적 한 줄
@@ -888,7 +944,8 @@ class _MacroThread(threading.Thread):
                                     "from": [int(_last_marker_pos[0]), int(_last_marker_pos[1])],
                                     "to": [int(track_pos[0]), int(track_pos[1])],
                                     "vel": [round(_tvx, 1), round(_tvy, 1)],
-                                    "cands": [[int(c[0]), int(c[1]), round(c[2], 2)]
+                                    "cands": [[int(c[0]), int(c[1]), round(c[2], 2),
+                                               int(c[3]), int(c[4])]
                                               for c in _cands],
                                 }
                                 with open(os.path.join(_sw_dir, f"{_ts}.json"),
@@ -919,7 +976,8 @@ class _MacroThread(threading.Thread):
                             abs_y = det_mon["top"]  + int(cy + _cursor_off_y)
                             _real_click(abs_x, abs_y)
 
-                        if self._auto.is_set() and _vit_active and preview_cnt % 30 == 0:
+                        if should_emit_tracking_alert(
+                                self._auto.is_set(), tracking, preview_cnt):
                             self._sig.log.emit(f"[추적중] pos=({abs_x},{abs_y})")
                             now = time.time()
                             if self._sound and now - last_alert > 2.0:
@@ -971,9 +1029,11 @@ class _MacroThread(threading.Thread):
                             _y1 = _det_ly + int(_ycy - _yh / 2)
                             _x2 = _det_lx + int(_ycx + _yw / 2)
                             _y2 = _det_ly + int(_ycy + _yh / 2)
-                            _sel = (track_pos is not None
-                                    and abs(_ycx - track_pos[0]) < 2
-                                    and abs(_ycy - track_pos[1]) < 2)
+                            _sel = (track_pos is not None and (
+                                    (abs(_ycx - track_pos[0]) < 2
+                                     and abs(_ycy - track_pos[1]) < 2)
+                                    or (_ycx - _yw / 2 <= track_pos[0] <= _ycx + _yw / 2
+                                        and _ycy - _yh / 2 <= track_pos[1] <= _ycy + _yh / 2)))
                             _col = (0, 255, 80) if _sel else (0, 190, 0)
                             cv2.rectangle(vis, (_x1, _y1), (_x2, _y2),
                                           _col, 2 if _sel else 1)
@@ -1223,26 +1283,8 @@ class MainUI(QWidget):
         self.chk_gpu   = QCheckBox("GPU 사용 (Vulkan, fp32)")
         self.chk_sound = QCheckBox("소리 알람 (도형찾기 감지 시)")
         self.chk_sound.setChecked(True)
-        self.chk_reacq = QCheckBox("턴 재획득 (실험 · A/B용, 기본 끔)")
-        self.chk_reacq.setToolTip(
-            "투명 단계에서 타겟이 꺾일 때 다른 도형으로 새면, 페이드 자리에서 "
-            "재출현하는 진짜 도형으로 되돌리는 실험 기능. 일부 판을 살리나 일부 판을 "
-            "깰 수 있어 인게임 A/B 검증용. 기본 끔.")
-        self.chk_vortex = QCheckBox("vortex 추적 (실험 · 투명 광류 소용돌이)")
-        self.chk_vortex.setToolTip(
-            "투명 단계를 ByteTrack 대신 광류 소용돌이로 추적. 타겟만 자전→소용돌이, "
-            "배경은 평행이동이라 자동 배제. 오프라인 16판 평균오차 ByteTrack 99px→54px, "
-            "12/16 우세. 검출/분류 불요. 인게임 A/B 검증용. 기본 끔.")
-        self.chk_idea6 = QCheckBox("⑥ 주기차분 추적 (검출무관 · 인게임 권장)")
-        self.chk_idea6.setToolTip(
-            "투명 단계를 frame[t]−정렬(frame[t−T]) 잔차로 추적. 배경은 주기 T로 반복돼 "
-            "상쇄되고 타겟만 잔차로 남음. 검출·연속성 불요라 턴 갈아타기에 안 갇힘. "
-            "인게임 무손실 평가서 v2(304px)·vortex(78px) 대비 24~71px로 최강. 기본 끔.")
         opt.addWidget(self.chk_gpu)
         opt.addWidget(self.chk_sound)
-        opt.addWidget(self.chk_reacq)
-        opt.addWidget(self.chk_vortex)
-        opt.addWidget(self.chk_idea6)
         root.addWidget(opt_card)
 
         # 텔레그램 (UI 유지, 기능은 선택)
@@ -1348,9 +1390,6 @@ class MainUI(QWidget):
             tg_enabled=self.chk_tg.isChecked(),
             tg_token=self.tg_token.text().strip(),
             tg_chat=self.tg_chat.text().strip(),
-            reacq=self.chk_reacq.isChecked(),
-            vortex=self.chk_vortex.isChecked(),
-            idea6=self.chk_idea6.isChecked(),
         )
         self._macro.start()
 

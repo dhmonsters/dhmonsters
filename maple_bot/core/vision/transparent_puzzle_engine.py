@@ -53,6 +53,11 @@ class PuzzleCandidate:
     h: float = float("nan")
 
 
+def candidate_from_live_row(row: Sequence[float]) -> PuzzleCandidate:
+    cx, cy, score, w, h = row[:5]
+    return PuzzleCandidate(float(cx), float(cy), float(score), float(w), float(h))
+
+
 @dataclass(frozen=True)
 class PuzzleEngineInput:
     frame_index: int

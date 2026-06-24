@@ -9,6 +9,7 @@ from core.vision.transparent_puzzle_engine import (
     PuzzleCandidate,
     PuzzleEngineInput,
     TransparentPuzzleEngine,
+    candidate_from_live_row,
     internal_points,
 )
 
@@ -91,6 +92,15 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
 
     def test_replay_adapter_converts_candidate_tuple(self):
         candidate = replay.candidate_from_tuple((10.0, 20.0, 0.7, 30.0, 40.0))
+
+        self.assertEqual(candidate.cx, 10.0)
+        self.assertEqual(candidate.cy, 20.0)
+        self.assertEqual(candidate.score, 0.7)
+        self.assertEqual(candidate.w, 30.0)
+        self.assertEqual(candidate.h, 40.0)
+
+    def test_live_candidate_adapter_uses_yolo_order(self):
+        candidate = candidate_from_live_row((10.0, 20.0, 0.7, 30.0, 40.0))
 
         self.assertEqual(candidate.cx, 10.0)
         self.assertEqual(candidate.cy, 20.0)

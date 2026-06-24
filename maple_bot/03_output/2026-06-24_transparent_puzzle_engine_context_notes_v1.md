@@ -17,3 +17,6 @@
 - Task 5에서 `_transparent_engine_replay_score.py`를 추가했다.
 - 첫 replay 결과는 0/16, 평균 109.9px이다. 새 엔진은 아직 live 기본 경로로 연결하면 안 된다.
 - 현재 replay scorer는 CSV 저장 권한이 없을 때도 화면 출력 후 정상 종료한다.
+- Task 6에서 `planet_solver_noauth.py`에 shadow mode를 연결했다.
+- live mouse target은 기존 `track_pos`를 그대로 사용한다.
+- 새 엔진 결과는 녹화 JSONL의 `engine` 필드에만 기록한다.
