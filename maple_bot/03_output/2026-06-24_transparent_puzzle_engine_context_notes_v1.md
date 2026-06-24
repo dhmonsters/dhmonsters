@@ -10,3 +10,5 @@
 - 흰색 anchor가 들어오면 후보보다 anchor를 우선하고 `state="white_anchor"`를 반환한다.
 - Task 2에서 `BackgroundCatalog`를 추가했다.
 - `prep_end`를 period로 고정하지 않고, 후보 중심 반복 거리의 median score가 가장 낮은 lag를 period로 선택한다.
+- Task 3에서 `EngineConfig`, continuity gate, coast 상태를 추가했다.
+- 후보가 예측 위치에서 너무 멀면 검출 중심을 따르지 않고 velocity 예측 위치를 반환한다.

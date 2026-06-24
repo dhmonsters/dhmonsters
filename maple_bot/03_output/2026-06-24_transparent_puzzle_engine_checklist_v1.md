@@ -5,8 +5,8 @@
 - [x] 새 엔진 최소 구현.
 - [x] 배경 catalog와 period 테스트 작성.
 - [x] 배경 catalog와 period 구현.
-- [ ] continuity와 coast 상태 테스트 작성.
-- [ ] continuity와 coast 상태 구현.
+- [x] continuity와 coast 상태 테스트 작성.
+- [x] continuity와 coast 상태 구현.
 - [ ] merged blob 내부점 테스트 작성.
 - [ ] merged blob 내부점 구현.
 - [ ] 오프라인 replay scorer 작성.

@@ -3,6 +3,7 @@ import unittest
 
 from core.vision.transparent_puzzle_engine import (
     BackgroundCatalog,
+    EngineConfig,
     PuzzleCandidate,
     PuzzleEngineInput,
     TransparentPuzzleEngine,
@@ -33,6 +34,32 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
 
         self.assertEqual(period, 5)
         self.assertLess(score, 1.0)
+
+    def test_engine_prefers_continuous_candidate(self):
+        engine = TransparentPuzzleEngine()
+        engine.update(PuzzleEngineInput(0, [], white_anchor=(100.0, 100.0)))
+
+        out = engine.update(PuzzleEngineInput(1, [
+            PuzzleCandidate(108.0, 100.0, 0.4, 30.0, 30.0),
+            PuzzleCandidate(220.0, 100.0, 0.99, 30.0, 30.0),
+        ]))
+
+        self.assertEqual(out.candidate_index, 0)
+        self.assertEqual(out.state, "candidate")
+
+    def test_engine_coasts_when_candidates_jump_too_far(self):
+        engine = TransparentPuzzleEngine(EngineConfig(max_candidate_jump=50.0, coast_frames=3))
+        engine.update(PuzzleEngineInput(0, [], white_anchor=(100.0, 100.0)))
+        engine.update(PuzzleEngineInput(1, [
+            PuzzleCandidate(110.0, 100.0, 0.8, 30.0, 30.0),
+        ]))
+
+        out = engine.update(PuzzleEngineInput(2, [
+            PuzzleCandidate(300.0, 300.0, 0.99, 30.0, 30.0),
+        ]))
+
+        self.assertEqual(out.state, "coast")
+        self.assertAlmostEqual(out.x, 120.0, delta=1.0)
 
 
 if __name__ == "__main__":

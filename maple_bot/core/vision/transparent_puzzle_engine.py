@@ -40,6 +40,12 @@ class PuzzleEngineOutput:
     debug: Dict[str, object]
 
 
+@dataclass(frozen=True)
+class EngineConfig:
+    max_candidate_jump: float = 115.0
+    coast_frames: int = 12
+
+
 class BackgroundCatalog:
     def __init__(self):
         self._frames: Dict[int, List[PuzzleCandidate]] = {}
@@ -142,16 +148,21 @@ class BackgroundCatalog:
 
 
 class TransparentPuzzleEngine:
-    def __init__(self):
+    def __init__(self, config: Optional[EngineConfig] = None):
+        self._config = config or EngineConfig()
         self.reset()
 
     def reset(self) -> None:
         self._last_point: Optional[Point] = None
+        self._velocity: Point = (0.0, 0.0)
+        self._coast_left = int(self._config.coast_frames)
 
     def update(self, inp: PuzzleEngineInput) -> PuzzleEngineOutput:
         if inp.white_anchor is not None:
             x, y = float(inp.white_anchor[0]), float(inp.white_anchor[1])
             self._last_point = (x, y)
+            self._velocity = (0.0, 0.0)
+            self._coast_left = int(self._config.coast_frames)
             return PuzzleEngineOutput(
                 x=x,
                 y=y,
@@ -162,6 +173,8 @@ class TransparentPuzzleEngine:
             )
 
         if not inp.candidates:
+            if self._last_point is not None and self._coast_left > 0:
+                return self._coast(inp.frame_index, reason="no_candidates")
             return PuzzleEngineOutput(
                 x=None,
                 y=None,
@@ -171,14 +184,77 @@ class TransparentPuzzleEngine:
                 debug={"frame_index": inp.frame_index},
             )
 
-        candidate = max(inp.candidates, key=lambda cand: float(cand.score))
-        idx = list(inp.candidates).index(candidate)
-        self._last_point = (float(candidate.cx), float(candidate.cy))
+        selected = self._select_candidate(inp.candidates)
+        if selected is None:
+            return self._coast(inp.frame_index, reason="jump_gate")
+
+        idx, candidate = selected
+        cur = (float(candidate.cx), float(candidate.cy))
+        if self._last_point is not None:
+            self._velocity = (
+                cur[0] - self._last_point[0],
+                cur[1] - self._last_point[1],
+            )
+        self._last_point = cur
+        self._coast_left = int(self._config.coast_frames)
         return PuzzleEngineOutput(
-            x=float(candidate.cx),
-            y=float(candidate.cy),
+            x=cur[0],
+            y=cur[1],
             confidence=float(candidate.score),
             candidate_index=idx,
             state="candidate",
             debug={"frame_index": inp.frame_index},
+        )
+
+    def _predicted_point(self) -> Optional[Point]:
+        if self._last_point is None:
+            return None
+        return (
+            self._last_point[0] + self._velocity[0],
+            self._last_point[1] + self._velocity[1],
+        )
+
+    def _select_candidate(
+        self,
+        candidates: Sequence[PuzzleCandidate],
+    ) -> Optional[Tuple[int, PuzzleCandidate]]:
+        pred = self._predicted_point()
+        if pred is None:
+            return max(enumerate(candidates), key=lambda item: float(item[1].score))
+
+        gated = [
+            (idx, cand)
+            for idx, cand in enumerate(candidates)
+            if _dist(pred, (cand.cx, cand.cy)) <= float(self._config.max_candidate_jump)
+        ]
+        if not gated:
+            return None
+        return min(
+            gated,
+            key=lambda item: (
+                _dist(pred, (item[1].cx, item[1].cy)) - 0.02 * float(item[1].score),
+                -float(item[1].score),
+            ),
+        )
+
+    def _coast(self, frame_index: int, reason: str) -> PuzzleEngineOutput:
+        pred = self._predicted_point()
+        if pred is None or self._coast_left <= 0:
+            return PuzzleEngineOutput(
+                x=None,
+                y=None,
+                confidence=0.0,
+                candidate_index=None,
+                state="lost",
+                debug={"frame_index": frame_index, "reason": reason},
+            )
+        self._last_point = pred
+        self._coast_left -= 1
+        return PuzzleEngineOutput(
+            x=pred[0],
+            y=pred[1],
+            confidence=0.25,
+            candidate_index=None,
+            state="coast",
+            debug={"frame_index": frame_index, "reason": reason},
         )
