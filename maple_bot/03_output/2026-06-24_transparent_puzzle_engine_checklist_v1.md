@@ -9,8 +9,8 @@
 - [x] continuity와 coast 상태 구현.
 - [x] merged blob 내부점 테스트 작성.
 - [x] merged blob 내부점 구현.
-- [ ] 오프라인 replay scorer 작성.
-- [ ] 16개 GT replay 실행.
+- [x] 오프라인 replay scorer 작성.
+- [x] 16개 GT replay 실행.
 - [ ] `planet_solver_noauth.py` shadow mode 연결.
 - [ ] 불필요한 live tracking 옵션 제거.
 - [ ] 관련 테스트 전체 실행.

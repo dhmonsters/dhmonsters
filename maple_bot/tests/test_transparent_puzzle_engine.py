@@ -1,6 +1,8 @@
 # 투명 도형 퍼즐 추적 엔진의 상태 전환과 후보 선택 규칙을 검증합니다.
 import unittest
+from unittest.mock import patch
 
+import _transparent_engine_replay_score as replay
 from core.vision.transparent_puzzle_engine import (
     BackgroundCatalog,
     EngineConfig,
@@ -86,6 +88,21 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
 
         self.assertEqual(out.state, "merged_internal")
         self.assertLess(abs(out.x - 120.0), abs(out.x - 160.0))
+
+    def test_replay_adapter_converts_candidate_tuple(self):
+        candidate = replay.candidate_from_tuple((10.0, 20.0, 0.7, 30.0, 40.0))
+
+        self.assertEqual(candidate.cx, 10.0)
+        self.assertEqual(candidate.cy, 20.0)
+        self.assertEqual(candidate.score, 0.7)
+        self.assertEqual(candidate.w, 30.0)
+        self.assertEqual(candidate.h, 40.0)
+
+    def test_replay_output_permission_failure_is_nonfatal(self):
+        with patch("pathlib.Path.write_text", side_effect=PermissionError("blocked")):
+            result = replay.write_outputs([])
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

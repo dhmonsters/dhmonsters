@@ -14,3 +14,6 @@
 - 후보가 예측 위치에서 너무 멀면 검출 중심을 따르지 않고 velocity 예측 위치를 반환한다.
 - Task 4에서 후보 박스 내부 격자점과 `merged_internal` 상태를 추가했다.
 - 내부점 보정은 작은 일반 박스에는 적용하지 않고, `merged_min_size` 이상의 큰 후보에서만 적용한다.
+- Task 5에서 `_transparent_engine_replay_score.py`를 추가했다.
+- 첫 replay 결과는 0/16, 평균 109.9px이다. 새 엔진은 아직 live 기본 경로로 연결하면 안 된다.
+- 현재 replay scorer는 CSV 저장 권한이 없을 때도 화면 출력 후 정상 종료한다.
