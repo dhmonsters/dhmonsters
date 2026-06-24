@@ -12,3 +12,5 @@
 - `prep_end`를 period로 고정하지 않고, 후보 중심 반복 거리의 median score가 가장 낮은 lag를 period로 선택한다.
 - Task 3에서 `EngineConfig`, continuity gate, coast 상태를 추가했다.
 - 후보가 예측 위치에서 너무 멀면 검출 중심을 따르지 않고 velocity 예측 위치를 반환한다.
+- Task 4에서 후보 박스 내부 격자점과 `merged_internal` 상태를 추가했다.
+- 내부점 보정은 작은 일반 박스에는 적용하지 않고, `merged_min_size` 이상의 큰 후보에서만 적용한다.

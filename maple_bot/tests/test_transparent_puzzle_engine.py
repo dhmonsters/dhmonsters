@@ -7,6 +7,7 @@ from core.vision.transparent_puzzle_engine import (
     PuzzleCandidate,
     PuzzleEngineInput,
     TransparentPuzzleEngine,
+    internal_points,
 )
 
 
@@ -60,6 +61,31 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
 
         self.assertEqual(out.state, "coast")
         self.assertAlmostEqual(out.x, 120.0, delta=1.0)
+
+    def test_internal_points_include_center_and_box_offsets(self):
+        pts = internal_points(
+            PuzzleCandidate(100.0, 100.0, 0.8, 40.0, 20.0),
+            grid_size=3,
+            shrink=0.5,
+        )
+
+        self.assertIn((100.0, 100.0), pts)
+        self.assertIn((90.0, 95.0), pts)
+        self.assertIn((110.0, 105.0), pts)
+
+    def test_merged_candidate_uses_predicted_internal_point(self):
+        engine = TransparentPuzzleEngine(EngineConfig(max_candidate_jump=100.0))
+        engine.update(PuzzleEngineInput(0, [], white_anchor=(100.0, 100.0)))
+        engine.update(PuzzleEngineInput(1, [
+            PuzzleCandidate(110.0, 100.0, 0.8, 60.0, 60.0),
+        ]))
+
+        out = engine.update(PuzzleEngineInput(2, [
+            PuzzleCandidate(160.0, 100.0, 0.8, 120.0, 60.0),
+        ]))
+
+        self.assertEqual(out.state, "merged_internal")
+        self.assertLess(abs(out.x - 120.0), abs(out.x - 160.0))
 
 
 if __name__ == "__main__":

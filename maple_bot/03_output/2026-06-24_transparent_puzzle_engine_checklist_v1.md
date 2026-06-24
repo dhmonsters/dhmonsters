@@ -7,8 +7,8 @@
 - [x] 배경 catalog와 period 구현.
 - [x] continuity와 coast 상태 테스트 작성.
 - [x] continuity와 coast 상태 구현.
-- [ ] merged blob 내부점 테스트 작성.
-- [ ] merged blob 내부점 구현.
+- [x] merged blob 내부점 테스트 작성.
+- [x] merged blob 내부점 구현.
 - [ ] 오프라인 replay scorer 작성.
 - [ ] 16개 GT replay 실행.
 - [ ] `planet_solver_noauth.py` shadow mode 연결.

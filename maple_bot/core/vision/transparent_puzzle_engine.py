@@ -13,6 +13,37 @@ def _dist(a: Point, b: Point) -> float:
     return math.hypot(float(a[0]) - float(b[0]), float(a[1]) - float(b[1]))
 
 
+def _finite_size(candidate: "PuzzleCandidate") -> bool:
+    return (
+        math.isfinite(float(candidate.w))
+        and math.isfinite(float(candidate.h))
+        and float(candidate.w) > 0.0
+        and float(candidate.h) > 0.0
+    )
+
+
+def internal_points(
+    candidate: "PuzzleCandidate",
+    grid_size: int = 5,
+    shrink: float = 0.76,
+) -> List[Point]:
+    cx, cy = float(candidate.cx), float(candidate.cy)
+    if not _finite_size(candidate) or grid_size <= 1:
+        return [(cx, cy)]
+
+    half_w = float(candidate.w) * float(shrink) / 2.0
+    half_h = float(candidate.h) * float(shrink) / 2.0
+    if grid_size == 3:
+        xs = [cx - half_w, cx, cx + half_w]
+        ys = [cy - half_h, cy, cy + half_h]
+    else:
+        step_x = 0.0 if grid_size <= 1 else (half_w * 2.0) / float(grid_size - 1)
+        step_y = 0.0 if grid_size <= 1 else (half_h * 2.0) / float(grid_size - 1)
+        xs = [cx - half_w + step_x * i for i in range(grid_size)]
+        ys = [cy - half_h + step_y * i for i in range(grid_size)]
+    return [(float(x), float(y)) for x in xs for y in ys]
+
+
 @dataclass(frozen=True)
 class PuzzleCandidate:
     cx: float
@@ -44,6 +75,7 @@ class PuzzleEngineOutput:
 class EngineConfig:
     max_candidate_jump: float = 115.0
     coast_frames: int = 12
+    merged_min_size: float = 80.0
 
 
 class BackgroundCatalog:
@@ -189,7 +221,7 @@ class TransparentPuzzleEngine:
             return self._coast(inp.frame_index, reason="jump_gate")
 
         idx, candidate = selected
-        cur = (float(candidate.cx), float(candidate.cy))
+        cur, state = self._candidate_point(candidate)
         if self._last_point is not None:
             self._velocity = (
                 cur[0] - self._last_point[0],
@@ -202,7 +234,7 @@ class TransparentPuzzleEngine:
             y=cur[1],
             confidence=float(candidate.score),
             candidate_index=idx,
-            state="candidate",
+            state=state,
             debug={"frame_index": inp.frame_index},
         )
 
@@ -236,6 +268,29 @@ class TransparentPuzzleEngine:
                 -float(item[1].score),
             ),
         )
+
+    def _candidate_point(self, candidate: PuzzleCandidate) -> Tuple[Point, str]:
+        center = (float(candidate.cx), float(candidate.cy))
+        pred = self._predicted_point()
+        if pred is None or not _finite_size(candidate):
+            return center, "candidate"
+        if max(float(candidate.w), float(candidate.h)) < float(self._config.merged_min_size):
+            return center, "candidate"
+
+        inside = (
+            abs(pred[0] - center[0]) <= float(candidate.w) / 2.0
+            and abs(pred[1] - center[1]) <= float(candidate.h) / 2.0
+        )
+        if not inside:
+            return center, "candidate"
+
+        point = min(
+            internal_points(candidate, grid_size=5, shrink=0.76),
+            key=lambda item: _dist(item, pred),
+        )
+        if _dist(point, pred) + 1.0 < _dist(center, pred):
+            return point, "merged_internal"
+        return center, "candidate"
 
     def _coast(self, frame_index: int, reason: str) -> PuzzleEngineOutput:
         pred = self._predicted_point()
