@@ -2,6 +2,7 @@
 import unittest
 
 from core.vision.transparent_puzzle_engine import (
+    BackgroundCatalog,
     PuzzleCandidate,
     PuzzleEngineInput,
     TransparentPuzzleEngine,
@@ -21,6 +22,17 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
         self.assertEqual((out.x, out.y), (220.0, 180.0))
         self.assertEqual(out.state, "white_anchor")
         self.assertIsNone(out.candidate_index)
+
+    def test_period_is_measured_from_candidate_repetition(self):
+        catalog = BackgroundCatalog()
+        for frame in range(8):
+            x = float((frame % 5) * 10)
+            catalog.add_frame(frame, [PuzzleCandidate(x, 0.0, 1.0, 20.0, 20.0)])
+
+        period, score = catalog.estimate_period(prep_end=6, min_lag=3, max_lag=6)
+
+        self.assertEqual(period, 5)
+        self.assertLess(score, 1.0)
 
 
 if __name__ == "__main__":

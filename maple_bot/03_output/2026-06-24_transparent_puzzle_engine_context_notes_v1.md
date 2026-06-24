@@ -8,3 +8,5 @@
 - 핵심 병목은 후보 검출이 아니라 merged blob 내부의 타겟 중심 복원이다.
 - Task 1에서 `PuzzleCandidate`, `PuzzleEngineInput`, `PuzzleEngineOutput`, `TransparentPuzzleEngine.update` 최소 계약을 추가했다.
 - 흰색 anchor가 들어오면 후보보다 anchor를 우선하고 `state="white_anchor"`를 반환한다.
+- Task 2에서 `BackgroundCatalog`를 추가했다.
+- `prep_end`를 period로 고정하지 않고, 후보 중심 반복 거리의 median score가 가장 낮은 lag를 period로 선택한다.
