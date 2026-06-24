@@ -1,8 +1,8 @@
 # 2026-06-24 transparent puzzle engine 체크리스트 v1
 
 - [x] 구현 계획 문서 작성.
-- [ ] 새 엔진 data contract 테스트 작성.
-- [ ] 새 엔진 최소 구현.
+- [x] 새 엔진 data contract 테스트 작성.
+- [x] 새 엔진 최소 구현.
 - [ ] 배경 catalog와 period 테스트 작성.
 - [ ] 배경 catalog와 period 구현.
 - [ ] continuity와 coast 상태 테스트 작성.

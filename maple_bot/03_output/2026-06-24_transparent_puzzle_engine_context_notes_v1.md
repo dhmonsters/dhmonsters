@@ -6,3 +6,5 @@
 - replay가 기존 consensus 9/16보다 좋아지기 전까지 live 기본 경로로 켜지 않는다.
 - live 연결은 shadow mode를 우선한다.
 - 핵심 병목은 후보 검출이 아니라 merged blob 내부의 타겟 중심 복원이다.
+- Task 1에서 `PuzzleCandidate`, `PuzzleEngineInput`, `PuzzleEngineOutput`, `TransparentPuzzleEngine.update` 최소 계약을 추가했다.
+- 흰색 anchor가 들어오면 후보보다 anchor를 우선하고 `state="white_anchor"`를 반환한다.
