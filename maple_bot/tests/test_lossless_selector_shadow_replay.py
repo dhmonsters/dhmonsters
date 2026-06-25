@@ -6,6 +6,8 @@ from _lossless_selector_shadow_replay import (
     raw_candidate_anchor_paths,
     replay_shadow_path_from_rows,
     score_path,
+    track_rescue_beam_path,
+    track_rescue_candidate_path,
 )
 
 
@@ -152,6 +154,49 @@ class LosslessSelectorShadowReplayTests(unittest.TestCase):
             records[3]["family"],
             "panel_default_center_mild_state_mild_raw_rank0",
         )
+
+    def test_track_rescue_candidate_path_uses_prediction_when_track_jumps(self):
+        rows = [
+            {"track": [0, 0], "cands": [[0, 0, 0.9], [100, 0, 0.8]]},
+            {"track": [10, 0], "cands": [[10, 0, 0.9], [100, 0, 0.8]]},
+            {"track": [100, 0], "cands": [[20, 0, 0.8], [100, 0, 0.9]]},
+            {"track": None, "cands": [[30, 0, 0.8], [100, 0, 0.9]]},
+        ]
+
+        path = track_rescue_candidate_path(
+            rows,
+            track_prediction_gate=35.0,
+            rescue_prediction_gate=45.0,
+        )
+
+        self.assertEqual(path[0], (0.0, 0.0))
+        self.assertEqual(path[1], (10.0, 0.0))
+        self.assertEqual(path[2], (20.0, 0.0))
+        self.assertEqual(path[3], (30.0, 0.0))
+
+    def test_track_rescue_beam_path_keeps_smooth_branch_when_track_is_wrong(self):
+        rows = [
+            {"track": [0, 0], "cands": [[0, 0, 0.8], [100, 0, 0.9]]},
+            {"track": [10, 0], "cands": [[10, 0, 0.8], [100, 0, 0.9]]},
+            {"track": [100, 0], "cands": [[20, 0, 0.7], [100, 0, 0.95]]},
+            {"track": None, "cands": [[30, 0, 0.7], [110, 0, 0.95]]},
+            {"track": None, "cands": [[40, 0, 0.7], [120, 0, 0.95]]},
+        ]
+
+        path = track_rescue_beam_path(
+            rows,
+            keep=6,
+            branch=2,
+            track_prediction_gate=35.0,
+            rescue_prediction_gate=50.0,
+            detection_weight=0.2,
+        )
+
+        self.assertEqual(path[0], (0.0, 0.0))
+        self.assertEqual(path[1], (10.0, 0.0))
+        self.assertEqual(path[2], (20.0, 0.0))
+        self.assertEqual(path[3], (30.0, 0.0))
+        self.assertEqual(path[4], (40.0, 0.0))
 
 
 if __name__ == "__main__":

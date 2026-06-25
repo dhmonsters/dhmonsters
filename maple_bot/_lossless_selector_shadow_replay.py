@@ -5,6 +5,7 @@ import argparse
 import glob
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import median
 from typing import Mapping, Sequence
@@ -28,6 +29,14 @@ RAW_CONTINUITY_FAMILY_PREFIX = f"{TRACK_ANCHOR_FAMILY}_raw_cont"
 
 
 Point = tuple[float, float]
+
+
+@dataclass(frozen=True)
+class _RescueHypothesis:
+    score: float
+    last: Point
+    velocity: Point
+    path: dict[int, Point]
 
 
 def _point(value: object) -> Point | None:
@@ -194,6 +203,167 @@ def raw_candidate_anchor_paths(
         for family, path in paths.items()
         if path
     }
+
+
+def track_rescue_candidate_path(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    max_candidates: int = 24,
+    track_prediction_gate: float = 90.0,
+    rescue_prediction_gate: float = 160.0,
+    velocity_alpha: float = 0.55,
+) -> dict[int, Point]:
+    path: dict[int, Point] = {}
+    last: Point | None = None
+    velocity = (0.0, 0.0)
+
+    for frame, row in enumerate(rows):
+        candidates = _normalize_candidates(row.get("cands", []))
+        candidates.sort(key=lambda candidate: candidate[2], reverse=True)
+        points = [
+            (candidate[0], candidate[1])
+            for candidate in candidates[: max(1, int(max_candidates))]
+        ]
+        if not points:
+            continue
+
+        track = _point(row.get("track"))
+        track_pick = (
+            min(points, key=lambda point: _dist(point, track))
+            if track is not None
+            else None
+        )
+        if last is None:
+            picked = track_pick if track_pick is not None else points[0]
+        else:
+            pred = (last[0] + velocity[0], last[1] + velocity[1])
+            rescue_pick = min(points, key=lambda point: _dist(point, pred))
+            track_ok = (
+                track_pick is not None
+                and _dist(track_pick, pred) <= float(track_prediction_gate)
+            )
+            rescue_ok = _dist(rescue_pick, pred) <= float(rescue_prediction_gate)
+            if track_ok:
+                picked = track_pick
+            elif rescue_ok:
+                picked = rescue_pick
+            else:
+                picked = track_pick if track_pick is not None else rescue_pick
+
+        if last is not None:
+            new_velocity = (picked[0] - last[0], picked[1] - last[1])
+            alpha = float(velocity_alpha)
+            velocity = (
+                alpha * velocity[0] + (1.0 - alpha) * new_velocity[0],
+                alpha * velocity[1] + (1.0 - alpha) * new_velocity[1],
+            )
+        last = picked
+        path[frame] = picked
+
+    return path
+
+
+def track_rescue_beam_path(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    max_candidates: int = 24,
+    keep: int = 24,
+    branch: int = 6,
+    track_prediction_gate: float = 90.0,
+    track_snap_gate: float = 30.0,
+    rescue_prediction_gate: float = 160.0,
+    velocity_alpha: float = 0.55,
+    continuity_weight: float = 10.0,
+    track_weight: float = 8.0,
+    detection_weight: float = 0.6,
+    jump_penalty_weight: float = 0.03,
+) -> dict[int, Point]:
+    hypotheses: list[_RescueHypothesis] = []
+
+    for frame, row in enumerate(rows):
+        candidates = _normalize_candidates(row.get("cands", []))
+        candidates.sort(key=lambda candidate: candidate[2], reverse=True)
+        points = [
+            ((candidate[0], candidate[1]), candidate[2])
+            for candidate in candidates[: max(1, int(max_candidates))]
+        ]
+        if not points:
+            continue
+
+        track = _point(row.get("track"))
+        if not hypotheses:
+            seed_point = (
+                min((point for point, _score in points), key=lambda point: _dist(point, track))
+                if track is not None
+                else points[0][0]
+            )
+            hypotheses = [
+                _RescueHypothesis(
+                    score=0.0,
+                    last=seed_point,
+                    velocity=(0.0, 0.0),
+                    path={frame: seed_point},
+                )
+            ]
+            continue
+
+        expanded: list[_RescueHypothesis] = []
+        for hyp in hypotheses:
+            pred = (hyp.last[0] + hyp.velocity[0], hyp.last[1] + hyp.velocity[1])
+            track_reliable = (
+                track is not None
+                and _dist(track, pred) <= float(track_prediction_gate)
+            )
+            scored_points = []
+            for point, det_score in points:
+                pred_dist = _dist(point, pred)
+                continuity = max(
+                    0.0,
+                    1.0 - pred_dist / max(float(rescue_prediction_gate), 1e-6),
+                ) * float(continuity_weight)
+                track_bonus = 0.0
+                if track_reliable and track is not None:
+                    track_dist = _dist(point, track)
+                    track_bonus = max(
+                        0.0,
+                        1.0 - track_dist / max(float(track_snap_gate), 1e-6),
+                    ) * float(track_weight)
+                local_score = (
+                    continuity
+                    + track_bonus
+                    + float(detection_weight) * float(det_score)
+                    - float(jump_penalty_weight) * pred_dist
+                )
+                scored_points.append((local_score, point))
+
+            scored_points.sort(key=lambda item: item[0], reverse=True)
+            for local_score, point in scored_points[: max(1, int(branch))]:
+                new_velocity = (point[0] - hyp.last[0], point[1] - hyp.last[1])
+                alpha = float(velocity_alpha)
+                velocity = (
+                    alpha * hyp.velocity[0] + (1.0 - alpha) * new_velocity[0],
+                    alpha * hyp.velocity[1] + (1.0 - alpha) * new_velocity[1],
+                )
+                path = dict(hyp.path)
+                path[frame] = point
+                expanded.append(
+                    _RescueHypothesis(
+                        score=hyp.score + local_score,
+                        last=point,
+                        velocity=velocity,
+                        path=path,
+                    )
+                )
+
+        hypotheses = sorted(
+            expanded,
+            key=lambda hyp: hyp.score,
+            reverse=True,
+        )[: max(1, int(keep))]
+
+    if not hypotheses:
+        return {}
+    return max(hypotheses, key=lambda hyp: hyp.score).path
 
 
 def replay_shadow_path_from_rows(
