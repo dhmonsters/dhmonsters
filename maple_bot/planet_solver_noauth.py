@@ -116,6 +116,7 @@ from core.vision.transparent_puzzle_engine import (
 )
 from core.vision.transparent_box_selector import TransparentBoxSelector
 from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
+from core.vision.transparent_selector_shadow import TransparentSelectorShadow
 from core.vision.tracking_alert import should_emit_tracking_alert
 
 # 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
@@ -447,11 +448,20 @@ class _MacroThread(threading.Thread):
         _boxsel = TransparentBoxSelector()
         _transparent_engine = TransparentPuzzleEngine()
         _family_selector = TransparentFamilySelectorRuntime()
+        _selector_shadow = TransparentSelectorShadow(
+            _family_selector,
+            clip_id="live",
+            window=24,
+            min_frames=8,
+            emit_every=10,
+            max_candidates=8,
+        )
         self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
         self._sig.log.emit("[setting] transparent box selector ON")
         self._sig.log.emit("[setting] transparent puzzle engine shadow ON")
         if _family_selector.available:
             self._sig.log.emit("[setting] GT-free family selector model loaded")
+            self._sig.log.emit("[setting] GT-free family selector shadow log ON")
         else:
             self._sig.log.emit(f"[setting] GT-free family selector disabled: {_family_selector.load_error}")
         _vortex = None
@@ -531,6 +541,7 @@ class _MacroThread(threading.Thread):
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
                             _boxsel.reset()
                             _transparent_engine.reset()
+                            _selector_shadow.reset(clip_id="live")
                             _target_shape = None    # 다음 판 모양 재판별
                             _shape_votes = {}
                             _shape_cnt = 0
@@ -719,6 +730,7 @@ class _MacroThread(threading.Thread):
                                         _rc_dir = os.path.join(ROOT, "_record_debug")
                                         os.makedirs(_rc_dir, exist_ok=True)
                                         _stamp = time.strftime("%m%d_%H%M%S")
+                                        _selector_shadow.reset(clip_id=f"{success:03d}_{_stamp}")
                                         _rc_base = os.path.join(_rc_dir, f"{success:03d}_{_stamp}")
                                         _rec_size = (det.shape[1], det.shape[0])
                                         _rec_writer = cv2.VideoWriter(
@@ -786,6 +798,7 @@ class _MacroThread(threading.Thread):
                         if _tg is not None:
                             _tvx, _tvy = _tg.vx, _tg.vy
                             _miss_run = _tg.miss
+                        _pre_box_pos = track_pos
                         _box_dec = None
                         if track_pos is not None:
                             _box_dec = _boxsel.update(
@@ -798,6 +811,32 @@ class _MacroThread(threading.Thread):
                             tracking = True
                             _box_mode = _box_dec.mode
                             _box_innov = _box_dec.innovation
+                        _selector_shadow_rec = None
+                        try:
+                            _shadow_anchors = {}
+                            if _pre_box_pos is not None:
+                                _shadow_anchors["panel_default_center_mild_state_mild"] = _pre_box_pos
+                            if _box_dec is not None and track_pos is not None:
+                                _shadow_anchors["balanced_viterbi_center_mild_state_mild"] = track_pos
+                            if (_engine_out is not None and _engine_out.x is not None
+                                    and _engine_out.y is not None):
+                                _shadow_anchors["phase_catalog_center_mild_state_mild"] = (
+                                    _engine_out.x, _engine_out.y)
+                            if _shadow_anchors:
+                                _selector_shadow_rec = _selector_shadow.update(
+                                    preview_cnt,
+                                    candidates=_cands,
+                                    anchors=_shadow_anchors,
+                                )
+                        except Exception as _sel_exc:
+                            _selector_shadow_rec = {
+                                "clip": "live",
+                                "frame": preview_cnt,
+                                "available": False,
+                                "error": str(_sel_exc),
+                            }
+                            if _diag_cnt % 60 == 0:
+                                self._sig.log.emit(f"[selector-shadow-error] {_sel_exc}")
                         # 트랙 급감 진단 — 잠금 후 트랙이 5개 미만이면 후보 수와 함께 기록
                         # (후보 많은데 트랙 적으면 _bt 버그, 후보도 적으면 검출 공백)
                         if _bt.locked and _bt.track_count < 5:
@@ -814,6 +853,11 @@ class _MacroThread(threading.Thread):
                                 f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
                                 f"miss={_miss_run} → track={_tp} ({_src}) "
                                 f"box={_box_mode or '-'}:{_box_innov:.0f}")
+                            if _selector_shadow_rec and _selector_shadow_rec.get("available"):
+                                self._sig.log.emit(
+                                    f"[selector-shadow] {_selector_shadow_rec.get('family')} "
+                                    f"point={_selector_shadow_rec.get('point')} "
+                                    f"rows={_selector_shadow_rec.get('rows')}")
                         # 점진 표류 진단: 매 프레임 궤적 기록 + 멈춤(track 소실) 시 직전 90프레임 덤프
                         _frame_rec = {
                             "i": preview_cnt,
@@ -828,9 +872,10 @@ class _MacroThread(threading.Thread):
                             "engine": (None if _engine_out is None
                                        else {"track": (None if _engine_out.x is None
                                                        else [int(_engine_out.x), int(_engine_out.y)]),
-                                             "confidence": round(_engine_out.confidence, 2),
-                                             "candidate": _engine_out.candidate_index,
-                                             "state": _engine_out.state}),
+                                              "confidence": round(_engine_out.confidence, 2),
+                                              "candidate": _engine_out.candidate_index,
+                                              "state": _engine_out.state}),
+                            "selector_shadow": _selector_shadow_rec,
                             "cands": [[int(c[0]), int(c[1]), round(c[2], 2),
                                        int(c[3]), int(c[4])] for c in _cands],
                         }
