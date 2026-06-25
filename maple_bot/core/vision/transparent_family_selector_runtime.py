@@ -8,6 +8,7 @@ from _gt_free_family_selector import (
     load_gt_free_selector_model,
     select_gt_free_family_rows,
 )
+from core.vision.transparent_feature_rows import build_transparent_feature_rows
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,6 +44,21 @@ class TransparentFamilySelectorRuntime:
             return {}
         runtime_rows = [strip_gt_score_labels(row) for row in rows]
         return select_gt_free_family_rows(runtime_rows, self._model)
+
+    def select_from_path_pool(
+        self,
+        clip: str,
+        paths,
+        frames,
+        **kwargs,
+    ) -> tuple[Dict[object, dict], list[dict]]:
+        rows = build_transparent_feature_rows(
+            clip,
+            paths,
+            frames,
+            **kwargs,
+        )
+        return self.select(rows), rows
 
     def _load(self) -> None:
         try:

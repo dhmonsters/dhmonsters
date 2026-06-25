@@ -101,6 +101,40 @@ class TransparentFamilySelectorRuntimeTests(unittest.TestCase):
         self.assertEqual(summary["total"], 16)
         self.assertLessEqual(summary["mean"], 40.0)
 
+    def test_runtime_selects_from_path_pool_rows(self):
+        model = LinearSelectorModel(
+            feature_names=("rank_rough",),
+            weights=(-1.0,),
+            mean=(0.0,),
+            scale=(1.0,),
+        )
+        paths = {
+            "steady": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+            },
+            "jumpy": {
+                0: (0.0, 0.0),
+                1: (50.0, 0.0),
+                2: (20.0, 0.0),
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.json"
+            save_gt_free_selector_model(path, model)
+            runtime = TransparentFamilySelectorRuntime(path)
+
+            selected, rows = runtime.select_from_path_pool(
+                "live_clip",
+                paths,
+                [0, 1, 2],
+            )
+
+        self.assertEqual(selected["live_clip"]["family"], "steady")
+        self.assertEqual(len(rows), 2)
+        self.assertIn("rank_rough", rows[0])
+
 
 if __name__ == "__main__":
     unittest.main()
