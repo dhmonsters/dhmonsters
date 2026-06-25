@@ -116,8 +116,10 @@ from core.vision.transparent_puzzle_engine import (
 )
 from core.vision.transparent_box_selector import TransparentBoxSelector
 from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
+from core.vision.transparent_live_family_pool import TransparentLiveFamilyPool
 from core.vision.transparent_selector_shadow import TransparentSelectorShadow
 from core.vision.transparent_track_health import TransparentTrackHealthSelector
+from core.vision.transparent_visual_rescue import TransparentVisualRescueTracker
 from core.vision.tracking_alert import should_emit_tracking_alert
 
 # 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
@@ -448,7 +450,9 @@ class _MacroThread(threading.Thread):
         _bt = ByteTracker(reacq=self._reacq)   # ByteTrack MOT(+턴 재획득 토글)
         _boxsel = TransparentBoxSelector()
         _healthsel = TransparentTrackHealthSelector()
+        _visual_rescue = TransparentVisualRescueTracker()
         _transparent_engine = TransparentPuzzleEngine()
+        _live_family_pool = TransparentLiveFamilyPool()
         _family_selector = TransparentFamilySelectorRuntime()
         _selector_shadow = TransparentSelectorShadow(
             _family_selector,
@@ -543,7 +547,9 @@ class _MacroThread(threading.Thread):
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
                             _boxsel.reset()
                             _healthsel.reset()
+                            _visual_rescue.reset()
                             _transparent_engine.reset()
+                            _live_family_pool.reset()
                             _selector_shadow.reset(clip_id="live")
                             _target_shape = None    # 다음 판 모양 재판별
                             _shape_votes = {}
@@ -667,6 +673,7 @@ class _MacroThread(threading.Thread):
                         _wc = None
                         if _wb is not None and _wb[2] >= 20:
                             _wc = (_wb[0] + _wb[2] / 2.0, _wb[1] + _wb[3] / 2.0)
+                        _engine_white = None
                         try:
                             _engine_white = (
                                 _wc if (_wb is not None and _wb[2] >= 50 and _wb[3] >= 50)
@@ -725,6 +732,7 @@ class _MacroThread(threading.Thread):
                                     _boxsel.reset(_wc)
                                     _healthsel.reset(_wc)
                                     _transparent_engine.reset()
+                                    _live_family_pool.reset()
                                     track_pos = _wc
                                     tracking = True
                                     self._sig.log.emit(
@@ -734,6 +742,7 @@ class _MacroThread(threading.Thread):
                                         _rc_dir = os.path.join(ROOT, "_record_debug")
                                         os.makedirs(_rc_dir, exist_ok=True)
                                         _stamp = time.strftime("%m%d_%H%M%S")
+                                        _live_family_pool.reset()
                                         _selector_shadow.reset(clip_id=f"{success:03d}_{_stamp}")
                                         _rc_base = os.path.join(_rc_dir, f"{success:03d}_{_stamp}")
                                         _rec_size = (det.shape[1], det.shape[0])
@@ -805,6 +814,8 @@ class _MacroThread(threading.Thread):
                         _pre_box_pos = track_pos
                         _box_dec = None
                         _health_dec = None
+                        _visual_dec = None
+                        _live_family_dec = None
                         if track_pos is not None:
                             _box_dec = _boxsel.update(
                                 _cands, track_pos,
@@ -817,9 +828,26 @@ class _MacroThread(threading.Thread):
                             _box_mode = _box_dec.mode
                             _box_innov = _box_dec.innovation
                         _health_rescue = None
+                        _health_rescue_source = None
+                        try:
+                            _visual_dec = _visual_rescue.update(
+                                _cur_gray,
+                                _cands,
+                                white_anchor=_engine_white,
+                                track_point=track_pos,
+                            )
+                            if _visual_dec.available and _visual_dec.point is not None:
+                                _health_rescue = _visual_dec.point
+                                _health_rescue_source = "visual"
+                        except Exception as _vis_exc:
+                            _visual_dec = None
+                            if _diag_cnt % 60 == 0:
+                                self._sig.log.emit(f"[visual-rescue-error] {_vis_exc}")
                         if (_engine_out is not None and _engine_out.x is not None
-                                and _engine_out.y is not None):
+                                and _engine_out.y is not None
+                                and _health_rescue is None):
                             _health_rescue = (_engine_out.x, _engine_out.y)
+                            _health_rescue_source = "engine"
                         if track_pos is not None or _health_rescue is not None:
                             _health_dec = _healthsel.update(
                                 primary=track_pos,
@@ -834,9 +862,23 @@ class _MacroThread(threading.Thread):
                                         _bt.nudge(_health_dec.point[0], _health_dec.point[1])
                                 track_pos = _health_dec.point
                                 tracking = True
+                        try:
+                            _live_family_dec = _live_family_pool.update(
+                                preview_cnt,
+                                candidates=_cands,
+                                gray_frame=_cur_gray,
+                                white_anchor=_engine_white,
+                            )
+                        except Exception as _fam_exc:
+                            _live_family_dec = None
+                            if _diag_cnt % 60 == 0:
+                                self._sig.log.emit(f"[live-family-error] {_fam_exc}")
                         _selector_shadow_rec = None
                         try:
                             _shadow_anchors = {}
+                            if _live_family_dec is not None:
+                                for _family, _point in _live_family_dec.points.items():
+                                    _shadow_anchors[_family] = _point
                             if _pre_box_pos is not None:
                                 _shadow_anchors["panel_default_center_mild_state_mild"] = _pre_box_pos
                             if _box_dec is not None and track_pos is not None:
@@ -873,11 +915,12 @@ class _MacroThread(threading.Thread):
                                     else ("ByteTrack" if track_pos is not None
                                           else ("소실" if _bt.locked else "잠금대기")))
                             _health_src = "-" if _health_dec is None else _health_dec.reason
+                            _rescue_src = "-" if _health_rescue_source is None else _health_rescue_source
                             self._sig.log.emit(
                                 f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
                                 f"miss={_miss_run} → track={_tp} ({_src}) "
                                 f"box={_box_mode or '-'}:{_box_innov:.0f} "
-                                f"health={_health_src}")
+                                f"health={_health_src} rescue={_rescue_src}")
                             if _selector_shadow_rec and _selector_shadow_rec.get("available"):
                                 self._sig.log.emit(
                                     f"[selector-shadow] {_selector_shadow_rec.get('family')} "
@@ -902,12 +945,26 @@ class _MacroThread(threading.Thread):
                                              "hold": _health_dec.rescue_hold,
                                              "err": round(_health_dec.primary_error, 1),
                                              "oob": _health_dec.out_of_bounds}),
+                            "visual": (None if _visual_dec is None
+                                       else {"available": _visual_dec.available,
+                                             "source": _visual_dec.source,
+                                             "period": _visual_dec.period,
+                                             "best": round(_visual_dec.visual_best, 1),
+                                             "point": (None if _visual_dec.point is None
+                                                       else [int(_visual_dec.point[0]),
+                                                             int(_visual_dec.point[1])])}),
                             "engine": (None if _engine_out is None
                                        else {"track": (None if _engine_out.x is None
                                                        else [int(_engine_out.x), int(_engine_out.y)]),
                                               "confidence": round(_engine_out.confidence, 2),
                                               "candidate": _engine_out.candidate_index,
                                               "state": _engine_out.state}),
+                            "live_family": (None if _live_family_dec is None
+                                            else {"points": {
+                                                _name: [int(_pt[0]), int(_pt[1])]
+                                                for _name, _pt in _live_family_dec.points.items()
+                                            },
+                                                  "debug": dict(_live_family_dec.debug)}),
                             "selector_shadow": _selector_shadow_rec,
                             "cands": [[int(c[0]), int(c[1]), round(c[2], 2),
                                        int(c[3]), int(c[4])] for c in _cands],
