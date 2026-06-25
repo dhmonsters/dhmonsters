@@ -117,6 +117,7 @@ from core.vision.transparent_puzzle_engine import (
 from core.vision.transparent_box_selector import TransparentBoxSelector
 from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
 from core.vision.transparent_selector_shadow import TransparentSelectorShadow
+from core.vision.transparent_track_health import TransparentTrackHealthSelector
 from core.vision.tracking_alert import should_emit_tracking_alert
 
 # 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
@@ -446,6 +447,7 @@ class _MacroThread(threading.Thread):
         _bgx = _bgy = 0.0           # 배경 전역 변위(phaseCorrelate) — 투명 단계 배경동조 데칼 거부
         _bt = ByteTracker(reacq=self._reacq)   # ByteTrack MOT(+턴 재획득 토글)
         _boxsel = TransparentBoxSelector()
+        _healthsel = TransparentTrackHealthSelector()
         _transparent_engine = TransparentPuzzleEngine()
         _family_selector = TransparentFamilySelectorRuntime()
         _selector_shadow = TransparentSelectorShadow(
@@ -540,6 +542,7 @@ class _MacroThread(threading.Thread):
                             _tvx = _tvy = 0.0
                             _bt.reset()             # 다음 판 위해 MOT 트랙 초기화
                             _boxsel.reset()
+                            _healthsel.reset()
                             _transparent_engine.reset()
                             _selector_shadow.reset(clip_id="live")
                             _target_shape = None    # 다음 판 모양 재판별
@@ -720,6 +723,7 @@ class _MacroThread(threading.Thread):
                                         + (_wc[1] - _white_prev[1]) ** 2 <= 15 ** 2):
                                     _bt.lock(_wc[0], _wc[1])
                                     _boxsel.reset(_wc)
+                                    _healthsel.reset(_wc)
                                     _transparent_engine.reset()
                                     track_pos = _wc
                                     tracking = True
@@ -800,6 +804,7 @@ class _MacroThread(threading.Thread):
                             _miss_run = _tg.miss
                         _pre_box_pos = track_pos
                         _box_dec = None
+                        _health_dec = None
                         if track_pos is not None:
                             _box_dec = _boxsel.update(
                                 _cands, track_pos,
@@ -811,6 +816,24 @@ class _MacroThread(threading.Thread):
                             tracking = True
                             _box_mode = _box_dec.mode
                             _box_innov = _box_dec.innovation
+                        _health_rescue = None
+                        if (_engine_out is not None and _engine_out.x is not None
+                                and _engine_out.y is not None):
+                            _health_rescue = (_engine_out.x, _engine_out.y)
+                        if track_pos is not None or _health_rescue is not None:
+                            _health_dec = _healthsel.update(
+                                primary=track_pos,
+                                rescue=_health_rescue,
+                                frame_shape=det.shape[:2],
+                                force_primary=_via_white,
+                            )
+                            if _health_dec.point is not None:
+                                if _health_dec.source == "rescue":
+                                    _boxsel.reset(_health_dec.point)
+                                    if _bt.locked:
+                                        _bt.nudge(_health_dec.point[0], _health_dec.point[1])
+                                track_pos = _health_dec.point
+                                tracking = True
                         _selector_shadow_rec = None
                         try:
                             _shadow_anchors = {}
@@ -849,10 +872,12 @@ class _MacroThread(threading.Thread):
                             _src = ("흰색" if _via_white
                                     else ("ByteTrack" if track_pos is not None
                                           else ("소실" if _bt.locked else "잠금대기")))
+                            _health_src = "-" if _health_dec is None else _health_dec.reason
                             self._sig.log.emit(
                                 f"[진단] 후보{len(_cands)}개(강{len(_strong)}) 트랙{_bt.track_count} "
                                 f"miss={_miss_run} → track={_tp} ({_src}) "
-                                f"box={_box_mode or '-'}:{_box_innov:.0f}")
+                                f"box={_box_mode or '-'}:{_box_innov:.0f} "
+                                f"health={_health_src}")
                             if _selector_shadow_rec and _selector_shadow_rec.get("available"):
                                 self._sig.log.emit(
                                     f"[selector-shadow] {_selector_shadow_rec.get('family')} "
@@ -869,6 +894,14 @@ class _MacroThread(threading.Thread):
                             "box": (None if _box_mode is None
                                     else {"mode": _box_mode,
                                           "innov": round(_box_innov, 1)}),
+                            "health": (None if _health_dec is None
+                                       else {"source": _health_dec.source,
+                                             "reason": _health_dec.reason,
+                                             "unhealthy": _health_dec.unhealthy,
+                                             "suspect": _health_dec.suspect_frames,
+                                             "hold": _health_dec.rescue_hold,
+                                             "err": round(_health_dec.primary_error, 1),
+                                             "oob": _health_dec.out_of_bounds}),
                             "engine": (None if _engine_out is None
                                        else {"track": (None if _engine_out.x is None
                                                        else [int(_engine_out.x), int(_engine_out.y)]),
