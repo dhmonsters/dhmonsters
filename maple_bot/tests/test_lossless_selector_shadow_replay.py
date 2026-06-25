@@ -3,6 +3,7 @@ import unittest
 
 from _lossless_selector_shadow_replay import (
     lossless_valid_frames,
+    raw_candidate_anchor_paths,
     replay_shadow_path_from_rows,
     score_path,
 )
@@ -12,8 +13,11 @@ class FakeRuntime:
     available = True
     load_error = ""
 
+    def __init__(self, family="panel_default_center_mild_state_mild"):
+        self.family = family
+
     def select_from_path_pool(self, clip, paths, frames, **kwargs):
-        family = "panel_default_center_mild_state_mild"
+        family = self.family
         row = {
             "clip": clip,
             "family": family,
@@ -87,6 +91,67 @@ class LosslessSelectorShadowReplayTests(unittest.TestCase):
         self.assertEqual(path[1], (11.0, 20.0))
         self.assertEqual(path[3], (13.0, 20.0))
         self.assertEqual(records[3]["family"], "panel_default_center_mild_state_mild")
+
+    def test_raw_candidate_anchor_paths_create_rank_and_continuity_families(self):
+        rows = [
+            {"cands": [[10, 0, 0.9, 10, 10], [100, 0, 0.8, 10, 10]]},
+            {"cands": [[12, 0, 0.9, 10, 10], [98, 0, 0.8, 10, 10]]},
+            {"cands": [[14, 0, 0.9, 10, 10], [96, 0, 0.8, 10, 10]]},
+        ]
+
+        paths = raw_candidate_anchor_paths(
+            rows,
+            max_rank_families=2,
+            max_continuity_families=2,
+            max_step_px=20.0,
+        )
+
+        self.assertEqual(
+            paths["panel_default_center_mild_state_mild_raw_rank0"][2],
+            (14.0, 0.0),
+        )
+        self.assertEqual(
+            paths["panel_default_center_mild_state_mild_raw_rank1"][2],
+            (96.0, 0.0),
+        )
+        self.assertEqual(
+            paths["panel_default_center_mild_state_mild_raw_cont0"][2],
+            (14.0, 0.0),
+        )
+        self.assertEqual(
+            paths["panel_default_center_mild_state_mild_raw_cont1"][2],
+            (96.0, 0.0),
+        )
+
+    def test_replay_shadow_path_can_select_raw_candidate_anchor(self):
+        rows = [
+            {
+                "track": [200, 200],
+                "cands": [
+                    [10 + frame, 20, 0.9, 20, 20],
+                    [200, 200, 0.1, 20, 20],
+                ],
+            }
+            for frame in range(4)
+        ]
+
+        path, records = replay_shadow_path_from_rows(
+            rows,
+            runtime=FakeRuntime("panel_default_center_mild_state_mild_raw_rank0"),
+            clip_id="sample",
+            window=4,
+            min_frames=2,
+            max_candidates=4,
+            include_local_box=False,
+            include_raw_candidate_anchors=True,
+        )
+
+        self.assertEqual(path[1], (11.0, 20.0))
+        self.assertEqual(path[3], (13.0, 20.0))
+        self.assertEqual(
+            records[3]["family"],
+            "panel_default_center_mild_state_mild_raw_rank0",
+        )
 
 
 if __name__ == "__main__":

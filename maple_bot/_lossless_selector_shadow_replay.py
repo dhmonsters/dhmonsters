@@ -23,6 +23,8 @@ CURSOR_EXCLUDES = {
     "000_0621_180636": ((97, 107),),
 }
 TRACK_ANCHOR_FAMILY = "panel_default_center_mild_state_mild"
+RAW_RANK_FAMILY_PREFIX = f"{TRACK_ANCHOR_FAMILY}_raw_rank"
+RAW_CONTINUITY_FAMILY_PREFIX = f"{TRACK_ANCHOR_FAMILY}_raw_cont"
 
 
 Point = tuple[float, float]
@@ -134,6 +136,66 @@ def _normalize_candidates(candidates: Sequence[Sequence[float]]) -> list[tuple[f
     return normalized
 
 
+def raw_candidate_anchor_paths(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    max_rank_families: int = 3,
+    max_continuity_families: int = 6,
+    max_candidates_per_frame: int = 24,
+    max_step_px: float = 85.0,
+) -> dict[str, dict[int, Point]]:
+    paths: dict[str, dict[int, Point]] = {
+        f"{RAW_RANK_FAMILY_PREFIX}{rank}": {}
+        for rank in range(max(0, int(max_rank_families)))
+    }
+    continuity_paths: dict[str, dict[int, Point]] = {}
+    last_points: dict[str, Point] = {}
+
+    for frame, row in enumerate(rows):
+        candidates = _normalize_candidates(row.get("cands", []))
+        candidates.sort(key=lambda candidate: candidate[2], reverse=True)
+        candidates = candidates[: max(1, int(max_candidates_per_frame))]
+        points = [(candidate[0], candidate[1]) for candidate in candidates]
+        if not points:
+            continue
+
+        for rank, point in enumerate(points[: max(0, int(max_rank_families))]):
+            paths[f"{RAW_RANK_FAMILY_PREFIX}{rank}"][frame] = point
+
+        if not last_points:
+            for index, point in enumerate(points[: max(0, int(max_continuity_families))]):
+                family = f"{RAW_CONTINUITY_FAMILY_PREFIX}{index}"
+                continuity_paths[family] = {frame: point}
+                last_points[family] = point
+            continue
+
+        used: set[int] = set()
+        for family in sorted(last_points):
+            previous = last_points[family]
+            best_index = None
+            best_error = float("inf")
+            for index, point in enumerate(points):
+                if index in used:
+                    continue
+                error = _dist(previous, point)
+                if error < best_error:
+                    best_index = index
+                    best_error = error
+            if best_index is None or best_error > float(max_step_px):
+                continue
+            used.add(best_index)
+            point = points[best_index]
+            continuity_paths.setdefault(family, {})[frame] = point
+            last_points[family] = point
+
+    paths.update(continuity_paths)
+    return {
+        family: path
+        for family, path in paths.items()
+        if path
+    }
+
+
 def replay_shadow_path_from_rows(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -143,8 +205,21 @@ def replay_shadow_path_from_rows(
     min_frames: int = 8,
     max_candidates: int = 24,
     include_local_box: bool = True,
+    include_raw_candidate_anchors: bool = False,
+    raw_rank_families: int = 3,
+    raw_continuity_families: int = 6,
 ) -> tuple[dict[int, Point], dict[int, dict]]:
     runtime = runtime or TransparentFamilySelectorRuntime()
+    raw_paths = (
+        raw_candidate_anchor_paths(
+            rows,
+            max_rank_families=raw_rank_families,
+            max_continuity_families=raw_continuity_families,
+            max_candidates_per_frame=max_candidates,
+        )
+        if include_raw_candidate_anchors
+        else {}
+    )
     shadow = TransparentSelectorShadow(
         runtime,
         clip_id=clip_id,
@@ -166,6 +241,11 @@ def replay_shadow_path_from_rows(
             engine_track = _point(engine.get("track"))
             if engine_track is not None:
                 anchors["phase_catalog_center_mild_state_mild"] = engine_track
+        if include_raw_candidate_anchors:
+            for family, raw_path in raw_paths.items():
+                point = raw_path.get(frame)
+                if point is not None:
+                    anchors[family] = point
         if not anchors:
             continue
         record = shadow.update(
