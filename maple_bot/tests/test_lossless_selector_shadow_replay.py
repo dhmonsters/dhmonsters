@@ -1,13 +1,19 @@
 # 무손실 녹화의 selector_shadow 오프라인 재생과 채점을 검증합니다.
 import unittest
 
+import numpy as np
+
 from _lossless_selector_shadow_replay import (
     lossless_valid_frames,
+    path_health,
     raw_candidate_anchor_paths,
     replay_shadow_path_from_rows,
     score_path,
+    select_path_by_track_health,
     track_rescue_beam_path,
     track_rescue_candidate_path,
+    track_rescue_visual_beam_path,
+    visual_rank_scores_for_candidates,
 )
 
 
@@ -197,6 +203,98 @@ class LosslessSelectorShadowReplayTests(unittest.TestCase):
         self.assertEqual(path[2], (20.0, 0.0))
         self.assertEqual(path[3], (30.0, 0.0))
         self.assertEqual(path[4], (40.0, 0.0))
+
+    def test_visual_rank_scores_for_candidates_prefers_center_residual(self):
+        diff = np.zeros((60, 60), dtype=np.float32)
+        diff[18:23, 18:23] = 100.0
+        diff[42:47, 42:47] = 20.0
+        candidates = [
+            [20, 20, 0.4, 16, 16],
+            [44, 44, 0.9, 16, 16],
+        ]
+
+        scores = visual_rank_scores_for_candidates(
+            diff,
+            candidates,
+            metric="center_mean",
+            inner_radius=4,
+            outer_radius=10,
+        )
+
+        self.assertGreater(scores[0], scores[1])
+        self.assertAlmostEqual(scores[0], 10.0)
+
+    def test_track_rescue_visual_beam_path_uses_visual_score_for_branch_choice(self):
+        rows = [
+            {"track": [0, 0], "cands": [[0, 0, 0.8], [90, 0, 0.9]]},
+            {"track": [10, 0], "cands": [[10, 0, 0.8], [90, 0, 0.9]]},
+            {"track": None, "cands": [[20, 0, 0.4], [15, 0, 0.95]]},
+            {"track": None, "cands": [[30, 0, 0.4], [18, 0, 0.95]]},
+            {"track": None, "cands": [[40, 0, 0.4], [21, 0, 0.95]]},
+        ]
+        visual_scores = {
+            2: [10.0, 0.0],
+            3: [10.0, 0.0],
+            4: [10.0, 0.0],
+        }
+
+        path = track_rescue_visual_beam_path(
+            rows,
+            visual_scores,
+            keep=8,
+            branch=2,
+            track_prediction_gate=35.0,
+            rescue_prediction_gate=50.0,
+            detection_weight=0.2,
+            visual_weight=1.5,
+        )
+
+        self.assertEqual(path[2], (20.0, 0.0))
+        self.assertEqual(path[3], (30.0, 0.0))
+        self.assertEqual(path[4], (40.0, 0.0))
+
+    def test_path_health_counts_points_far_outside_frame(self):
+        path = {
+            0: (10.0, 10.0),
+            1: (20.0, 20.0),
+            2: (50.0, -120.0),
+        }
+
+        health = path_health(path, frames=[0, 1, 2], frame_shape=(100, 100), margin=20.0)
+
+        self.assertEqual(health["covered"], 3)
+        self.assertEqual(health["out_of_bounds"], 1)
+        self.assertGreater(health["max_step"], 100.0)
+
+    def test_select_path_by_track_health_uses_visual_when_track_leaves_screen(self):
+        track = {
+            0: (10.0, 10.0),
+            1: (20.0, 20.0),
+            2: (40.0, -130.0),
+        }
+        rescue = {
+            0: (10.0, 10.0),
+            1: (19.0, 20.0),
+            2: (28.0, 29.0),
+        }
+        visual = {
+            0: (10.0, 10.0),
+            1: (20.0, 20.0),
+            2: (30.0, 30.0),
+        }
+
+        selected, reason, health = select_path_by_track_health(
+            track,
+            rescue,
+            visual,
+            frames=[0, 1, 2],
+            frame_shape=(100, 100),
+            margin=20.0,
+        )
+
+        self.assertEqual(reason, "visual_rescue_track_unhealthy")
+        self.assertEqual(selected[2], (30.0, 30.0))
+        self.assertEqual(health["track"]["out_of_bounds"], 1)
 
 
 if __name__ == "__main__":
