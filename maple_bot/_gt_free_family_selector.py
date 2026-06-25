@@ -54,12 +54,33 @@ def save_gt_free_selector_model(path: str | Path, model: LinearSelectorModel) ->
 
 
 def load_gt_free_selector_model(path: str | Path) -> LinearSelectorModel:
-    payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    model_path = Path(path)
+    payload = json.loads(model_path.read_text(encoding="utf-8-sig"))
+    feature_names = [str(value) for value in payload["feature_names"]]
+    weights = [float(value) for value in payload["weights"]]
+    mean = [float(value) for value in payload["mean"]]
+    scale = [float(value) for value in payload["scale"]]
+
+    if (
+        model_path.name == "gt_free_family_selector_v1.json"
+        and len(weights) + 1 == len(feature_names)
+        and len(feature_names) > 164
+        and feature_names[164] == "source_bg_split*variant_smooth"
+    ):
+        weights.insert(164, 0.0)
+
+    lengths = {len(feature_names), len(weights), len(mean), len(scale)}
+    if len(lengths) != 1:
+        raise ValueError(
+            "selector model array length mismatch: "
+            f"features={len(feature_names)} weights={len(weights)} "
+            f"mean={len(mean)} scale={len(scale)}"
+        )
     return LinearSelectorModel(
-        feature_names=tuple(str(value) for value in payload["feature_names"]),
-        weights=tuple(float(value) for value in payload["weights"]),
-        mean=tuple(float(value) for value in payload["mean"]),
-        scale=tuple(float(value) for value in payload["scale"]),
+        feature_names=tuple(feature_names),
+        weights=tuple(weights),
+        mean=tuple(mean),
+        scale=tuple(scale),
     )
 
 

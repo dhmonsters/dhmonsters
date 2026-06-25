@@ -115,6 +115,7 @@ from core.vision.transparent_puzzle_engine import (
     candidate_from_live_row,
 )
 from core.vision.transparent_box_selector import TransparentBoxSelector
+from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
 from core.vision.tracking_alert import should_emit_tracking_alert
 
 # 흰색 단계 분류 모양 → 추적 최적 전문 검출기(GT 검증: 별→star, 나머지→circle).
@@ -445,9 +446,14 @@ class _MacroThread(threading.Thread):
         _bt = ByteTracker(reacq=self._reacq)   # ByteTrack MOT(+턴 재획득 토글)
         _boxsel = TransparentBoxSelector()
         _transparent_engine = TransparentPuzzleEngine()
+        _family_selector = TransparentFamilySelectorRuntime()
         self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
         self._sig.log.emit("[setting] transparent box selector ON")
         self._sig.log.emit("[setting] transparent puzzle engine shadow ON")
+        if _family_selector.available:
+            self._sig.log.emit("[setting] GT-free family selector model loaded")
+        else:
+            self._sig.log.emit(f"[setting] GT-free family selector disabled: {_family_selector.load_error}")
         _vortex = None
         _idea6 = None
         _target_shape = None        # 흰색 단계 판별된 타겟 모양(이후 전문 검출기 사용)
