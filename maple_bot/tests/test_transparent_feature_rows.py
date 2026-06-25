@@ -120,6 +120,56 @@ class TransparentFeatureRowsTests(unittest.TestCase):
         self.assertEqual(row["contrast_med"], 5.0)
         self.assertEqual(row["ring"], 6.0)
 
+    def test_motion_background_and_divergence_selector_features_are_ranked(self):
+        frames = [0, 1, 2]
+        paths = {
+            "background_like": {
+                0: (0.0, 0.0),
+                1: (1.0, 0.0),
+                2: (2.0, 0.0),
+            },
+            "also_background_like": {
+                0: (10.0, 0.0),
+                1: (11.0, 0.0),
+                2: (12.0, 0.0),
+            },
+            "target_divergent": {
+                0: (0.0, 40.0),
+                1: (8.0, 40.0),
+                2: (16.0, 40.0),
+            },
+        }
+
+        rows = build_transparent_feature_rows(
+            "live_clip",
+            paths,
+            frames,
+            background_stats={
+                "background_like": {
+                    "matched_ratio": 0.9,
+                    "run_identity_ratio": 0.8,
+                },
+                "also_background_like": {
+                    "matched_ratio": 0.8,
+                    "run_identity_ratio": 0.7,
+                },
+                "target_divergent": {
+                    "matched_ratio": 0.1,
+                    "run_identity_ratio": 0.2,
+                },
+            },
+        )
+        by_family = {row["family"]: row for row in rows}
+        target = by_family["target_divergent"]
+        background = by_family["background_like"]
+
+        self.assertGreater(target["motion_div"], background["motion_div"])
+        self.assertLess(target["bg_like"], background["bg_like"])
+        self.assertGreater(target["divergence"], background["divergence"])
+        self.assertLess(target["rank_high_motion_div"], background["rank_high_motion_div"])
+        self.assertLess(target["rank_bg_like"], background["rank_bg_like"])
+        self.assertLess(target["rank_high_divergence"], background["rank_high_divergence"])
+
     def test_build_rows_from_recorded_local_box_pool_has_selector_columns(self):
         name = "000_0615_035137"
         gt = phase_catalog.load_gt(name)

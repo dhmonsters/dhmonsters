@@ -13,6 +13,7 @@ Point = Tuple[float, float]
 Candidate = Tuple[float, float, float, float, float]
 
 LOWER_RANK_FEATURES = (
+    "bg_like",
     "center",
     "cons_med",
     "idsw",
@@ -25,6 +26,8 @@ LOWER_RANK_FEATURES = (
 HIGHER_RANK_FEATURES = (
     "contrast",
     "contrast_med",
+    "divergence",
+    "motion_div",
 )
 
 
@@ -85,11 +88,48 @@ def path_consensus_median(
     return float(median(distances)) if distances else 0.0
 
 
+def path_motion_divergence_median(
+    path: Mapping[int, Point],
+    paths: Mapping[str, Mapping[int, Point]],
+    frames: Sequence[int],
+) -> float:
+    values = []
+    ordered = [int(frame) for frame in frames]
+    for prev_frame, frame in zip(ordered, ordered[1:]):
+        prev_point = path.get(prev_frame)
+        point = path.get(frame)
+        if prev_point is None or point is None:
+            continue
+
+        velocities = []
+        for other in paths.values():
+            other_prev = other.get(prev_frame)
+            other_point = other.get(frame)
+            if other_prev is None or other_point is None:
+                continue
+            velocities.append((
+                float(other_point[0]) - float(other_prev[0]),
+                float(other_point[1]) - float(other_prev[1]),
+            ))
+        if len(velocities) <= 1:
+            continue
+
+        median_vx = float(median(velocity[0] for velocity in velocities))
+        median_vy = float(median(velocity[1] for velocity in velocities))
+        vx = float(point[0]) - float(prev_point[0])
+        vy = float(point[1]) - float(prev_point[1])
+        values.append(math.hypot(vx - median_vx, vy - median_vy))
+    return float(median(values)) if values else 0.0
+
+
 def _background_columns(stats: Mapping[str, object] | None) -> dict:
     stats = stats or {}
+    matched = float(stats.get("matched_ratio", 0.0) or 0.0)
+    run_identity = float(stats.get("run_identity_ratio", 0.0) or 0.0)
     return {
-        "match": float(stats.get("matched_ratio", 0.0) or 0.0),
-        "run": float(stats.get("run_identity_ratio", 0.0) or 0.0),
+        "bg_like": (matched + run_identity) / 2.0,
+        "match": matched,
+        "run": run_identity,
         "idsw": float(stats.get("id_switches", 0.0) or 0.0),
     }
 
@@ -127,6 +167,8 @@ def build_transparent_feature_rows(
             "family": str(family),
             "center": path_candidate_distance_median(path, frames, candidate_sets),
             "cons_med": path_consensus_median(path, paths, frames),
+            "divergence": path_consensus_median(path, paths, frames),
+            "motion_div": path_motion_divergence_median(path, paths, frames),
             "rough": local_box_selector.path_quality_prior(dict(path), frames),
             "prior": local_box_selector.local_box_family_prior(
                 str(family),
