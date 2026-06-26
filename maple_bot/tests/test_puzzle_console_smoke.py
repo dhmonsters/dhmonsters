@@ -690,3 +690,87 @@ def test_puzzle_console_select_missing_timeline_frame_keeps_current(monkeypatch)
     assert window.selected_frame_index == 3
     assert window.timeline_status.text() == "frame 3"
     assert "frame 99" not in window.cctv_status_label.text()
+
+
+def test_puzzle_console_exposes_timeline_navigation_buttons(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.timeline_prev_button.objectName() == "timelinePrevFrameButton"
+    assert window.timeline_next_button.objectName() == "timelineNextFrameButton"
+
+
+def test_puzzle_console_next_timeline_frame_moves_across_saved_frames(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+    for frame_index in (3, 5, 8):
+        window.apply_trace_event(
+            {
+                "type": "FRAME_REPLAYED",
+                "session_id": "20260626_225000_001",
+                "frame_index": frame_index,
+                "payload": {
+                    "source_kind": "image_sequence",
+                    "source_frame_path": f"C:/frames/{frame_index:03d}.png",
+                },
+            }
+        )
+
+    assert window.selected_frame_index is None
+
+    window.timeline_next_button.clicked.emit()
+
+    assert window.selected_frame_index == 3
+    assert "C:/frames/003.png" in window.cctv_status_label.text()
+
+    assert window.select_next_timeline_frame() is True
+
+    assert window.selected_frame_index == 5
+    assert "C:/frames/005.png" in window.cctv_status_label.text()
+
+    assert window.select_next_timeline_frame() is True
+    assert window.select_next_timeline_frame() is False
+
+    assert window.selected_frame_index == 8
+    assert "C:/frames/008.png" in window.cctv_status_label.text()
+
+
+def test_puzzle_console_previous_timeline_frame_moves_across_saved_frames(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+    for frame_index in (3, 5, 8):
+        window.apply_trace_event(
+            {
+                "type": "FRAME_REPLAYED",
+                "session_id": "20260626_225000_001",
+                "frame_index": frame_index,
+                "payload": {
+                    "source_kind": "image_sequence",
+                    "source_frame_path": f"C:/frames/{frame_index:03d}.png",
+                },
+            }
+        )
+
+    assert window.selected_frame_index is None
+
+    window.timeline_prev_button.clicked.emit()
+
+    assert window.selected_frame_index == 8
+    assert "C:/frames/008.png" in window.cctv_status_label.text()
+
+    assert window.select_previous_timeline_frame() is True
+
+    assert window.selected_frame_index == 5
+    assert "C:/frames/005.png" in window.cctv_status_label.text()
+
+    assert window.select_previous_timeline_frame() is True
+    assert window.select_previous_timeline_frame() is False
+
+    assert window.selected_frame_index == 3
+    assert "C:/frames/003.png" in window.cctv_status_label.text()

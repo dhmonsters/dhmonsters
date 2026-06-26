@@ -232,8 +232,14 @@ class PuzzleConsoleWindow(QMainWindow):
         self.timeline_detail = QLabel("-")
         self.timeline_detail.setObjectName("puzzleTimelineDetail")
         self.timeline_detail.setWordWrap(True)
+        self.timeline_prev_button = _command_button("<", "timelinePrevFrameButton")
+        self.timeline_next_button = _command_button(">", "timelineNextFrameButton")
+        self.timeline_prev_button.clicked.connect(lambda _checked=False: self.select_previous_timeline_frame())
+        self.timeline_next_button.clicked.connect(lambda _checked=False: self.select_next_timeline_frame())
         layout.addWidget(title)
         layout.addWidget(self.timeline_status)
+        layout.addWidget(self.timeline_prev_button)
+        layout.addWidget(self.timeline_next_button)
         layout.addWidget(self.timeline_detail, 1)
         layout.addStretch(1)
         return self.timeline_panel
@@ -341,6 +347,40 @@ class PuzzleConsoleWindow(QMainWindow):
             self._apply_identity_metrics(identity)
 
         return True
+
+    def select_next_timeline_frame(self) -> bool:
+        return self._select_adjacent_timeline_frame(1)
+
+    def select_previous_timeline_frame(self) -> bool:
+        return self._select_adjacent_timeline_frame(-1)
+
+    def _select_adjacent_timeline_frame(self, direction: int) -> bool:
+        frames = self._available_timeline_frames()
+        if not frames:
+            self.append_log("frame 없음")
+            return False
+
+        if self.selected_frame_index is None:
+            return self.select_timeline_frame(frames[0] if direction > 0 else frames[-1])
+
+        if direction > 0:
+            next_frames = [frame for frame in frames if frame > self.selected_frame_index]
+            if not next_frames:
+                return False
+            return self.select_timeline_frame(next_frames[0])
+
+        previous_frames = [frame for frame in frames if frame < self.selected_frame_index]
+        if not previous_frames:
+            return False
+        return self.select_timeline_frame(previous_frames[-1])
+
+    def _available_timeline_frames(self) -> list[int]:
+        return sorted(
+            set(self.current_frame_sources)
+            | set(self.current_frame_candidates)
+            | set(self.current_frame_evidence)
+            | set(self.current_frame_identity)
+        )
 
     def _has_frame_state(self, frame_index: int) -> bool:
         return (
