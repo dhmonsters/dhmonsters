@@ -229,6 +229,9 @@ class PuzzleConsoleWindow(QMainWindow):
         title.setObjectName("cardTitle")
         self.timeline_status = QLabel("frame 0")
         self.timeline_status.setObjectName("puzzleTimelineStatus")
+        self.timeline_frames_label = QLabel("frames 0")
+        self.timeline_frames_label.setObjectName("puzzleTimelineFrames")
+        self.timeline_frames_label.setWordWrap(True)
         self.timeline_detail = QLabel("-")
         self.timeline_detail.setObjectName("puzzleTimelineDetail")
         self.timeline_detail.setWordWrap(True)
@@ -240,6 +243,7 @@ class PuzzleConsoleWindow(QMainWindow):
         layout.addWidget(self.timeline_status)
         layout.addWidget(self.timeline_prev_button)
         layout.addWidget(self.timeline_next_button)
+        layout.addWidget(self.timeline_frames_label)
         layout.addWidget(self.timeline_detail, 1)
         layout.addStretch(1)
         return self.timeline_panel
@@ -346,6 +350,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.cctv_identity_summary_label.setText(_identity_summary(frame_index, identity))
             self._apply_identity_metrics(identity)
 
+        self._refresh_timeline_frames_summary()
         return True
 
     def select_next_timeline_frame(self) -> bool:
@@ -382,6 +387,11 @@ class PuzzleConsoleWindow(QMainWindow):
             | set(self.current_frame_identity)
         )
 
+    def _refresh_timeline_frames_summary(self) -> None:
+        self.timeline_frames_label.setText(
+            _timeline_frames_summary(self._available_timeline_frames(), self.selected_frame_index)
+        )
+
     def _has_frame_state(self, frame_index: int) -> bool:
         return (
             frame_index in self.current_frame_sources
@@ -410,6 +420,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.current_frame_sources[frame_index] = source
         self.cctv_status_label.setText(f"frame {frame_index}: {source}")
         self._load_cctv_frame_preview(source)
+        self._refresh_timeline_frames_summary()
 
     def _load_cctv_frame_preview(self, source: str) -> None:
         path = Path(source)
@@ -428,6 +439,7 @@ class PuzzleConsoleWindow(QMainWindow):
         candidates = _candidate_list(payload)
         self.current_frame_candidates[frame_index] = candidates
         self.cctv_candidate_summary_label.setText(_candidate_summary(frame_index, payload))
+        self._refresh_timeline_frames_summary()
 
     def _apply_evidence(self, frame_index: object, payload: dict[object, object]) -> None:
         if not isinstance(frame_index, int):
@@ -435,12 +447,14 @@ class PuzzleConsoleWindow(QMainWindow):
         evidence = _evidence_list(payload)
         self.current_frame_evidence[frame_index] = evidence
         self.cctv_evidence_summary_label.setText(_evidence_summary(frame_index, payload))
+        self._refresh_timeline_frames_summary()
 
     def _apply_identity(self, frame_index: object, payload: dict[object, object]) -> None:
         if not isinstance(frame_index, int):
             return
         self.current_frame_identity[frame_index] = dict(payload)
         self.cctv_identity_summary_label.setText(_identity_summary(frame_index, payload))
+        self._refresh_timeline_frames_summary()
 
     def _apply_identity_metrics(self, payload: dict[object, object]) -> None:
         state = str(payload.get("state") or "")
@@ -619,6 +633,23 @@ def _evidence_count(payload: dict[object, object]) -> int:
     if isinstance(evidence, list):
         return len(evidence)
     return 0
+
+
+def _timeline_frames_summary(frames: list[int], selected_frame_index: int | None) -> str:
+    if not frames:
+        return "frames 0"
+
+    if len(frames) <= 8:
+        frame_text = ",".join(str(frame) for frame in frames)
+    else:
+        head = ",".join(str(frame) for frame in frames[:4])
+        tail = ",".join(str(frame) for frame in frames[-2:])
+        frame_text = f"{head},...,{tail}"
+
+    summary = f"frames {len(frames)}: {frame_text}"
+    if selected_frame_index in frames:
+        summary = f"{summary} | selected {selected_frame_index}"
+    return summary
 
 
 def _timeline_item(

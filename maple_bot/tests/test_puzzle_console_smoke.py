@@ -774,3 +774,69 @@ def test_puzzle_console_previous_timeline_frame_moves_across_saved_frames(monkey
 
     assert window.selected_frame_index == 3
     assert "C:/frames/003.png" in window.cctv_status_label.text()
+
+
+def test_puzzle_console_exposes_timeline_frames_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.timeline_frames_label.objectName() == "puzzleTimelineFrames"
+    assert window.timeline_frames_label.text() == "frames 0"
+
+
+def test_puzzle_console_updates_timeline_frames_summary_from_saved_states(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+    window.apply_trace_event(
+        {
+            "type": "FRAME_REPLAYED",
+            "session_id": "20260626_230000_001",
+            "frame_index": 8,
+            "payload": {"source_kind": "image_sequence", "source_frame_path": "C:/frames/008.png"},
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "CANDIDATES",
+            "session_id": "20260626_230000_001",
+            "frame_index": 3,
+            "payload": {"count": 1, "candidates": [{"candidate_id": "c3_a"}]},
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "EVIDENCE",
+            "session_id": "20260626_230000_001",
+            "frame_index": 5,
+            "payload": {"count": 1, "evidence": [{"candidate_id": "c5_a"}]},
+        }
+    )
+
+    assert window.timeline_frames_label.text() == "frames 3: 3,5,8"
+
+
+def test_puzzle_console_marks_selected_timeline_frame_in_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+    for frame_index in (3, 5, 8):
+        window.apply_trace_event(
+            {
+                "type": "FRAME_REPLAYED",
+                "session_id": "20260626_230000_001",
+                "frame_index": frame_index,
+                "payload": {
+                    "source_kind": "image_sequence",
+                    "source_frame_path": f"C:/frames/{frame_index:03d}.png",
+                },
+            }
+        )
+
+    assert window.select_timeline_frame(5) is True
+
+    assert window.timeline_frames_label.text() == "frames 3: 3,5,8 | selected 5"
