@@ -11,7 +11,8 @@ from _selector_shadow_gt_replay_score import load_red_gt, score_path
 
 ROOT = Path(__file__).resolve().parent
 Point = tuple[float, float]
-Candidate = tuple[float, float, float, float, float]
+RecordCandidate = tuple[float, float, float, float, float]
+LocalBoxCandidate = tuple[float, float, float, float, float]
 KNOWN_SOURCES = (
     "raw_candidate",
     "balanced_viterbi",
@@ -34,7 +35,7 @@ def _point(value: object) -> Point | None:
         return None
 
 
-def _record_candidate(candidate: object) -> Candidate | None:
+def _record_candidate(candidate: object) -> RecordCandidate | None:
     if not isinstance(candidate, Sequence) or isinstance(candidate, (str, bytes)):
         return None
     if len(candidate) < 2:
@@ -54,7 +55,7 @@ def _record_candidate(candidate: object) -> Candidate | None:
         return None
 
 
-def _local_box_candidate(candidate: Candidate) -> Candidate:
+def _local_box_candidate(candidate: RecordCandidate) -> LocalBoxCandidate:
     return (
         float(candidate[0]),
         float(candidate[1]),
@@ -66,8 +67,8 @@ def _local_box_candidate(candidate: Candidate) -> Candidate:
 
 def local_box_candidate_sets_from_rows(
     rows: Sequence[Mapping[str, object]],
-) -> dict[int, list[Candidate]]:
-    out: dict[int, list[Candidate]] = {}
+) -> dict[int, list[LocalBoxCandidate]]:
+    out: dict[int, list[LocalBoxCandidate]] = {}
     for frame, row in enumerate(rows):
         candidates = [
             parsed
@@ -83,6 +84,7 @@ def build_record_source_paths(
     rows: Sequence[Mapping[str, object]],
     *,
     include_live: bool = True,
+    live_pool_kwargs: Mapping[str, object] | None = None,
 ) -> dict[str, dict[int, Point]]:
     paths: dict[str, dict[int, Point]] = {
         "panel_default_center_mild_state_mild": {},
@@ -93,7 +95,11 @@ def build_record_source_paths(
     if include_live:
         from core.vision.transparent_live_family_pool import TransparentLiveFamilyPool
 
-        live_pool = TransparentLiveFamilyPool(window=24, min_frames=8)
+        live_pool = TransparentLiveFamilyPool(
+            window=24,
+            min_frames=8,
+            **dict(live_pool_kwargs or {}),
+        )
     seeded = False
 
     for frame, row in enumerate(rows):
@@ -138,7 +144,7 @@ def build_record_source_paths(
 
 def augment_with_local_box(
     paths: Mapping[str, Mapping[int, Point]],
-    candidate_sets: Mapping[int, Sequence[Candidate]],
+    candidate_sets: Mapping[int, Sequence[LocalBoxCandidate]],
     frames: Sequence[int],
     *,
     max_local_box_families: int | None = None,
@@ -169,6 +175,14 @@ def source_group_for_family(family: str) -> str:
     return base
 
 
+def _source_row_rank(row: Mapping[str, object]) -> tuple[bool, float, float]:
+    return (
+        bool(row.get("success", False)),
+        float(row.get("coverage", 0.0) or 0.0),
+        -float(row.get("mean", float("inf"))),
+    )
+
+
 def best_by_source_group(
     paths: Mapping[str, Mapping[int, Point]],
     gt_by_frame: Mapping[int, Point],
@@ -176,13 +190,6 @@ def best_by_source_group(
     *,
     min_coverage: float = 0.9,
 ) -> dict[str, dict[str, object]]:
-    def rank(row: Mapping[str, object]) -> tuple[bool, float, float]:
-        return (
-            bool(row.get("success", False)),
-            float(row.get("coverage", 0.0) or 0.0),
-            -float(row.get("mean", float("inf"))),
-        )
-
     best: dict[str, dict[str, object]] = {}
     total = max(1, len(frames))
     for family, path in paths.items():
@@ -199,7 +206,7 @@ def best_by_source_group(
             "coverage": coverage,
             "success": bool(score["success"]) and coverage >= float(min_coverage),
         }
-        if group not in best or rank(row) > rank(best[group]):
+        if group not in best or _source_row_rank(row) > _source_row_rank(best[group]):
             best[group] = row
     return best
 
@@ -210,13 +217,26 @@ def score_clip(
     root: Path = ROOT,
     include_local_box: bool = True,
     max_local_box_families: int | None = None,
+    raw_fast: bool = False,
 ) -> dict[str, object]:
     from _selector_shadow_backfill import _load_jsonl
 
     rows = _load_jsonl(root / "_record_debug" / f"{name}.jsonl")
     gt = load_red_gt(name, root=root)
     frames = [frame for frame in sorted(gt) if frame < len(rows)]
-    paths = build_record_source_paths(rows, include_live=True)
+    live_pool_kwargs = {}
+    if raw_fast:
+        live_pool_kwargs = {
+            "enable_bg_mht": False,
+            "enable_phase_catalog": False,
+            "enable_phase_mht": False,
+            "enable_raw_mht": False,
+        }
+    paths = build_record_source_paths(
+        rows,
+        include_live=True,
+        live_pool_kwargs=live_pool_kwargs,
+    )
     candidate_sets = local_box_candidate_sets_from_rows(rows)
     if include_local_box:
         augmented = augment_with_local_box(
@@ -241,6 +261,7 @@ def score_all(
     names: Sequence[str] | None = None,
     include_local_box: bool = True,
     max_local_box_families: int | None = None,
+    raw_fast: bool = False,
 ) -> list[dict[str, object]]:
     if names is None:
         names = [
@@ -254,6 +275,7 @@ def score_all(
             root=root,
             include_local_box=include_local_box,
             max_local_box_families=max_local_box_families,
+            raw_fast=raw_fast,
         )
         for name in names
     ]
@@ -306,9 +328,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="live 기록 source별 family 상한을 채점합니다.")
     parser.add_argument("names", nargs="*")
     parser.add_argument("--out", default="03_output/2026-06-26_live_source_upper_score_v1.md")
+    parser.add_argument("--no-local-box", action="store_true")
+    parser.add_argument("--max-local-box-families", type=int, default=None)
+    parser.add_argument("--raw-fast", action="store_true")
     args = parser.parse_args(argv)
 
-    results = score_all(names=args.names or None)
+    results = score_all(
+        names=args.names or None,
+        include_local_box=not args.no_local_box,
+        max_local_box_families=args.max_local_box_families,
+        raw_fast=args.raw_fast,
+    )
     text = markdown_report(results)
     print(text)
     print(json.dumps(results, ensure_ascii=False))

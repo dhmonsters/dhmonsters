@@ -193,6 +193,112 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
             (30.0, 0.0),
         )
 
+    def test_raw_candidate_mht_prefers_smooth_branch_over_far_high_score(self):
+        pool = TransparentLiveFamilyPool(
+            window=5,
+            min_frames=3,
+            raw_rank_families=0,
+            raw_continuity_families=0,
+            enable_raw_mht=True,
+        )
+        gray = np.zeros((80, 160), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(
+            1,
+            candidates=[
+                (100.0, 0.0, 0.99, 20.0, 20.0),
+                (10.0, 0.0, 0.40, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+        pool.update(
+            2,
+            candidates=[
+                (100.0, 0.0, 0.99, 20.0, 20.0),
+                (20.0, 0.0, 0.40, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+        decision = pool.update(
+            3,
+            candidates=[
+                (100.0, 0.0, 0.99, 20.0, 20.0),
+                (30.0, 0.0, 0.40, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+
+        self.assertEqual(
+            decision.points["raw_candidate_mht_center_mild_state_mild"],
+            (30.0, 0.0),
+        )
+
+    def test_raw_candidate_mht_is_disabled_by_default(self):
+        pool = TransparentLiveFamilyPool(
+            window=5,
+            min_frames=3,
+            raw_rank_families=0,
+            raw_continuity_families=0,
+        )
+        gray = np.zeros((80, 160), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(1, candidates=[(10.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        pool.update(2, candidates=[(20.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        decision = pool.update(
+            3,
+            candidates=[(30.0, 0.0, 0.9, 20.0, 20.0)],
+            gray_frame=gray,
+        )
+
+        self.assertNotIn("raw_candidate_mht_center_mild_state_mild", decision.points)
+
+    def test_raw_candidate_beam_keeps_smooth_low_score_branch(self):
+        pool = TransparentLiveFamilyPool(
+            window=5,
+            min_frames=3,
+            raw_rank_families=0,
+            raw_continuity_families=0,
+            raw_beam_families=4,
+        )
+        gray = np.zeros((80, 160), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(
+            1,
+            candidates=[
+                (100.0, 0.0, 0.99, 20.0, 20.0),
+                (10.0, 0.0, 0.40, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+        pool.update(
+            2,
+            candidates=[
+                (100.0, 0.0, 0.99, 20.0, 20.0),
+                (20.0, 0.0, 0.40, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+        decision = pool.update(
+            3,
+            candidates=[
+                (100.0, 0.0, 0.99, 20.0, 20.0),
+                (30.0, 0.0, 0.40, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+
+        self.assertIn(
+            (30.0, 0.0),
+            [
+                decision.points[family]
+                for family in decision.points
+                if family.startswith("raw_candidate_beam")
+            ],
+        )
+
     def test_bg_split_family_keeps_hidden_target_center_through_merge(self):
         pool = TransparentLiveFamilyPool(window=5, min_frames=2)
         gray = np.zeros((80, 120), dtype=np.float32)
@@ -221,6 +327,27 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
         self.assertIn(family, merged.points)
         self.assertEqual(merged.points[family], (40.0, 0.0))
         self.assertEqual(split.points[family], (60.0, 0.0))
+
+    def test_expensive_mht_and_phase_families_can_be_disabled(self):
+        pool = TransparentLiveFamilyPool(
+            window=5,
+            min_frames=2,
+            enable_bg_mht=False,
+            enable_phase_catalog=False,
+        )
+        gray = np.zeros((80, 120), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(1, candidates=[(20.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        decision = pool.update(
+            2,
+            candidates=[(10.0, 0.0, 0.95, 100.0, 50.0)],
+            gray_frame=gray,
+        )
+
+        self.assertNotIn("bg_split_viterbi_center_mild_state_mild", decision.points)
+        self.assertNotIn("merge_context_center_mild_state_mild", decision.points)
+        self.assertNotIn("phase_catalog_live_center_mild_state_mild", decision.points)
 
     def test_merge_context_family_aliases_bg_split_path_for_selector_source_feature(self):
         pool = TransparentLiveFamilyPool(window=5, min_frames=2)

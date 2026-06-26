@@ -34,6 +34,14 @@ class _Node:
 
 
 @dataclass(frozen=True)
+class _RawBeam:
+    point: Point
+    vx: float
+    vy: float
+    cost: float
+
+
+@dataclass(frozen=True)
 class _FamilyConfig:
     name: str
     transition_scale: float
@@ -55,10 +63,17 @@ class TransparentLiveFamilyPool:
         catalog_max_lag: int = 80,
         catalog_history: int = 160,
         phase_mht_window: int = 28,
+        enable_phase_catalog: bool = True,
+        enable_bg_mht: bool = True,
         enable_phase_mht: bool = False,
-        raw_rank_families: int = 4,
-        raw_continuity_families: int = 8,
-        raw_max_candidates_per_frame: int = 24,
+        enable_raw_mht: bool = False,
+        raw_rank_families: int = 12,
+        raw_continuity_families: int = 24,
+        raw_beam_families: int = 12,
+        raw_beam_branch: int = 4,
+        raw_beam_spawn: int = 8,
+        raw_max_candidates_per_frame: int = 32,
+        raw_mht_max_candidates_per_frame: int = 8,
         raw_max_step_px: float = 85.0,
     ):
         self.window = max(2, int(window))
@@ -69,14 +84,22 @@ class TransparentLiveFamilyPool:
         self.catalog_max_lag = max(self.catalog_min_lag, int(catalog_max_lag))
         self.catalog_history = max(self.catalog_max_lag + 2, int(catalog_history))
         self.phase_mht_window = max(3, int(phase_mht_window))
+        self.enable_phase_catalog = bool(enable_phase_catalog)
+        self.enable_bg_mht = bool(enable_bg_mht)
         self.enable_phase_mht = bool(enable_phase_mht)
+        self.enable_raw_mht = bool(enable_raw_mht)
         self.raw_rank_families = max(0, int(raw_rank_families))
         self.raw_continuity_families = max(0, int(raw_continuity_families))
+        self.raw_beam_families = max(0, int(raw_beam_families))
+        self.raw_beam_branch = max(1, int(raw_beam_branch))
+        self.raw_beam_spawn = max(0, int(raw_beam_spawn))
         self.raw_max_candidates_per_frame = max(1, int(raw_max_candidates_per_frame))
+        self.raw_mht_max_candidates_per_frame = max(1, int(raw_mht_max_candidates_per_frame))
         self.raw_max_step_px = float(raw_max_step_px)
         self._phase_family_name = "phase_catalog_live_center_mild_state_mild"
         self._phase_mht_family_name = "phase_catalog_mht_center_mild_state_mild"
         self._mht_family_name = "bg_split_viterbi_center_mild_state_mild"
+        self._raw_mht_family_name = "raw_candidate_mht_center_mild_state_mild"
         self._mht_config = SolverConfig(
             keep=64,
             branch=8,
@@ -92,6 +115,21 @@ class TransparentLiveFamilyPool:
             shrink=0.76,
             score_weight=0.05,
             bg_penalty=36.0,
+        )
+        self._raw_mht_config = SolverConfig(
+            keep=32,
+            branch=4,
+            gate=160.0,
+            grid_size=1,
+            shrink=1.0,
+            continuity_weight=1.0,
+            accel_weight=0.25,
+            center_weight=0.0,
+            bg_penalty=0.0,
+            score_weight=0.02,
+            motion_weight=0.0,
+            viol_weight=0.0,
+            bg_weight=0.0,
         )
         self._configs = (
             _FamilyConfig(
@@ -124,6 +162,7 @@ class TransparentLiveFamilyPool:
         self._start_point: Point | None = None
         self._raw_last_points: dict[str, Point] = {}
         self._raw_offset_histories: dict[str, list[Point]] = {}
+        self._raw_beams: list[_RawBeam] = []
 
     def update(
         self,
@@ -139,6 +178,7 @@ class TransparentLiveFamilyPool:
             self._start_point = (float(white_anchor[0]), float(white_anchor[1]))
             self._phase_last = self._start_point
             self._phase_velocity = (0.0, 0.0)
+            self._raw_beams = []
 
         normalized = self._normalize_candidates(candidates)
         if frame not in self._candidate_sets:
@@ -153,6 +193,7 @@ class TransparentLiveFamilyPool:
         self._prune()
         self._prune_catalog()
         raw_points = self._raw_candidate_family_points(frame, normalized)
+        raw_points.update(self._raw_beam_family_points(normalized))
 
         usable_frames = [
             idx for idx in self._frames
@@ -166,42 +207,48 @@ class TransparentLiveFamilyPool:
 
         points = {}
         points.update(raw_points)
+        latest_frame = usable_frames[-1]
+        if self.enable_raw_mht:
+            raw_mht_path = self._raw_mht_path(usable_frames)
+            if latest_frame in raw_mht_path:
+                points[self._raw_mht_family_name] = raw_mht_path[latest_frame]
         for config in self._configs:
             path = self._viterbi_path(usable_frames, config)
             if path:
                 points[config.name] = path[-1]
                 points.update(self._coast_variants(config.name, usable_frames, path))
-        mht_path = self._hidden_mht_path(usable_frames)
-        latest_frame = usable_frames[-1]
-        if latest_frame in mht_path:
-            point = mht_path[latest_frame]
-            points[self._mht_family_name] = point
-            points["merge_context_center_mild_state_mild"] = point
-            ordered_mht = [
-                mht_path[frame]
-                for frame in usable_frames
-                if frame in mht_path
-            ]
-            ordered_frames = [
-                frame
-                for frame in usable_frames
-                if frame in mht_path
-            ]
-            if len(ordered_mht) >= 3:
-                points.update(self._coast_variants(
-                    self._mht_family_name,
-                    ordered_frames,
-                    ordered_mht,
-                ))
-                points.update(self._coast_variants(
-                    "merge_context_center_mild_state_mild",
-                    ordered_frames,
-                    ordered_mht,
-                ))
-        phase_point = self._phase_catalog_live_point(frame)
-        if phase_point is not None:
-            points[self._phase_family_name] = phase_point
-        if self.enable_phase_mht:
+        if self.enable_bg_mht:
+            mht_path = self._hidden_mht_path(usable_frames)
+            if latest_frame in mht_path:
+                point = mht_path[latest_frame]
+                points[self._mht_family_name] = point
+                points["merge_context_center_mild_state_mild"] = point
+                ordered_mht = [
+                    mht_path[frame]
+                    for frame in usable_frames
+                    if frame in mht_path
+                ]
+                ordered_frames = [
+                    frame
+                    for frame in usable_frames
+                    if frame in mht_path
+                ]
+                if len(ordered_mht) >= 3:
+                    points.update(self._coast_variants(
+                        self._mht_family_name,
+                        ordered_frames,
+                        ordered_mht,
+                    ))
+                    points.update(self._coast_variants(
+                        "merge_context_center_mild_state_mild",
+                        ordered_frames,
+                        ordered_mht,
+                    ))
+        if self.enable_phase_catalog:
+            phase_point = self._phase_catalog_live_point(frame)
+            if phase_point is not None:
+                points[self._phase_family_name] = phase_point
+        if self.enable_phase_catalog and self.enable_phase_mht:
             phase_mht_path = self._phase_catalog_mht_path(frame)
             if frame in phase_mht_path:
                 points[self._phase_mht_family_name] = phase_mht_path[frame]
@@ -241,6 +288,7 @@ class TransparentLiveFamilyPool:
                 offset_family = self._raw_box_offset_family_name(family)
                 self._raw_offset_histories[offset_family] = [point]
                 out[offset_family] = point
+            out.update(self._raw_beam_family_points(ranked))
             return out
 
         used: set[int] = set()
@@ -294,6 +342,7 @@ class TransparentLiveFamilyPool:
 
         self._raw_last_points = next_last
         self._raw_offset_histories = next_histories
+        out.update(self._raw_beam_family_points(ranked))
         return out
 
     @staticmethod
@@ -302,6 +351,64 @@ class TransparentLiveFamilyPool:
             "_center_mild_state_mild",
             "_box_offset_state_mild",
         )
+
+    def _raw_beam_family_points(self, candidates: Sequence[Candidate]) -> dict[str, Point]:
+        if self.raw_beam_families <= 0:
+            return {}
+        ranked = sorted(
+            list(candidates),
+            key=lambda candidate: float(candidate[2]),
+            reverse=True,
+        )[: self.raw_max_candidates_per_frame]
+        if not ranked:
+            return {}
+
+        candidate_points = [
+            (float(candidate[0]), float(candidate[1]), float(candidate[2]))
+            for candidate in ranked
+        ]
+        if not self._raw_beams:
+            anchor = self._start_point
+            beams = []
+            for x, y, score in candidate_points[: self.raw_beam_families]:
+                start_cost = -0.02 * score
+                if anchor is not None:
+                    start_cost += math.hypot(x - anchor[0], y - anchor[1]) * 0.05
+                beams.append(_RawBeam((x, y), 0.0, 0.0, start_cost))
+            self._raw_beams = beams
+        else:
+            expanded: list[_RawBeam] = []
+            for beam in self._raw_beams:
+                pred = (beam.point[0] + beam.vx, beam.point[1] + beam.vy)
+                nearest = sorted(
+                    candidate_points,
+                    key=lambda item: math.hypot(item[0] - pred[0], item[1] - pred[1]),
+                )[: self.raw_beam_branch]
+                for x, y, score in nearest:
+                    dx = x - beam.point[0]
+                    dy = y - beam.point[1]
+                    accel = math.hypot(dx - beam.vx, dy - beam.vy)
+                    dist = math.hypot(x - pred[0], y - pred[1])
+                    cost = beam.cost + dist + accel * 0.25 - score * 0.02
+                    vx = 0.55 * beam.vx + 0.45 * dx
+                    vy = 0.55 * beam.vy + 0.45 * dy
+                    expanded.append(_RawBeam((x, y), vx, vy, cost))
+
+            anchor = self._start_point
+            for x, y, score in candidate_points[: self.raw_beam_spawn]:
+                spawn_cost = 35.0 - score * 0.02
+                if anchor is not None:
+                    spawn_cost += math.hypot(x - anchor[0], y - anchor[1]) * 0.02
+                expanded.append(_RawBeam((x, y), 0.0, 0.0, spawn_cost))
+            self._raw_beams = sorted(expanded, key=lambda beam: beam.cost)[: self.raw_beam_families]
+
+        return {
+            f"raw_candidate_beam{index}_center_mild_state_mild": (
+                float(beam.point[0]),
+                float(beam.point[1]),
+            )
+            for index, beam in enumerate(self._raw_beams)
+        }
 
     def _raw_box_offset_point(
         self,
@@ -414,6 +521,37 @@ class TransparentLiveFamilyPool:
                 self._mht_candidates_for_frame(int(frame)),
             ))
         return solve_mht(mht_frames, config=self._mht_config)
+
+    def _raw_mht_path(self, frames: Sequence[int]) -> dict[int, Point]:
+        if self._start_point is None or not frames:
+            return {}
+
+        anchor_frame = int(frames[0]) - 1
+        mht_frames = [MhtFrame(anchor_frame, [], anchor=self._start_point)]
+        for frame in frames:
+            mht_frames.append(MhtFrame(
+                int(frame),
+                self._raw_mht_candidates_for_frame(int(frame)),
+            ))
+        return solve_mht(mht_frames, config=self._raw_mht_config)
+
+    def _raw_mht_candidates_for_frame(self, frame: int) -> list[MhtCandidate]:
+        candidates = sorted(
+            self._candidate_sets.get(int(frame), []),
+            key=lambda candidate: float(candidate[2]),
+            reverse=True,
+        )[: self.raw_mht_max_candidates_per_frame]
+        out = []
+        for candidate in candidates:
+            cx, cy, score, width, height = candidate
+            out.append(MhtCandidate(
+                cx=float(cx),
+                cy=float(cy),
+                score=float(score),
+                w=float(width),
+                h=float(height),
+            ))
+        return out
 
     def _mht_candidates_for_frame(self, frame: int) -> list[MhtCandidate]:
         candidates = self._candidate_sets.get(int(frame), [])
