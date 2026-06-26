@@ -10,7 +10,41 @@ import _transparent_mht_replay_score as replay_score
 
 
 class TransparentMhtSolverTests(unittest.TestCase):
-    def test_merged_candidate_uses_internal_point_near_prediction(self):
+    def test_background_merge_confirms_hidden_target_without_moving_center(self):
+        frames = [
+            MhtFrame(0, [], anchor=(0.0, 0.0)),
+            MhtFrame(1, [MhtCandidate(20.0, 0.0, 1.0, 20.0, 20.0)]),
+            MhtFrame(2, [
+                MhtCandidate(
+                    10.0,
+                    0.0,
+                    1.0,
+                    100.0,
+                    50.0,
+                    bg_center=(10.0, 0.0),
+                )
+            ]),
+            MhtFrame(3, [
+                MhtCandidate(60.0, 0.0, 0.7, 20.0, 20.0),
+                MhtCandidate(
+                    10.0,
+                    0.0,
+                    1.0,
+                    20.0,
+                    20.0,
+                    bg_center=(10.0, 0.0),
+                ),
+            ]),
+        ]
+
+        path = solve_mht(frames, grid_size=5, shrink=0.76)
+
+        self.assertAlmostEqual(path[2][0], 40.0, delta=0.001)
+        self.assertAlmostEqual(path[2][1], 0.0, delta=0.001)
+        self.assertAlmostEqual(path[3][0], 60.0, delta=0.001)
+        self.assertAlmostEqual(path[3][1], 0.0, delta=0.001)
+
+    def test_merged_candidate_preserves_predicted_point_inside_merge(self):
         frames = [
             MhtFrame(0, [], anchor=(0.0, 0.0)),
             MhtFrame(1, [MhtCandidate(40.0, 0.0, 1.0, 20.0, 20.0)]),
@@ -28,7 +62,7 @@ class TransparentMhtSolverTests(unittest.TestCase):
 
         path = solve_mht(frames, grid_size=5, shrink=0.76)
 
-        self.assertAlmostEqual(path[2][0], 78.0, delta=0.001)
+        self.assertAlmostEqual(path[2][0], 80.0, delta=0.001)
         self.assertAlmostEqual(path[2][1], 0.0, delta=0.001)
 
     def test_background_repel_does_not_choose_far_decal_when_prediction_is_elsewhere(self):

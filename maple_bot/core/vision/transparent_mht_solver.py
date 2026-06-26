@@ -130,6 +130,25 @@ def _states_for_hypothesis(
         pred_inside = _inside_box(pred, candidate, scale=1.08)
         bg_like = candidate.bg_center is not None
         allow_merge_grid = bg_like and pred_inside and not direct_near
+        signal_cost = (
+            -float(config.motion_weight) * float(candidate.motion_score)
+            - float(config.viol_weight) * float(candidate.viol_score)
+            - float(config.bg_weight) * float(candidate.bg_score)
+            - float(config.score_weight) * float(candidate.score)
+        )
+        if allow_merge_grid:
+            local = signal_cost
+            local -= min(_dist(pred, candidate.bg_center), 90.0) * float(config.merge_bg_far_bonus)
+            states.append(
+                _State(
+                    point=pred,
+                    cand_idx=cand_idx,
+                    offset_x=0.0,
+                    offset_y=0.0,
+                    local_cost=local,
+                    score=float(candidate.score),
+                )
+            )
         grid_size = config.grid_size if allow_merge_grid else 1
         for point, offset_x, offset_y in _candidate_points(
             candidate,
@@ -141,10 +160,7 @@ def _states_for_hypothesis(
                 local -= min(_dist(point, candidate.bg_center), 90.0) * float(config.merge_bg_far_bonus)
             elif bg_like and not pred_inside:
                 local += float(config.bg_penalty)
-            local -= float(config.motion_weight) * float(candidate.motion_score)
-            local -= float(config.viol_weight) * float(candidate.viol_score)
-            local -= float(config.bg_weight) * float(candidate.bg_score)
-            local -= float(config.score_weight) * float(candidate.score)
+            local += signal_cost
             states.append(
                 _State(
                     point=point,
