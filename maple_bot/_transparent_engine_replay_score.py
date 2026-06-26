@@ -50,7 +50,7 @@ def load_engine_inputs(name: str) -> List[PuzzleEngineInput]:
     frames = phase_catalog.load_frames(name)
     rows = phase_catalog.load_rows(name)
     wrows = phase_catalog.load_wrows(name)
-    _prep_end, white = phase_catalog.detect_prep(frames)
+    prep_end, white = phase_catalog.detect_prep(frames)
     csets = phase_catalog.candidate_sets(rows, wrows, white)
 
     inputs = []
@@ -60,7 +60,7 @@ def load_engine_inputs(name: str) -> List[PuzzleEngineInput]:
             PuzzleEngineInput(
                 frame_index=frame_index,
                 candidates=_candidate_set_to_engine(candidates),
-                white_anchor=white.get(frame_index),
+                white_anchor=white.get(frame_index) if frame_index < prep_end else None,
                 gray_frame=gray_frame,
             )
         )

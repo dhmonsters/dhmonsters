@@ -51,6 +51,34 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
         self.assertEqual(out.candidate_index, 0)
         self.assertEqual(out.state, "candidate")
 
+    def test_engine_removes_periodic_background_candidate(self):
+        engine = TransparentPuzzleEngine(EngineConfig(
+            max_candidate_jump=120.0,
+            use_background_catalog=True,
+        ))
+        prep_background = [
+            110.0,
+            150.0,
+            190.0,
+            230.0,
+            270.0,
+            110.0,
+        ]
+        for frame, bg_x in enumerate(prep_background):
+            engine.update(PuzzleEngineInput(
+                frame,
+                [PuzzleCandidate(bg_x, 0.0, 0.9, 20.0, 20.0)],
+                white_anchor=(100.0, 0.0),
+            ))
+
+        out = engine.update(PuzzleEngineInput(6, [
+            PuzzleCandidate(150.0, 0.0, 0.95, 20.0, 20.0),
+            PuzzleCandidate(40.0, 0.0, 0.80, 20.0, 20.0),
+        ]))
+
+        self.assertEqual(out.candidate_index, 1)
+        self.assertEqual((out.x, out.y), (40.0, 0.0))
+
     def test_engine_coasts_when_candidates_jump_too_far(self):
         engine = TransparentPuzzleEngine(EngineConfig(max_candidate_jump=50.0, coast_frames=3))
         engine.update(PuzzleEngineInput(0, [], white_anchor=(100.0, 100.0)))
@@ -98,6 +126,26 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
         self.assertEqual(candidate.score, 0.7)
         self.assertEqual(candidate.w, 30.0)
         self.assertEqual(candidate.h, 40.0)
+
+    def test_replay_inputs_use_white_anchor_only_before_prep_end(self):
+        with patch.object(replay.phase_catalog, "load_frames", return_value=[object(), object(), object()]):
+            with patch.object(replay.phase_catalog, "load_rows", return_value=[{}, {}, {}]):
+                with patch.object(replay.phase_catalog, "load_wrows", return_value=None):
+                    with patch.object(
+                        replay.phase_catalog,
+                        "detect_prep",
+                        return_value=(2, {0: (1.0, 1.0), 1: (2.0, 2.0), 2: (3.0, 3.0)}),
+                    ):
+                        with patch.object(
+                            replay.phase_catalog,
+                            "candidate_sets",
+                            return_value=[[], [], []],
+                        ):
+                            inputs = replay.load_engine_inputs("dummy")
+
+        self.assertEqual(inputs[0].white_anchor, (1.0, 1.0))
+        self.assertEqual(inputs[1].white_anchor, (2.0, 2.0))
+        self.assertIsNone(inputs[2].white_anchor)
 
     def test_live_candidate_adapter_uses_yolo_order(self):
         candidate = candidate_from_live_row((10.0, 20.0, 0.7, 30.0, 40.0))

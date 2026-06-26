@@ -81,6 +81,14 @@ class EngineConfig:
     max_candidate_jump: float = 115.0
     coast_frames: int = 12
     merged_min_size: float = 80.0
+    use_background_catalog: bool = False
+    catalog_white_exclusion: float = 45.0
+    background_pos_tol: float = 10.0
+    background_area_tol_pct: float = 6.0
+    background_aspect_tol_pct: float = 6.0
+    background_prediction_guard: float = 34.0
+    period_search: int = 24
+    local_lag_search: int = 8
 
 
 class BackgroundCatalog:
@@ -190,40 +198,53 @@ class TransparentPuzzleEngine:
         self.reset()
 
     def reset(self) -> None:
+        self._catalog = BackgroundCatalog()
+        self._period: Optional[int] = None
+        self._period_score: float = float("inf")
+        self._prep_end: Optional[int] = None
+        self._was_white = False
         self._last_point: Optional[Point] = None
         self._velocity: Point = (0.0, 0.0)
         self._coast_left = int(self._config.coast_frames)
 
     def update(self, inp: PuzzleEngineInput) -> PuzzleEngineOutput:
+        frame_index = int(inp.frame_index)
+        self._catalog.add_frame(
+            frame_index,
+            self._catalog_candidates(inp.candidates, inp.white_anchor),
+        )
         if inp.white_anchor is not None:
             x, y = float(inp.white_anchor[0]), float(inp.white_anchor[1])
             self._last_point = (x, y)
             self._velocity = (0.0, 0.0)
             self._coast_left = int(self._config.coast_frames)
+            self._was_white = True
             return PuzzleEngineOutput(
                 x=x,
                 y=y,
                 confidence=1.0,
                 candidate_index=None,
                 state="white_anchor",
-                debug={"frame_index": inp.frame_index},
+                debug={"frame_index": frame_index},
             )
 
         if not inp.candidates:
             if self._last_point is not None and self._coast_left > 0:
-                return self._coast(inp.frame_index, reason="no_candidates")
+                return self._coast(frame_index, reason="no_candidates")
             return PuzzleEngineOutput(
                 x=None,
                 y=None,
                 confidence=0.0,
                 candidate_index=None,
                 state="lost",
-                debug={"frame_index": inp.frame_index},
+                debug={"frame_index": frame_index},
             )
 
-        selected = self._select_candidate(inp.candidates)
+        self._ensure_period(frame_index)
+        active = self._active_candidates(frame_index, inp.candidates)
+        selected = self._select_indexed_candidates(active)
         if selected is None:
-            return self._coast(inp.frame_index, reason="jump_gate")
+            return self._coast(frame_index, reason="jump_gate")
 
         idx, candidate = selected
         cur, state = self._candidate_point(candidate)
@@ -240,8 +261,115 @@ class TransparentPuzzleEngine:
             confidence=float(candidate.score),
             candidate_index=idx,
             state=state,
-            debug={"frame_index": inp.frame_index},
+            debug={
+                "frame_index": frame_index,
+                "period": self._period,
+                "period_score": self._period_score,
+                "active_candidates": len(active),
+                "total_candidates": len(inp.candidates),
+            },
         )
+
+    def _catalog_candidates(
+        self,
+        candidates: Sequence[PuzzleCandidate],
+        white_anchor: Optional[Point],
+    ) -> List[PuzzleCandidate]:
+        if white_anchor is None:
+            return list(candidates)
+        return [
+            candidate
+            for candidate in candidates
+            if _dist((candidate.cx, candidate.cy), white_anchor)
+            > float(self._config.catalog_white_exclusion)
+        ]
+
+    def _ensure_period(self, frame_index: int) -> None:
+        if not self._config.use_background_catalog:
+            self._was_white = False
+            return
+        if self._period is not None:
+            return
+        if not self._was_white:
+            return
+        self._prep_end = int(frame_index)
+        search = int(self._config.period_search)
+        period, score = self._catalog.estimate_period(
+            int(frame_index),
+            min_lag=max(2, int(frame_index) - search),
+            max_lag=int(frame_index),
+        )
+        self._period = int(period)
+        self._period_score = float(score)
+        self._was_white = False
+
+    def _active_candidates(
+        self,
+        frame_index: int,
+        candidates: Sequence[PuzzleCandidate],
+    ) -> List[Tuple[int, PuzzleCandidate]]:
+        indexed = list(enumerate(candidates))
+        if not self._config.use_background_catalog:
+            return indexed
+        if self._period is None:
+            return indexed
+        expected = self._catalog.expected_candidates(
+            int(frame_index),
+            int(self._period),
+            local_search=int(self._config.local_lag_search),
+        )
+        if not expected:
+            return indexed
+
+        pred = self._predicted_point()
+        active = []
+        for idx, candidate in indexed:
+            if self._is_background_candidate(candidate, expected):
+                if pred is None:
+                    continue
+                if _dist((candidate.cx, candidate.cy), pred) > float(self._config.background_prediction_guard):
+                    continue
+            active.append((idx, candidate))
+        return active if active else indexed
+
+    def _is_background_candidate(
+        self,
+        candidate: PuzzleCandidate,
+        expected: Sequence[PuzzleCandidate],
+    ) -> bool:
+        for background in expected:
+            if _dist((candidate.cx, candidate.cy), (background.cx, background.cy)) > float(self._config.background_pos_tol):
+                continue
+            if not self._shape_close(candidate, background):
+                continue
+            return True
+        return False
+
+    def _shape_close(self, candidate: PuzzleCandidate, expected: PuzzleCandidate) -> bool:
+        area_delta = self._pct_delta(self._area(candidate), self._area(expected))
+        aspect_delta = self._pct_delta(self._aspect(candidate), self._aspect(expected))
+        return (
+            area_delta <= float(self._config.background_area_tol_pct)
+            and aspect_delta <= float(self._config.background_aspect_tol_pct)
+        )
+
+    @staticmethod
+    def _area(candidate: PuzzleCandidate) -> float:
+        if not _finite_size(candidate):
+            return float("nan")
+        return float(candidate.w) * float(candidate.h)
+
+    @staticmethod
+    def _aspect(candidate: PuzzleCandidate) -> float:
+        if not _finite_size(candidate):
+            return float("nan")
+        return float(candidate.w) / max(float(candidate.h), 1e-6)
+
+    @staticmethod
+    def _pct_delta(a: float, b: float) -> float:
+        if not (math.isfinite(float(a)) and math.isfinite(float(b))):
+            return 0.0
+        return abs(float(a) - float(b)) / max((abs(float(a)) + abs(float(b))) / 2.0, 1e-6) * 100.0
 
     def _predicted_point(self) -> Optional[Point]:
         if self._last_point is None:
@@ -255,13 +383,19 @@ class TransparentPuzzleEngine:
         self,
         candidates: Sequence[PuzzleCandidate],
     ) -> Optional[Tuple[int, PuzzleCandidate]]:
+        return self._select_indexed_candidates(list(enumerate(candidates)))
+
+    def _select_indexed_candidates(
+        self,
+        candidates: Sequence[Tuple[int, PuzzleCandidate]],
+    ) -> Optional[Tuple[int, PuzzleCandidate]]:
         pred = self._predicted_point()
         if pred is None:
-            return max(enumerate(candidates), key=lambda item: float(item[1].score))
+            return max(candidates, key=lambda item: float(item[1].score))
 
         gated = [
             (idx, cand)
-            for idx, cand in enumerate(candidates)
+            for idx, cand in candidates
             if _dist(pred, (cand.cx, cand.cy)) <= float(self._config.max_candidate_jump)
         ]
         if not gated:
