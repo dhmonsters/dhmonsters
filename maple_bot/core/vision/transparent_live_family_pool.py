@@ -51,11 +51,18 @@ class TransparentLiveFamilyPool:
         min_frames: int = 8,
         merge_min_size: float = 48.0,
         merge_size_ratio: float = 1.18,
+        catalog_min_lag: int = 20,
+        catalog_max_lag: int = 80,
+        catalog_history: int = 160,
     ):
         self.window = max(2, int(window))
         self.min_frames = max(2, int(min_frames))
         self.merge_min_size = float(merge_min_size)
         self.merge_size_ratio = float(merge_size_ratio)
+        self.catalog_min_lag = max(2, int(catalog_min_lag))
+        self.catalog_max_lag = max(self.catalog_min_lag, int(catalog_max_lag))
+        self.catalog_history = max(self.catalog_max_lag + 2, int(catalog_history))
+        self._phase_family_name = "phase_catalog_live_center_mild_state_mild"
         self._mht_family_name = "bg_split_viterbi_center_mild_state_mild"
         self._mht_config = SolverConfig(
             keep=64,
@@ -87,6 +94,11 @@ class TransparentLiveFamilyPool:
     def reset(self) -> None:
         self._frames: deque[int] = deque()
         self._candidate_sets: dict[int, list[Candidate]] = {}
+        self._catalog_frames: deque[int] = deque()
+        self._catalog_candidate_sets: dict[int, list[Candidate]] = {}
+        self._catalog_period: int | None = None
+        self._phase_last: Point | None = None
+        self._phase_velocity: Point = (0.0, 0.0)
         self._start_point: Point | None = None
 
     def update(
@@ -101,11 +113,21 @@ class TransparentLiveFamilyPool:
         frame = int(frame_index)
         if white_anchor is not None:
             self._start_point = (float(white_anchor[0]), float(white_anchor[1]))
+            self._phase_last = self._start_point
+            self._phase_velocity = (0.0, 0.0)
 
+        normalized = self._normalize_candidates(candidates)
         if frame not in self._candidate_sets:
             self._frames.append(frame)
-        self._candidate_sets[frame] = self._normalize_candidates(candidates)
+        self._candidate_sets[frame] = normalized
+        if frame not in self._catalog_candidate_sets:
+            self._catalog_frames.append(frame)
+        self._catalog_candidate_sets[frame] = self._catalog_candidates(
+            normalized,
+            white_anchor,
+        )
         self._prune()
+        self._prune_catalog()
 
         usable_frames = [
             idx for idx in self._frames
@@ -150,6 +172,9 @@ class TransparentLiveFamilyPool:
                     ordered_frames,
                     ordered_mht,
                 ))
+        phase_point = self._phase_catalog_live_point(frame)
+        if phase_point is not None:
+            points[self._phase_family_name] = phase_point
         return LiveFamilyDecision(points, {
             "frames": len(usable_frames),
             "ready": bool(points),
@@ -160,6 +185,11 @@ class TransparentLiveFamilyPool:
         while len(self._frames) > self.window:
             old = self._frames.popleft()
             self._candidate_sets.pop(old, None)
+
+    def _prune_catalog(self) -> None:
+        while len(self._catalog_frames) > self.catalog_history:
+            old = self._catalog_frames.popleft()
+            self._catalog_candidate_sets.pop(old, None)
 
     def _viterbi_path(
         self,
@@ -256,6 +286,184 @@ class TransparentLiveFamilyPool:
                 bg_center=(float(cx), float(cy)) if merge_like else None,
             ))
         return out
+
+    def _phase_catalog_live_point(self, frame: int) -> Point | None:
+        candidates = self._catalog_candidate_sets.get(int(frame), [])
+        if not candidates or self._phase_last is None:
+            return None
+        if self._catalog_period is None:
+            self._catalog_period = self._estimate_catalog_period(frame)
+        if self._catalog_period is None:
+            return None
+
+        lag = self._choose_catalog_lag(frame, self._catalog_period)
+        expected = self._catalog_candidate_sets.get(int(frame) - int(lag), [])
+        pred = (
+            float(self._phase_last[0]) + float(self._phase_velocity[0]),
+            float(self._phase_last[1]) + float(self._phase_velocity[1]),
+        )
+        active = self._active_phase_candidates(candidates, expected, pred)
+        picked = self._pick_phase_candidate(active, pred)
+        if picked is None:
+            cur = pred
+            self._phase_velocity = (
+                float(self._phase_velocity[0]) * 0.9,
+                float(self._phase_velocity[1]) * 0.9,
+            )
+        else:
+            cur = (float(picked[0]), float(picked[1]))
+            self._phase_velocity = (
+                float(self._phase_velocity[0]) * 0.6 + (cur[0] - self._phase_last[0]) * 0.4,
+                float(self._phase_velocity[1]) * 0.6 + (cur[1] - self._phase_last[1]) * 0.4,
+            )
+        self._phase_last = cur
+        return cur
+
+    def _estimate_catalog_period(self, frame: int) -> int | None:
+        hi = min(int(frame), int(self.catalog_max_lag))
+        lo = min(int(self.catalog_min_lag), hi)
+        best: tuple[float, int] | None = None
+        for lag in range(lo, hi + 1):
+            scores = []
+            for cur_frame in self._catalog_frames:
+                if cur_frame < lag:
+                    continue
+                if cur_frame > frame:
+                    continue
+                ref = self._catalog_candidate_sets.get(int(cur_frame) - lag, [])
+                cur = self._catalog_candidate_sets.get(int(cur_frame), [])
+                score = self._catalog_match_score(ref, cur)
+                if score is not None:
+                    scores.append(score)
+            if not scores:
+                continue
+            scores.sort()
+            item = (float(scores[len(scores) // 2]), int(lag))
+            if best is None or item < best:
+                best = item
+        return None if best is None else int(best[1])
+
+    def _choose_catalog_lag(self, frame: int, period: int, search: int = 8) -> int:
+        lo = max(2, int(period) - int(search))
+        hi = min(int(frame), int(period) + int(search))
+        best: tuple[float, int] | None = None
+        for lag in range(lo, hi + 1):
+            ref = self._catalog_candidate_sets.get(int(frame) - int(lag), [])
+            cur = self._catalog_candidate_sets.get(int(frame), [])
+            score = self._catalog_match_score(ref, cur)
+            if score is None:
+                continue
+            item = (score, int(lag))
+            if best is None or item < best:
+                best = item
+        return int(period) if best is None else int(best[1])
+
+    @staticmethod
+    def _catalog_match_score(
+        reference: Sequence[Candidate],
+        current: Sequence[Candidate],
+    ) -> float | None:
+        if not reference or not current:
+            return None
+        pairs = []
+        for ri, ref in enumerate(reference):
+            for ci, cur in enumerate(current):
+                pairs.append((math.hypot(ref[0] - cur[0], ref[1] - cur[1]), ri, ci))
+        pairs.sort(key=lambda item: item[0])
+        used_ref = set()
+        used_cur = set()
+        distances = []
+        for distance, ri, ci in pairs:
+            if ri in used_ref or ci in used_cur:
+                continue
+            used_ref.add(ri)
+            used_cur.add(ci)
+            distances.append(float(distance))
+        if not distances:
+            return None
+        distances.sort()
+        keep = distances[: max(1, int(math.ceil(len(distances) * 0.75)))]
+        return float(keep[len(keep) // 2])
+
+    def _active_phase_candidates(
+        self,
+        candidates: Sequence[Candidate],
+        expected: Sequence[Candidate],
+        pred: Point,
+    ) -> list[Candidate]:
+        if not expected:
+            return list(candidates)
+        active = []
+        for candidate in candidates:
+            if self._candidate_matches_background(candidate, expected):
+                if math.hypot(candidate[0] - pred[0], candidate[1] - pred[1]) > 34.0:
+                    continue
+            active.append(candidate)
+        return active if active else list(candidates)
+
+    def _candidate_matches_background(
+        self,
+        candidate: Candidate,
+        expected: Sequence[Candidate],
+    ) -> bool:
+        for background in expected:
+            if math.hypot(candidate[0] - background[0], candidate[1] - background[1]) > 10.0:
+                continue
+            if not self._candidate_shape_close(candidate, background):
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _candidate_shape_close(candidate: Candidate, expected: Candidate) -> bool:
+        if not (
+            math.isfinite(candidate[3])
+            and math.isfinite(candidate[4])
+            and math.isfinite(expected[3])
+            and math.isfinite(expected[4])
+            and candidate[3] > 0.0
+            and candidate[4] > 0.0
+            and expected[3] > 0.0
+            and expected[4] > 0.0
+        ):
+            return True
+        area_a = float(candidate[3]) * float(candidate[4])
+        area_b = float(expected[3]) * float(expected[4])
+        aspect_a = float(candidate[3]) / max(float(candidate[4]), 1e-6)
+        aspect_b = float(expected[3]) / max(float(expected[4]), 1e-6)
+        return (
+            TransparentLiveFamilyPool._pct_delta(area_a, area_b) <= 6.0
+            and TransparentLiveFamilyPool._pct_delta(aspect_a, aspect_b) <= 6.0
+        )
+
+    @staticmethod
+    def _pct_delta(a: float, b: float) -> float:
+        return abs(float(a) - float(b)) / max((abs(float(a)) + abs(float(b))) / 2.0, 1e-6) * 100.0
+
+    @staticmethod
+    def _pick_phase_candidate(candidates: Sequence[Candidate], pred: Point) -> Candidate | None:
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda candidate: (
+                math.hypot(candidate[0] - pred[0], candidate[1] - pred[1])
+                - 0.02 * float(candidate[2])
+            ),
+        )
+
+    def _catalog_candidates(
+        self,
+        candidates: Sequence[Candidate],
+        white_anchor: Point | None,
+    ) -> list[Candidate]:
+        if white_anchor is None:
+            return list(candidates)
+        return [
+            candidate
+            for candidate in candidates
+            if math.hypot(candidate[0] - white_anchor[0], candidate[1] - white_anchor[1]) > 45.0
+        ]
 
     def _coast_variants(
         self,
