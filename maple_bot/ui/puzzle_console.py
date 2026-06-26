@@ -29,6 +29,7 @@ from core_ui.theme import SPACING, build_qss
 ReplayRunner = Callable[[str, str], str | Path]
 PathPicker = Callable[[str], str | Path | None]
 FolderOpener = Callable[[Path], None]
+RecordingStopHandler = Callable[[], bool]
 TRACE_TIMELINE_LIMIT = 5
 
 
@@ -39,12 +40,14 @@ class PuzzleConsoleWindow(QMainWindow):
         replay_runner: ReplayRunner | None = None,
         path_picker: PathPicker | None = None,
         folder_opener: FolderOpener | None = None,
+        recording_stop_handler: RecordingStopHandler | None = None,
         default_test_path: str | Path | None = None,
     ) -> None:
         super().__init__()
         self._replay_runner = replay_runner
         self._path_picker = path_picker or self._pick_path
         self._folder_opener = folder_opener or _open_folder
+        self._recording_stop_handler = recording_stop_handler
         self._default_test_path = str(default_test_path) if default_test_path is not None else ""
         self.last_report_path: Path | None = None
         self.last_session_dir: Path | None = None
@@ -126,6 +129,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.start_watch_button = _command_button("화면 감시", "startWatchButton", primary=True)
         self.roi_settings_button = _command_button("ROI 설정", "roiSettingsButton")
         self.open_recording_folder_button = _command_button("녹화 폴더", "openRecordingFolderButton")
+        self.stop_recording_button = _command_button("녹화 종료 F3", "stopRecordingButton")
 
         self.open_image_sequence_button.clicked.connect(
             lambda _checked=False: self.run_replay_input("image_sequence")
@@ -136,6 +140,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.start_watch_button.clicked.connect(lambda _checked=False: self.append_log("화면 감시는 다음 단계에서 연결"))
         self.roi_settings_button.clicked.connect(lambda _checked=False: self.append_log("고정 ROI 사용 중"))
         self.open_recording_folder_button.clicked.connect(lambda _checked=False: self.open_last_recording_folder())
+        self.stop_recording_button.clicked.connect(lambda _checked=False: self.stop_recording_input())
 
         for button in (
             self.open_image_sequence_button,
@@ -145,6 +150,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.start_watch_button,
             self.roi_settings_button,
             self.open_recording_folder_button,
+            self.stop_recording_button,
         ):
             layout.addWidget(button)
 
@@ -511,6 +517,23 @@ class PuzzleConsoleWindow(QMainWindow):
         self._folder_opener(self.last_session_dir)
         self.append_log(f"recording folder 열기: {self.last_session_dir}")
         return True
+
+    def stop_recording_input(self) -> bool:
+        if self._recording_stop_handler is None:
+            self.append_log("recording stop 대기: active recording 없음")
+            return False
+        stopped = bool(self._recording_stop_handler())
+        if stopped:
+            self.append_log("recording stop")
+        else:
+            self.append_log("recording stop skipped")
+        return stopped
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_F3:
+            self.stop_recording_input()
+            return
+        super().keyPressEvent(event)
 
     def _run_replay_path(self, path: str, input_kind: str) -> None:
         self.set_identity_state("REPLAYING")

@@ -178,8 +178,11 @@ def _install_fake_qt(monkeypatch) -> None:
     class _AlignmentFlag:
         AlignCenter = "center"
 
+    class _Key:
+        Key_F3 = "f3"
+
     qtcore = types.ModuleType("PyQt6.QtCore")
-    qtcore.Qt = types.SimpleNamespace(Orientation=_Orientation, AlignmentFlag=_AlignmentFlag)
+    qtcore.Qt = types.SimpleNamespace(Orientation=_Orientation, AlignmentFlag=_AlignmentFlag, Key=_Key)
 
     qtgui = types.ModuleType("PyQt6.QtGui")
     qtgui.QPixmap = _Pixmap
@@ -224,6 +227,37 @@ def test_puzzle_console_window_exposes_expected_commands(monkeypatch):
     assert window.run_default_test_button.objectName() == "runDefaultPuzzleTestButton"
     assert window.roi_settings_button.objectName() == "roiSettingsButton"
     assert window.open_recording_folder_button.objectName() == "openRecordingFolderButton"
+    assert window.stop_recording_button.objectName() == "stopRecordingButton"
+    assert "F3" in window.stop_recording_button.text()
+
+
+def test_puzzle_console_stop_recording_button_calls_handler(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    calls = []
+
+    window = module.PuzzleConsoleWindow(recording_stop_handler=lambda: calls.append("stop") or True)
+
+    window.stop_recording_button.clicked.emit()
+
+    assert calls == ["stop"]
+    assert "recording stop" in window.event_log.toPlainText()
+
+
+def test_puzzle_console_f3_calls_recording_stop_handler(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    calls = []
+
+    class _Event:
+        def key(self):
+            return module.Qt.Key.Key_F3
+
+    window = module.PuzzleConsoleWindow(recording_stop_handler=lambda: calls.append("stop") or True)
+
+    window.keyPressEvent(_Event())
+
+    assert calls == ["stop"]
 
 
 def test_puzzle_entrypoint_builds_parser_and_window(monkeypatch):

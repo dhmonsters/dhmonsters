@@ -22,9 +22,9 @@ def _session(tmp_path: Path) -> PuzzleSession:
         board_roi=_roi("board"),
         output_dir=tmp_path,
         trace_path=tmp_path / "trace.jsonl",
-        raw_video_path=tmp_path / "raw_cctv.mp4",
-        board_video_path=tmp_path / "board_crop.mp4",
-        overlay_video_path=tmp_path / "overlay.mp4",
+        raw_video_path=tmp_path / "raw_cctv.mkv",
+        board_video_path=tmp_path / "board_crop.mkv",
+        overlay_video_path=tmp_path / "overlay.mkv",
     )
 
 
@@ -60,6 +60,16 @@ def test_session_recorder_writes_three_video_outputs_and_snapshot(tmp_path):
     assert session.overlay_video_path.stat().st_size > 0
     assert snapshot_path == session.output_dir / "snapshots" / "000003_start.png"
     assert snapshot_path.exists()
+
+
+def test_session_recorder_defaults_to_lossless_ffv1(tmp_path):
+    session = _session(tmp_path)
+    recorder = SessionRecorder(session, fps=10.0)
+
+    try:
+        assert recorder.fourcc == "FFV1"
+    finally:
+        recorder.close()
 
 
 def test_session_recorder_logs_roi_invalid_when_frame_size_changes(tmp_path):

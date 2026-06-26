@@ -14,7 +14,7 @@ class SessionRecorder:
         session: PuzzleSession,
         fps: float = 30.0,
         trace_logger: TraceLogger | None = None,
-        fourcc: str = "mp4v",
+        fourcc: str = "FFV1",
     ) -> None:
         if fps <= 0:
             raise ValueError("fps must be positive")

@@ -50,9 +50,9 @@ class SessionManager:
             board_roi=board_roi,
             output_dir=output_dir,
             trace_path=output_dir / "trace.jsonl",
-            raw_video_path=output_dir / "raw_cctv.mp4",
-            board_video_path=output_dir / "board_crop.mp4",
-            overlay_video_path=output_dir / "overlay.mp4",
+            raw_video_path=output_dir / "raw_cctv.mkv",
+            board_video_path=output_dir / "board_crop.mkv",
+            overlay_video_path=output_dir / "overlay.mkv",
         )
 
     @staticmethod

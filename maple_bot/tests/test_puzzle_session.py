@@ -27,9 +27,9 @@ def test_session_manager_creates_output_paths(tmp_path):
     assert session.output_dir.is_dir()
     assert (session.output_dir / "snapshots").is_dir()
     assert session.trace_path == session.output_dir / "trace.jsonl"
-    assert session.raw_video_path == session.output_dir / "raw_cctv.mp4"
-    assert session.board_video_path == session.output_dir / "board_crop.mp4"
-    assert session.overlay_video_path == session.output_dir / "overlay.mp4"
+    assert session.raw_video_path == session.output_dir / "raw_cctv.mkv"
+    assert session.board_video_path == session.output_dir / "board_crop.mkv"
+    assert session.overlay_video_path == session.output_dir / "overlay.mkv"
 
 
 def test_session_manager_increments_ids_within_same_second(tmp_path):

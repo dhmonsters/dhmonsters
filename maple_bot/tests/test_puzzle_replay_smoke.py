@@ -42,9 +42,9 @@ def test_headless_replay_processes_five_frames_and_writes_artifacts(tmp_path):
     trace_path = session_dir / "trace.jsonl"
     assert report_path.exists()
     assert trace_path.exists()
-    assert (session_dir / "raw_cctv.mp4").stat().st_size > 0
-    assert (session_dir / "board_crop.mp4").stat().st_size > 0
-    assert (session_dir / "overlay.mp4").stat().st_size > 0
+    assert (session_dir / "raw_cctv.mkv").stat().st_size > 0
+    assert (session_dir / "board_crop.mkv").stat().st_size > 0
+    assert (session_dir / "overlay.mkv").stat().st_size > 0
 
     event_types = _event_types(trace_path)
     assert event_types.count("FRAME_REPLAYED") == 5

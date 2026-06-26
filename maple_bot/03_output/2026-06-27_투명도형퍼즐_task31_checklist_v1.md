@@ -1,0 +1,13 @@
+# Task 31 체크리스트
+- [x] RecordingController 실패 테스트 추가.
+- [x] 무손실 MKV 실패 테스트 추가.
+- [x] UI 녹화 종료 실패 테스트 추가.
+- [x] 실패 테스트 확인.
+- [x] RecordingController 구현.
+- [x] 세션 경로와 recorder 기본 fourcc 변경.
+- [x] UI 녹화 종료 버튼과 F3 진입점 구현.
+- [x] 신규 테스트 통과 확인.
+- [x] 실제 transparent-test 실행 경로 재검증.
+- [x] 전체 puzzle 테스트 통과 확인.
+- [x] 문법 검사와 공백 검사 통과 확인.
+- [x] 커밋.

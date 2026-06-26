@@ -13,6 +13,7 @@ from core.puzzle.frame_source import ImageSequenceFrameSource, JsonlReplayFrameS
 from core.puzzle.identity import IdentityTracker
 from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision
 from core.puzzle.recorder import SessionRecorder
+from core.puzzle.recording_controller import RecordingController
 from core.puzzle.report import ReportBuilder
 from core.puzzle.session import SessionManager
 from core.puzzle.trace import TraceLogger
@@ -109,7 +110,10 @@ def run_headless_replay(
         board_roi=board_roi,
     )
     trace = TraceLogger(session)
-    recorder = SessionRecorder(session, trace_logger=trace)
+    recording = RecordingController(
+        recorder=SessionRecorder(session, trace_logger=trace),
+        trace_logger=trace,
+    )
     candidate_provider = CandidateProvider(_empty_replay_rows, source="replay")
     evidence_judges = EvidenceJudges()
     identity_tracker = IdentityTracker()
@@ -130,7 +134,7 @@ def run_headless_replay(
         for packet in _open_replay_source(replay_path, session).iter_frames():
             if processed >= max_frames:
                 break
-            recorder.write(packet, overlay_frame=packet.source_frame)
+            recording.write(packet, overlay_frame=packet.source_frame)
             candidates = candidate_provider.detect(packet)
             evidence = evidence_judges.score(candidates, packet)
             decision = identity_tracker.update(
@@ -171,7 +175,7 @@ def run_headless_replay(
             )
             processed += 1
     finally:
-        recorder.close()
+        recording.stop_recording(reason="replay_finished")
 
     trace.write_event("SESSION_END", None, {"frames": processed})
     return ReportBuilder().build(session, session.trace_path)

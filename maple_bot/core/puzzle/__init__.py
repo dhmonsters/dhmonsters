@@ -28,6 +28,7 @@ from core.puzzle.models import (
     RoiSpec,
 )
 from core.puzzle.recorder import SessionRecorder
+from core.puzzle.recording_controller import RecordingController
 from core.puzzle.session import SessionManager
 from core.puzzle.trace import TraceLogger
 
@@ -50,6 +51,7 @@ __all__ = [
     "PuzzleSession",
     "PuzzleNotifier",
     "ReportBuilder",
+    "RecordingController",
     "RoiSpec",
     "SessionRecorder",
     "SessionManager",
