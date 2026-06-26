@@ -42,6 +42,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.trace_timeline: list[str] = []
         self.current_frame_sources: dict[int, str] = {}
         self.current_frame_candidates: dict[int, list[dict[object, object]]] = {}
+        self.current_frame_evidence: dict[int, list[dict[object, object]]] = {}
         self.current_frame_identity: dict[int, dict[object, object]] = {}
         self.current_cctv_source_path: str | None = None
         self.setObjectName("puzzleConsoleWindow")
@@ -158,6 +159,9 @@ class PuzzleConsoleWindow(QMainWindow):
         self.cctv_candidate_summary_label = QLabel("candidates 0")
         self.cctv_candidate_summary_label.setObjectName("puzzleCctvCandidateSummary")
         self.cctv_candidate_summary_label.setWordWrap(True)
+        self.cctv_evidence_summary_label = QLabel("evidence 0")
+        self.cctv_evidence_summary_label.setObjectName("puzzleCctvEvidenceSummary")
+        self.cctv_evidence_summary_label.setWordWrap(True)
         self.cctv_identity_summary_label = QLabel("identity -")
         self.cctv_identity_summary_label.setObjectName("puzzleCctvIdentitySummary")
         self.cctv_identity_summary_label.setWordWrap(True)
@@ -165,6 +169,7 @@ class PuzzleConsoleWindow(QMainWindow):
         layout.addWidget(self.cctv_frame_label, 1)
         layout.addWidget(self.cctv_status_label, 0)
         layout.addWidget(self.cctv_candidate_summary_label, 0)
+        layout.addWidget(self.cctv_evidence_summary_label, 0)
         layout.addWidget(self.cctv_identity_summary_label, 0)
         return frame
 
@@ -273,6 +278,7 @@ class PuzzleConsoleWindow(QMainWindow):
             return
 
         if event_type == "EVIDENCE":
+            self._apply_evidence(frame_index, payload)
             return
 
         if event_type == "IDENTITY_STATE":
@@ -350,6 +356,13 @@ class PuzzleConsoleWindow(QMainWindow):
         candidates = _candidate_list(payload)
         self.current_frame_candidates[frame_index] = candidates
         self.cctv_candidate_summary_label.setText(_candidate_summary(frame_index, payload))
+
+    def _apply_evidence(self, frame_index: object, payload: dict[object, object]) -> None:
+        if not isinstance(frame_index, int):
+            return
+        evidence = _evidence_list(payload)
+        self.current_frame_evidence[frame_index] = evidence
+        self.cctv_evidence_summary_label.setText(_evidence_summary(frame_index, payload))
 
     def _apply_identity(self, frame_index: object, payload: dict[object, object]) -> None:
         if not isinstance(frame_index, int):
@@ -482,6 +495,35 @@ def _compact_point(point: list[object]) -> str:
         else:
             values.append(str(value))
     return ",".join(values)
+
+
+def _evidence_list(payload: dict[object, object]) -> list[dict[object, object]]:
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list):
+        return []
+    return [item for item in evidence if isinstance(item, dict)]
+
+
+def _evidence_summary(frame_index: int, payload: dict[object, object]) -> str:
+    count = _evidence_count(payload)
+    evidence = _evidence_list(payload)
+    if not evidence:
+        return f"frame {frame_index} evidence {count}"
+
+    first = evidence[0]
+    parts = [f"frame {frame_index}", f"evidence {count}"]
+    candidate_id = first.get("candidate_id")
+    if candidate_id:
+        parts.append(f"candidate {candidate_id}")
+    for key, label in (
+        ("bg_score", "bg"),
+        ("motion_divergence", "motion"),
+        ("merge_likelihood", "merge"),
+    ):
+        value = first.get(key)
+        if isinstance(value, (int, float)):
+            parts.append(f"{label} {float(value):.2f}")
+    return " | ".join(parts)
 
 
 def _evidence_count(payload: dict[object, object]) -> int:

@@ -549,3 +549,51 @@ def test_puzzle_console_applies_identity_to_cctv_summary(monkeypatch):
     assert "conf 0.82" in window.cctv_identity_summary_label.text()
     assert "candidate c12_a" in window.cctv_identity_summary_label.text()
     assert "point 25,40" in window.cctv_identity_summary_label.text()
+
+
+def test_puzzle_console_exposes_cctv_evidence_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.cctv_evidence_summary_label.objectName() == "puzzleCctvEvidenceSummary"
+
+
+def test_puzzle_console_applies_evidence_to_cctv_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    window.apply_trace_event(
+        {
+            "type": "EVIDENCE",
+            "session_id": "20260626_223000_001",
+            "frame_index": 12,
+            "payload": {
+                "count": 2,
+                "evidence": [
+                    {
+                        "candidate_id": "c12_a",
+                        "bg_score": 0.123,
+                        "motion_divergence": 0.345,
+                        "merge_likelihood": 0.567,
+                    },
+                    {
+                        "candidate_id": "c12_b",
+                        "bg_score": 0.9,
+                    },
+                ],
+            },
+        }
+    )
+
+    assert len(window.current_frame_evidence[12]) == 2
+    assert window.current_frame_evidence[12][0]["candidate_id"] == "c12_a"
+    assert "frame 12" in window.cctv_evidence_summary_label.text()
+    assert "evidence 2" in window.cctv_evidence_summary_label.text()
+    assert "candidate c12_a" in window.cctv_evidence_summary_label.text()
+    assert "bg 0.12" in window.cctv_evidence_summary_label.text()
+    assert "motion 0.34" in window.cctv_evidence_summary_label.text()
+    assert "merge 0.57" in window.cctv_evidence_summary_label.text()
