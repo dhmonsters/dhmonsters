@@ -5,7 +5,7 @@ from pathlib import Path
 
 from _final_candidate_selector import LinearSelectorModel
 from _final_candidate_selector import load_feature_rows_cache, summarize_selected_rows
-from _gt_free_family_selector import save_gt_free_selector_model
+from _gt_free_family_selector import load_gt_free_selector_model, save_gt_free_selector_model
 from _offline_16gt_solver import DEFAULT_CACHE_PATH
 from core.vision.transparent_family_selector_runtime import (
     DEFAULT_MODEL_PATH,
@@ -81,6 +81,12 @@ class TransparentFamilySelectorRuntimeTests(unittest.TestCase):
         self.assertTrue(DEFAULT_MODEL_PATH.exists())
         self.assertTrue(runtime.available)
         self.assertEqual(runtime.load_error, "")
+
+    def test_default_model_contains_refreshed_selector_signal_features(self):
+        model = load_gt_free_selector_model(DEFAULT_MODEL_PATH)
+
+        self.assertIn("rank_bg_like", model.feature_names)
+        self.assertIn("rank_high_divergence", model.feature_names)
 
     def test_default_model_reproduces_sixteen_cached_gt_clips_without_runtime_labels(self):
         rows = load_feature_rows_cache(DEFAULT_CACHE_PATH)
