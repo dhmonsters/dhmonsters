@@ -49,6 +49,12 @@ def _serial_point(point: Point | None) -> list[int] | None:
     return [int(round(point[0])), int(round(point[1]))]
 
 
+def _serial_float_point(point: Point | None) -> list[float] | None:
+    if point is None:
+        return None
+    return [float(point[0]), float(point[1])]
+
+
 class TransparentSelectorShadow:
     def __init__(
         self,
@@ -145,6 +151,7 @@ class TransparentSelectorShadow:
             "available": True,
             "family": family,
             "point": _serial_point(point),
+            "rescue_point": _serial_float_point(point),
             "rows": len(rows),
             "paths": len(paths),
             "frames": len(frames),

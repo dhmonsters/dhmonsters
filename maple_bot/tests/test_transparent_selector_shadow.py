@@ -86,6 +86,35 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["point"], [32, 40])
         self.assertEqual(result["rows"], 1)
 
+    def test_shadow_result_exposes_float_rescue_point_for_live_health_selector(self):
+        runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=3,
+            min_frames=2,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        shadow.update(
+            0,
+            candidates=[(10.0, 10.0, 0.9, 20.0, 20.0)],
+            anchors={
+                "panel_default_center_mild_state_mild": (10.25, 10.75),
+            },
+        )
+        result = shadow.update(
+            1,
+            candidates=[(11.0, 10.0, 0.9, 20.0, 20.0)],
+            anchors={
+                "panel_default_center_mild_state_mild": (11.25, 10.75),
+            },
+        )
+
+        self.assertEqual(result["point"], [11, 11])
+        self.assertEqual(result["rescue_point"], [11.25, 10.75])
+
     def test_shadow_prunes_old_frames_to_window(self):
         runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
         shadow = TransparentSelectorShadow(

@@ -459,7 +459,7 @@ class _MacroThread(threading.Thread):
             clip_id="live",
             window=24,
             min_frames=8,
-            emit_every=10,
+            emit_every=1,
             max_candidates=8,
         )
         self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
@@ -843,25 +843,6 @@ class _MacroThread(threading.Thread):
                             _visual_dec = None
                             if _diag_cnt % 60 == 0:
                                 self._sig.log.emit(f"[visual-rescue-error] {_vis_exc}")
-                        if (_engine_out is not None and _engine_out.x is not None
-                                and _engine_out.y is not None
-                                and _health_rescue is None):
-                            _health_rescue = (_engine_out.x, _engine_out.y)
-                            _health_rescue_source = "engine"
-                        if track_pos is not None or _health_rescue is not None:
-                            _health_dec = _healthsel.update(
-                                primary=track_pos,
-                                rescue=_health_rescue,
-                                frame_shape=det.shape[:2],
-                                force_primary=_via_white,
-                            )
-                            if _health_dec.point is not None:
-                                if _health_dec.source == "rescue":
-                                    _boxsel.reset(_health_dec.point)
-                                    if _bt.locked:
-                                        _bt.nudge(_health_dec.point[0], _health_dec.point[1])
-                                track_pos = _health_dec.point
-                                tracking = True
                         try:
                             _live_family_dec = _live_family_pool.update(
                                 preview_cnt,
@@ -904,6 +885,35 @@ class _MacroThread(threading.Thread):
                                 self._sig.log.emit(f"[selector-shadow-error] {_sel_exc}")
                         # 트랙 급감 진단 — 잠금 후 트랙이 5개 미만이면 후보 수와 함께 기록
                         # (후보 많은데 트랙 적으면 _bt 버그, 후보도 적으면 검출 공백)
+                        if (_selector_shadow_rec and _selector_shadow_rec.get("available")
+                                and _selector_shadow_rec.get("rescue_point") is not None
+                                and _health_rescue is None):
+                            try:
+                                _srp = _selector_shadow_rec.get("rescue_point")
+                                if len(_srp) >= 2:
+                                    _health_rescue = (float(_srp[0]), float(_srp[1]))
+                                    _health_rescue_source = "selector_shadow"
+                            except Exception:
+                                pass
+                        if (_engine_out is not None and _engine_out.x is not None
+                                and _engine_out.y is not None
+                                and _health_rescue is None):
+                            _health_rescue = (_engine_out.x, _engine_out.y)
+                            _health_rescue_source = "engine"
+                        if track_pos is not None or _health_rescue is not None:
+                            _health_dec = _healthsel.update(
+                                primary=track_pos,
+                                rescue=_health_rescue,
+                                frame_shape=det.shape[:2],
+                                force_primary=_via_white,
+                            )
+                            if _health_dec.point is not None:
+                                if _health_dec.source == "rescue":
+                                    _boxsel.reset(_health_dec.point)
+                                    if _bt.locked:
+                                        _bt.nudge(_health_dec.point[0], _health_dec.point[1])
+                                track_pos = _health_dec.point
+                                tracking = True
                         if _bt.locked and _bt.track_count < 5:
                             self._sig.log.emit(
                                 f"[트랙급감] 후보{len(_dets)}개(전체{len(_cands)}) "
