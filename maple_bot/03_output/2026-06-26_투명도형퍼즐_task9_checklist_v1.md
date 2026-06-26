@@ -1,0 +1,11 @@
+# 투명도형 퍼즐 Task 9 체크리스트
+- [x] `white_anchor`가 `INIT_VISIBLE`을 만드는 테스트를 작성한다.
+- [x] 가까운 정상 후보가 `TRACK_CONFIDENT`로 이어지는 테스트를 작성한다.
+- [x] 먼 점프 또는 높은 merge likelihood가 `OCCLUSION_SUSPECTED`를 만드는 테스트를 작성한다.
+- [x] 겹침 이후 애매한 프레임이 `IDENTITY_HOLD`로 이전 신분을 보류하는 테스트를 작성한다.
+- [x] 복원 후보가 나오면 `REACQUIRE`를 거쳐 추적 복귀하는 테스트를 작성한다.
+- [x] 보류 한계를 넘으면 `LOST`가 되는 테스트를 작성한다.
+- [x] 테스트가 기대 이유로 실패하는지 확인한다.
+- [x] `IdentityTracker`를 최소 구현한다.
+- [x] Task 1부터 Task 9까지 검증 통과를 확인한다.
+- [ ] 커밋은 사용자 요청 시 별도로 진행한다.
