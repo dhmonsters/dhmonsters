@@ -948,6 +948,7 @@ class _MacroThread(threading.Thread):
                             "box": (None if _box_mode is None
                                     else {"mode": _box_mode,
                                           "innov": round(_box_innov, 1)}),
+                            "rescue_source": _health_rescue_source,
                             "health": (None if _health_dec is None
                                        else {"source": _health_dec.source,
                                              "reason": _health_dec.reason,

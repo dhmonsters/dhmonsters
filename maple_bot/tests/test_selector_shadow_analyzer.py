@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from _selector_shadow_analyzer import (
     analyze_record_file,
@@ -84,6 +85,63 @@ class SelectorShadowAnalyzerTests(unittest.TestCase):
 
         self.assertEqual([item["name"] for item in summaries], ["new.jsonl"])
 
+    def test_analyze_file_counts_selector_rescue_gate_and_usage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rescue.jsonl"
+            _write_jsonl(path, [
+                {
+                    "i": 1,
+                    "track": [10, 10],
+                    "rescue_source": None,
+                    "health": {"source": "primary", "reason": "primary_healthy"},
+                    "selector_shadow": {
+                        "available": True,
+                        "family": "panel_default_center_mild_state_mild",
+                        "point": [10, 10],
+                        "rescue_point": [10.0, 10.0],
+                        "rescue_allowed": False,
+                    },
+                },
+                {
+                    "i": 2,
+                    "track": [20, 10],
+                    "rescue_source": "selector_shadow",
+                    "health": {"source": "rescue", "reason": "primary_repeated_jump"},
+                    "selector_shadow": {
+                        "available": True,
+                        "family": "bg_split_viterbi_center_mild_state_mild",
+                        "point": [20, 10],
+                        "rescue_point": [20.0, 10.0],
+                        "rescue_allowed": True,
+                    },
+                },
+                {
+                    "i": 3,
+                    "track": [30, 10],
+                    "rescue_source": "engine",
+                    "health": {"source": "primary", "reason": "primary_healthy"},
+                    "selector_shadow": {
+                        "available": True,
+                        "family": "bg_split_viterbi_center_mild_state_mild",
+                        "point": [30, 10],
+                        "rescue_point": [30.0, 10.0],
+                        "rescue_allowed": True,
+                    },
+                },
+            ])
+
+            summary = analyze_record_file(path)
+
+        self.assertEqual(summary["rescue_allowed_frames"], 2)
+        self.assertEqual(summary["rescue_blocked_frames"], 1)
+        self.assertEqual(summary["bg_split_frames"], 2)
+        self.assertEqual(summary["selector_rescue_used"], 1)
+        self.assertEqual(summary["health_rescue_frames"], 1)
+        self.assertTrue(any(
+            event["kind"] == "selector_rescue_used"
+            for event in summary["events"]
+        ))
+
     def test_write_markdown_report_mentions_no_shadow_logs(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "report.md"
@@ -92,7 +150,16 @@ class SelectorShadowAnalyzerTests(unittest.TestCase):
 
             text = out.read_text(encoding="utf-8")
 
-        self.assertIn("selector_shadow 로그가 있는 파일이 없습니다", text)
+        self.assertIn("selector_shadow 로그가 있는 파일이 없습니다.", text)
+
+    def test_write_markdown_report_permission_failure_is_nonfatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "report.md"
+
+            with patch("pathlib.Path.write_text", side_effect=PermissionError("blocked")):
+                result = write_markdown_report([], out)
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
