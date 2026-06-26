@@ -6,8 +6,12 @@ import json
 import sys
 from pathlib import Path
 
+from core.puzzle.candidates import CandidateProvider
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
+from core.puzzle.evidence import EvidenceJudges
 from core.puzzle.frame_source import ImageSequenceFrameSource, JsonlReplayFrameSource, VideoFrameSource
+from core.puzzle.identity import IdentityTracker
+from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision
 from core.puzzle.recorder import SessionRecorder
 from core.puzzle.report import ReportBuilder
 from core.puzzle.session import SessionManager
@@ -87,6 +91,9 @@ def run_headless_replay(
     )
     trace = TraceLogger(session)
     recorder = SessionRecorder(session, trace_logger=trace)
+    candidate_provider = CandidateProvider(_empty_replay_rows, source="replay")
+    evidence_judges = EvidenceJudges()
+    identity_tracker = IdentityTracker()
     processed = 0
 
     trace.write_event(
@@ -105,6 +112,13 @@ def run_headless_replay(
             if processed >= max_frames:
                 break
             recorder.write(packet, overlay_frame=packet.source_frame)
+            candidates = candidate_provider.detect(packet)
+            evidence = evidence_judges.score(candidates, packet)
+            decision = identity_tracker.update(
+                frame_index=packet.frame_index,
+                candidates=candidates,
+                evidence=evidence,
+            )
             trace.write_event(
                 "FRAME_REPLAYED",
                 packet.frame_index,
@@ -112,6 +126,28 @@ def run_headless_replay(
                     "timestamp_ms": packet.timestamp_ms,
                     "source_kind": packet.source_kind,
                 },
+            )
+            trace.write_event(
+                "CANDIDATES",
+                packet.frame_index,
+                {
+                    "count": len(candidates),
+                    "candidates": [_candidate_to_payload(candidate) for candidate in candidates],
+                    "debug": candidate_provider.last_debug,
+                },
+            )
+            trace.write_event(
+                "EVIDENCE",
+                packet.frame_index,
+                {
+                    "count": len(evidence),
+                    "evidence": [_evidence_to_payload(item) for item in evidence.values()],
+                },
+            )
+            trace.write_event(
+                "IDENTITY_STATE",
+                packet.frame_index,
+                _identity_to_payload(decision),
             )
             processed += 1
     finally:
@@ -131,6 +167,48 @@ def _open_replay_source(replay_path: Path, session):
 
 def _run_replay_from_ui(path: str, _kind: str) -> Path:
     return run_headless_replay(path)
+
+
+def _empty_replay_rows(_packet: FramePacket) -> list[object]:
+    return []
+
+
+def _candidate_to_payload(candidate: Candidate) -> dict[str, object]:
+    return {
+        "candidate_id": candidate.candidate_id,
+        "frame_index": candidate.frame_index,
+        "bbox": list(candidate.bbox),
+        "center": list(candidate.center),
+        "score": candidate.score,
+        "source": candidate.source,
+        "class_name": candidate.class_name,
+    }
+
+
+def _evidence_to_payload(evidence: CandidateEvidence) -> dict[str, object]:
+    return {
+        "candidate_id": evidence.candidate_id,
+        "bg_score": evidence.bg_score,
+        "motion_divergence": evidence.motion_divergence,
+        "rigid_violation": evidence.rigid_violation,
+        "phase_similarity": evidence.phase_similarity,
+        "texture_bg_score": evidence.texture_bg_score,
+        "color_residual": evidence.color_residual,
+        "merge_likelihood": evidence.merge_likelihood,
+        "notes": list(evidence.notes),
+    }
+
+
+def _identity_to_payload(decision: IdentityDecision) -> dict[str, object]:
+    return {
+        "state": decision.state,
+        "point": list(decision.point) if decision.point is not None else None,
+        "candidate_id": decision.candidate_id,
+        "confidence": decision.confidence,
+        "reason": decision.reason,
+        "hold_frames": decision.hold_frames,
+        "debug": decision.debug,
+    }
 
 
 def _source_kind_for(replay_path: Path) -> str:
