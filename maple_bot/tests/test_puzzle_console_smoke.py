@@ -250,3 +250,49 @@ def test_puzzle_console_shows_fixed_roi_values(monkeypatch):
     assert window.board_roi_label.objectName() == "puzzleBoardRoiLabel"
     assert "0.440,0.217,0.116,0.095" in window.detect_roi_label.text()
     assert "0.286,0.183,0.428,0.575" in window.board_roi_label.text()
+
+
+def test_puzzle_console_applies_trace_events_to_analysis_metrics(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    window.apply_trace_event(
+        {
+            "type": "SESSION_START",
+            "session_id": "20260626_213000_001",
+            "frame_index": None,
+            "payload": {},
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "CANDIDATES",
+            "session_id": "20260626_213000_001",
+            "frame_index": 7,
+            "payload": {"count": 12},
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "IDENTITY_STATE",
+            "session_id": "20260626_213000_001",
+            "frame_index": 7,
+            "payload": {
+                "state": "IDENTITY_HOLD",
+                "confidence": 0.251,
+                "hold_frames": 3,
+                "reason": "hold_ambiguous_candidate",
+            },
+        }
+    )
+
+    assert window.session_label.text() == "session: 20260626_213000_001"
+    assert window.state_label.text() == "IDENTITY_HOLD"
+    assert window.metric_labels["후보"].text() == "12"
+    assert window.metric_labels["상태"].text() == "IDENTITY_HOLD"
+    assert window.metric_labels["confidence"].text() == "0.25"
+    assert window.metric_labels["hold"].text() == "3"
+    assert window.metric_labels["reason"].text() == "hold_ambiguous_candidate"
+    assert window.timeline_status.text() == "frame 7"

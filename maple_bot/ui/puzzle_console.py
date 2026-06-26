@@ -224,6 +224,41 @@ class PuzzleConsoleWindow(QMainWindow):
             if key in self.metric_labels:
                 self.metric_labels[key].setText(state)
 
+    def apply_trace_event(self, event: dict[str, object]) -> None:
+        event_type = str(event.get("type") or "")
+        frame_index = event.get("frame_index")
+        session_id = event.get("session_id")
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+
+        if isinstance(session_id, str) and session_id:
+            self.set_session_id(session_id)
+        if isinstance(frame_index, int):
+            self.timeline_status.setText(f"frame {frame_index}")
+
+        if event_type == "CANDIDATES":
+            self._set_metric("후보", str(_candidate_count(payload)))
+            return
+
+        if event_type == "IDENTITY_STATE":
+            state = str(payload.get("state") or "")
+            if state:
+                self.set_identity_state(state)
+            confidence = payload.get("confidence")
+            if isinstance(confidence, (int, float)):
+                self._set_metric("confidence", f"{float(confidence):.2f}")
+            hold_frames = payload.get("hold_frames")
+            if isinstance(hold_frames, int):
+                self._set_metric("hold", str(hold_frames))
+            reason = str(payload.get("reason") or "-")
+            self._set_metric("reason", reason)
+
+    def _set_metric(self, name: str, value: str) -> None:
+        label = self.metric_labels.get(name)
+        if label is not None:
+            label.setText(value)
+
     def append_log(self, message: str) -> None:
         self.event_log.append(f"[ui] {message}")
 
@@ -280,3 +315,13 @@ def _command_button(text: str, object_name: str, *, primary: bool = False) -> QP
         button.setObjectName(object_name)
         button.setStyleSheet("font-weight: 700;")
     return button
+
+
+def _candidate_count(payload: dict[object, object]) -> int:
+    count = payload.get("count")
+    if isinstance(count, int):
+        return count
+    candidates = payload.get("candidates")
+    if isinstance(candidates, list):
+        return len(candidates)
+    return 0
