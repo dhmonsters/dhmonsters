@@ -16,6 +16,7 @@ from core.puzzle.frame_source import (
     VideoFrameSource,
 )
 from core.puzzle.identity import IdentityTracker
+from core.puzzle.live_recording import LiveRecordingRuntime
 from core.puzzle.notify import PuzzleNotifier
 from core.puzzle.report import ReportBuilder
 from core.puzzle.detection import DetectionEvent, DetectionGate
@@ -48,6 +49,7 @@ __all__ = [
     "IdentityDecision",
     "IdentityTracker",
     "JsonlReplayFrameSource",
+    "LiveRecordingRuntime",
     "PuzzleSession",
     "PuzzleNotifier",
     "ReportBuilder",

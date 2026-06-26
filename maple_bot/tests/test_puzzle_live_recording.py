@@ -1,0 +1,108 @@
+# 투명도형 퍼즐 라이브 화면 녹화 리허설 runtime을 검증한다.
+
+import json
+
+import numpy as np
+
+from core.puzzle.live_recording import LiveRecordingRuntime
+
+
+def _frames(count: int):
+    values = [30 + index for index in range(count)]
+
+    def grab():
+        if not values:
+            return np.full((6, 8, 3), 99, dtype=np.uint8)
+        return np.full((6, 8, 3), values.pop(0), dtype=np.uint8)
+
+    return grab
+
+
+def _failing_frames():
+    calls = {"count": 0}
+
+    def grab():
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return np.full((6, 8, 3), 40, dtype=np.uint8)
+        raise RuntimeError("screen grab failed")
+
+    return grab
+
+
+def _events(trace_path):
+    return [
+        json.loads(line)
+        for line in trace_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def test_live_recording_runtime_writes_lossless_session_outputs(tmp_path):
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(3),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+    )
+
+    report_path = runtime.run_until_stopped(max_frames=3)
+
+    session_dir = report_path.parent
+    assert report_path.exists()
+    assert (session_dir / "raw_cctv.mkv").stat().st_size > 0
+    assert (session_dir / "board_crop.mkv").stat().st_size > 0
+    assert (session_dir / "overlay.mkv").stat().st_size > 0
+    events = _events(session_dir / "trace.jsonl")
+    assert [event["type"] for event in events].count("FRAME_RECORDED") == 3
+    assert events[-1]["type"] == "SESSION_END"
+    assert runtime.session is not None
+    assert runtime.report_path == report_path
+
+
+def test_live_recording_solver_stop_keeps_recording_until_f3(tmp_path):
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(2),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+    )
+
+    session = runtime.start()
+    assert runtime.stop_solver(reason="manual_f2") is True
+    assert runtime.is_recording is True
+    assert runtime.pump_once() is True
+    assert runtime.stop_recording(reason="manual_f3") is True
+    report_path = runtime.finish(reason="manual_f3")
+
+    events = _events(session.trace_path)
+    event_types = [event["type"] for event in events]
+    assert event_types.count("FRAME_RECORDED") == 2
+    assert "SOLVER_STOPPED" in event_types
+    assert "RECORDING_STOPPED" in event_types
+    assert report_path.exists()
+
+
+def test_live_recording_failure_closes_recording_and_writes_report(tmp_path):
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_failing_frames(),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+    )
+
+    try:
+        runtime.run_until_stopped(max_frames=2)
+    except RuntimeError as exc:
+        assert str(exc) == "screen grab failed"
+    else:
+        raise AssertionError("expected screen grab failure")
+
+    assert runtime.is_recording is False
+    assert runtime.report_path is not None
+    assert runtime.report_path.exists()
+    events = _events(runtime.session.trace_path)
+    event_types = [event["type"] for event in events]
+    assert "LIVE_RECORDING_FAILED" in event_types
+    assert "RECORDING_STOPPED" in event_types
+    assert events[-1]["type"] == "SESSION_END"

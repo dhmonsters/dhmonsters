@@ -1,0 +1,13 @@
+# Task 32 체크리스트
+- [x] 라이브 녹화 runtime 실패 테스트 추가.
+- [x] UI 화면 감시 실패 테스트 추가.
+- [x] CLI live-record 실패 테스트 추가.
+- [x] 실패 테스트 확인.
+- [x] LiveRecordingRuntime 구현.
+- [x] UI 화면 감시 시작 연결.
+- [x] CLI live-record 연결.
+- [x] 신규 테스트 통과 확인.
+- [x] 실제 제한 프레임 라이브 녹화 dry-run 시도 및 Codex 화면 캡처 제한 기록.
+- [x] 전체 puzzle 테스트 통과 확인.
+- [x] 문법 검사와 공백 검사 통과 확인.
+- [x] 커밋.

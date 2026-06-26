@@ -260,6 +260,27 @@ def test_puzzle_console_f3_calls_recording_stop_handler(monkeypatch):
     assert calls == ["stop"]
 
 
+def test_puzzle_console_start_watch_button_calls_live_recording_handler(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    calls = []
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+
+    def start_watch():
+        calls.append("start")
+        return session_dir
+
+    window = module.PuzzleConsoleWindow(watch_start_handler=start_watch)
+
+    window.start_watch_button.clicked.emit()
+
+    assert calls == ["start"]
+    assert window.state_label.text() == "RECORDING"
+    assert window.last_session_dir == session_dir
+    assert "recording start" in window.event_log.toPlainText()
+
+
 def test_puzzle_entrypoint_builds_parser_and_window(monkeypatch):
     _install_fake_qt(monkeypatch)
     puzzle = importlib.import_module("puzzle")
@@ -270,6 +291,31 @@ def test_puzzle_entrypoint_builds_parser_and_window(monkeypatch):
 
     assert args.headless is False
     assert window.objectName() == "puzzleConsoleWindow"
+
+
+def test_puzzle_live_record_command_invokes_runtime(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    puzzle = importlib.import_module("puzzle")
+    calls = []
+
+    def fake_run_live_recording(*, output_root=None, max_frames=None):
+        calls.append((output_root, max_frames))
+        report_path = tmp_path / "report.md"
+        report_path.write_text("# report\n", encoding="utf-8")
+        return report_path
+
+    monkeypatch.setattr(puzzle, "run_live_recording", fake_run_live_recording)
+
+    code = puzzle.run_gui([
+        "--live-record",
+        "--output-root",
+        str(tmp_path),
+        "--live-max-frames",
+        "2",
+    ])
+
+    assert code == 0
+    assert calls == [(str(tmp_path), 2)]
 
 
 def test_puzzle_console_connects_image_sequence_button_to_replay_runner(monkeypatch):

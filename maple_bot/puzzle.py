@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 
 from core.puzzle.candidates import CandidateProvider
@@ -11,6 +12,7 @@ from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
 from core.puzzle.evidence import EvidenceJudges
 from core.puzzle.frame_source import ImageSequenceFrameSource, JsonlReplayFrameSource, VideoFrameSource
 from core.puzzle.identity import IdentityTracker
+from core.puzzle.live_recording import LiveRecordingRuntime
 from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision
 from core.puzzle.recorder import SessionRecorder
 from core.puzzle.recording_controller import RecordingController
@@ -30,6 +32,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transparent-test", action="store_true", help="기본 투명도형 테스트 replay를 실행한다")
     parser.add_argument("--output-root", default="", help="headless replay 산출물 루트")
     parser.add_argument("--max-frames", type=int, default=5, help="replay에서 처리할 최대 frame 수")
+    parser.add_argument("--live-record", action="store_true", help="GUI 없이 현재 화면 녹화를 시작한다")
+    parser.add_argument("--live-max-frames", type=int, default=0, help="live-record 검증용 최대 frame 수. 0은 수동 종료")
     return parser
 
 
@@ -37,10 +41,32 @@ def create_window(args: argparse.Namespace | None = None):
     from ui.puzzle_console import PuzzleConsoleWindow
 
     default_test_path = default_transparent_test_replay_path()
+    live_runtime = LiveRecordingRuntime(output_root=(args.output_root or None) if args is not None else None)
+    live_thread: dict[str, threading.Thread | None] = {"thread": None}
+
+    def start_live_recording() -> Path | None:
+        thread = live_thread["thread"]
+        if thread is not None and thread.is_alive():
+            return live_runtime.session.output_dir if live_runtime.session is not None else None
+        session = live_runtime.start()
+
+        def worker() -> None:
+            try:
+                live_runtime.run_until_stopped()
+            except Exception:
+                pass
+
+        live_thread["thread"] = threading.Thread(target=worker, daemon=True, name="PuzzleLiveRecorder")
+        live_thread["thread"].start()
+        return session.output_dir
+
     window = PuzzleConsoleWindow(
         replay_runner=_run_replay_from_ui,
+        watch_start_handler=start_live_recording,
+        recording_stop_handler=lambda: live_runtime.stop_recording(reason="manual_f3"),
         default_test_path=default_test_path if default_test_path.exists() else None,
     )
+    _attach_puzzle_hotkeys(window)
     if args is not None and getattr(args, "replay", ""):
         window.append_log(f"replay input: {args.replay}")
     return window
@@ -49,6 +75,14 @@ def create_window(args: argparse.Namespace | None = None):
 def run_gui(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    if args.live_record:
+        report_path = run_live_recording(
+            output_root=args.output_root or None,
+            max_frames=args.live_max_frames or None,
+        )
+        print(report_path)
+        return 0
+
     if args.transparent_test:
         replay_path = Path(args.replay) if args.replay else default_transparent_test_replay_path()
         if not replay_path.exists():
@@ -179,6 +213,36 @@ def run_headless_replay(
 
     trace.write_event("SESSION_END", None, {"frames": processed})
     return ReportBuilder().build(session, session.trace_path)
+
+
+def run_live_recording(
+    *,
+    output_root: str | Path | None = None,
+    max_frames: int | None = None,
+) -> Path:
+    runtime = LiveRecordingRuntime(output_root=output_root)
+    try:
+        return runtime.run_until_stopped(max_frames=max_frames)
+    except KeyboardInterrupt:
+        runtime.stop_recording(reason="keyboard_interrupt")
+        return runtime.finish(reason="keyboard_interrupt")
+
+
+def _attach_puzzle_hotkeys(window: object) -> None:
+    try:
+        from core.hotkey_manager import HotkeyManager
+    except Exception as exc:
+        if hasattr(window, "append_log"):
+            window.append_log(f"global F3 hotkey unavailable: {exc}")
+        return
+
+    try:
+        manager = HotkeyManager(window)
+        manager.register("puzzle_stop_recording", "f3", window.stop_recording_input)
+        setattr(window, "_puzzle_hotkey_manager", manager)
+    except Exception as exc:
+        if hasattr(window, "append_log"):
+            window.append_log(f"global F3 hotkey unavailable: {exc}")
 
 
 def _open_replay_source(replay_path: Path, session):
