@@ -41,6 +41,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._path_picker = path_picker or self._pick_path
         self.trace_timeline: list[str] = []
         self.current_frame_sources: dict[int, str] = {}
+        self.current_frame_candidates: dict[int, list[dict[object, object]]] = {}
         self.current_cctv_source_path: str | None = None
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
@@ -153,9 +154,13 @@ class PuzzleConsoleWindow(QMainWindow):
         self.cctv_status_label = QLabel("입력 대기")
         self.cctv_status_label.setObjectName("puzzleCctvStatus")
         self.cctv_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cctv_candidate_summary_label = QLabel("candidates 0")
+        self.cctv_candidate_summary_label.setObjectName("puzzleCctvCandidateSummary")
+        self.cctv_candidate_summary_label.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(self.cctv_frame_label, 1)
         layout.addWidget(self.cctv_status_label, 0)
+        layout.addWidget(self.cctv_candidate_summary_label, 0)
         return frame
 
     def _build_analysis_panel(self) -> QFrame:
@@ -259,6 +264,7 @@ class PuzzleConsoleWindow(QMainWindow):
 
         if event_type == "CANDIDATES":
             self._set_metric("후보", str(_candidate_count(payload)))
+            self._apply_candidates(frame_index, payload)
             return
 
         if event_type == "EVIDENCE":
@@ -332,6 +338,13 @@ class PuzzleConsoleWindow(QMainWindow):
         self.cctv_frame_label.setPixmap(pixmap)
         self.cctv_frame_label.setText(path.name)
 
+    def _apply_candidates(self, frame_index: object, payload: dict[object, object]) -> None:
+        if not isinstance(frame_index, int):
+            return
+        candidates = _candidate_list(payload)
+        self.current_frame_candidates[frame_index] = candidates
+        self.cctv_candidate_summary_label.setText(_candidate_summary(frame_index, payload))
+
     def _set_metric(self, name: str, value: str) -> None:
         label = self.metric_labels.get(name)
         if label is not None:
@@ -404,6 +417,34 @@ def _candidate_count(payload: dict[object, object]) -> int:
     if isinstance(candidates, list):
         return len(candidates)
     return 0
+
+
+def _candidate_list(payload: dict[object, object]) -> list[dict[object, object]]:
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        return []
+    return [item for item in candidates if isinstance(item, dict)]
+
+
+def _candidate_summary(frame_index: int, payload: dict[object, object]) -> str:
+    count = _candidate_count(payload)
+    candidates = _candidate_list(payload)
+    if not candidates:
+        return f"frame {frame_index} candidates {count}"
+    bbox = candidates[0].get("bbox")
+    if not isinstance(bbox, list):
+        return f"frame {frame_index} candidates {count}"
+    return f"frame {frame_index} candidates {count} | bbox {_compact_bbox(bbox)}"
+
+
+def _compact_bbox(bbox: list[object]) -> str:
+    values: list[str] = []
+    for value in bbox[:4]:
+        if isinstance(value, (int, float)):
+            values.append(str(int(round(float(value)))))
+        else:
+            values.append(str(value))
+    return ",".join(values)
 
 
 def _evidence_count(payload: dict[object, object]) -> int:

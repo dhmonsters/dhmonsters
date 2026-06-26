@@ -464,3 +464,48 @@ def test_puzzle_console_loads_existing_frame_preview(monkeypatch, tmp_path):
 
     assert window.current_cctv_source_path == str(frame_path)
     assert window.cctv_frame_label.pixmap().path == str(frame_path)
+
+
+def test_puzzle_console_exposes_cctv_candidate_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.cctv_candidate_summary_label.objectName() == "puzzleCctvCandidateSummary"
+
+
+def test_puzzle_console_applies_candidates_to_cctv_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    window.apply_trace_event(
+        {
+            "type": "CANDIDATES",
+            "session_id": "20260626_221000_001",
+            "frame_index": 12,
+            "payload": {
+                "count": 2,
+                "candidates": [
+                    {
+                        "candidate_id": "c12_a",
+                        "bbox": [10.0, 20.0, 30.0, 40.0],
+                        "center": [25.0, 40.0],
+                    },
+                    {
+                        "candidate_id": "c12_b",
+                        "bbox": [50.0, 60.0, 20.0, 20.0],
+                        "center": [60.0, 70.0],
+                    },
+                ],
+            },
+        }
+    )
+
+    assert len(window.current_frame_candidates[12]) == 2
+    assert window.current_frame_candidates[12][0]["candidate_id"] == "c12_a"
+    assert "frame 12" in window.cctv_candidate_summary_label.text()
+    assert "candidates 2" in window.cctv_candidate_summary_label.text()
+    assert "bbox 10,20,30,40" in window.cctv_candidate_summary_label.text()
