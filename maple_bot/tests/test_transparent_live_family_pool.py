@@ -151,6 +151,50 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
         self.assertIn(merge_family, decision.points)
         self.assertEqual(decision.points[merge_family], decision.points[split_family])
 
+    def test_state_coast_family_predicts_through_wrong_merge_center(self):
+        pool = TransparentLiveFamilyPool(window=5, min_frames=3)
+        gray = np.zeros((80, 140), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(1, candidates=[(10.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        pool.update(2, candidates=[(20.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        decision = pool.update(
+            3,
+            candidates=[(70.0, 0.0, 0.95, 120.0, 40.0)],
+            gray_frame=gray,
+        )
+
+        self.assertEqual(
+            decision.points["balanced_viterbi_center_mild_state_coast"],
+            (30.0, 0.0),
+        )
+        self.assertEqual(
+            decision.points["balanced_viterbi_center_mild_offset_coast"],
+            (30.0, 0.0),
+        )
+
+    def test_state_coast_family_keeps_normal_current_detection(self):
+        pool = TransparentLiveFamilyPool(window=5, min_frames=3)
+        gray = np.zeros((80, 140), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(1, candidates=[(10.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        pool.update(2, candidates=[(20.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        decision = pool.update(
+            3,
+            candidates=[(30.0, 0.0, 0.95, 20.0, 20.0)],
+            gray_frame=gray,
+        )
+
+        self.assertEqual(
+            decision.points["balanced_viterbi_center_mild_state_coast"],
+            (30.0, 0.0),
+        )
+        self.assertEqual(
+            decision.points["balanced_viterbi_center_mild_offset_coast"],
+            (30.0, 0.0),
+        )
+
     def test_reset_clears_history(self):
         pool = TransparentLiveFamilyPool(window=3, min_frames=2)
         gray = np.zeros((20, 20), dtype=np.float32)

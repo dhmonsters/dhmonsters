@@ -122,12 +122,34 @@ class TransparentLiveFamilyPool:
             path = self._viterbi_path(usable_frames, config)
             if path:
                 points[config.name] = path[-1]
+                points.update(self._coast_variants(config.name, usable_frames, path))
         mht_path = self._hidden_mht_path(usable_frames)
         latest_frame = usable_frames[-1]
         if latest_frame in mht_path:
             point = mht_path[latest_frame]
             points[self._mht_family_name] = point
             points["merge_context_center_mild_state_mild"] = point
+            ordered_mht = [
+                mht_path[frame]
+                for frame in usable_frames
+                if frame in mht_path
+            ]
+            ordered_frames = [
+                frame
+                for frame in usable_frames
+                if frame in mht_path
+            ]
+            if len(ordered_mht) >= 3:
+                points.update(self._coast_variants(
+                    self._mht_family_name,
+                    ordered_frames,
+                    ordered_mht,
+                ))
+                points.update(self._coast_variants(
+                    "merge_context_center_mild_state_mild",
+                    ordered_frames,
+                    ordered_mht,
+                ))
         return LiveFamilyDecision(points, {
             "frames": len(usable_frames),
             "ready": bool(points),
@@ -234,6 +256,152 @@ class TransparentLiveFamilyPool:
                 bg_center=(float(cx), float(cy)) if merge_like else None,
             ))
         return out
+
+    def _coast_variants(
+        self,
+        family_name: str,
+        frames: Sequence[int],
+        path: Sequence[Point],
+    ) -> dict[str, Point]:
+        if len(frames) < 3 or len(path) < 3:
+            return {}
+        latest_frame = int(frames[-1])
+        latest_point = path[-1]
+        state_point = latest_point
+        if self._is_state_suspect(frames, path):
+            state_point = self._coast_prediction(frames, path)
+        offset_point = self._clamp_to_nearest_candidate_box(
+            latest_frame,
+            state_point,
+            max_dist=105.0,
+        )
+        state_name, offset_name = self._coast_family_names(family_name)
+        return {
+            state_name: (float(state_point[0]), float(state_point[1])),
+            offset_name: (float(offset_point[0]), float(offset_point[1])),
+        }
+
+    @staticmethod
+    def _coast_family_names(family_name: str) -> tuple[str, str]:
+        base = str(family_name)
+        for suffix in ("_state_mild", "_state_medium", "_state_aggressive"):
+            if base.endswith(suffix):
+                base = base[: -len(suffix)]
+                break
+        return (f"{base}_state_coast", f"{base}_offset_coast")
+
+    def _is_state_suspect(
+        self,
+        frames: Sequence[int],
+        path: Sequence[Point],
+    ) -> bool:
+        latest_frame = int(frames[-1])
+        latest_point = path[-1]
+        selected = self._nearest_candidate(latest_frame, latest_point, max_dist=120.0)
+        if selected is not None and self._is_merge_like_candidate(latest_frame, selected):
+            return True
+        if len(path) < 3:
+            return False
+
+        a_frame, b_frame, c_frame = int(frames[-3]), int(frames[-2]), int(frames[-1])
+        a_point, b_point, c_point = path[-3], path[-2], path[-1]
+        dt_ab = max(1.0, float(b_frame - a_frame))
+        vx = (float(b_point[0]) - float(a_point[0])) / dt_ab
+        vy = (float(b_point[1]) - float(a_point[1])) / dt_ab
+        dt_bc = max(1.0, float(c_frame - b_frame))
+        pred = (
+            float(b_point[0]) + vx * dt_bc,
+            float(b_point[1]) + vy * dt_bc,
+        )
+        return math.hypot(float(c_point[0]) - pred[0], float(c_point[1]) - pred[1]) > 36.0
+
+    def _coast_prediction(
+        self,
+        frames: Sequence[int],
+        path: Sequence[Point],
+    ) -> Point:
+        stable = []
+        for frame, point in zip(frames[:-1], path[:-1]):
+            selected = self._nearest_candidate(int(frame), point, max_dist=120.0)
+            if selected is not None and self._is_merge_like_candidate(int(frame), selected):
+                continue
+            stable.append((int(frame), point))
+        if len(stable) < 2:
+            return (float(path[-1][0]), float(path[-1][1]))
+
+        a_frame, a_point = stable[-2]
+        b_frame, b_point = stable[-1]
+        latest_frame = int(frames[-1])
+        dt = max(1.0, float(b_frame - a_frame))
+        vx = (float(b_point[0]) - float(a_point[0])) / dt
+        vy = (float(b_point[1]) - float(a_point[1])) / dt
+        ahead = max(1.0, float(latest_frame - b_frame))
+        return (
+            float(b_point[0]) + vx * ahead,
+            float(b_point[1]) + vy * ahead,
+        )
+
+    def _is_merge_like_candidate(self, frame: int, candidate: Candidate) -> bool:
+        candidates = self._candidate_sets.get(int(frame), [])
+        if not candidates:
+            return False
+        sizes = [max(float(item[3]), float(item[4])) for item in candidates]
+        areas = [float(item[3]) * float(item[4]) for item in candidates]
+        size = max(float(candidate[3]), float(candidate[4]))
+        area = float(candidate[3]) * float(candidate[4])
+        median_size = float(np.median(sizes)) if sizes else 0.0
+        median_area = float(np.median(areas)) if areas else 0.0
+        return (
+            size >= self.merge_min_size
+            or (
+                median_size > 0.0
+                and size >= median_size * self.merge_size_ratio
+            )
+            or (
+                median_area > 0.0
+                and area >= median_area * 1.18
+            )
+        )
+
+    def _clamp_to_nearest_candidate_box(
+        self,
+        frame: int,
+        point: Point,
+        *,
+        max_dist: float,
+    ) -> Point:
+        candidate = self._nearest_candidate(frame, point, max_dist=max_dist)
+        if candidate is None:
+            return (float(point[0]), float(point[1]))
+        cx, cy, _score, width, height = candidate
+        half_w = float(width) / 2.0
+        half_h = float(height) / 2.0
+        return (
+            min(max(float(point[0]), float(cx) - half_w), float(cx) + half_w),
+            min(max(float(point[1]), float(cy) - half_h), float(cy) + half_h),
+        )
+
+    def _nearest_candidate(
+        self,
+        frame: int,
+        point: Point,
+        *,
+        max_dist: float,
+    ) -> Candidate | None:
+        candidates = self._candidate_sets.get(int(frame), [])
+        if not candidates:
+            return None
+        best = min(
+            candidates,
+            key=lambda candidate: math.hypot(
+                float(candidate[0]) - float(point[0]),
+                float(candidate[1]) - float(point[1]),
+            ),
+        )
+        dist = math.hypot(float(best[0]) - float(point[0]), float(best[1]) - float(point[1]))
+        if dist > float(max_dist):
+            return None
+        return best
 
     def _nodes_for_frame(
         self,
