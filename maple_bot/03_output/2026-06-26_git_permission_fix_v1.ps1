@@ -34,13 +34,30 @@ function Remove-DenyRulesOnPath {
     }
 }
 
+function Repair-GitAclTree {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $denySids = @(
+        "*S-1-5-21-978354614-1266499431-1830078014-2620688460",
+        "*S-1-5-21-3634278631-776383150-2551165408-3594734579"
+    )
+    icacls $Path /remove:d $denySids /T /C | Out-Host
+    icacls $Path /grant:r "DESKTOP-9MNMSJL\CodexSandboxUsers:(OI)(CI)(M)" "DESKTOP-9MNMSJL\PC:(OI)(CI)(F)" /T /C | Out-Host
+}
+
 function Copy-FileIfMissing {
     param(
         [Parameter(Mandatory=$true)][string]$Source,
         [Parameter(Mandatory=$true)][string]$Destination
     )
 
-    if ((Test-Path -LiteralPath $Source -PathType Leaf) -and -not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+    if (Test-Path -LiteralPath $Source -PathType Leaf) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
         Copy-Item -LiteralPath $Source -Destination $Destination -Force
     }
@@ -53,6 +70,7 @@ function Convert-ResidualGitDirectoryToLinkedGitDir {
     )
 
     Remove-DenyRulesOnPath -Path $GitPath
+    Repair-GitAclTree -Path $GitPath
     attrib -H $GitPath 2>$null
     New-Item -ItemType Directory -Force -Path $GitPath | Out-Null
 
@@ -187,6 +205,12 @@ foreach ($item in $items) {
 }
 
 icacls $metadataPath /grant:r "DESKTOP-9MNMSJL\CodexSandboxUsers:(OI)(CI)(M)" "DESKTOP-9MNMSJL\PC:(OI)(CI)(F)" /T /C | Out-Host
+if (Test-Path -LiteralPath $gitPath -PathType Container) {
+    Repair-GitAclTree -Path $gitPath
+    Copy-FileIfMissing -Source (Join-Path $metadataPath "HEAD") -Destination (Join-Path $gitPath "HEAD")
+    Copy-FileIfMissing -Source (Join-Path $metadataPath "index") -Destination (Join-Path $gitPath "index")
+    Set-Content -LiteralPath (Join-Path $gitPath "commondir") -Value (($metadataPath -replace "\\", "/") + "`n") -Encoding ASCII
+}
 
 $excludePath = Join-Path $metadataPath "info\exclude"
 $excludeText = if (Test-Path -LiteralPath $excludePath) { Get-Content -LiteralPath $excludePath -Raw } else { "" }
