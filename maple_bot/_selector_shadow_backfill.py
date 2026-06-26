@@ -51,8 +51,15 @@ def _normalize_candidates(candidates: object) -> list[Candidate]:
     return out
 
 
-def _load_jsonl(path: str | Path) -> list[dict]:
+def _limit_candidates(candidates: Sequence[Candidate], limit: int | None) -> list[Candidate]:
+    if limit is None or int(limit) <= 0:
+        return list(candidates)
+    return sorted(candidates, key=lambda candidate: candidate[2], reverse=True)[: int(limit)]
+
+
+def _load_jsonl(path: str | Path, *, limit: int | None = None) -> list[dict]:
     rows = []
+    max_rows = None if limit is None or int(limit) <= 0 else int(limit)
     with Path(path).open("r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -64,6 +71,8 @@ def _load_jsonl(path: str | Path) -> list[dict]:
                 continue
             if isinstance(item, dict):
                 rows.append(item)
+                if max_rows is not None and len(rows) >= max_rows:
+                    break
     return rows
 
 
@@ -82,7 +91,9 @@ def backfill_selector_shadow_rows(
     window: int = 24,
     min_frames: int = 8,
     shadow_min_frames: int | None = None,
+    emit_every: int = 1,
     max_candidates: int = 8,
+    live_max_candidates: int | None = None,
     include_local_box: bool = True,
 ) -> list[dict]:
     runtime = runtime or TransparentFamilySelectorRuntime()
@@ -93,7 +104,7 @@ def backfill_selector_shadow_rows(
         clip_id=clip_id,
         window=window,
         min_frames=shadow_frames,
-        emit_every=1,
+        emit_every=emit_every,
         max_candidates=max_candidates,
         include_local_box=include_local_box,
     )
@@ -105,7 +116,7 @@ def backfill_selector_shadow_rows(
         frame = int(row.get("i", index) or index)
         candidates = _normalize_candidates(row.get("cands", []))
         track = _point(row.get("track"))
-        live_candidates = candidates
+        live_candidates = _limit_candidates(candidates, live_max_candidates)
         white_anchor = None
         if not seeded and track is not None:
             white_anchor = track
@@ -143,9 +154,11 @@ def backfill_selector_shadow_rows(
 def write_backfilled_jsonl(
     in_path: str | Path,
     out_path: str | Path,
+    *,
+    limit: int | None = None,
     **kwargs,
 ) -> Path | None:
-    rows = _load_jsonl(in_path)
+    rows = _load_jsonl(in_path, limit=limit)
     backfilled = backfill_selector_shadow_rows(
         rows,
         clip_id=Path(in_path).stem,
@@ -168,7 +181,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--window", type=int, default=24)
     parser.add_argument("--min-frames", type=int, default=8)
     parser.add_argument("--shadow-min-frames", type=int, default=0)
+    parser.add_argument("--emit-every", type=int, default=1)
+    parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--max-candidates", type=int, default=8)
+    parser.add_argument("--live-max-candidates", type=int, default=0)
+    parser.add_argument("--no-local-box", action="store_true")
     args = parser.parse_args(argv)
 
     source = Path(args.input)
@@ -176,10 +193,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     result = write_backfilled_jsonl(
         source,
         out_path,
+        limit=args.limit or None,
         window=args.window,
         min_frames=args.min_frames,
         shadow_min_frames=args.shadow_min_frames or None,
+        emit_every=args.emit_every,
         max_candidates=args.max_candidates,
+        live_max_candidates=args.live_max_candidates or args.max_candidates,
+        include_local_box=not args.no_local_box,
     )
     print(f"selector_shadow_backfill input={source} output={result}")
     return 0
