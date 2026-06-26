@@ -27,7 +27,7 @@ class SessionManager:
         now = self._clock()
         date_key = now.strftime("%Y-%m-%d")
         second_key = now.strftime("%Y%m%d_%H%M%S")
-        session_root = self.output_root / f"{date_key}_투명도형퍼즐_sessions"
+        session_root = self.output_root / f"{date_key}_transparent_puzzle_sessions"
         session_root.mkdir(parents=True, exist_ok=True)
 
         counter = self._counters.get(second_key, 0) + 1

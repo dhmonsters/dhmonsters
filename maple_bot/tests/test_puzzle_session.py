@@ -23,7 +23,7 @@ def test_session_manager_creates_output_paths(tmp_path):
 
     assert session.session_id == "20260626_164501_001"
     assert session.started_at == "2026-06-26T16:45:01"
-    assert session.output_dir == tmp_path / "2026-06-26_투명도형퍼즐_sessions" / session.session_id
+    assert session.output_dir == tmp_path / "2026-06-26_transparent_puzzle_sessions" / session.session_id
     assert session.output_dir.is_dir()
     assert (session.output_dir / "snapshots").is_dir()
     assert session.trace_path == session.output_dir / "trace.jsonl"
@@ -45,3 +45,14 @@ def test_session_manager_increments_ids_within_same_second(tmp_path):
     assert second.session_id == "20260626_164501_002"
     assert first.output_dir != second.output_dir
 
+
+def test_session_manager_uses_ascii_safe_session_root(tmp_path):
+    manager = SessionManager(
+        output_root=tmp_path,
+        clock=lambda: datetime(2026, 6, 26, 16, 45, 1),
+    )
+
+    session = manager.start("image_sequence", _roi("detect"), _roi("board"))
+
+    assert session.output_dir.parent.name == "2026-06-26_transparent_puzzle_sessions"
+    session.output_dir.relative_to(tmp_path)
