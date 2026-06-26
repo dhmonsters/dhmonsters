@@ -42,6 +42,11 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     "point": [1, 2],
                     "rescue_point": [1.0, 2.0],
                     "rescue_allowed": False,
+                    "merge_context": {
+                        "frames": 0,
+                        "max_size": 122.0,
+                        "max_ratio": 1.1,
+                    },
                 },
             },
             {
@@ -51,6 +56,11 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     "point": [4, 5],
                     "rescue_point": [4.0, 5.0],
                     "rescue_allowed": True,
+                    "merge_context": {
+                        "frames": 2,
+                        "max_size": 181.5,
+                        "max_ratio": 1.34,
+                    },
                 },
             },
             {"i": 30},
@@ -65,8 +75,12 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
         self.assertEqual(summary["rescue_allowed_frames"], 1)
         self.assertEqual(summary["first_bg_split_frame"], 20)
         self.assertEqual(summary["first_rescue_allowed_frame"], 20)
+        self.assertEqual(summary["merge_context_frames"], 2)
+        self.assertEqual(summary["merge_context_max_size"], 181.5)
+        self.assertEqual(summary["merge_context_max_ratio"], 1.34)
         self.assertEqual(summary["families"]["bg_split_viterbi_center_mild_state_mild"], 1)
         self.assertEqual(summary["events"][0]["frame"], 20)
+        self.assertEqual(summary["events"][0]["merge_context"]["max_size"], 181.5)
 
     def test_first_rescue_allowed_frame_ignores_blocked_bg_split(self):
         rows = [
@@ -77,6 +91,11 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     "point": [1, 2],
                     "rescue_point": [1.0, 2.0],
                     "rescue_allowed": False,
+                    "merge_context": {
+                        "frames": 0,
+                        "max_size": 128.0,
+                        "max_ratio": 1.099,
+                    },
                 },
             },
             {
@@ -86,6 +105,11 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     "point": [4, 5],
                     "rescue_point": [4.0, 5.0],
                     "rescue_allowed": True,
+                    "merge_context": {
+                        "frames": 1,
+                        "max_size": 180.0,
+                        "max_ratio": 1.31,
+                    },
                 },
             },
         ]
@@ -94,6 +118,37 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
 
         self.assertEqual(summary["first_bg_split_frame"], 10)
         self.assertEqual(summary["first_rescue_allowed_frame"], 20)
+        self.assertEqual(summary["events"][0]["merge_context"]["frames"], 0)
+
+    def test_write_markdown_report_includes_merge_context_columns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "report.md"
+
+            write_markdown_report([
+                {
+                    "name": "clip.jsonl",
+                    "frames": 3,
+                    "shadow_frames": 2,
+                    "bg_split_frames": 1,
+                    "rescue_allowed_frames": 1,
+                    "first_bg_split_frame": 20,
+                    "first_rescue_allowed_frame": 20,
+                    "merge_context_frames": 2,
+                    "merge_context_max_size": 181.5,
+                    "merge_context_max_ratio": 1.34,
+                    "families": {
+                        "bg_split_viterbi_center_mild_state_mild": 1,
+                    },
+                    "events": [],
+                    "elapsed_ms": 12,
+                },
+            ], out)
+
+            text = out.read_text(encoding="utf-8")
+
+        self.assertIn("merge_frames", text)
+        self.assertIn("181.5", text)
+        self.assertIn("1.34", text)
 
     def test_analyze_record_path_fast_limits_files_and_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

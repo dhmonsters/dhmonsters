@@ -43,6 +43,22 @@ def _first_rescue_allowed_frame(events: Sequence[Mapping[str, object]]) -> int |
     return None
 
 
+def _merge_context(value: object) -> dict:
+    if not isinstance(value, Mapping):
+        return {
+            "frames": 0,
+            "latest": False,
+            "max_size": 0.0,
+            "max_ratio": 0.0,
+        }
+    return {
+        "frames": int(value.get("frames", 0) or 0),
+        "latest": bool(value.get("latest", False)),
+        "max_size": float(value.get("max_size", 0.0) or 0.0),
+        "max_ratio": float(value.get("max_ratio", 0.0) or 0.0),
+    }
+
+
 def _jsonl_files(path: str | Path, max_files: int | None = None) -> list[Path]:
     source = Path(path)
     if source.is_file():
@@ -64,6 +80,9 @@ def summarize_backfilled_rows(
     shadow_frames = 0
     bg_split_frames = 0
     rescue_allowed_frames = 0
+    merge_context_frames = 0
+    merge_context_max_size = 0.0
+    merge_context_max_ratio = 0.0
     events = []
 
     for row in rows:
@@ -79,6 +98,10 @@ def summarize_backfilled_rows(
         rescue_point = record.get("rescue_point")
         rescue_allowed = bool(record.get("rescue_allowed", False)) and rescue_point is not None
         bg_split = _is_bg_split(family)
+        merge_context = _merge_context(record.get("merge_context"))
+        merge_context_frames = max(merge_context_frames, int(merge_context.get("frames", 0) or 0))
+        merge_context_max_size = max(merge_context_max_size, float(merge_context.get("max_size", 0.0) or 0.0))
+        merge_context_max_ratio = max(merge_context_max_ratio, float(merge_context.get("max_ratio", 0.0) or 0.0))
         if bg_split:
             bg_split_frames += 1
         if rescue_allowed:
@@ -91,6 +114,7 @@ def summarize_backfilled_rows(
                 "point": record.get("point"),
                 "rescue_point": rescue_point,
                 "rescue_allowed": rescue_allowed,
+                "merge_context": merge_context,
             })
 
     events = events[: max(0, int(max_events))]
@@ -100,6 +124,9 @@ def summarize_backfilled_rows(
         "shadow_frames": shadow_frames,
         "bg_split_frames": bg_split_frames,
         "rescue_allowed_frames": rescue_allowed_frames,
+        "merge_context_frames": int(merge_context_frames),
+        "merge_context_max_size": round(float(merge_context_max_size), 1),
+        "merge_context_max_ratio": round(float(merge_context_max_ratio), 3),
         "first_bg_split_frame": _first_frame(events, kind="bg_split"),
         "first_rescue_allowed_frame": _first_rescue_allowed_frame(events),
         "families": dict(families),
@@ -180,13 +207,14 @@ def write_markdown_report(
         f"- bg_split 프레임: {sum(int(item.get('bg_split_frames', 0) or 0) for item in items)}개",
         f"- rescue_allowed 프레임: {sum(int(item.get('rescue_allowed_frames', 0) or 0) for item in items)}개",
         "",
-        "| 파일 | 프레임 | shadow | bg_split | allowed | first_bg | first_allowed | ms | 주요 family |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| 파일 | 프레임 | shadow | bg_split | allowed | first_bg | first_allowed | merge_frames | merge_max | merge_ratio | ms | 주요 family |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in items:
         lines.append(
             "| {name} | {frames} | {shadow} | {bg_split} | {allowed} | "
-            "{first_bg} | {first_allowed} | {elapsed} | {family} |".format(
+            "{first_bg} | {first_allowed} | {merge_frames} | {merge_max} | {merge_ratio} | "
+            "{elapsed} | {family} |".format(
                 name=item.get("name", ""),
                 frames=item.get("frames", 0),
                 shadow=item.get("shadow_frames", 0),
@@ -194,6 +222,9 @@ def write_markdown_report(
                 allowed=item.get("rescue_allowed_frames", 0),
                 first_bg=item.get("first_bg_split_frame") or "-",
                 first_allowed=item.get("first_rescue_allowed_frame") or "-",
+                merge_frames=item.get("merge_context_frames", 0),
+                merge_max=item.get("merge_context_max_size", 0.0),
+                merge_ratio=item.get("merge_context_max_ratio", 0.0),
                 elapsed=item.get("elapsed_ms", 0),
                 family=_top_family(item),
             )
@@ -207,7 +238,14 @@ def write_markdown_report(
         lines.append("")
         lines.append(f"### {item.get('name', '')}")
         for event in events:
-            lines.append(f"- f{event.get('frame')}: {event.get('family')} rescue={event.get('rescue_allowed')}")
+            merge_context = _merge_context(event.get("merge_context"))
+            lines.append(
+                f"- f{event.get('frame')}: {event.get('family')} "
+                f"rescue={event.get('rescue_allowed')} "
+                f"merge_frames={merge_context.get('frames')} "
+                f"merge_max={merge_context.get('max_size')} "
+                f"merge_ratio={merge_context.get('max_ratio')}"
+            )
 
     try:
         out.write_text("\n".join(lines) + "\n", encoding="utf-8")
