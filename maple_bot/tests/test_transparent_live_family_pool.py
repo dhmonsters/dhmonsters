@@ -100,6 +100,35 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
 
         self.assertEqual(decision.points["balanced_viterbi_center_mild_state_mild"], (24.0, 5.0))
 
+    def test_bg_split_family_keeps_hidden_target_center_through_merge(self):
+        pool = TransparentLiveFamilyPool(window=5, min_frames=2)
+        gray = np.zeros((80, 120), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(
+            1,
+            candidates=[(20.0, 0.0, 0.9, 20.0, 20.0)],
+            gray_frame=gray,
+        )
+        merged = pool.update(
+            2,
+            candidates=[(10.0, 0.0, 0.95, 100.0, 50.0)],
+            gray_frame=gray,
+        )
+        split = pool.update(
+            3,
+            candidates=[
+                (60.0, 0.0, 0.7, 20.0, 20.0),
+                (10.0, 0.0, 0.95, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+
+        family = "bg_split_viterbi_center_mild_state_mild"
+        self.assertIn(family, merged.points)
+        self.assertEqual(merged.points[family], (40.0, 0.0))
+        self.assertEqual(split.points[family], (60.0, 0.0))
+
     def test_reset_clears_history(self):
         pool = TransparentLiveFamilyPool(window=3, min_frames=2)
         gray = np.zeros((20, 20), dtype=np.float32)

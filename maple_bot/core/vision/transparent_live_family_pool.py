@@ -8,6 +8,13 @@ from typing import Mapping, Sequence, Tuple
 
 import numpy as np
 
+from core.vision.transparent_mht_solver import (
+    MhtCandidate,
+    MhtFrame,
+    SolverConfig,
+    solve_mht,
+)
+
 
 Point = Tuple[float, float]
 Candidate = Tuple[float, float, float, float, float]
@@ -42,9 +49,21 @@ class TransparentLiveFamilyPool:
         *,
         window: int = 24,
         min_frames: int = 8,
+        merge_min_size: float = 48.0,
+        merge_size_ratio: float = 1.18,
     ):
         self.window = max(2, int(window))
         self.min_frames = max(2, int(min_frames))
+        self.merge_min_size = float(merge_min_size)
+        self.merge_size_ratio = float(merge_size_ratio)
+        self._mht_family_name = "bg_split_viterbi_center_mild_state_mild"
+        self._mht_config = SolverConfig(
+            keep=64,
+            branch=8,
+            gate=140.0,
+            grid_size=5,
+            shrink=0.76,
+        )
         self._configs = (
             _FamilyConfig(
                 "balanced_viterbi_center_mild_state_mild",
@@ -103,6 +122,10 @@ class TransparentLiveFamilyPool:
             path = self._viterbi_path(usable_frames, config)
             if path:
                 points[config.name] = path[-1]
+        mht_path = self._hidden_mht_path(usable_frames)
+        latest_frame = usable_frames[-1]
+        if latest_frame in mht_path:
+            points[self._mht_family_name] = mht_path[latest_frame]
         return LiveFamilyDecision(points, {
             "frames": len(usable_frames),
             "ready": bool(points),
@@ -169,6 +192,46 @@ class TransparentLiveFamilyPool:
             selected.append(node)
         selected.reverse()
         return [(node.x, node.y) for node in selected]
+
+    def _hidden_mht_path(self, frames: Sequence[int]) -> dict[int, Point]:
+        if self._start_point is None or not frames:
+            return {}
+
+        anchor_frame = int(frames[0]) - 1
+        mht_frames = [MhtFrame(anchor_frame, [], anchor=self._start_point)]
+        for frame in frames:
+            mht_frames.append(MhtFrame(
+                int(frame),
+                self._mht_candidates_for_frame(int(frame)),
+            ))
+        return solve_mht(mht_frames, config=self._mht_config)
+
+    def _mht_candidates_for_frame(self, frame: int) -> list[MhtCandidate]:
+        candidates = self._candidate_sets.get(int(frame), [])
+        if not candidates:
+            return []
+        sizes = [max(float(candidate[3]), float(candidate[4])) for candidate in candidates]
+        median_size = float(np.median(sizes)) if sizes else 0.0
+        out = []
+        for candidate in candidates:
+            cx, cy, score, width, height = candidate
+            size = max(float(width), float(height))
+            merge_like = (
+                size >= self.merge_min_size
+                or (
+                    median_size > 0.0
+                    and size >= median_size * self.merge_size_ratio
+                )
+            )
+            out.append(MhtCandidate(
+                cx=float(cx),
+                cy=float(cy),
+                score=float(score),
+                w=float(width),
+                h=float(height),
+                bg_center=(float(cx), float(cy)) if merge_like else None,
+            ))
+        return out
 
     def _nodes_for_frame(
         self,
