@@ -55,8 +55,11 @@ def _serial_float_point(point: Point | None) -> list[float] | None:
     return [float(point[0]), float(point[1])]
 
 
-def _rescue_allowed_for_family(family: str) -> bool:
-    return str(family).lower().startswith("bg_split_viterbi")
+def _rescue_allowed_for_family(family: str, merge_context: Mapping[str, object]) -> bool:
+    return (
+        str(family).lower().startswith("bg_split_viterbi")
+        and int(merge_context.get("frames", 0) or 0) > 0
+    )
 
 
 class TransparentSelectorShadow:
@@ -70,6 +73,9 @@ class TransparentSelectorShadow:
         emit_every: int = 5,
         max_candidates: int = 12,
         include_local_box: bool = True,
+        merge_context_frames: int = 6,
+        merge_min_size: float = 48.0,
+        merge_size_ratio: float = 1.18,
     ):
         self.runtime = runtime
         self.window = max(1, int(window))
@@ -77,6 +83,9 @@ class TransparentSelectorShadow:
         self.emit_every = max(1, int(emit_every))
         self.max_candidates = max(1, int(max_candidates))
         self.include_local_box = bool(include_local_box)
+        self.merge_context_frames = max(1, int(merge_context_frames))
+        self.merge_min_size = float(merge_min_size)
+        self.merge_size_ratio = float(merge_size_ratio)
         self.reset(clip_id=clip_id)
 
     def reset(self, *, clip_id: str | None = None) -> None:
@@ -149,6 +158,7 @@ class TransparentSelectorShadow:
 
         family = str(selected_row.get("family", ""))
         point = self._latest_point(paths.get(family, {}), frames)
+        merge_context = self._merge_context()
         return {
             "clip": self.clip_id,
             "frame": frame,
@@ -156,7 +166,8 @@ class TransparentSelectorShadow:
             "family": family,
             "point": _serial_point(point),
             "rescue_point": _serial_float_point(point),
-            "rescue_allowed": _rescue_allowed_for_family(family),
+            "rescue_allowed": _rescue_allowed_for_family(family, merge_context),
+            "merge_context": merge_context,
             "rows": len(rows),
             "paths": len(paths),
             "frames": len(frames),
@@ -212,9 +223,58 @@ class TransparentSelectorShadow:
                     }
         return augmented, meta
 
+    def _merge_context(self) -> dict:
+        frames = list(self._frames)[-self.merge_context_frames:]
+        context_frames = 0
+        latest = False
+        max_size = 0.0
+        max_ratio = 0.0
+
+        for frame in frames:
+            candidates = self._candidate_sets.get(frame, [])
+            sizes = [
+                max(float(candidate[3]), float(candidate[4]))
+                for candidate in candidates
+            ]
+            if not sizes:
+                continue
+            median_size = self._median(sizes)
+            frame_max_size = max(sizes)
+            frame_max_ratio = (
+                frame_max_size / median_size
+                if median_size > 1e-6
+                else 0.0
+            )
+            merge_like = (
+                frame_max_size >= self.merge_min_size
+                or frame_max_ratio >= self.merge_size_ratio
+            )
+            max_size = max(max_size, frame_max_size)
+            max_ratio = max(max_ratio, frame_max_ratio)
+            if merge_like:
+                context_frames += 1
+                latest = frame == frames[-1]
+
+        return {
+            "frames": int(context_frames),
+            "latest": bool(latest),
+            "max_size": round(max_size, 1),
+            "max_ratio": round(max_ratio, 3),
+        }
+
     @staticmethod
     def _latest_point(path: Mapping[int, Point], frames: Sequence[int]) -> Point | None:
         for frame in reversed(frames):
             if frame in path:
                 return path[frame]
         return None
+
+    @staticmethod
+    def _median(values: Sequence[float]) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(float(value) for value in values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2.0

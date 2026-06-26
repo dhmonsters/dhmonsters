@@ -57,7 +57,96 @@ def _limit_candidates(candidates: Sequence[Candidate], limit: int | None) -> lis
     return sorted(candidates, key=lambda candidate: candidate[2], reverse=True)[: int(limit)]
 
 
-def _load_jsonl(path: str | Path, *, limit: int | None = None) -> list[dict]:
+def _load_width_sidecar(path: str | Path, *, limit: int | None = None) -> list[list[list[float]]]:
+    source = Path(path)
+    sidecar = source.with_suffix(".wjsonl")
+    if source.suffix.lower() == ".wjsonl" or not sidecar.exists():
+        return []
+    rows = []
+    max_rows = None if limit is None or int(limit) <= 0 else int(limit)
+    with sidecar.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                item = []
+            rows.append(item if isinstance(item, list) else [])
+            if max_rows is not None and len(rows) >= max_rows:
+                break
+    return rows
+
+
+def _merge_width_sidecar(rows: list[dict], width_rows: Sequence[Sequence[Sequence[float]]]) -> list[dict]:
+    if not width_rows:
+        return rows
+    merged = []
+    for index, row in enumerate(rows):
+        copied = dict(row)
+        width_candidates = width_rows[index] if index < len(width_rows) else []
+        copied["cands"] = _merge_candidate_widths(copied.get("cands", []), width_candidates)
+        merged.append(copied)
+    return merged
+
+
+def _merge_candidate_widths(candidates: object, width_candidates: Sequence[Sequence[float]]) -> object:
+    if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+        return candidates
+    out = []
+    for candidate in candidates:
+        if not isinstance(candidate, Sequence) or isinstance(candidate, (str, bytes)) or len(candidate) < 3:
+            out.append(candidate)
+            continue
+        if len(candidate) >= 5:
+            out.append(candidate)
+            continue
+        width_match = _nearest_width_candidate(candidate, width_candidates)
+        if width_match is None:
+            out.append(candidate)
+            continue
+        out.append([
+            float(candidate[0]),
+            float(candidate[1]),
+            float(candidate[2]),
+            float(width_match[2]),
+            float(width_match[3]),
+        ])
+    return out
+
+
+def _nearest_width_candidate(
+    candidate: Sequence[float],
+    width_candidates: Sequence[Sequence[float]],
+    *,
+    max_distance: float = 16.0,
+) -> Sequence[float] | None:
+    best = None
+    best_dist = None
+    for width_candidate in width_candidates:
+        if not isinstance(width_candidate, Sequence) or len(width_candidate) < 4:
+            continue
+        try:
+            dx = float(candidate[0]) - float(width_candidate[0])
+            dy = float(candidate[1]) - float(width_candidate[1])
+        except (TypeError, ValueError):
+            continue
+        dist = (dx * dx + dy * dy) ** 0.5
+        if best_dist is None or dist < best_dist:
+            best = width_candidate
+            best_dist = dist
+    if best_dist is None or best_dist > float(max_distance):
+        return None
+    return best
+
+
+def _load_jsonl(
+    path: str | Path,
+    *,
+    limit: int | None = None,
+    use_width_sidecar: bool = True,
+) -> list[dict]:
     rows = []
     max_rows = None if limit is None or int(limit) <= 0 else int(limit)
     with Path(path).open("r", encoding="utf-8") as fh:
@@ -73,6 +162,8 @@ def _load_jsonl(path: str | Path, *, limit: int | None = None) -> list[dict]:
                 rows.append(item)
                 if max_rows is not None and len(rows) >= max_rows:
                     break
+    if use_width_sidecar:
+        rows = _merge_width_sidecar(rows, _load_width_sidecar(path, limit=limit))
     return rows
 
 
@@ -156,9 +247,10 @@ def write_backfilled_jsonl(
     out_path: str | Path,
     *,
     limit: int | None = None,
+    use_width_sidecar: bool = True,
     **kwargs,
 ) -> Path | None:
-    rows = _load_jsonl(in_path, limit=limit)
+    rows = _load_jsonl(in_path, limit=limit, use_width_sidecar=use_width_sidecar)
     backfilled = backfill_selector_shadow_rows(
         rows,
         clip_id=Path(in_path).stem,
@@ -186,6 +278,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-candidates", type=int, default=8)
     parser.add_argument("--live-max-candidates", type=int, default=0)
     parser.add_argument("--no-local-box", action="store_true")
+    parser.add_argument("--no-width-sidecar", action="store_true")
     args = parser.parse_args(argv)
 
     source = Path(args.input)
@@ -194,6 +287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         source,
         out_path,
         limit=args.limit or None,
+        use_width_sidecar=not args.no_width_sidecar,
         window=args.window,
         min_frames=args.min_frames,
         shadow_min_frames=args.shadow_min_frames or None,

@@ -175,6 +175,41 @@ class SelectorShadowBackfillTests(unittest.TestCase):
 
         self.assertEqual([row["i"] for row in written], [0, 1])
 
+    def test_write_backfilled_jsonl_uses_wjsonl_sidecar_widths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            in_path = Path(tmp) / "input.jsonl"
+            sidecar_path = Path(tmp) / "input.wjsonl"
+            out_path = Path(tmp) / "output.jsonl"
+            in_path.write_text(
+                json.dumps({
+                    "i": 0,
+                    "track": [10.0, 10.0],
+                    "cands": [[10.0, 10.0, 0.9]],
+                }) + "\n",
+                encoding="utf-8",
+            )
+            sidecar_path.write_text(
+                json.dumps([[10.2, 9.8, 70.0, 50.0, 0.8]]) + "\n",
+                encoding="utf-8",
+            )
+
+            write_backfilled_jsonl(
+                in_path,
+                out_path,
+                runtime=FakeRuntime("panel_default_center_mild_state_mild"),
+                min_frames=1,
+                shadow_min_frames=1,
+                include_local_box=False,
+            )
+
+            written = [
+                json.loads(line)
+                for line in out_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(written[0]["cands"][0], [10.0, 10.0, 0.9, 70.0, 50.0])
+        self.assertEqual(written[0]["selector_shadow"]["merge_context"]["frames"], 1)
+
     def test_main_accepts_fast_cli_options(self):
         with tempfile.TemporaryDirectory() as tmp:
             in_path = Path(tmp) / "input.jsonl"

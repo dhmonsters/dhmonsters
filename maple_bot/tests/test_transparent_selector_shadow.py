@@ -115,7 +115,7 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["point"], [11, 11])
         self.assertEqual(result["rescue_point"], [11.25, 10.75])
 
-    def test_shadow_rescue_is_allowed_only_for_bg_split_family(self):
+    def test_shadow_rescue_requires_bg_split_family_and_merge_context(self):
         panel_runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
         split_runtime = FakeRuntime(selected_family="bg_split_viterbi_center_mild_state_mild")
         panel_shadow = TransparentSelectorShadow(
@@ -139,13 +139,21 @@ class TransparentSelectorShadowTests(unittest.TestCase):
             "panel_default_center_mild_state_mild": (10.0, 10.0),
             "bg_split_viterbi_center_mild_state_mild": (12.0, 10.0),
         }
-        candidates = [(10.0, 10.0, 0.9, 20.0, 20.0)]
+        normal_candidates = [(10.0, 10.0, 0.9, 20.0, 20.0)]
+        merged_candidates = [
+            (10.0, 10.0, 0.9, 20.0, 20.0),
+            (12.0, 10.0, 0.8, 70.0, 50.0),
+        ]
 
-        panel_result = panel_shadow.update(0, candidates=candidates, anchors=anchors)
-        split_result = split_shadow.update(0, candidates=candidates, anchors=anchors)
+        panel_result = panel_shadow.update(0, candidates=merged_candidates, anchors=anchors)
+        split_blocked = split_shadow.update(0, candidates=normal_candidates, anchors=anchors)
+        split_allowed = split_shadow.update(1, candidates=merged_candidates, anchors=anchors)
 
         self.assertFalse(panel_result["rescue_allowed"])
-        self.assertTrue(split_result["rescue_allowed"])
+        self.assertFalse(split_blocked["rescue_allowed"])
+        self.assertEqual(split_blocked["merge_context"]["frames"], 0)
+        self.assertTrue(split_allowed["rescue_allowed"])
+        self.assertEqual(split_allowed["merge_context"]["frames"], 1)
 
     def test_shadow_prunes_old_frames_to_window(self):
         runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
