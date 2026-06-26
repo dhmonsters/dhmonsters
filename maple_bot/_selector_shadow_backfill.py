@@ -186,6 +186,9 @@ def backfill_selector_shadow_rows(
     max_candidates: int = 8,
     live_max_candidates: int | None = None,
     include_local_box: bool = True,
+    merge_context_frames: int = 6,
+    merge_min_size: float = 175.0,
+    merge_size_ratio: float = 1.30,
 ) -> list[dict]:
     runtime = runtime or TransparentFamilySelectorRuntime()
     shadow_frames = int(min_frames if shadow_min_frames is None else shadow_min_frames)
@@ -198,6 +201,9 @@ def backfill_selector_shadow_rows(
         emit_every=emit_every,
         max_candidates=max_candidates,
         include_local_box=include_local_box,
+        merge_context_frames=merge_context_frames,
+        merge_min_size=merge_min_size,
+        merge_size_ratio=merge_size_ratio,
     )
     out: list[dict] = []
     seeded = False
@@ -277,6 +283,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--max-candidates", type=int, default=8)
     parser.add_argument("--live-max-candidates", type=int, default=0)
+    parser.add_argument("--merge-context-frames", type=int, default=6)
+    parser.add_argument("--merge-min-size", type=float, default=175.0)
+    parser.add_argument("--merge-size-ratio", type=float, default=1.30)
     parser.add_argument("--no-local-box", action="store_true")
     parser.add_argument("--no-width-sidecar", action="store_true")
     args = parser.parse_args(argv)
@@ -295,6 +304,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_candidates=args.max_candidates,
         live_max_candidates=args.live_max_candidates or args.max_candidates,
         include_local_box=not args.no_local_box,
+        merge_context_frames=args.merge_context_frames,
+        merge_min_size=args.merge_min_size,
+        merge_size_ratio=args.merge_size_ratio,
     )
     print(f"selector_shadow_backfill input={source} output={result}")
     return 0

@@ -210,6 +210,54 @@ class SelectorShadowBackfillTests(unittest.TestCase):
         self.assertEqual(written[0]["cands"][0], [10.0, 10.0, 0.9, 180.0, 120.0])
         self.assertEqual(written[0]["selector_shadow"]["merge_context"]["frames"], 1)
 
+    def test_merge_gate_options_change_rescue_allowed_decision(self):
+        rows = [
+            {
+                "i": 0,
+                "track": [0.0, 0.0],
+                "cands": [[0.0, 0.0, 0.9, 20.0, 20.0]],
+            },
+            {
+                "i": 1,
+                "track": [20.0, 0.0],
+                "cands": [[20.0, 0.0, 0.9, 20.0, 20.0]],
+            },
+            {
+                "i": 2,
+                "track": [10.0, 0.0],
+                "cands": [[10.0, 0.0, 0.95, 180.0, 120.0]],
+            },
+        ]
+
+        allowed = backfill_selector_shadow_rows(
+            rows,
+            runtime=FakeRuntime("bg_split_viterbi_center_mild_state_mild"),
+            clip_id="sample",
+            window=5,
+            min_frames=2,
+            shadow_min_frames=1,
+            max_candidates=4,
+            include_local_box=False,
+            merge_min_size=175.0,
+            merge_size_ratio=10.0,
+        )
+        blocked = backfill_selector_shadow_rows(
+            rows,
+            runtime=FakeRuntime("bg_split_viterbi_center_mild_state_mild"),
+            clip_id="sample",
+            window=5,
+            min_frames=2,
+            shadow_min_frames=1,
+            max_candidates=4,
+            include_local_box=False,
+            merge_min_size=200.0,
+            merge_size_ratio=10.0,
+        )
+
+        self.assertTrue(allowed[2]["selector_shadow"]["rescue_allowed"])
+        self.assertFalse(blocked[2]["selector_shadow"]["rescue_allowed"])
+        self.assertEqual(blocked[2]["selector_shadow"]["merge_context"]["frames"], 0)
+
     def test_main_accepts_fast_cli_options(self):
         with tempfile.TemporaryDirectory() as tmp:
             in_path = Path(tmp) / "input.jsonl"

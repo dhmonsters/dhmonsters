@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from _selector_shadow_batch_report import (
     analyze_record_path_fast,
+    main,
     summarize_backfilled_rows,
     write_markdown_report,
 )
@@ -180,6 +181,68 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
 
         self.assertEqual([item["name"] for item in summaries], ["a.jsonl", "b.jsonl"])
         self.assertEqual([item["frames"] for item in summaries], [2, 2])
+
+    def test_analyze_record_path_fast_forwards_merge_gate_options(self):
+        captured = []
+
+        def fake_backfill(rows, **kwargs):
+            captured.append(kwargs)
+            return [dict(rows[0])]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.jsonl").write_text(
+                json.dumps({
+                    "i": 0,
+                    "track": [1.0, 2.0],
+                    "cands": [[1.0, 2.0, 0.9, 20.0, 20.0]],
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("_selector_shadow_batch_report.backfill_selector_shadow_rows", fake_backfill):
+                analyze_record_path_fast(
+                    root,
+                    runtime=FakeRuntime(),
+                    max_files=1,
+                    limit=1,
+                    min_frames=1,
+                    shadow_min_frames=1,
+                    emit_every=1,
+                    include_local_box=False,
+                    merge_context_frames=4,
+                    merge_min_size=201.0,
+                    merge_size_ratio=1.45,
+                )
+
+        self.assertEqual(captured[0]["merge_context_frames"], 4)
+        self.assertEqual(captured[0]["merge_min_size"], 201.0)
+        self.assertEqual(captured[0]["merge_size_ratio"], 1.45)
+
+    def test_main_accepts_merge_gate_cli_options(self):
+        captured = {}
+
+        def fake_analyze(path, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "report.md"
+            with patch("_selector_shadow_batch_report.analyze_record_path_fast", fake_analyze):
+                with patch("_selector_shadow_batch_report.write_markdown_report", return_value=out):
+                    result = main([
+                        "_record_debug",
+                        "--out", str(out),
+                        "--files", "1",
+                        "--merge-context-frames", "4",
+                        "--merge-min-size", "201",
+                        "--merge-size-ratio", "1.45",
+                    ])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(captured["merge_context_frames"], 4)
+        self.assertEqual(captured["merge_min_size"], 201.0)
+        self.assertEqual(captured["merge_size_ratio"], 1.45)
 
     def test_write_markdown_report_returns_none_on_permission_error(self):
         with tempfile.TemporaryDirectory() as tmp:
