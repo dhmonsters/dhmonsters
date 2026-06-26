@@ -509,3 +509,43 @@ def test_puzzle_console_applies_candidates_to_cctv_summary(monkeypatch):
     assert "frame 12" in window.cctv_candidate_summary_label.text()
     assert "candidates 2" in window.cctv_candidate_summary_label.text()
     assert "bbox 10,20,30,40" in window.cctv_candidate_summary_label.text()
+
+
+def test_puzzle_console_exposes_cctv_identity_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.cctv_identity_summary_label.objectName() == "puzzleCctvIdentitySummary"
+
+
+def test_puzzle_console_applies_identity_to_cctv_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    window.apply_trace_event(
+        {
+            "type": "IDENTITY_STATE",
+            "session_id": "20260626_222000_001",
+            "frame_index": 12,
+            "payload": {
+                "state": "TRACK_CONFIDENT",
+                "confidence": 0.824,
+                "candidate_id": "c12_a",
+                "point": [25.0, 40.0],
+                "hold_frames": 0,
+                "reason": "candidate_continuity",
+            },
+        }
+    )
+
+    assert window.current_frame_identity[12]["state"] == "TRACK_CONFIDENT"
+    assert window.current_frame_identity[12]["candidate_id"] == "c12_a"
+    assert "frame 12" in window.cctv_identity_summary_label.text()
+    assert "TRACK_CONFIDENT" in window.cctv_identity_summary_label.text()
+    assert "conf 0.82" in window.cctv_identity_summary_label.text()
+    assert "candidate c12_a" in window.cctv_identity_summary_label.text()
+    assert "point 25,40" in window.cctv_identity_summary_label.text()

@@ -42,6 +42,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.trace_timeline: list[str] = []
         self.current_frame_sources: dict[int, str] = {}
         self.current_frame_candidates: dict[int, list[dict[object, object]]] = {}
+        self.current_frame_identity: dict[int, dict[object, object]] = {}
         self.current_cctv_source_path: str | None = None
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
@@ -157,10 +158,14 @@ class PuzzleConsoleWindow(QMainWindow):
         self.cctv_candidate_summary_label = QLabel("candidates 0")
         self.cctv_candidate_summary_label.setObjectName("puzzleCctvCandidateSummary")
         self.cctv_candidate_summary_label.setWordWrap(True)
+        self.cctv_identity_summary_label = QLabel("identity -")
+        self.cctv_identity_summary_label.setObjectName("puzzleCctvIdentitySummary")
+        self.cctv_identity_summary_label.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(self.cctv_frame_label, 1)
         layout.addWidget(self.cctv_status_label, 0)
         layout.addWidget(self.cctv_candidate_summary_label, 0)
+        layout.addWidget(self.cctv_identity_summary_label, 0)
         return frame
 
     def _build_analysis_panel(self) -> QFrame:
@@ -282,6 +287,7 @@ class PuzzleConsoleWindow(QMainWindow):
                 self._set_metric("hold", str(hold_frames))
             reason = str(payload.get("reason") or "-")
             self._set_metric("reason", reason)
+            self._apply_identity(frame_index, payload)
 
     def load_trace_summary(self, trace_path: str | Path) -> int:
         path = Path(trace_path)
@@ -344,6 +350,12 @@ class PuzzleConsoleWindow(QMainWindow):
         candidates = _candidate_list(payload)
         self.current_frame_candidates[frame_index] = candidates
         self.cctv_candidate_summary_label.setText(_candidate_summary(frame_index, payload))
+
+    def _apply_identity(self, frame_index: object, payload: dict[object, object]) -> None:
+        if not isinstance(frame_index, int):
+            return
+        self.current_frame_identity[frame_index] = dict(payload)
+        self.cctv_identity_summary_label.setText(_identity_summary(frame_index, payload))
 
     def _set_metric(self, name: str, value: str) -> None:
         label = self.metric_labels.get(name)
@@ -440,6 +452,31 @@ def _candidate_summary(frame_index: int, payload: dict[object, object]) -> str:
 def _compact_bbox(bbox: list[object]) -> str:
     values: list[str] = []
     for value in bbox[:4]:
+        if isinstance(value, (int, float)):
+            values.append(str(int(round(float(value)))))
+        else:
+            values.append(str(value))
+    return ",".join(values)
+
+
+def _identity_summary(frame_index: int, payload: dict[object, object]) -> str:
+    state = str(payload.get("state") or "-")
+    parts = [f"frame {frame_index}", state]
+    confidence = payload.get("confidence")
+    if isinstance(confidence, (int, float)):
+        parts.append(f"conf {float(confidence):.2f}")
+    candidate_id = payload.get("candidate_id")
+    if candidate_id:
+        parts.append(f"candidate {candidate_id}")
+    point = payload.get("point")
+    if isinstance(point, list):
+        parts.append(f"point {_compact_point(point)}")
+    return " | ".join(parts)
+
+
+def _compact_point(point: list[object]) -> str:
+    values: list[str] = []
+    for value in point[:2]:
         if isinstance(value, (int, float)):
             values.append(str(int(round(float(value)))))
         else:
