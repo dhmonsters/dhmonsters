@@ -597,3 +597,96 @@ def test_puzzle_console_applies_evidence_to_cctv_summary(monkeypatch):
     assert "bg 0.12" in window.cctv_evidence_summary_label.text()
     assert "motion 0.34" in window.cctv_evidence_summary_label.text()
     assert "merge 0.57" in window.cctv_evidence_summary_label.text()
+
+
+def test_puzzle_console_selects_saved_timeline_frame(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+    window.apply_trace_event(
+        {
+            "type": "FRAME_REPLAYED",
+            "session_id": "20260626_224000_001",
+            "frame_index": 5,
+            "payload": {"source_kind": "image_sequence", "source_frame_path": "C:/frames/005.png"},
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "CANDIDATES",
+            "session_id": "20260626_224000_001",
+            "frame_index": 5,
+            "payload": {
+                "count": 1,
+                "candidates": [{"candidate_id": "c5_a", "bbox": [1, 2, 3, 4]}],
+            },
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "EVIDENCE",
+            "session_id": "20260626_224000_001",
+            "frame_index": 5,
+            "payload": {
+                "count": 1,
+                "evidence": [{"candidate_id": "c5_a", "bg_score": 0.11, "motion_divergence": 0.22}],
+            },
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "IDENTITY_STATE",
+            "session_id": "20260626_224000_001",
+            "frame_index": 5,
+            "payload": {
+                "state": "TRACK_CONFIDENT",
+                "confidence": 0.91,
+                "candidate_id": "c5_a",
+                "point": [8, 9],
+                "hold_frames": 0,
+                "reason": "candidate_continuity",
+            },
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "FRAME_REPLAYED",
+            "session_id": "20260626_224000_001",
+            "frame_index": 6,
+            "payload": {"source_kind": "image_sequence", "source_frame_path": "C:/frames/006.png"},
+        }
+    )
+
+    assert window.select_timeline_frame(5) is True
+
+    assert window.selected_frame_index == 5
+    assert window.timeline_status.text() == "frame 5"
+    assert "C:/frames/005.png" in window.cctv_status_label.text()
+    assert "bbox 1,2,3,4" in window.cctv_candidate_summary_label.text()
+    assert "bg 0.11" in window.cctv_evidence_summary_label.text()
+    assert "TRACK_CONFIDENT" in window.cctv_identity_summary_label.text()
+    assert window.state_label.text() == "TRACK_CONFIDENT"
+    assert window.metric_labels["confidence"].text() == "0.91"
+
+
+def test_puzzle_console_select_missing_timeline_frame_keeps_current(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+    window.apply_trace_event(
+        {
+            "type": "FRAME_REPLAYED",
+            "session_id": "20260626_224000_001",
+            "frame_index": 3,
+            "payload": {"source_kind": "image_sequence", "source_frame_path": "C:/frames/003.png"},
+        }
+    )
+    assert window.select_timeline_frame(3) is True
+
+    assert window.select_timeline_frame(99) is False
+
+    assert window.selected_frame_index == 3
+    assert window.timeline_status.text() == "frame 3"
+    assert "frame 99" not in window.cctv_status_label.text()

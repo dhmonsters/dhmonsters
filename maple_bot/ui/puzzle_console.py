@@ -45,6 +45,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.current_frame_evidence: dict[int, list[dict[object, object]]] = {}
         self.current_frame_identity: dict[int, dict[object, object]] = {}
         self.current_cctv_source_path: str | None = None
+        self.selected_frame_index: int | None = None
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
         self.resize(1280, 820)
@@ -282,17 +283,7 @@ class PuzzleConsoleWindow(QMainWindow):
             return
 
         if event_type == "IDENTITY_STATE":
-            state = str(payload.get("state") or "")
-            if state:
-                self.set_identity_state(state)
-            confidence = payload.get("confidence")
-            if isinstance(confidence, (int, float)):
-                self._set_metric("confidence", f"{float(confidence):.2f}")
-            hold_frames = payload.get("hold_frames")
-            if isinstance(hold_frames, int):
-                self._set_metric("hold", str(hold_frames))
-            reason = str(payload.get("reason") or "-")
-            self._set_metric("reason", reason)
+            self._apply_identity_metrics(payload)
             self._apply_identity(frame_index, payload)
 
     def load_trace_summary(self, trace_path: str | Path) -> int:
@@ -317,6 +308,47 @@ class PuzzleConsoleWindow(QMainWindow):
                 applied += 1
         self.append_log(f"trace 반영: {applied} events")
         return applied
+
+    def select_timeline_frame(self, frame_index: int) -> bool:
+        if not self._has_frame_state(frame_index):
+            self.append_log(f"frame 없음: {frame_index}")
+            return False
+
+        self.selected_frame_index = frame_index
+        self.timeline_status.setText(f"frame {frame_index}")
+
+        source = self.current_frame_sources.get(frame_index)
+        if source is not None:
+            self.cctv_status_label.setText(f"frame {frame_index}: {source}")
+            self._load_cctv_frame_preview(source)
+
+        candidates = self.current_frame_candidates.get(frame_index)
+        if candidates is not None:
+            self._set_metric("후보", str(len(candidates)))
+            self.cctv_candidate_summary_label.setText(
+                _candidate_summary(frame_index, {"count": len(candidates), "candidates": candidates})
+            )
+
+        evidence = self.current_frame_evidence.get(frame_index)
+        if evidence is not None:
+            self.cctv_evidence_summary_label.setText(
+                _evidence_summary(frame_index, {"count": len(evidence), "evidence": evidence})
+            )
+
+        identity = self.current_frame_identity.get(frame_index)
+        if identity is not None:
+            self.cctv_identity_summary_label.setText(_identity_summary(frame_index, identity))
+            self._apply_identity_metrics(identity)
+
+        return True
+
+    def _has_frame_state(self, frame_index: int) -> bool:
+        return (
+            frame_index in self.current_frame_sources
+            or frame_index in self.current_frame_candidates
+            or frame_index in self.current_frame_evidence
+            or frame_index in self.current_frame_identity
+        )
 
     def _append_trace_timeline(
         self,
@@ -369,6 +401,19 @@ class PuzzleConsoleWindow(QMainWindow):
             return
         self.current_frame_identity[frame_index] = dict(payload)
         self.cctv_identity_summary_label.setText(_identity_summary(frame_index, payload))
+
+    def _apply_identity_metrics(self, payload: dict[object, object]) -> None:
+        state = str(payload.get("state") or "")
+        if state:
+            self.set_identity_state(state)
+        confidence = payload.get("confidence")
+        if isinstance(confidence, (int, float)):
+            self._set_metric("confidence", f"{float(confidence):.2f}")
+        hold_frames = payload.get("hold_frames")
+        if isinstance(hold_frames, int):
+            self._set_metric("hold", str(hold_frames))
+        reason = str(payload.get("reason") or "-")
+        self._set_metric("reason", reason)
 
     def _set_metric(self, name: str, value: str) -> None:
         label = self.metric_labels.get(name)
