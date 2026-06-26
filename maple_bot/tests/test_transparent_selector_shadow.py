@@ -142,7 +142,7 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         normal_candidates = [(10.0, 10.0, 0.9, 20.0, 20.0)]
         merged_candidates = [
             (10.0, 10.0, 0.9, 20.0, 20.0),
-            (12.0, 10.0, 0.8, 70.0, 50.0),
+            (12.0, 10.0, 0.8, 180.0, 120.0),
         ]
 
         panel_result = panel_shadow.update(0, candidates=merged_candidates, anchors=anchors)
@@ -154,6 +154,42 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(split_blocked["merge_context"]["frames"], 0)
         self.assertTrue(split_allowed["rescue_allowed"])
         self.assertEqual(split_allowed["merge_context"]["frames"], 1)
+
+    def test_default_merge_gate_uses_wjsonl_sized_thresholds(self):
+        runtime = FakeRuntime(selected_family="bg_split_viterbi_center_mild_state_mild")
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=3,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+        anchors = {
+            "bg_split_viterbi_center_mild_state_mild": (12.0, 10.0),
+        }
+
+        blocked = shadow.update(
+            0,
+            candidates=[
+                (10.0, 10.0, 0.9, 60.0, 60.0),
+                (12.0, 10.0, 0.8, 70.0, 50.0),
+            ],
+            anchors=anchors,
+        )
+        allowed = shadow.update(
+            1,
+            candidates=[
+                (10.0, 10.0, 0.9, 120.0, 120.0),
+                (12.0, 10.0, 0.8, 180.0, 120.0),
+            ],
+            anchors=anchors,
+        )
+
+        self.assertFalse(blocked["rescue_allowed"])
+        self.assertEqual(blocked["merge_context"]["frames"], 0)
+        self.assertTrue(allowed["rescue_allowed"])
+        self.assertEqual(allowed["merge_context"]["frames"], 1)
 
     def test_shadow_prunes_old_frames_to_window(self):
         runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")

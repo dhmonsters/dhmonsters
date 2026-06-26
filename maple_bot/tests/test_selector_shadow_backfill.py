@@ -57,7 +57,7 @@ class SelectorShadowBackfillTests(unittest.TestCase):
             {
                 "i": 2,
                 "track": [10.0, 0.0],
-                "cands": [[10.0, 0.0, 0.95, 100.0, 50.0]],
+                "cands": [[10.0, 0.0, 0.95, 180.0, 120.0]],
             },
             {
                 "i": 3,
@@ -189,7 +189,7 @@ class SelectorShadowBackfillTests(unittest.TestCase):
                 encoding="utf-8",
             )
             sidecar_path.write_text(
-                json.dumps([[10.2, 9.8, 70.0, 50.0, 0.8]]) + "\n",
+                json.dumps([[10.2, 9.8, 180.0, 120.0, 0.8]]) + "\n",
                 encoding="utf-8",
             )
 
@@ -207,7 +207,7 @@ class SelectorShadowBackfillTests(unittest.TestCase):
                 for line in out_path.read_text(encoding="utf-8").splitlines()
             ]
 
-        self.assertEqual(written[0]["cands"][0], [10.0, 10.0, 0.9, 70.0, 50.0])
+        self.assertEqual(written[0]["cands"][0], [10.0, 10.0, 0.9, 180.0, 120.0])
         self.assertEqual(written[0]["selector_shadow"]["merge_context"]["frames"], 1)
 
     def test_main_accepts_fast_cli_options(self):

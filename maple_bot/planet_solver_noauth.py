@@ -461,6 +461,9 @@ class _MacroThread(threading.Thread):
             min_frames=8,
             emit_every=1,
             max_candidates=8,
+            merge_context_frames=6,
+            merge_min_size=175.0,
+            merge_size_ratio=1.30,
         )
         self._sig.log.emit(f"[설정] 턴 재획득(re-acq) {'ON' if self._reacq else 'OFF'}")
         self._sig.log.emit("[setting] transparent box selector ON")
@@ -468,6 +471,7 @@ class _MacroThread(threading.Thread):
         if _family_selector.available:
             self._sig.log.emit("[setting] GT-free family selector model loaded")
             self._sig.log.emit("[setting] GT-free family selector shadow log ON")
+            self._sig.log.emit("[setting] selector shadow merge gate size>=175 ratio>=1.30 frames=6")
         else:
             self._sig.log.emit(f"[setting] GT-free family selector disabled: {_family_selector.load_error}")
         _vortex = None

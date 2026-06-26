@@ -74,8 +74,8 @@ class TransparentSelectorShadow:
         max_candidates: int = 12,
         include_local_box: bool = True,
         merge_context_frames: int = 6,
-        merge_min_size: float = 48.0,
-        merge_size_ratio: float = 1.18,
+        merge_min_size: float = 175.0,
+        merge_size_ratio: float = 1.30,
     ):
         self.runtime = runtime
         self.window = max(1, int(window))
