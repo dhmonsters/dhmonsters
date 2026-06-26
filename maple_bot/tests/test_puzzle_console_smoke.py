@@ -390,6 +390,54 @@ def test_puzzle_console_loads_trace_summary_after_replay(monkeypatch, tmp_path):
     assert "trace 반영: 4 events" in window.event_log.toPlainText()
 
 
+def test_puzzle_console_opens_last_recording_folder_after_replay(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    report_path = session_dir / "report.md"
+    trace_path = session_dir / "trace.jsonl"
+    report_path.write_text("# report\n", encoding="utf-8")
+    trace_path.write_text("", encoding="utf-8")
+    opened = []
+
+    def pick_path(kind):
+        assert kind == "image_sequence"
+        return "C:/frames"
+
+    def run_replay(path, kind):
+        assert (path, kind) == ("C:/frames", "image_sequence")
+        return report_path
+
+    def open_folder(path):
+        opened.append(path)
+
+    window = module.PuzzleConsoleWindow(
+        replay_runner=run_replay,
+        path_picker=pick_path,
+        folder_opener=open_folder,
+    )
+
+    window.open_image_sequence_button.clicked.emit()
+    window.open_recording_folder_button.clicked.emit()
+
+    assert opened == [session_dir]
+    assert "session" in window.event_log.toPlainText()
+
+
+def test_puzzle_console_recording_folder_button_waits_for_replay(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    opened = []
+
+    window = module.PuzzleConsoleWindow(folder_opener=lambda path: opened.append(path))
+
+    window.open_recording_folder_button.clicked.emit()
+
+    assert opened == []
+    assert "folder" in window.event_log.toPlainText().lower()
+
+
 def test_puzzle_console_renders_recent_trace_timeline(monkeypatch):
     _install_fake_qt(monkeypatch)
     module = importlib.import_module("ui.puzzle_console")

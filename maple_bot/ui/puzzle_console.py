@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -26,6 +28,7 @@ from core_ui.theme import SPACING, build_qss
 
 ReplayRunner = Callable[[str, str], str | Path]
 PathPicker = Callable[[str], str | Path | None]
+FolderOpener = Callable[[Path], None]
 TRACE_TIMELINE_LIMIT = 5
 
 
@@ -35,12 +38,16 @@ class PuzzleConsoleWindow(QMainWindow):
         *,
         replay_runner: ReplayRunner | None = None,
         path_picker: PathPicker | None = None,
+        folder_opener: FolderOpener | None = None,
         default_test_path: str | Path | None = None,
     ) -> None:
         super().__init__()
         self._replay_runner = replay_runner
         self._path_picker = path_picker or self._pick_path
+        self._folder_opener = folder_opener or _open_folder
         self._default_test_path = str(default_test_path) if default_test_path is not None else ""
+        self.last_report_path: Path | None = None
+        self.last_session_dir: Path | None = None
         self.trace_timeline: list[str] = []
         self.current_frame_sources: dict[int, str] = {}
         self.current_frame_candidates: dict[int, list[dict[object, object]]] = {}
@@ -128,9 +135,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.run_default_test_button.clicked.connect(lambda _checked=False: self.run_default_test_input())
         self.start_watch_button.clicked.connect(lambda _checked=False: self.append_log("화면 감시는 다음 단계에서 연결"))
         self.roi_settings_button.clicked.connect(lambda _checked=False: self.append_log("고정 ROI 사용 중"))
-        self.open_recording_folder_button.clicked.connect(
-            lambda _checked=False: self.append_log("녹화 폴더 열기는 다음 단계에서 연결")
-        )
+        self.open_recording_folder_button.clicked.connect(lambda _checked=False: self.open_last_recording_folder())
 
         for button in (
             self.open_image_sequence_button,
@@ -496,6 +501,17 @@ class PuzzleConsoleWindow(QMainWindow):
             return
         self._run_replay_path(self._default_test_path, "image_sequence")
 
+    def open_last_recording_folder(self) -> bool:
+        if self.last_session_dir is None:
+            self.append_log("recording folder 없음")
+            return False
+        if not self.last_session_dir.exists():
+            self.append_log(f"recording folder 없음: {self.last_session_dir}")
+            return False
+        self._folder_opener(self.last_session_dir)
+        self.append_log(f"recording folder 열기: {self.last_session_dir}")
+        return True
+
     def _run_replay_path(self, path: str, input_kind: str) -> None:
         self.set_identity_state("REPLAYING")
         self.cctv_status_label.setText(f"replay: {path}")
@@ -510,6 +526,8 @@ class PuzzleConsoleWindow(QMainWindow):
             self.cctv_status_label.setText(f"replay failed: {exc}")
             self.append_log(f"replay 실패: {exc}")
             return
+        self.last_report_path = Path(report_path)
+        self.last_session_dir = self.last_report_path.parent
         self.set_identity_state("REPLAY_DONE")
         self.cctv_status_label.setText(f"report: {report_path}")
         self.append_log(f"replay 완료: {report_path}")
@@ -545,6 +563,16 @@ def _command_button(text: str, object_name: str, *, primary: bool = False) -> QP
         button.setObjectName(object_name)
         button.setStyleSheet("font-weight: 700;")
     return button
+
+
+def _open_folder(path: Path) -> None:
+    if hasattr(os, "startfile"):
+        os.startfile(str(path))
+        return
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+        return
+    subprocess.Popen(["xdg-open", str(path)])
 
 
 def _candidate_count(payload: dict[object, object]) -> int:
