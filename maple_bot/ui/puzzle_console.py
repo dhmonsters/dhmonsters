@@ -35,10 +35,12 @@ class PuzzleConsoleWindow(QMainWindow):
         *,
         replay_runner: ReplayRunner | None = None,
         path_picker: PathPicker | None = None,
+        default_test_path: str | Path | None = None,
     ) -> None:
         super().__init__()
         self._replay_runner = replay_runner
         self._path_picker = path_picker or self._pick_path
+        self._default_test_path = str(default_test_path) if default_test_path is not None else ""
         self.trace_timeline: list[str] = []
         self.current_frame_sources: dict[int, str] = {}
         self.current_frame_candidates: dict[int, list[dict[object, object]]] = {}
@@ -113,6 +115,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.open_image_sequence_button = _command_button("이미지 시퀀스", "openImageSequenceButton")
         self.open_video_button = _command_button("영상", "openVideoButton")
         self.open_replay_button = _command_button("JSONL replay", "openReplayButton")
+        self.run_default_test_button = _command_button("기본 테스트", "runDefaultPuzzleTestButton")
         self.start_watch_button = _command_button("화면 감시", "startWatchButton", primary=True)
         self.roi_settings_button = _command_button("ROI 설정", "roiSettingsButton")
         self.open_recording_folder_button = _command_button("녹화 폴더", "openRecordingFolderButton")
@@ -122,6 +125,7 @@ class PuzzleConsoleWindow(QMainWindow):
         )
         self.open_video_button.clicked.connect(lambda _checked=False: self.run_replay_input("video"))
         self.open_replay_button.clicked.connect(lambda _checked=False: self.run_replay_input("jsonl_replay"))
+        self.run_default_test_button.clicked.connect(lambda _checked=False: self.run_default_test_input())
         self.start_watch_button.clicked.connect(lambda _checked=False: self.append_log("화면 감시는 다음 단계에서 연결"))
         self.roi_settings_button.clicked.connect(lambda _checked=False: self.append_log("고정 ROI 사용 중"))
         self.open_recording_folder_button.clicked.connect(
@@ -132,6 +136,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.open_image_sequence_button,
             self.open_video_button,
             self.open_replay_button,
+            self.run_default_test_button,
             self.start_watch_button,
             self.roi_settings_button,
             self.open_recording_folder_button,
@@ -483,6 +488,15 @@ class PuzzleConsoleWindow(QMainWindow):
             self.append_log(f"{input_kind} 선택 취소")
             return
         path = str(selected)
+        self._run_replay_path(path, input_kind)
+
+    def run_default_test_input(self) -> None:
+        if not self._default_test_path:
+            self.append_log("기본 테스트 경로 없음")
+            return
+        self._run_replay_path(self._default_test_path, "image_sequence")
+
+    def _run_replay_path(self, path: str, input_kind: str) -> None:
         self.set_identity_state("REPLAYING")
         self.cctv_status_label.setText(f"replay: {path}")
         self.append_log(f"{input_kind} replay 시작: {path}")

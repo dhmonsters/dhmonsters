@@ -221,6 +221,7 @@ def test_puzzle_console_window_exposes_expected_commands(monkeypatch):
     assert window.open_video_button.objectName() == "openVideoButton"
     assert window.open_replay_button.objectName() == "openReplayButton"
     assert window.start_watch_button.objectName() == "startWatchButton"
+    assert window.run_default_test_button.objectName() == "runDefaultPuzzleTestButton"
     assert window.roi_settings_button.objectName() == "roiSettingsButton"
     assert window.open_recording_folder_button.objectName() == "openRecordingFolderButton"
 
@@ -258,6 +259,27 @@ def test_puzzle_console_connects_image_sequence_button_to_replay_runner(monkeypa
     assert window.state_label.text() == "REPLAY_DONE"
     assert "report.md" in window.cctv_status_label.text()
     assert "report.md" in window.event_log.toPlainText()
+
+
+def test_puzzle_console_default_test_button_runs_default_replay(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    calls = []
+
+    def run_replay(path, kind):
+        calls.append((path, kind))
+        return "C:/out/report.md"
+
+    window = module.PuzzleConsoleWindow(
+        replay_runner=run_replay,
+        default_test_path="C:/frames/default",
+    )
+
+    window.run_default_test_button.clicked.emit()
+
+    assert calls == [("C:/frames/default", "image_sequence")]
+    assert window.state_label.text() == "REPLAY_DONE"
+    assert "report.md" in window.cctv_status_label.text()
 
 
 def test_puzzle_console_shows_fixed_roi_values(monkeypatch):

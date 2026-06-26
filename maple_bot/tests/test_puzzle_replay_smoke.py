@@ -73,6 +73,58 @@ def test_headless_replay_command_path_returns_zero_without_importing_gui(tmp_pat
     assert len(reports) == 1
 
 
+def test_headless_replay_command_respects_max_frames(tmp_path):
+    image_dir = tmp_path / "frames"
+    image_dir.mkdir()
+    for index in range(4):
+        _write_image(image_dir / f"{index:03d}.png", 40 + index)
+
+    code = puzzle.run_gui([
+        "--headless",
+        "--replay",
+        str(image_dir),
+        "--output-root",
+        str(tmp_path / "out"),
+        "--max-frames",
+        "2",
+    ])
+
+    assert code == 0
+    report_path = next((tmp_path / "out").glob("**/report.md"))
+    assert "frames: 2" in report_path.read_text(encoding="utf-8")
+
+
+def test_transparent_test_command_uses_default_replay(monkeypatch, tmp_path):
+    image_dir = tmp_path / "frames"
+    image_dir.mkdir()
+    _write_image(image_dir / "000.png", 66)
+    calls = []
+
+    def fake_default_replay_path():
+        return image_dir
+
+    def fake_run_headless_replay(replay, *, output_root=None, max_frames=5):
+        calls.append((Path(replay), Path(output_root), max_frames))
+        report_path = tmp_path / "out" / "report.md"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("# report\n", encoding="utf-8")
+        return report_path
+
+    monkeypatch.setattr(puzzle, "default_transparent_test_replay_path", fake_default_replay_path)
+    monkeypatch.setattr(puzzle, "run_headless_replay", fake_run_headless_replay)
+
+    code = puzzle.run_gui([
+        "--transparent-test",
+        "--output-root",
+        str(tmp_path / "out"),
+        "--max-frames",
+        "2",
+    ])
+
+    assert code == 0
+    assert calls == [(image_dir, tmp_path / "out", 2)]
+
+
 def test_headless_replay_records_fixed_roi_snapshot(tmp_path):
     image_dir = tmp_path / "frames"
     image_dir.mkdir()

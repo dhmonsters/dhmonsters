@@ -26,14 +26,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="투명도형 퍼즐 분석 콘솔")
     parser.add_argument("--replay", default="", help="나중에 headless replay에서 사용할 입력 경로")
     parser.add_argument("--headless", action="store_true", help="GUI 없이 replay를 실행한다")
+    parser.add_argument("--transparent-test", action="store_true", help="기본 투명도형 테스트 replay를 실행한다")
     parser.add_argument("--output-root", default="", help="headless replay 산출물 루트")
+    parser.add_argument("--max-frames", type=int, default=5, help="replay에서 처리할 최대 frame 수")
     return parser
 
 
 def create_window(args: argparse.Namespace | None = None):
     from ui.puzzle_console import PuzzleConsoleWindow
 
-    window = PuzzleConsoleWindow(replay_runner=_run_replay_from_ui)
+    default_test_path = default_transparent_test_replay_path()
+    window = PuzzleConsoleWindow(
+        replay_runner=_run_replay_from_ui,
+        default_test_path=default_test_path if default_test_path.exists() else None,
+    )
     if args is not None and getattr(args, "replay", ""):
         window.append_log(f"replay input: {args.replay}")
     return window
@@ -42,12 +48,25 @@ def create_window(args: argparse.Namespace | None = None):
 def run_gui(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    if args.transparent_test:
+        replay_path = Path(args.replay) if args.replay else default_transparent_test_replay_path()
+        if not replay_path.exists():
+            parser.error(f"transparent test replay not found: {replay_path}")
+        report_path = run_headless_replay(
+            replay_path,
+            output_root=args.output_root or None,
+            max_frames=args.max_frames,
+        )
+        print(report_path)
+        return 0
+
     if args.headless:
         if not args.replay:
             parser.error("--headless requires --replay")
         report_path = run_headless_replay(
             args.replay,
             output_root=args.output_root or None,
+            max_frames=args.max_frames,
         )
         print(report_path)
         return 0
@@ -168,6 +187,10 @@ def _open_replay_source(replay_path: Path, session):
 
 def _run_replay_from_ui(path: str, _kind: str) -> Path:
     return run_headless_replay(path)
+
+
+def default_transparent_test_replay_path() -> Path:
+    return Path(__file__).resolve().parent / "_record_debug" / "000_0621_180636_png"
 
 
 def _empty_replay_rows(_packet: FramePacket) -> list[object]:
