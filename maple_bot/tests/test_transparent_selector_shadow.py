@@ -1,6 +1,7 @@
 # 라이브 투명 퍼즐 selector shadow 기록기를 검증합니다.
 import json
 import unittest
+from unittest.mock import patch
 
 from core.vision.transparent_selector_shadow import TransparentSelectorShadow
 
@@ -59,6 +60,35 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertTrue(any(name.endswith("_lb_free") for name in call["paths"]))
         self.assertEqual(call["kwargs"]["candidate_sets"][2][0][0], 12.0)
         self.assertEqual(result["clip"], "live")
+
+    def test_shadow_converts_candidate_order_for_local_box_paths(self):
+        runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+        )
+        captured = {}
+
+        def fake_augment(paths, candidate_sets, frames, **kwargs):
+            captured["candidate"] = candidate_sets[0][0]
+            return dict(paths)
+
+        with patch(
+            "core.vision.transparent_selector_shadow.local_box.augment_local_box_paths",
+            side_effect=fake_augment,
+        ):
+            shadow.update(
+                0,
+                candidates=[(10.0, 20.0, 0.9, 30.0, 40.0)],
+                anchors={
+                    "panel_default_center_mild_state_mild": (10.0, 20.0),
+                },
+            )
+
+        self.assertEqual(captured["candidate"], (10.0, 20.0, 30.0, 40.0, 0.9))
 
     def test_shadow_result_is_json_serializable_and_contains_selected_point(self):
         runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")

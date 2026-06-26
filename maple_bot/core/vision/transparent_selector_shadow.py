@@ -35,6 +35,16 @@ def _candidate(value: Sequence[float]) -> Candidate | None:
     return (float(value[0]), float(value[1]), score, width, height)
 
 
+def _local_box_candidate(candidate: Candidate) -> tuple[float, float, float, float, float]:
+    return (
+        float(candidate[0]),
+        float(candidate[1]),
+        float(candidate[3]),
+        float(candidate[4]),
+        float(candidate[2]),
+    )
+
+
 def _source_for_family(family: str) -> str:
     name = family.lower()
     for source in KNOWN_SOURCES:
@@ -208,9 +218,13 @@ class TransparentSelectorShadow:
         if not self.include_local_box or not paths:
             return paths, meta
 
+        local_box_candidate_sets = {
+            frame: [_local_box_candidate(candidate) for candidate in self._candidate_sets.get(frame, [])]
+            for frame in frames
+        }
         augmented = local_box.augment_local_box_paths(
             paths,
-            self._candidate_sets,
+            local_box_candidate_sets,
             frames,
             local_box_families=list(paths),
         )
