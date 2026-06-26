@@ -39,6 +39,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._replay_runner = replay_runner
         self._path_picker = path_picker or self._pick_path
         self.trace_timeline: list[str] = []
+        self.current_frame_sources: dict[int, str] = {}
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
         self.resize(1280, 820)
@@ -245,6 +246,10 @@ class PuzzleConsoleWindow(QMainWindow):
             self.timeline_status.setText(f"frame {frame_index}")
         self._append_trace_timeline(event_type, frame_index, payload)
 
+        if event_type == "FRAME_REPLAYED":
+            self._apply_frame_replayed(frame_index, payload)
+            return
+
         if event_type == "CANDIDATES":
             self._set_metric("후보", str(_candidate_count(payload)))
             return
@@ -300,6 +305,13 @@ class PuzzleConsoleWindow(QMainWindow):
         self.trace_timeline.append(item)
         self.trace_timeline = self.trace_timeline[-TRACE_TIMELINE_LIMIT:]
         self.timeline_detail.setText(" | ".join(self.trace_timeline))
+
+    def _apply_frame_replayed(self, frame_index: object, payload: dict[object, object]) -> None:
+        if not isinstance(frame_index, int):
+            return
+        source = str(payload.get("source_frame_path") or payload.get("source_kind") or "-")
+        self.current_frame_sources[frame_index] = source
+        self.cctv_status_label.setText(f"frame {frame_index}: {source}")
 
     def _set_metric(self, name: str, value: str) -> None:
         label = self.metric_labels.get(name)

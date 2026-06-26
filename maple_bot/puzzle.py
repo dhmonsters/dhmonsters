@@ -125,6 +125,7 @@ def run_headless_replay(
                 {
                     "timestamp_ms": packet.timestamp_ms,
                     "source_kind": packet.source_kind,
+                    "source_frame_path": packet.source_path,
                 },
             )
             trace.write_event(

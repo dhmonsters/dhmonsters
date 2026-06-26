@@ -129,3 +129,23 @@ def test_headless_replay_records_analysis_events_per_frame(tmp_path):
     assert "CANDIDATES: 5" in report_text
     assert "EVIDENCE: 5" in report_text
     assert "IDENTITY_STATE: 5" in report_text
+
+
+def test_headless_replay_records_frame_source_path_per_frame(tmp_path):
+    image_dir = tmp_path / "frames"
+    image_dir.mkdir()
+    for index in range(5):
+        _write_image(image_dir / f"{index:03d}.png", 80 + index)
+
+    report_path = puzzle.run_headless_replay(image_dir, output_root=tmp_path / "out")
+    trace_path = report_path.parent / "trace.jsonl"
+    replayed = [
+        event
+        for event in _events(trace_path)
+        if event["type"] == "FRAME_REPLAYED"
+    ]
+
+    assert [event["payload"]["source_frame_path"] for event in replayed] == [
+        str(image_dir / f"{index:03d}.png")
+        for index in range(5)
+    ]

@@ -388,3 +388,27 @@ def test_puzzle_console_renders_recent_trace_timeline(monkeypatch):
     assert "f3 CANDIDATES 4" in detail
     assert "f6 EVIDENCE 2" in detail
     assert "f6 IDENTITY_HOLD" in detail
+
+
+def test_puzzle_console_applies_frame_replayed_to_cctv_status(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    window.apply_trace_event(
+        {
+            "type": "FRAME_REPLAYED",
+            "session_id": "20260626_215000_001",
+            "frame_index": 12,
+            "payload": {
+                "source_kind": "image_sequence",
+                "source_frame_path": "C:/frames/012.png",
+            },
+        }
+    )
+
+    assert window.timeline_status.text() == "frame 12"
+    assert window.current_frame_sources[12] == "C:/frames/012.png"
+    assert "frame 12" in window.cctv_status_label.text()
+    assert "C:/frames/012.png" in window.cctv_status_label.text()

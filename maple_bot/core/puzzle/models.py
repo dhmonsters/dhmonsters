@@ -60,6 +60,7 @@ class FramePacket:
     board_frame: Any
     source_kind: str
     roi_snapshot: dict[str, object]
+    source_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -95,4 +96,3 @@ class IdentityDecision:
     reason: str
     hold_frames: int
     debug: dict[str, object]
-

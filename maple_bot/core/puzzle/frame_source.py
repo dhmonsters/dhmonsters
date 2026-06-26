@@ -32,6 +32,7 @@ class ImageSequenceFrameSource:
                 source_frame=frame,
                 frame_index=index,
                 timestamp_ms=index * self.frame_period_ms,
+                source_path=str(path),
             )
 
 
@@ -67,6 +68,7 @@ class VideoFrameSource:
                     source_frame=frame,
                     frame_index=index,
                     timestamp_ms=timestamp_ms,
+                    source_path=f"{self.video_path}#frame={index}",
                 )
                 index += 1
         finally:
@@ -98,7 +100,8 @@ class JsonlReplayFrameSource:
                 if frame_path is None:
                     continue
 
-                frame = _read_image(self._resolve_frame_path(frame_path))
+                resolved_frame_path = self._resolve_frame_path(frame_path)
+                frame = _read_image(resolved_frame_path)
                 frame_index = int(event.get("frame_index", emitted))
                 timestamp_ms = int(event.get("timestamp_ms", emitted * self.frame_period_ms))
                 yield _make_packet(
@@ -106,6 +109,7 @@ class JsonlReplayFrameSource:
                     source_frame=frame,
                     frame_index=frame_index,
                     timestamp_ms=timestamp_ms,
+                    source_path=str(resolved_frame_path),
                 )
                 emitted += 1
 
@@ -149,6 +153,7 @@ def _make_packet(
     source_frame: Any,
     frame_index: int,
     timestamp_ms: int,
+    source_path: str | None = None,
 ) -> FramePacket:
     return FramePacket(
         session_id=session.session_id,
@@ -161,6 +166,7 @@ def _make_packet(
             "detect": _roi_to_dict(session.detect_roi),
             "board": _roi_to_dict(session.board_roi),
         },
+        source_path=source_path,
     )
 
 

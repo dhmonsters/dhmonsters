@@ -47,6 +47,8 @@ def test_image_sequence_frame_source_sorts_images_and_crops_board(tmp_path):
     assert packets[0].timestamp_ms == 0
     assert packets[1].timestamp_ms == 33
     assert packets[0].roi_snapshot["board"]["w"] == 2
+    assert packets[0].source_path == str(image_dir / "001.png")
+    assert packets[1].source_path == str(image_dir / "002.png")
 
 
 def test_jsonl_replay_frame_source_reads_frame_paths(tmp_path):
@@ -70,4 +72,5 @@ def test_jsonl_replay_frame_source_reads_frame_paths(tmp_path):
     assert len(packets) == 1
     assert packets[0].frame_index == 5
     assert packets[0].timestamp_ms == 123
+    assert packets[0].source_path == str(image_path)
     assert int(packets[0].board_frame[0, 0, 0]) == 77
