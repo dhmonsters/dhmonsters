@@ -1,6 +1,7 @@
 # 투명도형 퍼즐 분석 콘솔의 PyQt6 화면 골격을 구성한다.
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from core_ui.theme import SPACING, build_qss
 
 ReplayRunner = Callable[[str, str], str | Path]
 PathPicker = Callable[[str], str | Path | None]
+TRACE_TIMELINE_LIMIT = 5
 
 
 class PuzzleConsoleWindow(QMainWindow):
@@ -36,6 +38,7 @@ class PuzzleConsoleWindow(QMainWindow):
         super().__init__()
         self._replay_runner = replay_runner
         self._path_picker = path_picker or self._pick_path
+        self.trace_timeline: list[str] = []
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
         self.resize(1280, 820)
@@ -202,8 +205,12 @@ class PuzzleConsoleWindow(QMainWindow):
         title.setObjectName("cardTitle")
         self.timeline_status = QLabel("frame 0")
         self.timeline_status.setObjectName("puzzleTimelineStatus")
+        self.timeline_detail = QLabel("-")
+        self.timeline_detail.setObjectName("puzzleTimelineDetail")
+        self.timeline_detail.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(self.timeline_status)
+        layout.addWidget(self.timeline_detail, 1)
         layout.addStretch(1)
         return self.timeline_panel
 
@@ -236,9 +243,13 @@ class PuzzleConsoleWindow(QMainWindow):
             self.set_session_id(session_id)
         if isinstance(frame_index, int):
             self.timeline_status.setText(f"frame {frame_index}")
+        self._append_trace_timeline(event_type, frame_index, payload)
 
         if event_type == "CANDIDATES":
             self._set_metric("후보", str(_candidate_count(payload)))
+            return
+
+        if event_type == "EVIDENCE":
             return
 
         if event_type == "IDENTITY_STATE":
@@ -253,6 +264,42 @@ class PuzzleConsoleWindow(QMainWindow):
                 self._set_metric("hold", str(hold_frames))
             reason = str(payload.get("reason") or "-")
             self._set_metric("reason", reason)
+
+    def load_trace_summary(self, trace_path: str | Path) -> int:
+        path = Path(trace_path)
+        if not path.exists():
+            self.append_log(f"trace 없음: {path}")
+            return 0
+
+        applied = 0
+        with path.open("r", encoding="utf-8") as fp:
+            for line in fp:
+                if not line.strip():
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    self.append_log(f"trace 줄 무시: {exc}")
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                self.apply_trace_event(event)
+                applied += 1
+        self.append_log(f"trace 반영: {applied} events")
+        return applied
+
+    def _append_trace_timeline(
+        self,
+        event_type: str,
+        frame_index: object,
+        payload: dict[object, object],
+    ) -> None:
+        item = _timeline_item(event_type, frame_index, payload)
+        if item is None:
+            return
+        self.trace_timeline.append(item)
+        self.trace_timeline = self.trace_timeline[-TRACE_TIMELINE_LIMIT:]
+        self.timeline_detail.setText(" | ".join(self.trace_timeline))
 
     def _set_metric(self, name: str, value: str) -> None:
         label = self.metric_labels.get(name)
@@ -284,6 +331,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.set_identity_state("REPLAY_DONE")
         self.cctv_status_label.setText(f"report: {report_path}")
         self.append_log(f"replay 완료: {report_path}")
+        self.load_trace_summary(Path(report_path).parent / "trace.jsonl")
 
     def _pick_path(self, input_kind: str) -> str | None:
         from PyQt6.QtWidgets import QFileDialog
@@ -325,3 +373,31 @@ def _candidate_count(payload: dict[object, object]) -> int:
     if isinstance(candidates, list):
         return len(candidates)
     return 0
+
+
+def _evidence_count(payload: dict[object, object]) -> int:
+    count = payload.get("count")
+    if isinstance(count, int):
+        return count
+    evidence = payload.get("evidence")
+    if isinstance(evidence, list):
+        return len(evidence)
+    return 0
+
+
+def _timeline_item(
+    event_type: str,
+    frame_index: object,
+    payload: dict[object, object],
+) -> str | None:
+    if not isinstance(frame_index, int):
+        return None
+    prefix = f"f{frame_index}"
+    if event_type == "CANDIDATES":
+        return f"{prefix} CANDIDATES {_candidate_count(payload)}"
+    if event_type == "EVIDENCE":
+        return f"{prefix} EVIDENCE {_evidence_count(payload)}"
+    if event_type == "IDENTITY_STATE":
+        state = str(payload.get("state") or "IDENTITY_STATE")
+        return f"{prefix} {state}"
+    return None

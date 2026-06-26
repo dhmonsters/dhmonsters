@@ -1,5 +1,6 @@
 # 투명도형 퍼즐 분석 콘솔의 주요 패널과 실행 진입점이 생성되는지 검증한다.
 import importlib
+import json
 import sys
 import types
 
@@ -296,3 +297,94 @@ def test_puzzle_console_applies_trace_events_to_analysis_metrics(monkeypatch):
     assert window.metric_labels["hold"].text() == "3"
     assert window.metric_labels["reason"].text() == "hold_ambiguous_candidate"
     assert window.timeline_status.text() == "frame 7"
+
+
+def test_puzzle_console_loads_trace_summary_after_replay(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    report_path = session_dir / "report.md"
+    trace_path = session_dir / "trace.jsonl"
+    report_path.write_text("# report\n", encoding="utf-8")
+    trace_events = [
+        {"type": "SESSION_START", "session_id": "20260626_214000_001", "frame_index": None, "payload": {}},
+        {"type": "CANDIDATES", "session_id": "20260626_214000_001", "frame_index": 2, "payload": {"count": 9}},
+        {
+            "type": "IDENTITY_STATE",
+            "session_id": "20260626_214000_001",
+            "frame_index": 2,
+            "payload": {
+                "state": "TRACK_CONFIDENT",
+                "confidence": 0.873,
+                "hold_frames": 0,
+                "reason": "candidate_continuity",
+            },
+        },
+        {"type": "SESSION_END", "session_id": "20260626_214000_001", "frame_index": None, "payload": {"frames": 3}},
+    ]
+    trace_path.write_text(
+        "".join(f"{json.dumps(event, ensure_ascii=False)}\n" for event in trace_events),
+        encoding="utf-8",
+    )
+
+    def pick_path(kind):
+        assert kind == "image_sequence"
+        return "C:/frames"
+
+    def run_replay(path, kind):
+        assert (path, kind) == ("C:/frames", "image_sequence")
+        return report_path
+
+    window = module.PuzzleConsoleWindow(replay_runner=run_replay, path_picker=pick_path)
+
+    window.open_image_sequence_button.clicked.emit()
+
+    assert window.session_label.text() == "session: 20260626_214000_001"
+    assert window.state_label.text() == "TRACK_CONFIDENT"
+    assert window.metric_labels["후보"].text() == "9"
+    assert window.metric_labels["confidence"].text() == "0.87"
+    assert window.metric_labels["hold"].text() == "0"
+    assert window.metric_labels["reason"].text() == "candidate_continuity"
+    assert "trace 반영: 4 events" in window.event_log.toPlainText()
+
+
+def test_puzzle_console_renders_recent_trace_timeline(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.timeline_detail.objectName() == "puzzleTimelineDetail"
+    for frame_index in range(6):
+        window.apply_trace_event(
+            {
+                "type": "CANDIDATES",
+                "session_id": "20260626_214000_001",
+                "frame_index": frame_index,
+                "payload": {"count": frame_index + 1},
+            }
+        )
+    window.apply_trace_event(
+        {
+            "type": "EVIDENCE",
+            "session_id": "20260626_214000_001",
+            "frame_index": 6,
+            "payload": {"count": 2},
+        }
+    )
+    window.apply_trace_event(
+        {
+            "type": "IDENTITY_STATE",
+            "session_id": "20260626_214000_001",
+            "frame_index": 6,
+            "payload": {"state": "IDENTITY_HOLD", "confidence": 0.2, "hold_frames": 4, "reason": "merge"},
+        }
+    )
+
+    detail = window.timeline_detail.text()
+    assert "f0 CANDIDATES" not in detail
+    assert "f2 CANDIDATES" not in detail
+    assert "f3 CANDIDATES 4" in detail
+    assert "f6 EVIDENCE 2" in detail
+    assert "f6 IDENTITY_HOLD" in detail
