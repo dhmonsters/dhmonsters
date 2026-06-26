@@ -56,6 +56,10 @@ class TransparentLiveFamilyPool:
         catalog_history: int = 160,
         phase_mht_window: int = 28,
         enable_phase_mht: bool = False,
+        raw_rank_families: int = 4,
+        raw_continuity_families: int = 8,
+        raw_max_candidates_per_frame: int = 24,
+        raw_max_step_px: float = 85.0,
     ):
         self.window = max(2, int(window))
         self.min_frames = max(2, int(min_frames))
@@ -66,6 +70,10 @@ class TransparentLiveFamilyPool:
         self.catalog_history = max(self.catalog_max_lag + 2, int(catalog_history))
         self.phase_mht_window = max(3, int(phase_mht_window))
         self.enable_phase_mht = bool(enable_phase_mht)
+        self.raw_rank_families = max(0, int(raw_rank_families))
+        self.raw_continuity_families = max(0, int(raw_continuity_families))
+        self.raw_max_candidates_per_frame = max(1, int(raw_max_candidates_per_frame))
+        self.raw_max_step_px = float(raw_max_step_px)
         self._phase_family_name = "phase_catalog_live_center_mild_state_mild"
         self._phase_mht_family_name = "phase_catalog_mht_center_mild_state_mild"
         self._mht_family_name = "bg_split_viterbi_center_mild_state_mild"
@@ -114,6 +122,8 @@ class TransparentLiveFamilyPool:
         self._phase_last: Point | None = None
         self._phase_velocity: Point = (0.0, 0.0)
         self._start_point: Point | None = None
+        self._raw_last_points: dict[str, Point] = {}
+        self._raw_offset_histories: dict[str, list[Point]] = {}
 
     def update(
         self,
@@ -142,6 +152,7 @@ class TransparentLiveFamilyPool:
         )
         self._prune()
         self._prune_catalog()
+        raw_points = self._raw_candidate_family_points(frame, normalized)
 
         usable_frames = [
             idx for idx in self._frames
@@ -154,6 +165,7 @@ class TransparentLiveFamilyPool:
             })
 
         points = {}
+        points.update(raw_points)
         for config in self._configs:
             path = self._viterbi_path(usable_frames, config)
             if path:
@@ -198,6 +210,131 @@ class TransparentLiveFamilyPool:
             "ready": bool(points),
             "families": sorted(points),
         })
+
+    def _raw_candidate_family_points(
+        self,
+        frame: int,
+        candidates: Sequence[Candidate],
+    ) -> dict[str, Point]:
+        ranked = sorted(
+            list(candidates),
+            key=lambda candidate: float(candidate[2]),
+            reverse=True,
+        )[: self.raw_max_candidates_per_frame]
+        if not ranked:
+            return {}
+
+        points = [
+            (float(candidate[0]), float(candidate[1]))
+            for candidate in ranked
+        ]
+        out: dict[str, Point] = {}
+        for rank, point in enumerate(points[: self.raw_rank_families]):
+            out[f"raw_candidate_rank{rank}_center_mild_state_mild"] = point
+
+        if not self._raw_last_points:
+            for index, candidate in enumerate(ranked[: self.raw_continuity_families]):
+                point = (float(candidate[0]), float(candidate[1]))
+                family = f"raw_candidate_cont{index}_center_mild_state_mild"
+                self._raw_last_points[family] = point
+                out[family] = point
+                offset_family = self._raw_box_offset_family_name(family)
+                self._raw_offset_histories[offset_family] = [point]
+                out[offset_family] = point
+            return out
+
+        used: set[int] = set()
+        next_last = dict(self._raw_last_points)
+        next_histories = {
+            family: list(history[-2:])
+            for family, history in self._raw_offset_histories.items()
+        }
+        for family in sorted(self._raw_last_points):
+            previous = self._raw_last_points[family]
+            best_index = None
+            best_error = float("inf")
+            for index, point in enumerate(points):
+                if index in used:
+                    continue
+                error = math.hypot(point[0] - previous[0], point[1] - previous[1])
+                if error < best_error:
+                    best_index = index
+                    best_error = error
+            if best_index is None or best_error > self.raw_max_step_px:
+                continue
+            used.add(best_index)
+            point = points[best_index]
+            candidate = ranked[best_index]
+            next_last[family] = point
+            out[family] = point
+            offset_family = self._raw_box_offset_family_name(family)
+            offset_point = self._raw_box_offset_point(
+                int(frame),
+                candidate,
+                point,
+                next_histories.get(offset_family, []),
+            )
+            history = (next_histories.get(offset_family, []) + [offset_point])[-2:]
+            next_histories[offset_family] = history
+            out[offset_family] = offset_point
+
+        if len(next_last) < self.raw_continuity_families:
+            for candidate in ranked:
+                point = (float(candidate[0]), float(candidate[1]))
+                if any(math.hypot(point[0] - existing[0], point[1] - existing[1]) <= 1e-6 for existing in next_last.values()):
+                    continue
+                family = f"raw_candidate_cont{len(next_last)}_center_mild_state_mild"
+                next_last[family] = point
+                out[family] = point
+                offset_family = self._raw_box_offset_family_name(family)
+                next_histories[offset_family] = [point]
+                out[offset_family] = point
+                if len(next_last) >= self.raw_continuity_families:
+                    break
+
+        self._raw_last_points = next_last
+        self._raw_offset_histories = next_histories
+        return out
+
+    @staticmethod
+    def _raw_box_offset_family_name(family: str) -> str:
+        return str(family).replace(
+            "_center_mild_state_mild",
+            "_box_offset_state_mild",
+        )
+
+    def _raw_box_offset_point(
+        self,
+        frame: int,
+        candidate: Candidate,
+        point: Point,
+        history: Sequence[Point],
+    ) -> Point:
+        if not self._is_merge_like_candidate(int(frame), candidate):
+            return (float(point[0]), float(point[1]))
+        prediction = self._raw_offset_prediction(history, point)
+        return self._clamp_point_to_candidate_box(candidate, prediction)
+
+    @staticmethod
+    def _raw_offset_prediction(history: Sequence[Point], fallback: Point) -> Point:
+        if len(history) < 2:
+            return (float(fallback[0]), float(fallback[1]))
+        prev = history[-1]
+        before = history[-2]
+        return (
+            float(prev[0]) + (float(prev[0]) - float(before[0])),
+            float(prev[1]) + (float(prev[1]) - float(before[1])),
+        )
+
+    @staticmethod
+    def _clamp_point_to_candidate_box(candidate: Candidate, point: Point) -> Point:
+        cx, cy, _score, width, height = candidate
+        half_w = float(width) / 2.0
+        half_h = float(height) / 2.0
+        return (
+            min(max(float(point[0]), float(cx) - half_w), float(cx) + half_w),
+            min(max(float(point[1]), float(cy) - half_h), float(cy) + half_h),
+        )
 
     def _prune(self) -> None:
         while len(self._frames) > self.window:

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 Point = tuple[float, float]
 Candidate = tuple[float, float, float, float, float]
 KNOWN_SOURCES = (
+    "raw_candidate",
     "balanced_viterbi",
     "bg_split_viterbi",
     "strict_transition_viterbi",
@@ -139,6 +140,8 @@ def augment_with_local_box(
     paths: Mapping[str, Mapping[int, Point]],
     candidate_sets: Mapping[int, Sequence[Candidate]],
     frames: Sequence[int],
+    *,
+    max_local_box_families: int | None = None,
 ) -> dict[str, dict[int, Point]]:
     import _local_box_family_score as local_box
 
@@ -146,11 +149,14 @@ def augment_with_local_box(
         str(family): dict(path)
         for family, path in paths.items()
     }
+    local_box_families = list(copied)
+    if max_local_box_families is not None:
+        local_box_families = local_box_families[: max(0, int(max_local_box_families))]
     return local_box.augment_local_box_paths(
         copied,
         candidate_sets,
         frames,
-        local_box_families=list(copied),
+        local_box_families=local_box_families,
     )
 
 
@@ -167,26 +173,44 @@ def best_by_source_group(
     paths: Mapping[str, Mapping[int, Point]],
     gt_by_frame: Mapping[int, Point],
     frames: Sequence[int],
+    *,
+    min_coverage: float = 0.9,
 ) -> dict[str, dict[str, object]]:
+    def rank(row: Mapping[str, object]) -> tuple[bool, float, float]:
+        return (
+            bool(row.get("success", False)),
+            float(row.get("coverage", 0.0) or 0.0),
+            -float(row.get("mean", float("inf"))),
+        )
+
     best: dict[str, dict[str, object]] = {}
+    total = max(1, len(frames))
     for family, path in paths.items():
         score = score_path(path, gt_by_frame, frames)
         if not score.get("n"):
             continue
         group = source_group_for_family(str(family))
+        coverage = float(score["n"]) / float(total)
         row = {
             "family": str(family),
             "mean": float(score["mean"]),
             "max": float(score["max"]),
             "n": int(score["n"]),
-            "success": bool(score["success"]),
+            "coverage": coverage,
+            "success": bool(score["success"]) and coverage >= float(min_coverage),
         }
-        if group not in best or row["mean"] < float(best[group]["mean"]):
+        if group not in best or rank(row) > rank(best[group]):
             best[group] = row
     return best
 
 
-def score_clip(name: str, *, root: Path = ROOT) -> dict[str, object]:
+def score_clip(
+    name: str,
+    *,
+    root: Path = ROOT,
+    include_local_box: bool = True,
+    max_local_box_families: int | None = None,
+) -> dict[str, object]:
     from _selector_shadow_backfill import _load_jsonl
 
     rows = _load_jsonl(root / "_record_debug" / f"{name}.jsonl")
@@ -194,7 +218,15 @@ def score_clip(name: str, *, root: Path = ROOT) -> dict[str, object]:
     frames = [frame for frame in sorted(gt) if frame < len(rows)]
     paths = build_record_source_paths(rows, include_live=True)
     candidate_sets = local_box_candidate_sets_from_rows(rows)
-    augmented = augment_with_local_box(paths, candidate_sets, range(len(rows)))
+    if include_local_box:
+        augmented = augment_with_local_box(
+            paths,
+            candidate_sets,
+            range(len(rows)),
+            max_local_box_families=max_local_box_families,
+        )
+    else:
+        augmented = paths
     return {
         "name": name,
         "gt_frames": len(frames),
@@ -203,14 +235,28 @@ def score_clip(name: str, *, root: Path = ROOT) -> dict[str, object]:
     }
 
 
-def score_all(*, root: Path = ROOT, names: Sequence[str] | None = None) -> list[dict[str, object]]:
+def score_all(
+    *,
+    root: Path = ROOT,
+    names: Sequence[str] | None = None,
+    include_local_box: bool = True,
+    max_local_box_families: int | None = None,
+) -> list[dict[str, object]]:
     if names is None:
         names = [
             path.name
             for path in sorted((root / "_gt_frames").iterdir())
             if path.is_dir()
         ]
-    return [score_clip(str(name), root=root) for name in names]
+    return [
+        score_clip(
+            str(name),
+            root=root,
+            include_local_box=include_local_box,
+            max_local_box_families=max_local_box_families,
+        )
+        for name in names
+    ]
 
 
 def markdown_report(results: Sequence[Mapping[str, object]]) -> str:

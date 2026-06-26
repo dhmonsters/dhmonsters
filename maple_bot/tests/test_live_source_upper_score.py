@@ -2,6 +2,8 @@
 import unittest
 
 from _live_source_upper_score import (
+    augment_with_local_box,
+    best_by_source_group,
     build_record_source_paths,
     local_box_candidate_sets_from_rows,
     source_group_for_family,
@@ -52,6 +54,60 @@ class LiveSourceUpperScoreTests(unittest.TestCase):
             source_group_for_family("phase_catalog_center_mild_state_mild_lb_smooth"),
             "phase_catalog",
         )
+
+    def test_source_group_for_family_groups_raw_candidate_variants(self):
+        self.assertEqual(
+            source_group_for_family("raw_candidate_rank0_center_mild_state_mild"),
+            "raw_candidate",
+        )
+        self.assertEqual(
+            source_group_for_family("raw_candidate_cont0_box_offset_state_mild_lb_free"),
+            "raw_candidate",
+        )
+        self.assertEqual(
+            source_group_for_family("raw_candidate_cont0_center_mild_state_mild_lb_smooth"),
+            "raw_candidate",
+        )
+
+    def test_best_by_source_group_requires_minimum_coverage_for_success(self):
+        paths = {
+            "raw_candidate_cont0_center_mild_state_mild": {
+                0: (0.0, 0.0),
+            },
+            "raw_candidate_cont1_center_mild_state_mild": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+            },
+        }
+        gt = {
+            0: (0.0, 0.0),
+            1: (10.0, 0.0),
+        }
+
+        best = best_by_source_group(paths, gt, [0, 1], min_coverage=0.9)
+
+        self.assertTrue(best["raw_candidate"]["success"])
+        self.assertEqual(best["raw_candidate"]["family"], "raw_candidate_cont1_center_mild_state_mild")
+        self.assertAlmostEqual(best["raw_candidate"]["coverage"], 1.0)
+
+    def test_augment_with_local_box_can_limit_augmented_family_count(self):
+        paths = {
+            "a": {0: (0.0, 0.0)},
+            "b": {0: (10.0, 0.0)},
+        }
+        candidate_sets = {
+            0: [(0.0, 0.0, 20.0, 20.0, 0.9)],
+        }
+
+        augmented = augment_with_local_box(
+            paths,
+            candidate_sets,
+            [0],
+            max_local_box_families=1,
+        )
+
+        self.assertIn("a_lb_smooth", augmented)
+        self.assertNotIn("b_lb_smooth", augmented)
 
 
 if __name__ == "__main__":
