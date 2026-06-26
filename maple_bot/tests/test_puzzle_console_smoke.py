@@ -79,6 +79,12 @@ class _Widget:
     def setChecked(self, value: bool) -> None:
         self._checked = value
 
+    def setPixmap(self, pixmap) -> None:
+        self._pixmap = pixmap
+
+    def pixmap(self):
+        return getattr(self, "_pixmap", None)
+
     def append(self, text: str) -> None:
         self._text = f"{self._text}\n{text}" if self._text else text
 
@@ -143,6 +149,14 @@ class _Application:
         return 0
 
 
+class _Pixmap:
+    def __init__(self, path: str = "") -> None:
+        self.path = path
+
+    def isNull(self) -> bool:
+        return not bool(self.path)
+
+
 def _install_fake_qt(monkeypatch) -> None:
     qtwidgets = types.ModuleType("PyQt6.QtWidgets")
     qtwidgets.QApplication = _Application
@@ -167,12 +181,17 @@ def _install_fake_qt(monkeypatch) -> None:
     qtcore = types.ModuleType("PyQt6.QtCore")
     qtcore.Qt = types.SimpleNamespace(Orientation=_Orientation, AlignmentFlag=_AlignmentFlag)
 
+    qtgui = types.ModuleType("PyQt6.QtGui")
+    qtgui.QPixmap = _Pixmap
+
     pyqt = types.ModuleType("PyQt6")
     pyqt.QtWidgets = qtwidgets
     pyqt.QtCore = qtcore
+    pyqt.QtGui = qtgui
     monkeypatch.setitem(sys.modules, "PyQt6", pyqt)
     monkeypatch.setitem(sys.modules, "PyQt6.QtWidgets", qtwidgets)
     monkeypatch.setitem(sys.modules, "PyQt6.QtCore", qtcore)
+    monkeypatch.setitem(sys.modules, "PyQt6.QtGui", qtgui)
     sys.modules.pop("ui.puzzle_console", None)
     sys.modules.pop("puzzle", None)
 
@@ -412,3 +431,36 @@ def test_puzzle_console_applies_frame_replayed_to_cctv_status(monkeypatch):
     assert window.current_frame_sources[12] == "C:/frames/012.png"
     assert "frame 12" in window.cctv_status_label.text()
     assert "C:/frames/012.png" in window.cctv_status_label.text()
+
+
+def test_puzzle_console_exposes_cctv_frame_preview(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.cctv_frame_label.objectName() == "puzzleCctvFramePreview"
+
+
+def test_puzzle_console_loads_existing_frame_preview(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    frame_path = tmp_path / "frame_012.png"
+    frame_path.write_bytes(b"fake image")
+
+    window = module.PuzzleConsoleWindow()
+
+    window.apply_trace_event(
+        {
+            "type": "FRAME_REPLAYED",
+            "session_id": "20260626_220000_001",
+            "frame_index": 12,
+            "payload": {
+                "source_kind": "image_sequence",
+                "source_frame_path": str(frame_path),
+            },
+        }
+    )
+
+    assert window.current_cctv_source_path == str(frame_path)
+    assert window.cctv_frame_label.pixmap().path == str(frame_path)

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -40,6 +41,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._path_picker = path_picker or self._pick_path
         self.trace_timeline: list[str] = []
         self.current_frame_sources: dict[int, str] = {}
+        self.current_cctv_source_path: str | None = None
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
         self.resize(1280, 820)
@@ -144,11 +146,16 @@ class PuzzleConsoleWindow(QMainWindow):
 
         title = QLabel("CCTV")
         title.setObjectName("cardTitle")
+        self.cctv_frame_label = QLabel("preview 없음")
+        self.cctv_frame_label.setObjectName("puzzleCctvFramePreview")
+        self.cctv_frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cctv_frame_label.setMinimumHeight(360)
         self.cctv_status_label = QLabel("입력 대기")
         self.cctv_status_label.setObjectName("puzzleCctvStatus")
         self.cctv_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
-        layout.addWidget(self.cctv_status_label, 1)
+        layout.addWidget(self.cctv_frame_label, 1)
+        layout.addWidget(self.cctv_status_label, 0)
         return frame
 
     def _build_analysis_panel(self) -> QFrame:
@@ -312,6 +319,18 @@ class PuzzleConsoleWindow(QMainWindow):
         source = str(payload.get("source_frame_path") or payload.get("source_kind") or "-")
         self.current_frame_sources[frame_index] = source
         self.cctv_status_label.setText(f"frame {frame_index}: {source}")
+        self._load_cctv_frame_preview(source)
+
+    def _load_cctv_frame_preview(self, source: str) -> None:
+        path = Path(source)
+        if not path.is_file():
+            return
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            return
+        self.current_cctv_source_path = str(path)
+        self.cctv_frame_label.setPixmap(pixmap)
+        self.cctv_frame_label.setText(path.name)
 
     def _set_metric(self, name: str, value: str) -> None:
         label = self.metric_labels.get(name)
