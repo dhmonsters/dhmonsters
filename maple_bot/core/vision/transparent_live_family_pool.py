@@ -54,6 +54,8 @@ class TransparentLiveFamilyPool:
         catalog_min_lag: int = 20,
         catalog_max_lag: int = 80,
         catalog_history: int = 160,
+        phase_mht_window: int = 28,
+        enable_phase_mht: bool = False,
     ):
         self.window = max(2, int(window))
         self.min_frames = max(2, int(min_frames))
@@ -62,7 +64,10 @@ class TransparentLiveFamilyPool:
         self.catalog_min_lag = max(2, int(catalog_min_lag))
         self.catalog_max_lag = max(self.catalog_min_lag, int(catalog_max_lag))
         self.catalog_history = max(self.catalog_max_lag + 2, int(catalog_history))
+        self.phase_mht_window = max(3, int(phase_mht_window))
+        self.enable_phase_mht = bool(enable_phase_mht)
         self._phase_family_name = "phase_catalog_live_center_mild_state_mild"
+        self._phase_mht_family_name = "phase_catalog_mht_center_mild_state_mild"
         self._mht_family_name = "bg_split_viterbi_center_mild_state_mild"
         self._mht_config = SolverConfig(
             keep=64,
@@ -70,6 +75,15 @@ class TransparentLiveFamilyPool:
             gate=140.0,
             grid_size=5,
             shrink=0.76,
+        )
+        self._phase_mht_config = SolverConfig(
+            keep=48,
+            branch=6,
+            gate=140.0,
+            grid_size=3,
+            shrink=0.76,
+            score_weight=0.05,
+            bg_penalty=36.0,
         )
         self._configs = (
             _FamilyConfig(
@@ -175,6 +189,10 @@ class TransparentLiveFamilyPool:
         phase_point = self._phase_catalog_live_point(frame)
         if phase_point is not None:
             points[self._phase_family_name] = phase_point
+        if self.enable_phase_mht:
+            phase_mht_path = self._phase_catalog_mht_path(frame)
+            if frame in phase_mht_path:
+                points[self._phase_mht_family_name] = phase_mht_path[frame]
         return LiveFamilyDecision(points, {
             "frames": len(usable_frames),
             "ready": bool(points),
@@ -318,6 +336,66 @@ class TransparentLiveFamilyPool:
             )
         self._phase_last = cur
         return cur
+
+    def _phase_catalog_mht_path(self, frame: int) -> dict[int, Point]:
+        if self._start_point is None:
+            return {}
+        if self._catalog_period is None:
+            self._catalog_period = self._estimate_catalog_period(frame)
+        if self._catalog_period is None:
+            return {}
+
+        frames = [
+            int(idx)
+            for idx in self._catalog_frames
+            if idx <= int(frame) and self._catalog_candidate_sets.get(int(idx))
+        ]
+        frames = frames[-self.phase_mht_window:]
+        if len(frames) < 2:
+            return {}
+        anchor_frame = int(frames[0]) - 1
+        mht_frames = [MhtFrame(anchor_frame, [], anchor=self._start_point)]
+        for idx in frames:
+            mht_frames.append(MhtFrame(
+                int(idx),
+                self._phase_mht_candidates_for_frame(int(idx)),
+            ))
+        return solve_mht(mht_frames, config=self._phase_mht_config)
+
+    def _phase_mht_candidates_for_frame(self, frame: int) -> list[MhtCandidate]:
+        candidates = self._catalog_candidate_sets.get(int(frame), [])
+        if not candidates:
+            return []
+        if self._catalog_period is None:
+            return [
+                MhtCandidate(c[0], c[1], c[2], c[3], c[4])
+                for c in candidates
+            ]
+
+        lag = self._choose_catalog_lag(frame, self._catalog_period)
+        expected = self._catalog_candidate_sets.get(int(frame) - int(lag), [])
+        active = []
+        confirmed = []
+        for candidate in candidates:
+            if self._candidate_matches_background(candidate, expected):
+                confirmed.append(candidate)
+            else:
+                active.append(candidate)
+        source = active if active else confirmed
+        out = []
+        for candidate in source:
+            bg_center = None
+            if candidate in confirmed:
+                bg_center = (float(candidate[0]), float(candidate[1]))
+            out.append(MhtCandidate(
+                cx=float(candidate[0]),
+                cy=float(candidate[1]),
+                score=float(candidate[2]),
+                w=float(candidate[3]),
+                h=float(candidate[4]),
+                bg_center=bg_center,
+            ))
+        return out
 
     def _estimate_catalog_period(self, frame: int) -> int | None:
         hi = min(int(frame), int(self.catalog_max_lag))

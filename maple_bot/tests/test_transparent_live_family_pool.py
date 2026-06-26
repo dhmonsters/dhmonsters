@@ -227,6 +227,41 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
             decision.points["phase_catalog_live_center_mild_state_mild"],
             (40.0, 0.0),
         )
+        self.assertNotIn("phase_catalog_mht_center_mild_state_mild", decision.points)
+
+    def test_phase_catalog_mht_family_removes_periodic_background_candidate(self):
+        pool = TransparentLiveFamilyPool(
+            window=6,
+            min_frames=2,
+            catalog_min_lag=3,
+            catalog_max_lag=5,
+            enable_phase_mht=True,
+        )
+        gray = np.zeros((80, 140), dtype=np.float32)
+
+        pool.update(
+            0,
+            candidates=[(50.0, 0.0, 0.9, 20.0, 20.0)],
+            gray_frame=gray,
+            white_anchor=(100.0, 0.0),
+        )
+        pool.update(1, candidates=[(60.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        pool.update(2, candidates=[(70.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        pool.update(3, candidates=[(80.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        pool.update(4, candidates=[(50.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        decision = pool.update(
+            5,
+            candidates=[
+                (60.0, 0.0, 0.95, 20.0, 20.0),
+                (40.0, 0.0, 0.80, 20.0, 20.0),
+            ],
+            gray_frame=gray,
+        )
+
+        self.assertEqual(
+            decision.points["phase_catalog_mht_center_mild_state_mild"],
+            (40.0, 0.0),
+        )
 
     def test_reset_clears_history(self):
         pool = TransparentLiveFamilyPool(window=3, min_frames=2)
