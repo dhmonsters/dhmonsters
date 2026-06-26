@@ -115,6 +115,38 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["point"], [11, 11])
         self.assertEqual(result["rescue_point"], [11.25, 10.75])
 
+    def test_shadow_rescue_is_allowed_only_for_bg_split_family(self):
+        panel_runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
+        split_runtime = FakeRuntime(selected_family="bg_split_viterbi_center_mild_state_mild")
+        panel_shadow = TransparentSelectorShadow(
+            panel_runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+        split_shadow = TransparentSelectorShadow(
+            split_runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        anchors = {
+            "panel_default_center_mild_state_mild": (10.0, 10.0),
+            "bg_split_viterbi_center_mild_state_mild": (12.0, 10.0),
+        }
+        candidates = [(10.0, 10.0, 0.9, 20.0, 20.0)]
+
+        panel_result = panel_shadow.update(0, candidates=candidates, anchors=anchors)
+        split_result = split_shadow.update(0, candidates=candidates, anchors=anchors)
+
+        self.assertFalse(panel_result["rescue_allowed"])
+        self.assertTrue(split_result["rescue_allowed"])
+
     def test_shadow_prunes_old_frames_to_window(self):
         runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
         shadow = TransparentSelectorShadow(

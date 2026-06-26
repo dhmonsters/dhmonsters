@@ -55,6 +55,10 @@ def _serial_float_point(point: Point | None) -> list[float] | None:
     return [float(point[0]), float(point[1])]
 
 
+def _rescue_allowed_for_family(family: str) -> bool:
+    return str(family).lower().startswith("bg_split_viterbi")
+
+
 class TransparentSelectorShadow:
     def __init__(
         self,
@@ -152,6 +156,7 @@ class TransparentSelectorShadow:
             "family": family,
             "point": _serial_point(point),
             "rescue_point": _serial_float_point(point),
+            "rescue_allowed": _rescue_allowed_for_family(family),
             "rows": len(rows),
             "paths": len(paths),
             "frames": len(frames),

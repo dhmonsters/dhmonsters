@@ -886,6 +886,7 @@ class _MacroThread(threading.Thread):
                         # 트랙 급감 진단 — 잠금 후 트랙이 5개 미만이면 후보 수와 함께 기록
                         # (후보 많은데 트랙 적으면 _bt 버그, 후보도 적으면 검출 공백)
                         if (_selector_shadow_rec and _selector_shadow_rec.get("available")
+                                and _selector_shadow_rec.get("rescue_allowed")
                                 and _selector_shadow_rec.get("rescue_point") is not None
                                 and _health_rescue is None):
                             try:
