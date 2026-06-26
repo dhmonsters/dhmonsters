@@ -26,7 +26,11 @@ def _frame(row: Mapping[str, object]) -> int:
 
 
 def _is_bg_split(family: str) -> bool:
-    return family.lower().startswith("bg_split_viterbi")
+    name = family.lower()
+    return (
+        name.startswith("bg_split_viterbi")
+        or name.startswith("merge_context")
+    )
 
 
 def _first_frame(events: Sequence[Mapping[str, object]], *, kind: str) -> int | None:

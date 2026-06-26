@@ -155,6 +155,36 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertTrue(split_allowed["rescue_allowed"])
         self.assertEqual(split_allowed["merge_context"]["frames"], 1)
 
+    def test_shadow_rescue_allows_merge_context_family_only_when_merge_gate_is_open(self):
+        runtime = FakeRuntime(selected_family="merge_context_center_mild_state_mild")
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+        anchors = {
+            "merge_context_center_mild_state_mild": (12.0, 10.0),
+        }
+
+        blocked = shadow.update(
+            0,
+            candidates=[(12.0, 10.0, 0.8, 70.0, 50.0)],
+            anchors=anchors,
+        )
+        allowed = shadow.update(
+            1,
+            candidates=[(12.0, 10.0, 0.8, 180.0, 120.0)],
+            anchors=anchors,
+        )
+
+        self.assertFalse(blocked["rescue_allowed"])
+        self.assertEqual(blocked["merge_context"]["frames"], 0)
+        self.assertTrue(allowed["rescue_allowed"])
+        self.assertEqual(allowed["merge_context"]["frames"], 1)
+
     def test_default_merge_gate_uses_wjsonl_sized_thresholds(self):
         runtime = FakeRuntime(selected_family="bg_split_viterbi_center_mild_state_mild")
         shadow = TransparentSelectorShadow(

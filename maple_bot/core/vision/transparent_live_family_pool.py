@@ -125,7 +125,9 @@ class TransparentLiveFamilyPool:
         mht_path = self._hidden_mht_path(usable_frames)
         latest_frame = usable_frames[-1]
         if latest_frame in mht_path:
-            points[self._mht_family_name] = mht_path[latest_frame]
+            point = mht_path[latest_frame]
+            points[self._mht_family_name] = point
+            points["merge_context_center_mild_state_mild"] = point
         return LiveFamilyDecision(points, {
             "frames": len(usable_frames),
             "ready": bool(points),

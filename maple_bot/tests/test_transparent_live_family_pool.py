@@ -129,6 +129,28 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
         self.assertEqual(merged.points[family], (40.0, 0.0))
         self.assertEqual(split.points[family], (60.0, 0.0))
 
+    def test_merge_context_family_aliases_bg_split_path_for_selector_source_feature(self):
+        pool = TransparentLiveFamilyPool(window=5, min_frames=2)
+        gray = np.zeros((80, 120), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(
+            1,
+            candidates=[(20.0, 0.0, 0.9, 20.0, 20.0)],
+            gray_frame=gray,
+        )
+        decision = pool.update(
+            2,
+            candidates=[(10.0, 0.0, 0.95, 100.0, 50.0)],
+            gray_frame=gray,
+        )
+
+        split_family = "bg_split_viterbi_center_mild_state_mild"
+        merge_family = "merge_context_center_mild_state_mild"
+        self.assertIn(split_family, decision.points)
+        self.assertIn(merge_family, decision.points)
+        self.assertEqual(decision.points[merge_family], decision.points[split_family])
+
     def test_reset_clears_history(self):
         pool = TransparentLiveFamilyPool(window=3, min_frames=2)
         gray = np.zeros((20, 20), dtype=np.float32)

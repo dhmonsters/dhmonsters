@@ -56,8 +56,12 @@ def _serial_float_point(point: Point | None) -> list[float] | None:
 
 
 def _rescue_allowed_for_family(family: str, merge_context: Mapping[str, object]) -> bool:
+    name = str(family).lower()
     return (
-        str(family).lower().startswith("bg_split_viterbi")
+        (
+            name.startswith("bg_split_viterbi")
+            or name.startswith("merge_context")
+        )
         and int(merge_context.get("frames", 0) or 0) > 0
     )
 

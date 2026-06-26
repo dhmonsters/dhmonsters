@@ -92,7 +92,7 @@ def summarize_gate(
         max_size = max(max_size, merge_context["max_size"])
         max_ratio = max(max_ratio, merge_context["max_ratio"])
 
-        bg_split = family.lower().startswith("bg_split_viterbi")
+        bg_split = _is_rescue_family(family)
         if bg_split:
             bg_split_frames += 1
             bg_split_max_size = max(bg_split_max_size, merge_context["max_size"])
@@ -238,7 +238,7 @@ def _frame(row: Mapping[str, object], fallback: int) -> int:
 
 def _allowed_for_gate(record: Mapping[str, object], gate: GateSpec) -> bool:
     family = str(record.get("family", ""))
-    if not family.lower().startswith("bg_split_viterbi"):
+    if not _is_rescue_family(family):
         return False
     if record.get("rescue_point") is None:
         return False
@@ -246,6 +246,14 @@ def _allowed_for_gate(record: Mapping[str, object], gate: GateSpec) -> bool:
     return (
         merge_context["max_size"] >= float(gate.min_size)
         or merge_context["max_ratio"] >= float(gate.size_ratio)
+    )
+
+
+def _is_rescue_family(family: str) -> bool:
+    name = str(family).lower()
+    return (
+        name.startswith("bg_split_viterbi")
+        or name.startswith("merge_context")
     )
 
 

@@ -55,6 +55,27 @@ class SelectorShadowMergeGateSweepTests(unittest.TestCase):
         self.assertEqual(strict["bg_split_max_size"], 180.0)
         self.assertEqual(strict["bg_split_max_ratio"], 1.2)
 
+    def test_summarize_gate_treats_merge_context_family_as_rescue_family(self):
+        rows = [
+            {
+                "i": 10,
+                "selector_shadow": {
+                    "family": "merge_context_center_mild_state_mild",
+                    "rescue_point": [1.0, 2.0],
+                    "merge_context": {
+                        "max_size": 180.0,
+                        "max_ratio": 1.20,
+                    },
+                },
+            },
+        ]
+
+        summary = summarize_gate("clip.jsonl", rows, GateSpec("loose", 175.0, 1.30))
+
+        self.assertEqual(summary["bg_split_frames"], 1)
+        self.assertEqual(summary["rescue_allowed_frames"], 1)
+        self.assertEqual(summary["first_rescue_allowed_frame"], 10)
+
     def test_sweep_backfilled_rows_returns_one_summary_per_gate(self):
         rows = [
             {

@@ -121,6 +121,30 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
         self.assertEqual(summary["first_rescue_allowed_frame"], 20)
         self.assertEqual(summary["events"][0]["merge_context"]["frames"], 0)
 
+    def test_summarize_counts_merge_context_family_as_split_like_event(self):
+        rows = [
+            {
+                "i": 10,
+                "selector_shadow": {
+                    "family": "merge_context_center_mild_state_mild",
+                    "point": [4, 5],
+                    "rescue_point": [4.0, 5.0],
+                    "rescue_allowed": True,
+                    "merge_context": {
+                        "frames": 1,
+                        "max_size": 180.0,
+                        "max_ratio": 1.31,
+                    },
+                },
+            },
+        ]
+
+        summary = summarize_backfilled_rows("clip.jsonl", rows)
+
+        self.assertEqual(summary["bg_split_frames"], 1)
+        self.assertEqual(summary["rescue_allowed_frames"], 1)
+        self.assertEqual(summary["first_bg_split_frame"], 10)
+
     def test_write_markdown_report_includes_merge_context_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "report.md"
