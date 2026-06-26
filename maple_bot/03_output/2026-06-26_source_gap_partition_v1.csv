@@ -1,0 +1,17 @@
+name,bucket,gt_frames,source_family,source_mean,source_success,raw_center_mean,raw_center_success,raw_box_mean,raw_box_success
+000_0614_111417,offset_or_merge_center_reconstruction,12,phase_catalog,52.3,False,50.9,False,1.8,True
+000_0614_114417,source_upper_solved,16,balanced_viterbi,12.9,True,10.0,True,0.0,True
+000_0614_121417,source_upper_solved,21,balanced_viterbi,32.7,True,16.0,True,1.9,True
+000_0614_124417,raw_center_family_missing,41,panel_default,55.5,False,35.3,True,2.6,True
+000_0614_185318,source_upper_solved,15,balanced_viterbi,39.3,True,37.4,True,0.3,True
+000_0614_204718,raw_center_family_missing,16,panel_default,86.7,False,27.8,True,0.5,True
+000_0614_220518,source_upper_solved,25,strict_transition_viterbi,24.8,True,13.0,True,0.5,True
+000_0614_233218,source_upper_solved,11,balanced_viterbi,39.3,True,34.6,True,0.0,True
+000_0615_000258,raw_center_family_missing,17,panel_default,88.2,False,35.5,True,1.7,True
+000_0615_015619,raw_center_family_missing,17,strict_transition_viterbi,87.3,False,10.1,True,0.7,True
+000_0615_022618,raw_center_family_missing,15,balanced_viterbi,40.6,False,13.7,True,0.0,True
+000_0615_025624,source_upper_solved,11,phase_catalog,12.4,True,20.2,True,0.0,True
+000_0615_035137,source_upper_solved,16,balanced_viterbi,19.3,True,11.7,True,0.0,True
+000_0615_042024,source_upper_solved,10,phase_catalog,12.1,True,12.1,True,0.0,True
+000_0615_044401,raw_center_family_missing,21,bg_split_viterbi,72.7,False,18.1,True,0.7,True
+000_0615_062325,source_upper_solved,18,balanced_viterbi,35.7,True,33.3,True,2.8,True
