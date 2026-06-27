@@ -4,7 +4,7 @@ import json
 
 import numpy as np
 
-from core.puzzle.live_recording import LiveRecordingRuntime
+from core.puzzle.live_recording import LiveRecordingRuntime, _select_main_monitor
 
 
 def _frames(count: int):
@@ -106,3 +106,22 @@ def test_live_recording_failure_closes_recording_and_writes_report(tmp_path):
     assert "LIVE_RECORDING_FAILED" in event_types
     assert "RECORDING_STOPPED" in event_types
     assert events[-1]["type"] == "SESSION_END"
+
+
+def test_select_main_monitor_ignores_virtual_all_monitor():
+    monitors = [
+        {"left": -1280, "top": 0, "width": 3200, "height": 1080},
+        {"left": -1280, "top": 0, "width": 1280, "height": 1024},
+        {"left": 0, "top": 0, "width": 1920, "height": 1080},
+    ]
+
+    assert _select_main_monitor(monitors) == monitors[2]
+
+
+def test_select_main_monitor_falls_back_to_first_physical_monitor():
+    monitors = [
+        {"left": -1280, "top": 0, "width": 3200, "height": 1080},
+        {"left": 100, "top": 100, "width": 1920, "height": 1080},
+    ]
+
+    assert _select_main_monitor(monitors) == monitors[1]

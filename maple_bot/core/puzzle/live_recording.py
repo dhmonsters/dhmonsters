@@ -179,7 +179,7 @@ def grab_screen_bgr() -> Any:
         import mss
 
         with mss.mss() as sct:
-            image = sct.grab(sct.monitors[0])
+            image = sct.grab(_select_main_monitor(sct.monitors))
         return cv2.cvtColor(np.array(image), cv2.COLOR_BGRA2BGR)
     except Exception as exc:
         capture_errors.append(f"mss: {exc}")
@@ -187,10 +187,20 @@ def grab_screen_bgr() -> Any:
     from PIL import ImageGrab
 
     try:
-        image = ImageGrab.grab().convert("RGB")
+        image = ImageGrab.grab(all_screens=False).convert("RGB")
     except Exception as exc:
         capture_errors.append(f"ImageGrab: {exc}")
         details = " | ".join(capture_errors)
         raise RuntimeError(f"screen capture failed ({details})") from exc
     rgb = np.array(image)
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _select_main_monitor(monitors: list[dict[str, int]]) -> dict[str, int]:
+    physical_monitors = monitors[1:] if len(monitors) > 1 else monitors
+    for monitor in physical_monitors:
+        if monitor.get("left") == 0 and monitor.get("top") == 0:
+            return monitor
+    if physical_monitors:
+        return physical_monitors[0]
+    raise RuntimeError("no monitor available")

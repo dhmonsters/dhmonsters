@@ -9,6 +9,7 @@ from typing import Any
 
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
 from core.puzzle.live_recording import grab_screen_bgr
+from core.puzzle.roi import crop_by_roi
 
 
 FrameGrabber = Callable[[], Any]
@@ -23,6 +24,8 @@ class CaptureCheckResult:
     image_path: Path | None
     width: int = 0
     height: int = 0
+    image_width: int = 0
+    image_height: int = 0
     error: str = ""
 
 
@@ -39,9 +42,11 @@ def run_capture_check(
     try:
         frame = grabber()
         frame_h, frame_w = frame.shape[:2]
-        image_path = output_dir / "capture_check.png"
-        _write_png(image_path, frame)
         detect_roi, board_roi = fixed_puzzle_rois(frame_w=frame_w, frame_h=frame_h)
+        image_frame = crop_by_roi(frame, board_roi)
+        image_h, image_w = image_frame.shape[:2]
+        image_path = output_dir / "capture_check.png"
+        _write_png(image_path, image_frame)
         result = CaptureCheckResult(
             ok=True,
             output_dir=output_dir,
@@ -49,6 +54,8 @@ def run_capture_check(
             image_path=image_path,
             width=frame_w,
             height=frame_h,
+            image_width=image_w,
+            image_height=image_h,
         )
         report_path.write_text(
             _format_success_report(result, detect_roi=detect_roi, board_roi=board_roi),
@@ -106,7 +113,8 @@ def _format_success_report(result: CaptureCheckResult, *, detect_roi: Any, board
             "",
             "- status: ok",
             f"- frame: {result.width}x{result.height}",
-            f"- image: {result.image_path.name if result.image_path is not None else '-'}",
+            f"- image: {result.image_width}x{result.image_height}",
+            f"- image_path: {result.image_path.name if result.image_path is not None else '-'}",
             f"- detect_roi: {roi_to_payload(detect_roi)}",
             f"- board_roi: {roi_to_payload(board_roi)}",
             "",

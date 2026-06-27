@@ -13,6 +13,8 @@ def test_capture_check_success_writes_png_and_report(tmp_path):
     assert result.ok is True
     assert result.width == 8
     assert result.height == 6
+    assert result.image_width == 3
+    assert result.image_height == 3
     assert result.image_path is not None
     assert result.image_path.name == "capture_check.png"
     assert result.image_path.stat().st_size > 0
@@ -20,6 +22,7 @@ def test_capture_check_success_writes_png_and_report(tmp_path):
     report_text = result.report_path.read_text(encoding="utf-8")
     assert "status: ok" in report_text
     assert "frame: 8x6" in report_text
+    assert "image: 3x3" in report_text
 
 
 def test_capture_check_failure_writes_report_without_raising(tmp_path):
