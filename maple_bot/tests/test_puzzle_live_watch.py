@@ -53,6 +53,8 @@ class LiveRecordingActivationFrameTest(unittest.TestCase):
             self.assertTrue(session.output_dir.exists())
             self.assertEqual(runtime.frame_count, 1)
             self.assertEqual(grabbed["count"], 0)
+            self.assertIsNotNone(runtime.latest_preview_path)
+            self.assertTrue(runtime.latest_preview_path.exists())
             self.assertTrue(runtime.stop_recording(reason="test_cleanup"))
             self.assertTrue(runtime.finish(reason="test_cleanup").exists())
 

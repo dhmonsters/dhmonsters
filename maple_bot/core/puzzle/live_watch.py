@@ -23,6 +23,7 @@ class PuzzleActivation:
 class WatchStartResult:
     status: str
     session_dir: Path | None = None
+    preview_path: Path | None = None
     message: str = ""
 
 

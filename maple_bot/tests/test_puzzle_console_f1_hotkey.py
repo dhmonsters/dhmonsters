@@ -78,7 +78,14 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
 
         with TemporaryDirectory() as tmp:
             session_dir = Path(tmp) / "session"
-            status = types.SimpleNamespace(status="recording", session_dir=session_dir)
+            preview_path = session_dir / "latest_preview.png"
+            session_dir.mkdir()
+            preview_path.write_bytes(b"fake image")
+            status = types.SimpleNamespace(
+                status="recording",
+                session_dir=session_dir,
+                preview_path=preview_path,
+            )
 
             window = module.PuzzleConsoleWindow(
                 watch_start_handler=lambda: None,
@@ -90,6 +97,7 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
 
             self.assertEqual(window.state_label.text(), "RECORDING")
             self.assertEqual(window.last_session_dir, session_dir)
+            self.assertEqual(window.cctv_frame_label.pixmap().path, str(preview_path))
             self.assertIn("recording start", window.event_log.toPlainText())
 
     def test_global_f1_f2_and_f3_hotkeys_are_registered(self) -> None:

@@ -586,11 +586,14 @@ class PuzzleConsoleWindow(QMainWindow):
             self.append_log(f"solver on 실패: {exc}")
             return False
         session_dir = _watch_result_session_dir(result)
+        preview_path = _watch_result_preview_path(result)
         if session_dir is not None:
             self.last_session_dir = session_dir
             self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
             self.set_identity_state("RECORDING")
             self.append_log(f"recording start: {self.last_session_dir}")
+            if preview_path is not None:
+                self._load_cctv_frame_preview(str(preview_path))
             return True
         self.set_identity_state("SOLVER_ON")
         self.cctv_status_label.setText("solver on: waiting puzzle")
@@ -618,14 +621,17 @@ class PuzzleConsoleWindow(QMainWindow):
             self.append_log(f"live status 실패: {exc}")
             return
         session_dir = _watch_result_session_dir(result)
+        preview_path = _watch_result_preview_path(result)
         if session_dir is None:
             return
-        if self.last_session_dir == session_dir and self.state_label.text() == "RECORDING":
-            return
-        self.last_session_dir = session_dir
-        self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
-        self.set_identity_state("RECORDING")
-        self.append_log(f"recording start: {self.last_session_dir}")
+        is_new_recording = self.last_session_dir != session_dir or self.state_label.text() != "RECORDING"
+        if is_new_recording:
+            self.last_session_dir = session_dir
+            self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
+            self.set_identity_state("RECORDING")
+            self.append_log(f"recording start: {self.last_session_dir}")
+        if preview_path is not None and str(preview_path) != self.current_cctv_source_path:
+            self._load_cctv_frame_preview(str(preview_path))
 
     def capture_check_input(self) -> bool:
         if self._capture_check_handler is None:
@@ -730,6 +736,15 @@ def _watch_result_session_dir(result: object) -> Path | None:
     if session_dir is None:
         return None
     return Path(session_dir)
+
+
+def _watch_result_preview_path(result: object) -> Path | None:
+    if result is None:
+        return None
+    preview_path = getattr(result, "preview_path", None)
+    if preview_path is None:
+        return None
+    return Path(preview_path)
 
 
 def _candidate_count(payload: dict[object, object]) -> int:

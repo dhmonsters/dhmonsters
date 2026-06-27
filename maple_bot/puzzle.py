@@ -52,7 +52,11 @@ def create_window(args: argparse.Namespace | None = None):
     def start_live_watch() -> WatchStartResult:
         thread = live_thread["thread"]
         if live_runtime.is_recording and live_runtime.session is not None:
-            return WatchStartResult("recording", live_runtime.session.output_dir)
+            return WatchStartResult(
+                "recording",
+                live_runtime.session.output_dir,
+                live_runtime.latest_preview_path,
+            )
         if thread is not None and thread.is_alive():
             return WatchStartResult("armed")
         stop_event = threading.Event()
@@ -96,7 +100,11 @@ def create_window(args: argparse.Namespace | None = None):
 
     def live_status() -> WatchStartResult:
         if live_runtime.is_recording and live_runtime.session is not None:
-            return WatchStartResult("recording", live_runtime.session.output_dir)
+            return WatchStartResult(
+                "recording",
+                live_runtime.session.output_dir,
+                live_runtime.latest_preview_path,
+            )
         thread = live_thread.get("thread")
         if thread is not None and thread.is_alive():
             return WatchStartResult("armed")

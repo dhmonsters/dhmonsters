@@ -39,8 +39,10 @@ class LiveRecordingRuntime:
         self.trace: TraceLogger | None = None
         self.recording: RecordingController | None = None
         self.report_path: Path | None = None
+        self.latest_preview_path: Path | None = None
         self.frame_count = 0
         self._finished = False
+        self._preview_stride = max(1, int(round(self.fps / 5.0)))
 
     @property
     def is_recording(self) -> bool:
@@ -70,6 +72,7 @@ class LiveRecordingRuntime:
             trace_logger=trace,
         )
         self.report_path = None
+        self.latest_preview_path = None
         self.frame_count = 0
         self._finished = False
         trace.write_event(
@@ -157,6 +160,7 @@ class LiveRecordingRuntime:
             source_path=f"live_screen#frame={frame_index}",
         )
         self.recording.write(packet, overlay_frame=frame)
+        self._write_live_preview(packet)
         self.trace.write_event(
             "FRAME_RECORDED",
             frame_index,
@@ -168,6 +172,16 @@ class LiveRecordingRuntime:
         )
         self.frame_count += 1
         return True
+
+    def _write_live_preview(self, packet: FramePacket) -> None:
+        if self.session is None:
+            return
+        if packet.frame_index != 0 and packet.frame_index % self._preview_stride != 0:
+            return
+        preview_path = self.session.output_dir / "snapshots" / f"live_preview_{packet.frame_index:06d}.png"
+        ok = _cv2().imwrite(str(preview_path), packet.board_frame)
+        if ok:
+            self.latest_preview_path = preview_path
 
 
 def grab_screen_bgr() -> Any:
@@ -194,6 +208,12 @@ def grab_screen_bgr() -> Any:
         raise RuntimeError(f"screen capture failed ({details})") from exc
     rgb = np.array(image)
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _cv2() -> Any:
+    import cv2
+
+    return cv2
 
 
 def _select_main_monitor(monitors: list[dict[str, int]]) -> dict[str, int]:
