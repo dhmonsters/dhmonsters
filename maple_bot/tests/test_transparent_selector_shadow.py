@@ -259,6 +259,35 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["family"], family)
         self.assertEqual(runtime.calls[-1]["kwargs"]["meta"][family]["source"], "guarded_decal_identity")
 
+    def test_shadow_exposes_guarded_consensus_rescue_even_when_model_selects_raw(self):
+        selected_family = "raw_candidate_beam10_center_mild_state_mild"
+        consensus_family = "guarded_decal_identity_consensus_center_mild_state_mild"
+        runtime = FakeRuntime(selected_family=selected_family)
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(200.0, 10.0, 0.8, 20.0, 20.0)],
+            anchors={
+                selected_family: (200.0, 10.0),
+                consensus_family: (40.25, 10.75),
+            },
+        )
+
+        self.assertEqual(result["family"], selected_family)
+        self.assertFalse(result["rescue_allowed"])
+        self.assertEqual(result["rescue_point"], [200.0, 10.0])
+        self.assertTrue(result["consensus_rescue_allowed"])
+        self.assertEqual(result["consensus_rescue_family"], consensus_family)
+        self.assertEqual(result["consensus_rescue_point"], [40.25, 10.75])
+
     def test_default_merge_gate_uses_wjsonl_sized_thresholds(self):
         runtime = FakeRuntime(selected_family="bg_split_viterbi_center_mild_state_mild")
         shadow = TransparentSelectorShadow(

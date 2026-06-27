@@ -83,6 +83,28 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
         self.assertEqual(path[2], (250.0, 0.0))
         self.assertEqual(decisions[2]["source"], "primary")
 
+    def test_health_selection_uses_consensus_rescue_when_selected_rescue_is_blocked(self):
+        rows = [
+            {"track": [0.0, 0.0]},
+            {"track": [10.0, 0.0]},
+            {
+                "track": [250.0, 0.0],
+                "selector_shadow": {
+                    "available": True,
+                    "rescue_allowed": False,
+                    "rescue_point": [230.0, 0.0],
+                    "consensus_rescue_allowed": True,
+                    "consensus_rescue_point": [20.0, 0.0],
+                },
+            },
+        ]
+
+        path, decisions = apply_live_health_selection(rows, frame_shape=(300, 300))
+
+        self.assertEqual(path[2], (20.0, 0.0))
+        self.assertEqual(decisions[2]["source"], "rescue")
+        self.assertEqual(decisions[2]["reason"], "primary_immediate_jump")
+
     def test_score_path_reports_success_by_mean_error(self):
         gt = {0: (0.0, 0.0), 1: (10.0, 0.0), 2: (20.0, 0.0)}
         path = {0: (3.0, 4.0), 1: (16.0, 8.0)}

@@ -175,6 +175,7 @@ class TransparentSelectorShadow:
 
         family = str(selected_row.get("family", ""))
         point = self._latest_point(paths.get(family, {}), frames)
+        consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
         merge_context = self._merge_context()
         return {
             "clip": self.clip_id,
@@ -184,6 +185,9 @@ class TransparentSelectorShadow:
             "point": _serial_point(point),
             "rescue_point": _serial_float_point(point),
             "rescue_allowed": _rescue_allowed_for_family(family, merge_context),
+            "consensus_rescue_family": consensus_family,
+            "consensus_rescue_point": _serial_float_point(consensus_point),
+            "consensus_rescue_allowed": consensus_point is not None,
             "merge_context": merge_context,
             "rows": len(rows),
             "paths": len(paths),
@@ -289,6 +293,19 @@ class TransparentSelectorShadow:
             if frame in path:
                 return path[frame]
         return None
+
+    @staticmethod
+    def _guarded_consensus_rescue(
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str | None, Point | None]:
+        for family in sorted(paths):
+            if not family.lower().startswith("guarded_decal_identity_consensus"):
+                continue
+            point = TransparentSelectorShadow._latest_point(paths.get(family, {}), frames)
+            if point is not None:
+                return family, point
+        return None, None
 
     @staticmethod
     def _median(values: Sequence[float]) -> float:

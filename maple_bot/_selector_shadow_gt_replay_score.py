@@ -477,6 +477,10 @@ def _allowed_selector_rescue(row: Mapping[str, object]) -> Point | None:
         return None
     if not bool(record.get("available", False)):
         return None
+    if bool(record.get("consensus_rescue_allowed", False)):
+        consensus = _point(record.get("consensus_rescue_point"))
+        if consensus is not None:
+            return consensus
     if not bool(record.get("rescue_allowed", False)):
         return None
     return _point(record.get("rescue_point"))
