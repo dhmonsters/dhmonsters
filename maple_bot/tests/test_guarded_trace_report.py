@@ -1,7 +1,9 @@
 # guarded path의 worst frame trace 리포트를 검증합니다.
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from _guarded_trace_report import trace_guarded_worst_rows, write_markdown_report
+from _guarded_trace_report import trace_clip, trace_guarded_worst_rows, write_markdown_report
 
 
 class GuardedTraceReportTests(unittest.TestCase):
@@ -76,6 +78,7 @@ class GuardedTraceReportTests(unittest.TestCase):
                 "match_px": 16.0,
                 "shape_pct": 6.0,
                 "max_step": 180.0,
+                "live_max_candidates": 16,
             },
             "items": [
                 {
@@ -114,6 +117,7 @@ class GuardedTraceReportTests(unittest.TestCase):
         })
 
         self.assertIn("sample", text)
+        self.assertIn("live_max=16", text)
         self.assertIn("f11", text)
         self.assertIn("err=170.0", text)
         self.assertIn("cand0", text)
@@ -123,6 +127,21 @@ class GuardedTraceReportTests(unittest.TestCase):
         self.assertIn("gt_family0 raw_candidate_cont0_center_mild_state_mild", text)
         self.assertIn("sel_family0 guarded_decal_identity_center_mild_state_mild", text)
         self.assertIn("d_gt=0.0", text)
+
+    def test_trace_clip_forwards_live_max_candidates(self):
+        captured = {}
+
+        def fake_backfill(rows, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        with patch("_guarded_trace_report._load_jsonl", return_value=[]):
+            with patch("_guarded_trace_report.backfill_selector_shadow_rows", fake_backfill):
+                with patch("_guarded_trace_report.load_red_gt", return_value={}):
+                    report = trace_clip("sample", root=Path("."), live_max_candidates=16)
+
+        self.assertEqual(captured["live_max_candidates"], 16)
+        self.assertEqual(report["config"]["live_max_candidates"], 16)
 
 
 if __name__ == "__main__":

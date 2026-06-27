@@ -83,6 +83,7 @@ def trace_clip(
     match_distance_px: float = 16.0,
     shape_pct: float = 6.0,
     max_step_px: float = 180.0,
+    live_max_candidates: int = 8,
     max_items: int = 8,
 ) -> dict[str, object]:
     source = root / "_record_debug" / f"{name}.jsonl"
@@ -95,7 +96,7 @@ def trace_clip(
         shadow_min_frames=1,
         emit_every=1,
         max_candidates=8,
-        live_max_candidates=8,
+        live_max_candidates=int(live_max_candidates),
         include_local_box=False,
         enable_guarded_decal_identity=True,
         guarded_decal_min_background_frames=min_background_frames,
@@ -110,6 +111,7 @@ def trace_clip(
         "match_px": float(match_distance_px),
         "shape_pct": float(shape_pct),
         "max_step": float(max_step_px),
+        "live_max_candidates": int(live_max_candidates),
     }
     return {
         "clip": name,
@@ -131,7 +133,8 @@ def write_markdown_report(report: Mapping[str, object]) -> str:
             f"min_bg={config.get('min_bg', '-')}, "
             f"match_px={config.get('match_px', '-')}, "
             f"shape_pct={config.get('shape_pct', '-')}, "
-            f"max_step={config.get('max_step', '-')}"
+            f"max_step={config.get('max_step', '-')}, "
+            f"live_max={config.get('live_max_candidates', '-')}"
         ),
         "",
     ]
@@ -398,6 +401,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--match-px", type=float, default=16.0)
     parser.add_argument("--shape-pct", type=float, default=6.0)
     parser.add_argument("--max-step", type=float, default=180.0)
+    parser.add_argument("--live-max-candidates", type=int, default=8)
     parser.add_argument("--items", type=int, default=8)
     args = parser.parse_args(argv)
 
@@ -409,6 +413,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             match_distance_px=args.match_px,
             shape_pct=args.shape_pct,
             max_step_px=args.max_step,
+            live_max_candidates=args.live_max_candidates,
             max_items=args.items,
         )
         for name in args.names
