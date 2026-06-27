@@ -87,6 +87,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.current_frame_identity: dict[int, dict[object, object]] = {}
         self.current_frame_guarded: dict[int, dict[object, object]] = {}
         self.current_cctv_source_path: str | None = None
+        self.current_cctv_file_signature: tuple[int, int] | None = None
         self.selected_frame_index: int | None = None
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
@@ -564,12 +565,21 @@ class PuzzleConsoleWindow(QMainWindow):
 
     def _load_cctv_frame_preview(self, source: str) -> None:
         path = Path(source)
+        try:
+            stat = path.stat()
+        except OSError:
+            return
         if not path.is_file():
             return
-        pixmap = QPixmap(str(path))
+        source_path = str(path)
+        file_signature = (stat.st_mtime_ns, stat.st_size)
+        if source_path == self.current_cctv_source_path and file_signature == self.current_cctv_file_signature:
+            return
+        pixmap = _load_pixmap_uncached(path)
         if pixmap.isNull():
             return
-        self.current_cctv_source_path = str(path)
+        self.current_cctv_source_path = source_path
+        self.current_cctv_file_signature = file_signature
         self.cctv_frame_label.setPixmap(pixmap)
         self.cctv_frame_label.setText("")
 
@@ -722,7 +732,7 @@ class PuzzleConsoleWindow(QMainWindow):
         session_dir = _watch_result_session_dir(result)
         preview_path = _watch_result_preview_path(result)
         if session_dir is None:
-            if preview_path is not None and str(preview_path) != self.current_cctv_source_path:
+            if preview_path is not None:
                 self._load_cctv_frame_preview(str(preview_path))
             return
         is_new_recording = self.last_session_dir != session_dir or self.state_label.text() != "RECORDING"
@@ -732,7 +742,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.set_identity_state("RECORDING")
             self._mark_solver_on()
             self.append_log(f"recording start: {self.last_session_dir}")
-        if preview_path is not None and str(preview_path) != self.current_cctv_source_path:
+        if preview_path is not None:
             self._load_cctv_frame_preview(str(preview_path))
 
     def capture_check_input(self) -> bool:
@@ -815,6 +825,19 @@ def _command_button(text: str, object_name: str, *, primary: bool = False) -> QP
         button.setObjectName(object_name)
         button.setStyleSheet("font-weight: 700;")
     return button
+
+
+def _load_pixmap_uncached(path: Path) -> QPixmap:
+    pixmap = QPixmap()
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return pixmap
+
+    load_from_data = getattr(pixmap, "loadFromData", None)
+    if callable(load_from_data) and load_from_data(data):
+        return pixmap
+    return QPixmap(str(path))
 
 
 def _open_folder(path: Path) -> None:

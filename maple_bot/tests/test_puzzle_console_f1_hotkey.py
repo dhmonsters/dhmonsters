@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import types
 import unittest
@@ -114,7 +115,7 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
 
             self.assertEqual(window.state_label.text(), "RECORDING")
             self.assertEqual(window.last_session_dir, session_dir)
-            self.assertEqual(window.cctv_frame_label.pixmap().path, str(preview_path))
+            self.assertTrue(window.cctv_frame_label.pixmap().path.startswith("bytes:"))
             self.assertIn("recording start", window.event_log.toPlainText())
 
     def test_live_status_poll_updates_armed_preview_before_recording(self) -> None:
@@ -139,7 +140,35 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
 
             self.assertEqual(window.state_label.text(), "SOLVER_ON")
             self.assertIsNone(window.last_session_dir)
-            self.assertEqual(window.cctv_frame_label.pixmap().path, str(preview_path))
+            self.assertTrue(window.cctv_frame_label.pixmap().path.startswith("bytes:"))
+
+    def test_live_status_poll_reloads_same_armed_preview_path(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+
+        with TemporaryDirectory() as tmp:
+            preview_path = Path(tmp) / "watch_preview.png"
+            preview_path.write_bytes(b"first frame")
+            status = types.SimpleNamespace(
+                status="armed",
+                session_dir=None,
+                preview_path=preview_path,
+            )
+
+            window = module.PuzzleConsoleWindow(
+                watch_start_handler=lambda: None,
+                live_status_handler=lambda: status,
+            )
+
+            window.start_watch_input()
+            window._poll_live_status()
+            first_pixmap_path = window.cctv_frame_label.pixmap().path
+            preview_path.write_bytes(b"second frame")
+            os.utime(preview_path, (2_000_000_000, 2_000_000_000))
+            window._poll_live_status()
+
+            self.assertEqual(window.state_label.text(), "SOLVER_ON")
+            self.assertIsNone(window.last_session_dir)
+            self.assertNotEqual(window.cctv_frame_label.pixmap().path, first_pixmap_path)
 
     def test_global_f1_f2_and_f3_hotkeys_are_registered(self) -> None:
         fake_hotkey_module = types.ModuleType("core.hotkey_manager")

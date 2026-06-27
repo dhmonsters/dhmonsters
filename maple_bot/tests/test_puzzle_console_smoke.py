@@ -1,6 +1,7 @@
 # 투명도형 퍼즐 분석 콘솔의 주요 패널과 실행 진입점이 생성되는지 검증한다.
 import importlib
 import json
+import os
 import sys
 import types
 
@@ -175,6 +176,13 @@ class _Pixmap:
     def __init__(self, path: str = "") -> None:
         self.path = path
 
+    def loadFromData(self, data: bytes) -> bool:
+        if not data:
+            self.path = ""
+            return False
+        self.path = f"bytes:{len(data)}:{data[:16].hex()}"
+        return True
+
     def isNull(self) -> bool:
         return not bool(self.path)
 
@@ -266,7 +274,26 @@ def test_puzzle_console_preview_keeps_pixmap_visible(monkeypatch, tmp_path):
 
     window._load_cctv_frame_preview(str(preview_path))
 
-    assert window.cctv_frame_label.pixmap().path == str(preview_path)
+    assert window.cctv_frame_label.pixmap().path.startswith("bytes:")
+    assert window.cctv_frame_label.text() == ""
+
+
+def test_puzzle_console_preview_reloads_when_same_path_changes(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    preview_path = tmp_path / "live_watch_preview.png"
+    preview_path.write_bytes(b"first frame")
+
+    window = module.PuzzleConsoleWindow()
+
+    window._load_cctv_frame_preview(str(preview_path))
+    first_pixmap_path = window.cctv_frame_label.pixmap().path
+    preview_path.write_bytes(b"second frame")
+    os.utime(preview_path, (2_000_000_000, 2_000_000_000))
+    window._load_cctv_frame_preview(str(preview_path))
+
+    assert window.current_cctv_source_path == str(preview_path)
+    assert window.cctv_frame_label.pixmap().path != first_pixmap_path
     assert window.cctv_frame_label.text() == ""
 
 
