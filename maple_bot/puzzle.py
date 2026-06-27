@@ -20,6 +20,7 @@ from core.puzzle.recording_controller import RecordingController
 from core.puzzle.report import ReportBuilder
 from core.puzzle.session import SessionManager
 from core.puzzle.trace import TraceLogger
+from core.puzzle.live_watch import LivePuzzleActivationDetector, WatchStartResult
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp"}
@@ -44,23 +45,62 @@ def create_window(args: argparse.Namespace | None = None):
 
     default_test_path = default_transparent_test_replay_path()
     live_runtime = LiveRecordingRuntime(output_root=(args.output_root or None) if args is not None else None)
+    live_detector = LivePuzzleActivationDetector()
     live_thread: dict[str, threading.Thread | None] = {"thread": None}
+    live_stop: dict[str, threading.Event | None] = {"event": None}
 
-    def start_live_recording() -> Path | None:
+    def start_live_watch() -> WatchStartResult:
         thread = live_thread["thread"]
+        if live_runtime.is_recording and live_runtime.session is not None:
+            return WatchStartResult("recording", live_runtime.session.output_dir)
         if thread is not None and thread.is_alive():
-            return live_runtime.session.output_dir if live_runtime.session is not None else None
-        session = live_runtime.start()
+            return WatchStartResult("armed")
+        stop_event = threading.Event()
+        live_stop["event"] = stop_event
 
         def worker() -> None:
             try:
-                live_runtime.run_until_stopped()
+                frame_period_s = 1.0 / live_runtime.fps
+                while not stop_event.is_set() and not live_runtime.is_recording:
+                    frame = live_runtime.frame_grabber()
+                    activation = live_detector.detect(frame)
+                    if activation.active:
+                        live_runtime.start(initial_frame=frame)
+                        break
+                    live_runtime.sleeper(frame_period_s)
+                if live_runtime.is_recording:
+                    live_runtime.run_until_stopped()
             except Exception:
-                pass
+                if live_runtime.is_recording:
+                    live_runtime.stop_recording(reason="watch_error")
+                if live_runtime.session is not None:
+                    live_runtime.finish(reason="watch_error")
+                return
 
-        live_thread["thread"] = threading.Thread(target=worker, daemon=True, name="PuzzleLiveRecorder")
+        live_thread["thread"] = threading.Thread(target=worker, daemon=True, name="PuzzleLiveWatch")
         live_thread["thread"].start()
-        return session.output_dir
+        return WatchStartResult("armed")
+
+    def stop_live_solver() -> bool:
+        if live_runtime.is_recording:
+            return live_runtime.stop_solver(reason="manual_f2")
+        stop_event = live_stop.get("event")
+        thread = live_thread.get("thread")
+        if stop_event is not None and thread is not None and thread.is_alive():
+            stop_event.set()
+            return True
+        return False
+
+    def stop_live_recording() -> bool:
+        return live_runtime.stop_recording(reason="manual_f3")
+
+    def live_status() -> WatchStartResult:
+        if live_runtime.is_recording and live_runtime.session is not None:
+            return WatchStartResult("recording", live_runtime.session.output_dir)
+        thread = live_thread.get("thread")
+        if thread is not None and thread.is_alive():
+            return WatchStartResult("armed")
+        return WatchStartResult("idle")
 
     def run_capture_check_from_ui() -> Path | None:
         result = run_live_capture_check(output_root=(args.output_root or None) if args is not None else None)
@@ -70,9 +110,11 @@ def create_window(args: argparse.Namespace | None = None):
 
     window = PuzzleConsoleWindow(
         replay_runner=_run_replay_from_ui,
-        watch_start_handler=start_live_recording,
+        watch_start_handler=start_live_watch,
+        solver_stop_handler=stop_live_solver,
+        live_status_handler=live_status,
         capture_check_handler=run_capture_check_from_ui,
-        recording_stop_handler=lambda: live_runtime.stop_recording(reason="manual_f3"),
+        recording_stop_handler=stop_live_recording,
         default_test_path=default_test_path if default_test_path.exists() else None,
     )
     _attach_puzzle_hotkeys(window)
@@ -263,6 +305,7 @@ def _attach_puzzle_hotkeys(window: object) -> None:
     try:
         manager = HotkeyManager(window)
         manager.register("puzzle_start_recording", "f1", window.start_watch_input)
+        manager.register("puzzle_stop_solver", "f2", window.stop_solver_input)
         manager.register("puzzle_stop_recording", "f3", window.stop_recording_input)
         setattr(window, "_puzzle_hotkey_manager", manager)
     except Exception as exc:

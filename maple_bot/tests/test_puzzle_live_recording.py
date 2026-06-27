@@ -83,6 +83,28 @@ def test_live_recording_solver_stop_keeps_recording_until_f3(tmp_path):
     assert report_path.exists()
 
 
+def test_live_recording_start_can_use_activation_frame_without_extra_grab(tmp_path):
+    grabbed = {"count": 0}
+
+    def grab():
+        grabbed["count"] += 1
+        return np.full((6, 8, 3), 88, dtype=np.uint8)
+
+    activation_frame = np.full((6, 8, 3), 77, dtype=np.uint8)
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=grab,
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+    )
+
+    session = runtime.start(initial_frame=activation_frame)
+
+    assert session.output_dir.exists()
+    assert runtime.frame_count == 1
+    assert grabbed["count"] == 0
+
+
 def test_live_recording_failure_closes_recording_and_writes_report(tmp_path):
     runtime = LiveRecordingRuntime(
         output_root=tmp_path,

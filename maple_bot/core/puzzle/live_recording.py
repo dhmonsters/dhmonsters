@@ -50,11 +50,11 @@ class LiveRecordingRuntime:
     def is_solver_running(self) -> bool:
         return self.recording is not None and self.recording.is_solver_running
 
-    def start(self) -> PuzzleSession:
+    def start(self, *, initial_frame: Any | None = None) -> PuzzleSession:
         if self.is_recording and self.session is not None:
             return self.session
 
-        first_frame = self.frame_grabber()
+        first_frame = initial_frame if initial_frame is not None else self.frame_grabber()
         frame_h, frame_w = first_frame.shape[:2]
         detect_roi, board_roi = fixed_puzzle_rois(frame_w=frame_w, frame_h=frame_h)
         session = SessionManager(output_root=self.output_root).start(

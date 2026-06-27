@@ -149,6 +149,22 @@ class _Application:
         return 0
 
 
+class _Timer:
+    def __init__(self, _parent=None) -> None:
+        self.timeout = _Signal()
+        self.interval = 0
+        self.started = False
+
+    def setInterval(self, interval: int) -> None:
+        self.interval = interval
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.started = False
+
+
 class _Pixmap:
     def __init__(self, path: str = "") -> None:
         self.path = path
@@ -183,6 +199,7 @@ def _install_fake_qt(monkeypatch) -> None:
 
     qtcore = types.ModuleType("PyQt6.QtCore")
     qtcore.Qt = types.SimpleNamespace(Orientation=_Orientation, AlignmentFlag=_AlignmentFlag, Key=_Key)
+    qtcore.QTimer = _Timer
 
     qtgui = types.ModuleType("PyQt6.QtGui")
     qtgui.QPixmap = _Pixmap

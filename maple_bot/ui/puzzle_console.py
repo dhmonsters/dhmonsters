@@ -7,7 +7,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
@@ -30,7 +30,9 @@ ReplayRunner = Callable[[str, str], str | Path]
 PathPicker = Callable[[str], str | Path | None]
 FolderOpener = Callable[[Path], None]
 RecordingStopHandler = Callable[[], bool]
-WatchStartHandler = Callable[[], str | Path | None]
+WatchStartHandler = Callable[[], object]
+SolverStopHandler = Callable[[], bool]
+LiveStatusHandler = Callable[[], object]
 CaptureCheckHandler = Callable[[], str | Path | None]
 TRACE_TIMELINE_LIMIT = 5
 
@@ -44,6 +46,8 @@ class PuzzleConsoleWindow(QMainWindow):
         folder_opener: FolderOpener | None = None,
         recording_stop_handler: RecordingStopHandler | None = None,
         watch_start_handler: WatchStartHandler | None = None,
+        solver_stop_handler: SolverStopHandler | None = None,
+        live_status_handler: LiveStatusHandler | None = None,
         capture_check_handler: CaptureCheckHandler | None = None,
         default_test_path: str | Path | None = None,
     ) -> None:
@@ -53,6 +57,8 @@ class PuzzleConsoleWindow(QMainWindow):
         self._folder_opener = folder_opener or _open_folder
         self._recording_stop_handler = recording_stop_handler
         self._watch_start_handler = watch_start_handler
+        self._solver_stop_handler = solver_stop_handler
+        self._live_status_handler = live_status_handler
         self._capture_check_handler = capture_check_handler
         self._default_test_path = str(default_test_path) if default_test_path is not None else ""
         self.last_report_path: Path | None = None
@@ -81,6 +87,12 @@ class PuzzleConsoleWindow(QMainWindow):
         root_layout.addWidget(self._build_timeline_panel(), 0)
         root_layout.addWidget(self._build_event_log(), 0)
         self.setCentralWidget(root)
+        self._live_status_timer: QTimer | None = None
+        if self._live_status_handler is not None:
+            self._live_status_timer = QTimer(self)
+            self._live_status_timer.setInterval(500)
+            self._live_status_timer.timeout.connect(self._poll_live_status)
+            self._live_status_timer.start()
 
     def _build_header(self) -> QWidget:
         header = QWidget()
@@ -133,7 +145,8 @@ class PuzzleConsoleWindow(QMainWindow):
         self.open_video_button = _command_button("영상", "openVideoButton")
         self.open_replay_button = _command_button("JSONL replay", "openReplayButton")
         self.run_default_test_button = _command_button("기본 테스트", "runDefaultPuzzleTestButton")
-        self.start_watch_button = _command_button("화면 감시 F1", "startWatchButton", primary=True)
+        self.start_watch_button = _command_button("솔버 ON F1", "startWatchButton", primary=True)
+        self.stop_solver_button = _command_button("솔버 정지 F2", "stopSolverButton")
         self.roi_settings_button = _command_button("ROI 설정", "roiSettingsButton")
         self.capture_check_button = _command_button("캡처 점검", "captureCheckButton")
         self.open_recording_folder_button = _command_button("녹화 폴더", "openRecordingFolderButton")
@@ -146,6 +159,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.open_replay_button.clicked.connect(lambda _checked=False: self.run_replay_input("jsonl_replay"))
         self.run_default_test_button.clicked.connect(lambda _checked=False: self.run_default_test_input())
         self.start_watch_button.clicked.connect(lambda _checked=False: self.start_watch_input())
+        self.stop_solver_button.clicked.connect(lambda _checked=False: self.stop_solver_input())
         self.roi_settings_button.clicked.connect(lambda _checked=False: self.append_log("고정 ROI 사용 중"))
         self.capture_check_button.clicked.connect(lambda _checked=False: self.capture_check_input())
         self.open_recording_folder_button.clicked.connect(lambda _checked=False: self.open_last_recording_folder())
@@ -157,6 +171,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.open_replay_button,
             self.run_default_test_button,
             self.start_watch_button,
+            self.stop_solver_button,
             self.roi_settings_button,
             self.capture_check_button,
             self.open_recording_folder_button,
@@ -562,20 +577,55 @@ class PuzzleConsoleWindow(QMainWindow):
 
     def start_watch_input(self) -> bool:
         if self._watch_start_handler is None:
-            self.append_log("recording start 대기: live handler 없음")
+            self.append_log("solver on 대기: live handler 없음")
             return False
         try:
-            session_dir = self._watch_start_handler()
+            result = self._watch_start_handler()
         except Exception as exc:
-            self.set_identity_state("RECORDING_FAILED")
-            self.append_log(f"recording start 실패: {exc}")
+            self.set_identity_state("SOLVER_FAILED")
+            self.append_log(f"solver on 실패: {exc}")
             return False
+        session_dir = _watch_result_session_dir(result)
         if session_dir is not None:
-            self.last_session_dir = Path(session_dir)
+            self.last_session_dir = session_dir
             self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
-        self.set_identity_state("RECORDING")
-        self.append_log(f"recording start: {self.last_session_dir or '-'}")
+            self.set_identity_state("RECORDING")
+            self.append_log(f"recording start: {self.last_session_dir}")
+            return True
+        self.set_identity_state("SOLVER_ON")
+        self.cctv_status_label.setText("solver on: waiting puzzle")
+        self.append_log("solver on: waiting puzzle")
         return True
+
+    def stop_solver_input(self) -> bool:
+        if self._solver_stop_handler is None:
+            self.append_log("solver stop 대기: handler 없음")
+            return False
+        stopped = bool(self._solver_stop_handler())
+        if stopped:
+            self.set_identity_state("SOLVER_STOPPED")
+            self.append_log("solver stop")
+        else:
+            self.append_log("solver stop skipped")
+        return stopped
+
+    def _poll_live_status(self) -> None:
+        if self._live_status_handler is None:
+            return
+        try:
+            result = self._live_status_handler()
+        except Exception as exc:
+            self.append_log(f"live status 실패: {exc}")
+            return
+        session_dir = _watch_result_session_dir(result)
+        if session_dir is None:
+            return
+        if self.last_session_dir == session_dir and self.state_label.text() == "RECORDING":
+            return
+        self.last_session_dir = session_dir
+        self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
+        self.set_identity_state("RECORDING")
+        self.append_log(f"recording start: {self.last_session_dir}")
 
     def capture_check_input(self) -> bool:
         if self._capture_check_handler is None:
@@ -597,6 +647,9 @@ class PuzzleConsoleWindow(QMainWindow):
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_F1:
             self.start_watch_input()
+            return
+        if event.key() == Qt.Key.Key_F2:
+            self.stop_solver_input()
             return
         if event.key() == Qt.Key.Key_F3:
             self.stop_recording_input()
@@ -664,6 +717,19 @@ def _open_folder(path: Path) -> None:
         subprocess.Popen(["open", str(path)])
         return
     subprocess.Popen(["xdg-open", str(path)])
+
+
+def _watch_result_session_dir(result: object) -> Path | None:
+    if result is None:
+        return None
+    if isinstance(result, Path):
+        return result
+    if isinstance(result, str):
+        return Path(result)
+    session_dir = getattr(result, "session_dir", None)
+    if session_dir is None:
+        return None
+    return Path(session_dir)
 
 
 def _candidate_count(payload: dict[object, object]) -> int:

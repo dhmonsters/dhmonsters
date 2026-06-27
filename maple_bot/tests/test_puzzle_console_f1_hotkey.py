@@ -1,12 +1,12 @@
-# 퍼즐 콘솔 F1 시작 단축키 연결을 검증한다.
+# 퍼즐 콘솔 F1/F2/F3 단축키 연결을 검증한다.
 from __future__ import annotations
 
 import importlib
 import sys
-import tempfile
 import types
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from tests.test_puzzle_console_smoke import _install_fake_qt
 
@@ -33,33 +33,66 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
         self.patch = _ModulePatch()
         _install_fake_qt(self.patch)
         sys.modules["PyQt6.QtCore"].Qt.Key.Key_F1 = "f1"
+        sys.modules["PyQt6.QtCore"].Qt.Key.Key_F2 = "f2"
         self.addCleanup(self.patch.restore)
 
-    def test_f1_keypress_starts_live_recording(self) -> None:
+    def test_f1_keypress_arms_solver_without_recording_session(self) -> None:
         module = importlib.import_module("ui.puzzle_console")
         calls: list[str] = []
-        with tempfile.TemporaryDirectory() as tmp:
+
+        class _Event:
+            def key(self):
+                return module.Qt.Key.Key_F1
+
+        def start_watch():
+            calls.append("start")
+            return None
+
+        window = module.PuzzleConsoleWindow(watch_start_handler=start_watch)
+
+        window.keyPressEvent(_Event())
+
+        self.assertEqual(calls, ["start"])
+        self.assertEqual(window.state_label.text(), "SOLVER_ON")
+        self.assertIsNone(window.last_session_dir)
+        self.assertIn("solver on", window.event_log.toPlainText())
+
+    def test_f2_keypress_stops_solver_without_closing_recording(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        calls: list[str] = []
+
+        class _Event:
+            def key(self):
+                return module.Qt.Key.Key_F2
+
+        window = module.PuzzleConsoleWindow(solver_stop_handler=lambda: calls.append("solver_stop") or True)
+
+        window.keyPressEvent(_Event())
+
+        self.assertEqual(calls, ["solver_stop"])
+        self.assertEqual(window.state_label.text(), "SOLVER_STOPPED")
+        self.assertIn("solver stop", window.event_log.toPlainText())
+
+    def test_live_status_poll_marks_recording_after_detection(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+
+        with TemporaryDirectory() as tmp:
             session_dir = Path(tmp) / "session"
-            session_dir.mkdir()
+            status = types.SimpleNamespace(status="recording", session_dir=session_dir)
 
-            class _Event:
-                def key(self):
-                    return module.Qt.Key.Key_F1
+            window = module.PuzzleConsoleWindow(
+                watch_start_handler=lambda: None,
+                live_status_handler=lambda: status,
+            )
 
-            def start_watch():
-                calls.append("start")
-                return session_dir
+            window.start_watch_input()
+            window._poll_live_status()
 
-            window = module.PuzzleConsoleWindow(watch_start_handler=start_watch)
-
-            window.keyPressEvent(_Event())
-
-            self.assertEqual(calls, ["start"])
             self.assertEqual(window.state_label.text(), "RECORDING")
             self.assertEqual(window.last_session_dir, session_dir)
             self.assertIn("recording start", window.event_log.toPlainText())
 
-    def test_global_f1_and_f3_hotkeys_are_registered(self) -> None:
+    def test_global_f1_f2_and_f3_hotkeys_are_registered(self) -> None:
         fake_hotkey_module = types.ModuleType("core.hotkey_manager")
         registered: list[tuple[str, str, object]] = []
 
@@ -79,11 +112,16 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
         class _Window:
             def __init__(self) -> None:
                 self.started = 0
+                self.solver_stopped = 0
                 self.stopped = 0
                 self.logs: list[str] = []
 
             def start_watch_input(self) -> bool:
                 self.started += 1
+                return True
+
+            def stop_solver_input(self) -> bool:
+                self.solver_stopped += 1
                 return True
 
             def stop_recording_input(self) -> bool:
@@ -99,13 +137,16 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
 
         keys = {(name, key) for name, key, _callback in registered}
         self.assertIn(("puzzle_start_recording", "f1"), keys)
+        self.assertIn(("puzzle_stop_solver", "f2"), keys)
         self.assertIn(("puzzle_stop_recording", "f3"), keys)
 
         callbacks = {name: callback for name, _key, callback in registered}
         callbacks["puzzle_start_recording"]()
+        callbacks["puzzle_stop_solver"]()
         callbacks["puzzle_stop_recording"]()
 
         self.assertEqual(window.started, 1)
+        self.assertEqual(window.solver_stopped, 1)
         self.assertEqual(window.stopped, 1)
 
 
