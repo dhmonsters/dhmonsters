@@ -36,8 +36,8 @@ def test_selector_holds_identity_inside_merge_box_then_reacquires_split_candidat
     assert result.path[1] == (10.0, 0.0)
     assert result.path[2] == (20.0, 0.0)
     assert result.path[3] == (30.0, 0.0)
-    assert result.states[2] == "IDENTITY_HOLD"
-    assert result.states[3] == "REACQUIRE"
+    assert result.states[2] == "MERGED_HOLD"
+    assert result.states[3] == "REACQUIRE_CANDIDATE"
 
 
 def test_selector_coasts_without_candidates_and_marks_identity_hold():
@@ -51,8 +51,54 @@ def test_selector_coasts_without_candidates_and_marks_identity_hold():
 
     assert result.path[2] == (20.0, 0.0)
     assert result.path[3] == (30.0, 0.0)
-    assert result.states[2] == "IDENTITY_HOLD"
-    assert result.states[3] == "REACQUIRE"
+    assert result.states[2] == "MERGED_HOLD"
+    assert result.states[3] == "REACQUIRE_CANDIDATE"
+
+
+def test_selector_can_defer_identity_when_candidate_center_jumps_from_prediction():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(2, ((20.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(3, ((60.0, 0.0, 0.99, 20.0, 20.0),)),
+        TemporalFrame(4, ((40.0, 0.0, 0.80, 20.0, 20.0),)),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            prediction_hold_cost=1.0,
+            prediction_hold_distance_gate=32.0,
+            score_weight=0.0,
+        ),
+    )
+
+    assert result.path[3] == (30.0, 0.0)
+    assert result.path[4] == (40.0, 0.0)
+    assert result.states[3] == "RELEASE_PENDING"
+    assert result.states[4] == "REACQUIRE_CANDIDATE"
+
+
+def test_selector_restores_internal_point_when_prediction_is_inside_small_box():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(2, ((20.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(3, ((34.0, 0.0, 0.99, 30.0, 20.0),)),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            prediction_hold_cost=1.0,
+            score_weight=0.0,
+        ),
+    )
+
+    assert result.path[3] == (30.0, 0.0)
+    assert result.states[3] == "RELEASE_PENDING"
 
 
 def test_selector_uses_track_hint_as_soft_identity_evidence():

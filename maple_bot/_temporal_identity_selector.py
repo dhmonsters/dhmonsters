@@ -43,6 +43,11 @@ class TemporalIdentityConfig:
     background_run_grace: int = 2
     merge_center_penalty: float = 35.0
     hold_cost: float = 4.0
+    prediction_hold_cost: float = 80.0
+    prediction_hold_box_scale: float = 1.20
+    prediction_hold_distance_gate: float = 28.0
+    prediction_hold_distance_weight: float = 0.35
+    prediction_hold_score_weight: float = 0.10
     missing_cost: float = 12.0
 
 
@@ -230,7 +235,7 @@ def _states_for_frame(
                 predicted,
                 None,
                 float(cfg.missing_cost) + _track_hint_cost(predicted, track_hint, cfg),
-                "IDENTITY_HOLD",
+                "MERGED_HOLD",
                 None,
             )
         ]
@@ -257,7 +262,48 @@ def _states_for_frame(
                     - float(candidate[2]) * float(cfg.score_weight) * 0.25
                     + _candidate_signal_cost(index, background_penalties, target_supports, cfg)
                     + _track_hint_cost(predicted, track_hint, cfg),
-                    "IDENTITY_HOLD",
+                    "MERGED_HOLD",
+                    bg_id,
+                )
+            )
+        if _inside_box(predicted, candidate, scale=float(cfg.prediction_hold_box_scale)):
+            states.append(
+                _State(
+                    _clamp_point_to_candidate_box(predicted, candidate),
+                    index,
+                    _prediction_hold_cost(
+                        index,
+                        candidate,
+                        predicted,
+                        track_hint,
+                        background_penalties,
+                        target_supports,
+                        cfg,
+                    ),
+                    "RELEASE_PENDING",
+                    bg_id,
+                )
+            )
+    nearest = _nearest_candidate(predicted, candidates)
+    if nearest is not None:
+        nearest_index, nearest_candidate, nearest_distance = nearest
+        if nearest_distance <= float(cfg.prediction_hold_distance_gate):
+            bg_id = background_ids[nearest_index] if nearest_index < len(background_ids) else None
+            states.append(
+                _State(
+                    predicted,
+                    nearest_index,
+                    _prediction_hold_cost(
+                        nearest_index,
+                        nearest_candidate,
+                        predicted,
+                        track_hint,
+                        background_penalties,
+                        target_supports,
+                        cfg,
+                    )
+                    + nearest_distance * float(cfg.prediction_hold_distance_weight),
+                    "RELEASE_PENDING",
                     bg_id,
                 )
             )
@@ -299,7 +345,7 @@ def _advance(
     background_run = _next_background_run(hypothesis, background_id)
     step_cost += _background_run_cost(background_id, background_run, cfg)
     if state.state == "TRACK_CONFIDENT" and _was_holding(hypothesis.states):
-        state_name = "REACQUIRE"
+        state_name = "REACQUIRE_CANDIDATE"
     else:
         state_name = state.state
 
@@ -332,7 +378,31 @@ def _was_holding(states: Mapping[int, IdentityState]) -> bool:
     if not states:
         return False
     latest_frame = max(states)
-    return states[latest_frame] == "IDENTITY_HOLD"
+    return states[latest_frame] in {"MERGED_HOLD", "RELEASE_PENDING"}
+
+
+def _prediction_hold_cost(
+    index: int,
+    candidate: Candidate,
+    predicted: Point,
+    track_hint: Point | None,
+    background_penalties: Sequence[float],
+    target_supports: Sequence[float],
+    cfg: TemporalIdentityConfig,
+) -> float:
+    center = (float(candidate[0]), float(candidate[1]))
+    score_relief = (
+        float(candidate[2])
+        * float(cfg.score_weight)
+        * float(cfg.prediction_hold_score_weight)
+    )
+    return (
+        float(cfg.prediction_hold_cost)
+        + _dist(center, predicted) * float(cfg.prediction_hold_distance_weight)
+        - score_relief
+        + _candidate_signal_cost(index, background_penalties, target_supports, cfg) * 0.5
+        + _track_hint_cost(predicted, track_hint, cfg)
+    )
 
 
 def _next_background_run(hypothesis: _Hypothesis, background_id: int | None) -> int:
@@ -341,6 +411,23 @@ def _next_background_run(hypothesis: _Hypothesis, background_id: int | None) -> 
     if hypothesis.background_id == background_id:
         return int(hypothesis.background_run) + 1
     return 1
+
+
+def _nearest_candidate(
+    point: Point,
+    candidates: Sequence[Candidate],
+) -> tuple[int, Candidate, float] | None:
+    if not candidates:
+        return None
+    index, candidate = min(
+        enumerate(candidates),
+        key=lambda item: _dist(point, (item[1][0], item[1][1])),
+    )
+    return (
+        int(index),
+        candidate,
+        _dist(point, (candidate[0], candidate[1])),
+    )
 
 
 def _background_run_cost(
