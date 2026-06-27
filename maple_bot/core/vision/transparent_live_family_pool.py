@@ -752,7 +752,7 @@ class TransparentLiveFamilyPool:
                 "expected_frames": int(expected_frames),
             }
 
-        path, flags = self._select_guarded_decal_path(node_frames)
+        path, flags, selection_debug = self._select_guarded_decal_path(node_frames)
         if not path:
             return {}, {
                 "accepted": False,
@@ -772,6 +772,7 @@ class TransparentLiveFamilyPool:
             "background_ratio": round(float(ratio), 3),
             "max_step": round(float(max_step), 1),
         }
+        debug.update(selection_debug)
         if max_step > self.guarded_decal_max_step_px:
             debug["reason"] = "max_step"
             return {}, debug
@@ -814,9 +815,9 @@ class TransparentLiveFamilyPool:
     def _select_guarded_decal_path(
         self,
         node_frames: Sequence[tuple[int, Sequence[_GuardedDecalNode]]],
-    ) -> tuple[dict[int, Point], dict[int, bool]]:
+    ) -> tuple[dict[int, Point], dict[int, bool], dict[str, object]]:
         if not node_frames or self._start_point is None:
-            return {}, {}
+            return {}, {}, {}
 
         prev_scores: dict[_GuardedDecalNode, float] = {}
         back: list[dict[_GuardedDecalNode, _GuardedDecalNode | None]] = []
@@ -853,16 +854,18 @@ class TransparentLiveFamilyPool:
                     cur_scores[node] = best_score
                     cur_back[node] = best_prev
             if not cur_scores:
-                return {}, {}
+                return {}, {}, {}
             prev_scores = cur_scores
             back.append(cur_back)
 
-        node = max(prev_scores, key=prev_scores.get)
+        ranked = sorted(prev_scores.items(), key=lambda item: float(item[1]), reverse=True)
+        selection_debug = self._guarded_selection_debug(ranked)
+        node = ranked[0][0]
         selected = [node]
         for idx in range(len(back) - 1, 0, -1):
             previous = back[idx][node]
             if previous is None:
-                return {}, {}
+                return {}, {}, {}
             node = previous
             selected.append(node)
         selected.reverse()
@@ -877,7 +880,38 @@ class TransparentLiveFamilyPool:
             for frame, node in zip(selected_frames, selected)
             if node.has_expected
         }
-        return path, flags
+        return path, flags, selection_debug
+
+    @staticmethod
+    def _guarded_selection_debug(
+        ranked: Sequence[tuple[_GuardedDecalNode, float]],
+        *,
+        limit: int = 5,
+    ) -> dict[str, object]:
+        if not ranked:
+            return {}
+        selected, selected_score = ranked[0]
+        margin = None
+        if len(ranked) > 1:
+            margin = float(selected_score) - float(ranked[1][1])
+        latest_candidates = []
+        for node, path_score in ranked[: max(0, int(limit))]:
+            candidate = node.candidate
+            latest_candidates.append({
+                "point": [round(float(candidate[0]), 1), round(float(candidate[1]), 1)],
+                "path_score": round(float(path_score), 3),
+                "node_score": round(float(node.score), 3),
+                "det_score": round(float(candidate[2]), 3),
+                "size": [round(float(candidate[3]), 1), round(float(candidate[4]), 1)],
+                "is_background": bool(node.is_background),
+                "has_expected": bool(node.has_expected),
+            })
+        return {
+            "selected_point": [round(float(selected.candidate[0]), 1), round(float(selected.candidate[1]), 1)],
+            "path_score": round(float(selected_score), 3),
+            "score_margin": None if margin is None else round(float(margin), 3),
+            "latest_candidates": latest_candidates,
+        }
 
     @staticmethod
     def _node_from_candidate(candidate: Candidate) -> _Node:

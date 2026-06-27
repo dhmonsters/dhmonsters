@@ -163,6 +163,18 @@ def write_markdown_report(report: Mapping[str, object]) -> str:
         debug = item.get("debug", {})
         if isinstance(debug, Mapping) and debug:
             lines.append(f"- debug={_compact_debug(debug)}")
+            for index, candidate in enumerate(_guarded_latest_candidates(debug)):
+                lines.append(
+                    "- guarded_rank{idx} point={point} path_score={path_score} node_score={node_score} bg={bg} det={det} margin={margin}".format(
+                        idx=index,
+                        point=candidate.get("point", []),
+                        path_score=_fmt_float(candidate.get("path_score")),
+                        node_score=_fmt_float(candidate.get("node_score")),
+                        bg=candidate.get("is_background", "-"),
+                        det=_fmt_float(candidate.get("det_score")),
+                        margin=_fmt_float(debug.get("score_margin")),
+                    )
+                )
         candidates = item.get("nearest_candidates", [])
         if isinstance(candidates, Sequence) and not isinstance(candidates, (str, bytes)):
             for index, candidate in enumerate(candidates):
@@ -384,12 +396,29 @@ def _fmt_float(value: object) -> str:
 
 
 def _compact_debug(debug: Mapping[str, object]) -> str:
-    keys = ("reason", "background_frames", "expected_frames", "background_ratio", "max_step", "period")
+    keys = (
+        "reason",
+        "background_frames",
+        "expected_frames",
+        "background_ratio",
+        "max_step",
+        "period",
+        "selected_point",
+        "path_score",
+        "score_margin",
+    )
     parts = []
     for key in keys:
         if key in debug:
             parts.append(f"{key}={debug[key]}")
     return ", ".join(parts) if parts else str(dict(debug))
+
+
+def _guarded_latest_candidates(debug: Mapping[str, object]) -> list[Mapping[str, object]]:
+    candidates = debug.get("latest_candidates")
+    if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+        return []
+    return [candidate for candidate in candidates if isinstance(candidate, Mapping)]
 
 
 def main(argv: Sequence[str] | None = None) -> int:

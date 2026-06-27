@@ -543,6 +543,14 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
         self.assertTrue(decision.debug["guarded_decal_identity"]["accepted"])
         self.assertGreaterEqual(decision.debug["guarded_decal_identity"]["background_frames"], 2)
         self.assertEqual(decision.debug["guarded_decal_identity"]["background_ratio"], 0.0)
+        self.assertEqual(decision.debug["guarded_decal_identity"]["selected_point"], [50.0, 0.0])
+        self.assertIn("path_score", decision.debug["guarded_decal_identity"])
+        self.assertIn("score_margin", decision.debug["guarded_decal_identity"])
+        self.assertEqual(
+            decision.debug["guarded_decal_identity"]["latest_candidates"][0]["point"],
+            [50.0, 0.0],
+        )
+        self.assertFalse(decision.debug["guarded_decal_identity"]["latest_candidates"][0]["is_background"])
 
     def test_guarded_decal_identity_match_distance_can_be_relaxed(self):
         pool = TransparentLiveFamilyPool(

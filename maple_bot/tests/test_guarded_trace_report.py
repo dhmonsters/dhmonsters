@@ -89,6 +89,21 @@ class GuardedTraceReportTests(unittest.TestCase):
                     "gt": [10.0, 0.0],
                     "reason": "accepted",
                     "step_from_previous": 180.0,
+                    "debug": {
+                        "reason": "accepted",
+                        "selected_point": [180.0, 0.0],
+                        "path_score": -12.3,
+                        "score_margin": 4.5,
+                        "latest_candidates": [
+                            {
+                                "point": [180.0, 0.0],
+                                "path_score": -12.3,
+                                "node_score": 10.0,
+                                "is_background": False,
+                                "det_score": 0.6,
+                            }
+                        ],
+                    },
                     "nearest_candidates": [
                         {"point": [180.0, 0.0], "score": 0.6, "dist_to_point": 0.0, "dist_to_gt": 170.0},
                         {"point": [10.0, 0.0], "score": 0.8, "dist_to_point": 170.0, "dist_to_gt": 0.0, "score_rank": 0, "in_live_top8": True},
@@ -123,6 +138,8 @@ class GuardedTraceReportTests(unittest.TestCase):
         self.assertIn("cand0", text)
         self.assertIn("rank=0", text)
         self.assertIn("live8=True", text)
+        self.assertIn("guarded_rank0 point=[180.0, 0.0]", text)
+        self.assertIn("margin=4.5", text)
         self.assertIn("gt_cand0", text)
         self.assertIn("gt_family0 raw_candidate_cont0_center_mild_state_mild", text)
         self.assertIn("sel_family0 guarded_decal_identity_center_mild_state_mild", text)
