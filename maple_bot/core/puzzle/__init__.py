@@ -3,11 +3,11 @@ from core.puzzle.candidates import CandidateProvider, candidate_from_row
 from core.puzzle.capture_preflight import CaptureCheckResult, run_capture_check
 from core.puzzle.defaults import (
     DEFAULT_BOARD_ROI_RATIOS,
-    DEFAULT_DETECT_BASE_SIZE,
-    DEFAULT_DETECT_REGION,
     DEFAULT_DETECT_ROI_RATIOS,
+    DEFAULT_POPUP_HEADER_ROI_RATIOS,
     fixed_board_roi,
     fixed_detect_roi,
+    fixed_popup_header_roi,
     fixed_puzzle_rois,
 )
 from core.puzzle.evidence import EvidenceJudges
@@ -40,9 +40,8 @@ __all__ = [
     "CandidateProvider",
     "CaptureCheckResult",
     "DEFAULT_BOARD_ROI_RATIOS",
-    "DEFAULT_DETECT_BASE_SIZE",
-    "DEFAULT_DETECT_REGION",
     "DEFAULT_DETECT_ROI_RATIOS",
+    "DEFAULT_POPUP_HEADER_ROI_RATIOS",
     "DetectionEvent",
     "DetectionGate",
     "EvidenceJudges",
@@ -64,6 +63,7 @@ __all__ = [
     "candidate_from_row",
     "fixed_board_roi",
     "fixed_detect_roi",
+    "fixed_popup_header_roi",
     "fixed_puzzle_rois",
     "run_capture_check",
 ]

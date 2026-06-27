@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
-from core.puzzle.models import FramePacket, PuzzleSession
+from core.puzzle.models import FramePacket, PuzzleSession, RoiSpec
 from core.puzzle.recorder import SessionRecorder
 from core.puzzle.recording_controller import RecordingController
 from core.puzzle.report import ReportBuilder
@@ -52,13 +52,22 @@ class LiveRecordingRuntime:
     def is_solver_running(self) -> bool:
         return self.recording is not None and self.recording.is_solver_running
 
-    def start(self, *, initial_frame: Any | None = None) -> PuzzleSession:
+    def start(
+        self,
+        *,
+        initial_frame: Any | None = None,
+        detect_roi: RoiSpec | None = None,
+        board_roi: RoiSpec | None = None,
+    ) -> PuzzleSession:
         if self.is_recording and self.session is not None:
             return self.session
 
         first_frame = initial_frame if initial_frame is not None else self.frame_grabber()
         frame_h, frame_w = first_frame.shape[:2]
-        detect_roi, board_roi = fixed_puzzle_rois(frame_w=frame_w, frame_h=frame_h)
+        if detect_roi is None or board_roi is None:
+            default_detect_roi, default_board_roi = fixed_puzzle_rois(frame_w=frame_w, frame_h=frame_h)
+            detect_roi = detect_roi or default_detect_roi
+            board_roi = board_roi or default_board_roi
         session = SessionManager(output_root=self.output_root).start(
             source_kind="live_screen",
             detect_roi=detect_roi,

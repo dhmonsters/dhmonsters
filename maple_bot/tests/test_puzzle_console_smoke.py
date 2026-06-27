@@ -464,8 +464,8 @@ def test_puzzle_console_shows_fixed_roi_values(monkeypatch):
 
     assert window.detect_roi_label.objectName() == "puzzleDetectRoiLabel"
     assert window.board_roi_label.objectName() == "puzzleBoardRoiLabel"
-    assert "0.440,0.217,0.116,0.095" in window.detect_roi_label.text()
-    assert "0.286,0.183,0.428,0.575" in window.board_roi_label.text()
+    assert "0.320,0.265,0.358,0.463" in window.detect_roi_label.text()
+    assert "0.318,0.188,0.362,0.587" in window.board_roi_label.text()
 
 
 def test_puzzle_console_applies_trace_events_to_analysis_metrics(monkeypatch):

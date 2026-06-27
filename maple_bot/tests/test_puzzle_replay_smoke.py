@@ -136,19 +136,19 @@ def test_headless_replay_records_fixed_roi_snapshot(tmp_path):
 
     assert start_event["type"] == "SESSION_START"
     assert start_event["payload"]["detect_roi"]["basis"] == "window_client"
-    assert start_event["payload"]["detect_roi"]["x_ratio"] == 1126 / 2560
-    assert start_event["payload"]["detect_roi"]["y_ratio"] == 297 / 1369
-    assert start_event["payload"]["detect_roi"]["w_ratio"] == 296 / 2560
-    assert start_event["payload"]["detect_roi"]["h_ratio"] == 130 / 1369
-    assert start_event["payload"]["detect_roi"]["x"] == 4
-    assert start_event["payload"]["detect_roi"]["y"] == 1
-    assert start_event["payload"]["detect_roi"]["w"] == 1
-    assert start_event["payload"]["detect_roi"]["h"] == 1
+    assert start_event["payload"]["detect_roi"]["x_ratio"] == 0.320
+    assert start_event["payload"]["detect_roi"]["y_ratio"] == 0.265
+    assert start_event["payload"]["detect_roi"]["w_ratio"] == 0.678 - 0.320
+    assert start_event["payload"]["detect_roi"]["h_ratio"] == 0.728 - 0.265
+    assert start_event["payload"]["detect_roi"]["x"] == 3
+    assert start_event["payload"]["detect_roi"]["y"] == 2
+    assert start_event["payload"]["detect_roi"]["w"] == 3
+    assert start_event["payload"]["detect_roi"]["h"] == 3
     assert start_event["payload"]["board_roi"]["basis"] == "window_client"
-    assert start_event["payload"]["board_roi"]["x_ratio"] == 0.286
-    assert start_event["payload"]["board_roi"]["y_ratio"] == 0.183
-    assert start_event["payload"]["board_roi"]["w_ratio"] == 0.428
-    assert start_event["payload"]["board_roi"]["h_ratio"] == 0.575
+    assert start_event["payload"]["board_roi"]["x_ratio"] == 0.318
+    assert start_event["payload"]["board_roi"]["y_ratio"] == 0.188
+    assert start_event["payload"]["board_roi"]["w_ratio"] == 0.680 - 0.318
+    assert start_event["payload"]["board_roi"]["h_ratio"] == 0.775 - 0.188
 
 
 def test_headless_replay_records_analysis_events_per_frame(tmp_path):

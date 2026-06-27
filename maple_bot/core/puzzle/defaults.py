@@ -5,19 +5,24 @@ from core.puzzle.models import RoiSpec
 from core.puzzle.roi import resolve_ratio_roi
 
 
-DEFAULT_DETECT_REGION = (1126, 297, 296, 130)
-DEFAULT_DETECT_BASE_SIZE = (2560, 1369)
+# planet_solver_noauth.py의 팝업 감지 기준 ROI와 같은 상대좌표를 사용한다.
+DEFAULT_POPUP_HEADER_ROI_RATIOS = {
+    "x_ratio": 0.320,
+    "y_ratio": 0.202,
+    "w_ratio": 0.678 - 0.320,
+    "h_ratio": 0.263 - 0.202,
+}
 DEFAULT_DETECT_ROI_RATIOS = {
-    "x_ratio": DEFAULT_DETECT_REGION[0] / DEFAULT_DETECT_BASE_SIZE[0],
-    "y_ratio": DEFAULT_DETECT_REGION[1] / DEFAULT_DETECT_BASE_SIZE[1],
-    "w_ratio": DEFAULT_DETECT_REGION[2] / DEFAULT_DETECT_BASE_SIZE[0],
-    "h_ratio": DEFAULT_DETECT_REGION[3] / DEFAULT_DETECT_BASE_SIZE[1],
+    "x_ratio": 0.320,
+    "y_ratio": 0.265,
+    "w_ratio": 0.678 - 0.320,
+    "h_ratio": 0.728 - 0.265,
 }
 DEFAULT_BOARD_ROI_RATIOS = {
-    "x_ratio": 0.286,
-    "y_ratio": 0.183,
-    "w_ratio": 0.428,
-    "h_ratio": 0.575,
+    "x_ratio": 0.318,
+    "y_ratio": 0.188,
+    "w_ratio": 0.680 - 0.318,
+    "h_ratio": 0.775 - 0.188,
 }
 
 
@@ -38,6 +43,17 @@ def fixed_board_roi(*, frame_w: int, frame_h: int, window_title: str = "") -> Ro
         frame_w=frame_w,
         frame_h=frame_h,
         name="board",
+        basis="window_client",
+        window_title=window_title,
+    )
+
+
+def fixed_popup_header_roi(*, frame_w: int, frame_h: int, window_title: str = "") -> RoiSpec:
+    return resolve_ratio_roi(
+        DEFAULT_POPUP_HEADER_ROI_RATIOS,
+        frame_w=frame_w,
+        frame_h=frame_h,
+        name="popup_header",
         basis="window_client",
         window_title=window_title,
     )
@@ -85,8 +101,8 @@ def fixed_detect_roi_text() -> str:
 def fixed_board_roi_text() -> str:
     return (
         "board: ratio "
-        f"{DEFAULT_BOARD_ROI_RATIOS['x_ratio']},"
-        f"{DEFAULT_BOARD_ROI_RATIOS['y_ratio']},"
-        f"{DEFAULT_BOARD_ROI_RATIOS['w_ratio']},"
-        f"{DEFAULT_BOARD_ROI_RATIOS['h_ratio']}"
+        f"{DEFAULT_BOARD_ROI_RATIOS['x_ratio']:.3f},"
+        f"{DEFAULT_BOARD_ROI_RATIOS['y_ratio']:.3f},"
+        f"{DEFAULT_BOARD_ROI_RATIOS['w_ratio']:.3f},"
+        f"{DEFAULT_BOARD_ROI_RATIOS['h_ratio']:.3f}"
     )

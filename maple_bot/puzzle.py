@@ -69,7 +69,31 @@ def create_window(args: argparse.Namespace | None = None):
                     frame = live_runtime.frame_grabber()
                     activation = live_detector.detect(frame)
                     if activation.active:
-                        live_runtime.start(initial_frame=frame)
+                        live_runtime.start(
+                            initial_frame=frame,
+                            detect_roi=activation.detect_roi,
+                            board_roi=activation.board_roi,
+                        )
+                        if live_runtime.trace is not None:
+                            live_runtime.trace.write_event(
+                                "PUZZLE_ACTIVATED",
+                                None,
+                                {
+                                    "reason": activation.reason,
+                                    "score": activation.score,
+                                    "detect_roi": (
+                                        roi_to_payload(activation.detect_roi)
+                                        if activation.detect_roi is not None
+                                        else None
+                                    ),
+                                    "board_roi": (
+                                        roi_to_payload(activation.board_roi)
+                                        if activation.board_roi is not None
+                                        else None
+                                    ),
+                                    "debug": activation.debug or {},
+                                },
+                            )
                         break
                     live_runtime.sleeper(frame_period_s)
                 if live_runtime.is_recording:
