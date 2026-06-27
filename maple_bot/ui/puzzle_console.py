@@ -110,7 +110,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._live_status_timer: QTimer | None = None
         if self._live_status_handler is not None:
             self._live_status_timer = QTimer(self)
-            self._live_status_timer.setInterval(500)
+            self._live_status_timer.setInterval(50)
             self._live_status_timer.timeout.connect(self._poll_live_status)
             self._live_status_timer.start()
 

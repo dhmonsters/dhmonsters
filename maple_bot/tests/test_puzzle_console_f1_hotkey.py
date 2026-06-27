@@ -59,6 +59,14 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
         self.assertIn("#1f8f4d", window.solver_start_badge.styleSheet())
         self.assertIn("solver on", window.event_log.toPlainText())
 
+    def test_live_status_timer_polls_like_cctv(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+
+        window = module.PuzzleConsoleWindow(live_status_handler=lambda: None)
+
+        self.assertIsNotNone(window._live_status_timer)
+        self.assertLessEqual(window._live_status_timer.interval, 50)
+
     def test_f2_keypress_stops_solver_without_closing_recording(self) -> None:
         module = importlib.import_module("ui.puzzle_console")
         calls: list[str] = []

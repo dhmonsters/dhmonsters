@@ -95,8 +95,8 @@ class PlanetLiveSolver:
         self.mouse = mouse or PlanetMouseController()
         self.evidence_judges = evidence_judges or EvidenceJudges()
         self.identity_tracker = identity_tracker or IdentityTracker()
-        self._shape_yolo: Any | None = None
-        self._shape_yolo_loaded = False
+        self._noauth_detector: Any | None = None
+        self._noauth_detector_loaded = False
 
     def analyze(self, packet: FramePacket, *, solver_running: bool) -> PlanetLiveResult:
         detect_payload = packet.roi_snapshot.get("detect", {})
@@ -141,7 +141,7 @@ class PlanetLiveSolver:
         )
 
     def _detect_rows(self, det_frame: Any) -> Sequence[Any]:
-        detector = self.detector or self._load_shape_yolo()
+        detector = self.detector or self._load_noauth_detector()
         if detector is None or not getattr(detector, "enabled", True):
             return []
         try:
@@ -149,17 +149,17 @@ class PlanetLiveSolver:
         except Exception:
             return []
 
-    def _load_shape_yolo(self) -> Any | None:
-        if self._shape_yolo_loaded:
-            return self._shape_yolo
-        self._shape_yolo_loaded = True
+    def _load_noauth_detector(self) -> Any | None:
+        if self._noauth_detector_loaded:
+            return self._noauth_detector
+        self._noauth_detector_loaded = True
         try:
-            from core.shape_yolo import ShapeYolo
+            from core.puzzle.planet_noauth import PlanetNoAuthDetector
 
-            self._shape_yolo = ShapeYolo()
+            self._noauth_detector = PlanetNoAuthDetector()
         except Exception:
-            self._shape_yolo = None
-        return self._shape_yolo
+            self._noauth_detector = None
+        return self._noauth_detector
 
 
 def render_planet_cctv_preview(
@@ -178,7 +178,7 @@ def render_planet_cctv_preview(
     cv2 = _cv2()
     header_h = int(round(frame_h * 0.061))
     cv2.rectangle(vis, (0, 0), (popup_roi.w - 1, max(0, header_h - 1)), (0, 230, 255), 2)
-    score_text = "HDR score --" if popup_score is None else f"HDR score={popup_score:.2f} / thr=0.65"
+    score_text = "HDR score --" if popup_score is None else f"HDR score={popup_score:.2f} / thr=0.50"
     cv2.putText(vis, score_text, (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 230, 255), 1, cv2.LINE_AA)
 
     det_lx = detect_roi.x - popup_roi.x

@@ -67,15 +67,13 @@ def create_window(args: argparse.Namespace | None = None):
         def worker() -> None:
             try:
                 frame_period_s = 1.0 / live_runtime.fps
-                watch_frame_index = 0
                 while not stop_event.is_set() and not live_runtime.is_recording:
                     frame = live_runtime.frame_grabber()
                     activation = live_detector.detect(frame)
-                    if watch_frame_index % 5 == 0:
-                        live_watch_preview["frame"] = _build_watch_preview_frame(
-                            frame,
-                            popup_score=activation.score,
-                        )
+                    live_watch_preview["frame"] = _build_watch_preview_frame(
+                        frame,
+                        popup_score=activation.score,
+                    )
                     if activation.active:
                         live_runtime.start(
                             initial_frame=frame,
@@ -103,7 +101,6 @@ def create_window(args: argparse.Namespace | None = None):
                                 },
                             )
                         break
-                    watch_frame_index += 1
                     live_runtime.sleeper(frame_period_s)
                 if live_runtime.is_recording:
                     live_runtime.run_until_stopped()

@@ -1,12 +1,16 @@
 # planet_solver_noauth 방식의 live preview와 마우스 이동 어댑터를 검증한다.
 from __future__ import annotations
 
+import sys
+import types
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from core.puzzle.models import RoiSpec
 from core.puzzle.planet_live import PlanetMouseController, render_planet_cctv_preview
+from core.puzzle.planet_noauth import PlanetNoAuthDetector
 
 
 class PlanetMouseControllerTest(unittest.TestCase):
@@ -58,9 +62,29 @@ class PlanetCctvPreviewTest(unittest.TestCase):
             track_pos=(30.0, 40.0),
         )
 
-        self.assertEqual(preview.shape[:2], (619, 695))
+        self.assertEqual(preview.shape[:2], (717, 948))
         self.assertTrue(np.any(preview[:, :, 1] > 200))
         self.assertTrue(np.any(preview[:, :, 2] > 200))
+
+
+class PlanetNoAuthDetectorTest(unittest.TestCase):
+    def test_detect_all_uses_planet_solver_m1_signature(self) -> None:
+        calls = []
+
+        class _FakeM1:
+            def detect(self, board, imgsz, score):
+                calls.append((board.shape[:2], imgsz, score))
+                return np.array([[10, 20, 50, 80, 0.81, 0]], dtype=np.float32)
+
+        fake_module = types.ModuleType("planet_live_solver")
+        fake_module.load_models = lambda use_gpu=False: (_FakeM1(), object())
+
+        with patch.dict(sys.modules, {"planet_live_solver": fake_module}):
+            detector = PlanetNoAuthDetector()
+            rows = detector.detect_all(np.zeros((120, 200, 3), dtype=np.uint8))
+
+        self.assertEqual(calls, [((120, 200), 192, 0.2)])
+        self.assertEqual(rows, [(30, 50, 0.8100000023841858, 40, 60)])
 
 
 if __name__ == "__main__":

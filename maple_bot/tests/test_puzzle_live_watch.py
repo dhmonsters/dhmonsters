@@ -7,27 +7,21 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from core.puzzle.defaults import DEFAULT_BOARD_ROI_RATIOS, DEFAULT_DETECT_ROI_RATIOS
+from core.puzzle.defaults import (
+    DEFAULT_BOARD_ROI_RATIOS,
+    DEFAULT_DETECT_ROI_RATIOS,
+    DEFAULT_POPUP_HEADER_ROI_RATIOS,
+    DEFAULT_POPUP_PREVIEW_ROI_RATIOS,
+)
 from core.puzzle.live_recording import LiveRecordingRuntime
 from core.puzzle.live_watch import LivePuzzleActivationDetector, WatchStartResult
 from core.puzzle.models import RoiSpec
 
 
-def _write_popup_template(path) -> None:
-    import cv2
-
-    template = np.full((54, 120, 3), 64, dtype=np.uint8)
-    template[8:18, 12:108] = 220
-    template[26:42, 24:96] = 142
-    template[:, 0:4] = 12
-    template[:, -4:] = 12
-    cv2.imwrite(str(path), template)
-
-
 class LivePuzzleActivationDetectorTest(unittest.TestCase):
     def test_dark_frame_does_not_activate_recording(self) -> None:
         detector = LivePuzzleActivationDetector(use_yolo=False)
-        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame = np.full((100, 100, 3), 255, dtype=np.uint8)
 
         result = detector.detect(frame)
 
@@ -36,7 +30,7 @@ class LivePuzzleActivationDetectorTest(unittest.TestCase):
 
     def test_default_detector_does_not_activate_on_bright_game_background(self) -> None:
         detector = LivePuzzleActivationDetector(use_yolo=False)
-        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame = np.full((100, 100, 3), 255, dtype=np.uint8)
         frame[30:90, 20:95] = 255
 
         result = detector.detect(frame)
@@ -44,34 +38,45 @@ class LivePuzzleActivationDetectorTest(unittest.TestCase):
         self.assertFalse(result.active)
         self.assertEqual(result.reason, "popup_not_detected")
 
-    def test_popup_header_template_activates_with_planet_rois(self) -> None:
-        with TemporaryDirectory() as tmp:
-            template_path = f"{tmp}/popup_header.png"
-            _write_popup_template(template_path)
-            detector = LivePuzzleActivationDetector(use_yolo=False, template_dir=tmp)
-            frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
-            hx = int(1920 * 0.320) + 20
-            hy = int(1080 * 0.202) + 5
+    def test_dark_header_ratio_activates_with_planet_noauth_rois(self) -> None:
+        detector = LivePuzzleActivationDetector(use_yolo=False)
+        frame = np.full((1080, 1920, 3), 220, dtype=np.uint8)
+        hx1 = int(1920 * DEFAULT_POPUP_HEADER_ROI_RATIOS["x_ratio"])
+        hy1 = int(1080 * DEFAULT_POPUP_HEADER_ROI_RATIOS["y_ratio"])
+        hx2 = hx1 + int(1920 * DEFAULT_POPUP_HEADER_ROI_RATIOS["w_ratio"])
+        hy2 = hy1 + int(1080 * DEFAULT_POPUP_HEADER_ROI_RATIOS["h_ratio"])
+        frame[hy1:hy2, hx1:hx2] = 30
 
-            import cv2
-
-            template = cv2.imread(template_path)
-            frame[hy : hy + template.shape[0], hx : hx + template.shape[1]] = template
-
-            result = detector.detect(frame)
+        result = detector.detect(frame)
 
         self.assertTrue(result.active)
         self.assertEqual(result.reason, "popup_board")
+        self.assertGreaterEqual(result.score, 0.50)
         self.assertIsNotNone(result.board_roi)
         self.assertIsNotNone(result.detect_roi)
         self.assertAlmostEqual(result.board_roi.x_ratio, DEFAULT_BOARD_ROI_RATIOS["x_ratio"])
         self.assertAlmostEqual(result.board_roi.y_ratio, DEFAULT_BOARD_ROI_RATIOS["y_ratio"])
-        self.assertAlmostEqual(result.detect_roi.w_ratio, DEFAULT_DETECT_ROI_RATIOS["w_ratio"])
-        self.assertAlmostEqual(result.detect_roi.h_ratio, DEFAULT_DETECT_ROI_RATIOS["h_ratio"])
+        self.assertAlmostEqual(result.detect_roi.x_ratio, DEFAULT_DETECT_ROI_RATIOS["x_ratio"])
+        self.assertAlmostEqual(result.detect_roi.y_ratio, DEFAULT_DETECT_ROI_RATIOS["y_ratio"])
+
+    def test_default_rois_match_planet_solver_noauth_ratios(self) -> None:
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["x_ratio"], 0.252)
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["y_ratio"], 0.216)
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["w_ratio"], 0.748 - 0.252)
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["h_ratio"], 0.292 - 0.216)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["x_ratio"], 0.254)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["y_ratio"], 0.292)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["w_ratio"], 0.748 - 0.254)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["h_ratio"], 0.880 - 0.292)
+        self.assertEqual(DEFAULT_DETECT_ROI_RATIOS, DEFAULT_BOARD_ROI_RATIOS)
+        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["x_ratio"], 0.254)
+        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["y_ratio"], 0.216)
+        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["w_ratio"], 0.748 - 0.254)
+        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["h_ratio"], 0.880 - 0.216)
 
     def test_white_shape_fallback_only_activates_when_enabled(self) -> None:
         detector = LivePuzzleActivationDetector(use_yolo=False, allow_white_fallback=True)
-        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame = np.full((100, 100, 3), 120, dtype=np.uint8)
         frame[30:52, 36:58] = 255
 
         result = detector.detect(frame)
@@ -97,7 +102,7 @@ class WatchPreviewFrameTest(unittest.TestCase):
             preview = puzzle._build_watch_preview_frame(frame, popup_score=0.14)
 
             self.assertEqual(list(Path(tmp).rglob("*.png")), [])
-            self.assertEqual(preview.shape[:2], (619, 695))
+            self.assertEqual(preview.shape[:2], (717, 948))
 
 
 class LiveRecordingActivationFrameTest(unittest.TestCase):
