@@ -21,6 +21,7 @@ class TemporalFrame:
     background_ids: tuple[int | None, ...] = ()
     color_supports: tuple[float, ...] = ()
     merge_likelihoods: tuple[float, ...] = ()
+    appearance_supports: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,7 @@ class TemporalIdentityConfig:
     overlap_center_penalty_weight: float = 20.0
     overlap_hold_relief_weight: float = 10.0
     color_support_weight: float = 10.0
+    appearance_support_weight: float = 0.0
     color_fade_frames: int = 20
     post_hold_support_bonus: float = 8.0
     hold_cost: float = 4.0
@@ -126,6 +128,7 @@ def frames_from_jsonl_rows(
                 _background_ids(candidates, expected_background_by_frame.get(int(frame_index), ())),
                 (),
                 _merge_likelihoods(candidates),
+                (),
             )
         )
         previous_candidates = candidates
@@ -180,6 +183,7 @@ def select_temporal_identity(
                 frame.background_ids,
                 frame.color_supports,
                 frame.merge_likelihoods,
+                frame.appearance_supports,
                 cfg,
                 start_frame_index=start_frame_index,
                 frame_index=frame.frame_index,
@@ -245,6 +249,7 @@ def _states_for_frame(
     background_ids: Sequence[int | None],
     color_supports: Sequence[float],
     merge_likelihoods: Sequence[float],
+    appearance_supports: Sequence[float],
     cfg: TemporalIdentityConfig,
     *,
     start_frame_index: int,
@@ -274,6 +279,7 @@ def _states_for_frame(
             background_penalties,
             target_supports,
             color_supports,
+            appearance_supports,
             cfg,
             color_weight=color_weight,
         )
@@ -304,6 +310,7 @@ def _states_for_frame(
                         background_penalties,
                         target_supports,
                         color_supports,
+                        appearance_supports,
                         cfg,
                         color_weight=color_weight,
                     )
@@ -330,6 +337,7 @@ def _states_for_frame(
                         target_supports,
                         color_supports,
                         merge_likelihoods,
+                        appearance_supports,
                         cfg,
                         color_weight=color_weight,
                     ),
@@ -359,6 +367,7 @@ def _states_for_frame(
                         target_supports,
                         color_supports,
                         merge_likelihoods,
+                        appearance_supports,
                         cfg,
                         color_weight=color_weight,
                     )
@@ -452,6 +461,7 @@ def _prediction_hold_cost(
     target_supports: Sequence[float],
     color_supports: Sequence[float],
     merge_likelihoods: Sequence[float],
+    appearance_supports: Sequence[float],
     cfg: TemporalIdentityConfig,
     *,
     color_weight: float,
@@ -471,6 +481,7 @@ def _prediction_hold_cost(
             background_penalties,
             target_supports,
             color_supports,
+            appearance_supports,
             cfg,
             color_weight=color_weight,
         )
@@ -560,6 +571,7 @@ def _candidate_signal_cost(
     background_penalties: Sequence[float],
     target_supports: Sequence[float],
     color_supports: Sequence[float],
+    appearance_supports: Sequence[float],
     cfg: TemporalIdentityConfig,
     *,
     color_weight: float = 0.0,
@@ -567,10 +579,12 @@ def _candidate_signal_cost(
     background = _sequence_value(background_penalties, index)
     support = _sequence_value(target_supports, index)
     color = _sequence_value(color_supports, index) * float(color_weight)
+    appearance = _sequence_value(appearance_supports, index)
     return (
         background * float(cfg.background_penalty_weight)
         - support * float(cfg.target_support_weight)
         - color * float(cfg.color_support_weight)
+        - appearance * float(cfg.appearance_support_weight)
     )
 
 

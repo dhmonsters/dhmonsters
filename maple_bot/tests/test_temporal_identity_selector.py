@@ -432,3 +432,29 @@ def test_selector_rewards_supported_candidate_after_hold_release():
 
     assert result.states[2] == "MERGED_HOLD"
     assert result.path[3] == (30.0, 0.0)
+
+
+def test_selector_uses_appearance_support_without_color_fade():
+    frames = [
+        TemporalFrame(
+            25,
+            (
+                (5.0, 0.0, 0.80, 20.0, 20.0),
+                (10.0, 0.0, 0.80, 20.0, 20.0),
+            ),
+            appearance_supports=(0.0, 1.0),
+        )
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            appearance_support_weight=10.0,
+            score_weight=0.0,
+            color_support_weight=0.0,
+        ),
+    )
+
+    assert result.path[25] == (10.0, 0.0)
