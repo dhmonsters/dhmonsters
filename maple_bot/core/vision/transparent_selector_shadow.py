@@ -17,6 +17,7 @@ KNOWN_SOURCES = (
     "panel_default",
     "merge_context",
     "phase_catalog",
+    "guarded_decal_identity",
 )
 
 
@@ -67,6 +68,8 @@ def _serial_float_point(point: Point | None) -> list[float] | None:
 
 def _rescue_allowed_for_family(family: str, merge_context: Mapping[str, object]) -> bool:
     name = str(family).lower()
+    if name.startswith("guarded_decal_identity"):
+        return True
     return (
         (
             name.startswith("bg_split_viterbi")

@@ -747,6 +747,45 @@ def test_puzzle_console_exposes_cctv_identity_summary(monkeypatch):
     assert window.cctv_identity_summary_label.objectName() == "puzzleCctvIdentitySummary"
 
 
+def test_puzzle_console_exposes_guarded_decal_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+
+    assert window.cctv_guarded_summary_label.objectName() == "puzzleCctvGuardedSummary"
+
+
+def test_puzzle_console_applies_live_family_guarded_summary(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    window = module.PuzzleConsoleWindow()
+    window.apply_trace_event(
+        {
+            "type": "LIVE_FAMILY",
+            "session_id": "20260627_010000_001",
+            "frame_index": 12,
+            "payload": {
+                "debug": {
+                    "guarded_decal_identity": {
+                        "accepted": True,
+                        "background_ratio": 0.0,
+                        "background_frames": 2,
+                        "max_step": 10.0,
+                        "reason": "accepted",
+                    }
+                }
+            },
+        }
+    )
+
+    assert window.current_frame_guarded[12]["debug"]["guarded_decal_identity"]["accepted"] is True
+    assert "guarded_decal_identity" in window.cctv_guarded_summary_label.text()
+    assert "accepted" in window.cctv_guarded_summary_label.text()
+    assert "bg 0.00" in window.cctv_guarded_summary_label.text()
+
+
 def test_puzzle_console_applies_identity_to_cctv_summary(monkeypatch):
     _install_fake_qt(monkeypatch)
     module = importlib.import_module("ui.puzzle_console")

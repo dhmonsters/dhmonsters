@@ -189,10 +189,15 @@ def backfill_selector_shadow_rows(
     merge_context_frames: int = 6,
     merge_min_size: float = 175.0,
     merge_size_ratio: float = 1.30,
+    enable_guarded_decal_identity: bool = False,
 ) -> list[dict]:
     runtime = runtime or TransparentFamilySelectorRuntime()
     shadow_frames = int(min_frames if shadow_min_frames is None else shadow_min_frames)
-    live_pool = TransparentLiveFamilyPool(window=window, min_frames=min_frames)
+    live_pool = TransparentLiveFamilyPool(
+        window=window,
+        min_frames=min_frames,
+        enable_guarded_decal_identity=enable_guarded_decal_identity,
+    )
     shadow = TransparentSelectorShadow(
         runtime,
         clip_id=clip_id,
@@ -286,6 +291,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--merge-context-frames", type=int, default=6)
     parser.add_argument("--merge-min-size", type=float, default=175.0)
     parser.add_argument("--merge-size-ratio", type=float, default=1.30)
+    parser.add_argument("--guarded-decal-identity", action="store_true")
     parser.add_argument("--no-local-box", action="store_true")
     parser.add_argument("--no-width-sidecar", action="store_true")
     args = parser.parse_args(argv)
@@ -307,6 +313,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         merge_context_frames=args.merge_context_frames,
         merge_min_size=args.merge_min_size,
         merge_size_ratio=args.merge_size_ratio,
+        enable_guarded_decal_identity=args.guarded_decal_identity,
     )
     print(f"selector_shadow_backfill input={source} output={result}")
     return 0

@@ -452,7 +452,9 @@ class _MacroThread(threading.Thread):
         _healthsel = TransparentTrackHealthSelector()
         _visual_rescue = TransparentVisualRescueTracker()
         _transparent_engine = TransparentPuzzleEngine()
-        _live_family_pool = TransparentLiveFamilyPool()
+        _live_family_pool = TransparentLiveFamilyPool(
+            enable_guarded_decal_identity=True,
+        )
         _family_selector = TransparentFamilySelectorRuntime()
         _selector_shadow = TransparentSelectorShadow(
             _family_selector,

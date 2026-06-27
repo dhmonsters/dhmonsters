@@ -20,6 +20,19 @@ def _transparent_selector_shadow_calls():
     return calls
 
 
+def _transparent_live_family_pool_calls():
+    source = (ROOT / "planet_solver_noauth.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    calls = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if isinstance(func, ast.Name) and func.id == "TransparentLiveFamilyPool":
+            calls.append(node)
+    return calls
+
+
 def _literal_keyword(call, name):
     for keyword in call.keywords:
         if keyword.arg == name:
@@ -36,6 +49,12 @@ class PlanetSolverNoauthSelectorShadowConfigTests(unittest.TestCase):
         self.assertEqual(_literal_keyword(call, "merge_context_frames"), 6)
         self.assertEqual(_literal_keyword(call, "merge_min_size"), 175.0)
         self.assertEqual(_literal_keyword(call, "merge_size_ratio"), 1.30)
+
+    def test_live_family_pool_enables_guarded_decal_identity_family(self):
+        calls = _transparent_live_family_pool_calls()
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(_literal_keyword(calls[0], "enable_guarded_decal_identity"))
 
 
 if __name__ == "__main__":

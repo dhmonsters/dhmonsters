@@ -42,6 +42,14 @@ class _RawBeam:
 
 
 @dataclass(frozen=True)
+class _GuardedDecalNode:
+    candidate: Candidate
+    score: float
+    is_background: bool
+    has_expected: bool
+
+
+@dataclass(frozen=True)
 class _FamilyConfig:
     name: str
     transition_scale: float
@@ -75,6 +83,13 @@ class TransparentLiveFamilyPool:
         raw_max_candidates_per_frame: int = 32,
         raw_mht_max_candidates_per_frame: int = 8,
         raw_max_step_px: float = 85.0,
+        enable_guarded_decal_identity: bool = False,
+        guarded_decal_min_background_frames: int = 3,
+        guarded_decal_max_background_ratio: float = 0.34,
+        guarded_decal_max_step_px: float = 80.0,
+        guarded_decal_background_penalty: float = 80.0,
+        guarded_decal_transition_scale: float = 26.0,
+        guarded_decal_start_scale: float = 35.0,
     ):
         self.window = max(2, int(window))
         self.min_frames = max(2, int(min_frames))
@@ -96,10 +111,18 @@ class TransparentLiveFamilyPool:
         self.raw_max_candidates_per_frame = max(1, int(raw_max_candidates_per_frame))
         self.raw_mht_max_candidates_per_frame = max(1, int(raw_mht_max_candidates_per_frame))
         self.raw_max_step_px = float(raw_max_step_px)
+        self.enable_guarded_decal_identity = bool(enable_guarded_decal_identity)
+        self.guarded_decal_min_background_frames = max(1, int(guarded_decal_min_background_frames))
+        self.guarded_decal_max_background_ratio = float(guarded_decal_max_background_ratio)
+        self.guarded_decal_max_step_px = float(guarded_decal_max_step_px)
+        self.guarded_decal_background_penalty = float(guarded_decal_background_penalty)
+        self.guarded_decal_transition_scale = float(guarded_decal_transition_scale)
+        self.guarded_decal_start_scale = float(guarded_decal_start_scale)
         self._phase_family_name = "phase_catalog_live_center_mild_state_mild"
         self._phase_mht_family_name = "phase_catalog_mht_center_mild_state_mild"
         self._mht_family_name = "bg_split_viterbi_center_mild_state_mild"
         self._raw_mht_family_name = "raw_candidate_mht_center_mild_state_mild"
+        self._guarded_decal_family_name = "guarded_decal_identity_center_mild_state_mild"
         self._mht_config = SolverConfig(
             keep=64,
             branch=8,
@@ -252,11 +275,17 @@ class TransparentLiveFamilyPool:
             phase_mht_path = self._phase_catalog_mht_path(frame)
             if frame in phase_mht_path:
                 points[self._phase_mht_family_name] = phase_mht_path[frame]
-        return LiveFamilyDecision(points, {
+        guarded_path, guarded_debug = self._guarded_decal_identity_path(usable_frames)
+        if frame in guarded_path:
+            points[self._guarded_decal_family_name] = guarded_path[frame]
+        debug = {
             "frames": len(usable_frames),
             "ready": bool(points),
             "families": sorted(points),
-        })
+        }
+        if guarded_debug is not None:
+            debug["guarded_decal_identity"] = guarded_debug
+        return LiveFamilyDecision(points, debug)
 
     def _raw_candidate_family_points(
         self,
@@ -671,6 +700,202 @@ class TransparentLiveFamilyPool:
                 bg_center=bg_center,
             ))
         return out
+
+    def _guarded_decal_identity_path(
+        self,
+        frames: Sequence[int],
+    ) -> tuple[dict[int, Point], dict[str, object] | None]:
+        if not self.enable_guarded_decal_identity:
+            return {}, None
+        if self._start_point is None or not frames:
+            return {}, {
+                "accepted": False,
+                "reason": "not_ready",
+            }
+
+        latest_frame = int(frames[-1])
+        if self._catalog_period is None:
+            self._catalog_period = self._estimate_catalog_period(latest_frame)
+        if self._catalog_period is None:
+            return {}, {
+                "accepted": False,
+                "reason": "period",
+            }
+
+        node_frames: list[tuple[int, list[_GuardedDecalNode]]] = []
+        background_frames = 0
+        expected_frames = 0
+        for frame in frames:
+            nodes, has_background, has_expected = self._guarded_decal_nodes_for_frame(int(frame))
+            if not nodes:
+                continue
+            node_frames.append((int(frame), nodes))
+            if has_expected:
+                expected_frames += 1
+            if has_background:
+                background_frames += 1
+        if len(node_frames) < self.min_frames:
+            return {}, {
+                "accepted": False,
+                "reason": "frames",
+                "background_frames": int(background_frames),
+            }
+        if background_frames < self.guarded_decal_min_background_frames:
+            return {}, {
+                "accepted": False,
+                "reason": "background_signal",
+                "background_frames": int(background_frames),
+                "expected_frames": int(expected_frames),
+            }
+
+        path, flags = self._select_guarded_decal_path(node_frames)
+        if not path:
+            return {}, {
+                "accepted": False,
+                "reason": "path",
+                "background_frames": int(background_frames),
+                "expected_frames": int(expected_frames),
+            }
+
+        ratio = self._guarded_background_ratio(flags)
+        _mean_step, max_step = self._path_step_stats(path)
+        debug = {
+            "accepted": False,
+            "reason": "accepted",
+            "period": int(self._catalog_period),
+            "background_frames": int(background_frames),
+            "expected_frames": int(expected_frames),
+            "background_ratio": round(float(ratio), 3),
+            "max_step": round(float(max_step), 1),
+        }
+        if max_step > self.guarded_decal_max_step_px:
+            debug["reason"] = "max_step"
+            return {}, debug
+        if ratio > self.guarded_decal_max_background_ratio:
+            debug["reason"] = "background_ratio"
+            return {}, debug
+
+        debug["accepted"] = True
+        return path, debug
+
+    def _guarded_decal_nodes_for_frame(
+        self,
+        frame: int,
+    ) -> tuple[list[_GuardedDecalNode], bool, bool]:
+        candidates = self._candidate_sets.get(int(frame), [])
+        if not candidates:
+            return [], False, False
+
+        lag = self._choose_catalog_lag(int(frame), int(self._catalog_period))
+        expected = self._catalog_candidate_sets.get(int(frame) - int(lag), [])
+        has_expected = bool(expected)
+        nodes = []
+        has_background = False
+        for candidate in candidates:
+            is_background = bool(expected) and self._candidate_matches_background(candidate, expected)
+            has_background = has_background or is_background
+            score = -0.01 * float(candidate[2])
+            if is_background:
+                score -= self.guarded_decal_background_penalty
+            else:
+                score += 10.0
+            nodes.append(_GuardedDecalNode(
+                candidate=candidate,
+                score=float(score),
+                is_background=is_background,
+                has_expected=has_expected,
+            ))
+        return nodes, has_background, has_expected
+
+    def _select_guarded_decal_path(
+        self,
+        node_frames: Sequence[tuple[int, Sequence[_GuardedDecalNode]]],
+    ) -> tuple[dict[int, Point], dict[int, bool]]:
+        if not node_frames or self._start_point is None:
+            return {}, {}
+
+        prev_scores: dict[_GuardedDecalNode, float] = {}
+        back: list[dict[_GuardedDecalNode, _GuardedDecalNode | None]] = []
+        start = _Node(self._start_point[0], self._start_point[1], 0.0)
+        for node in node_frames[0][1]:
+            cur = self._node_from_candidate(node.candidate)
+            prev_scores[node] = node.score - self._transition_penalty(
+                start,
+                cur,
+                self.guarded_decal_start_scale,
+                self.guarded_decal_max_step_px,
+            )
+        back.append({node: None for node in node_frames[0][1]})
+
+        for _frame, nodes in node_frames[1:]:
+            cur_scores: dict[_GuardedDecalNode, float] = {}
+            cur_back: dict[_GuardedDecalNode, _GuardedDecalNode | None] = {}
+            for node in nodes:
+                cur = self._node_from_candidate(node.candidate)
+                best_score = None
+                best_prev = None
+                for prev, prev_score in prev_scores.items():
+                    previous = self._node_from_candidate(prev.candidate)
+                    score = prev_score + node.score - self._transition_penalty(
+                        previous,
+                        cur,
+                        self.guarded_decal_transition_scale,
+                        self.guarded_decal_max_step_px,
+                    )
+                    if best_score is None or score > best_score:
+                        best_score = score
+                        best_prev = prev
+                if best_score is not None and best_prev is not None:
+                    cur_scores[node] = best_score
+                    cur_back[node] = best_prev
+            if not cur_scores:
+                return {}, {}
+            prev_scores = cur_scores
+            back.append(cur_back)
+
+        node = max(prev_scores, key=prev_scores.get)
+        selected = [node]
+        for idx in range(len(back) - 1, 0, -1):
+            previous = back[idx][node]
+            if previous is None:
+                return {}, {}
+            node = previous
+            selected.append(node)
+        selected.reverse()
+
+        selected_frames = [int(item[0]) for item in node_frames]
+        path = {
+            frame: (float(node.candidate[0]), float(node.candidate[1]))
+            for frame, node in zip(selected_frames, selected)
+        }
+        flags = {
+            frame: bool(node.is_background)
+            for frame, node in zip(selected_frames, selected)
+            if node.has_expected
+        }
+        return path, flags
+
+    @staticmethod
+    def _node_from_candidate(candidate: Candidate) -> _Node:
+        return _Node(float(candidate[0]), float(candidate[1]), 0.0)
+
+    @staticmethod
+    def _guarded_background_ratio(flags: Mapping[int, bool]) -> float:
+        if not flags:
+            return 1.0
+        return sum(1 for value in flags.values() if value) / float(len(flags))
+
+    @staticmethod
+    def _path_step_stats(path: Mapping[int, Point]) -> tuple[float, float]:
+        keys = sorted(path)
+        steps = []
+        for left, right in zip(keys, keys[1:]):
+            a = path[int(left)]
+            b = path[int(right)]
+            steps.append(math.hypot(float(b[0]) - float(a[0]), float(b[1]) - float(a[1])))
+        if not steps:
+            return 0.0, 0.0
+        return float(sum(steps) / len(steps)), float(max(steps))
 
     def _estimate_catalog_period(self, frame: int) -> int | None:
         hi = min(int(frame), int(self.catalog_max_lag))

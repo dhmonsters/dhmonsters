@@ -483,6 +483,100 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
             (40.0, 0.0),
         )
 
+    def test_guarded_decal_identity_is_disabled_by_default(self):
+        pool = TransparentLiveFamilyPool(
+            window=8,
+            min_frames=3,
+            catalog_min_lag=3,
+            catalog_max_lag=3,
+        )
+        gray = np.zeros((80, 180), dtype=np.float32)
+
+        pool.update(0, candidates=[(100.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray, white_anchor=(0.0, 0.0))
+        for frame, bg_x, target_x in (
+            (1, 100.0, 10.0),
+            (2, 110.0, 20.0),
+            (3, 120.0, 30.0),
+            (4, 100.0, 40.0),
+        ):
+            decision = pool.update(
+                frame,
+                candidates=[
+                    (bg_x, 0.0, 0.99, 20.0, 20.0),
+                    (target_x, 0.0, 0.20, 20.0, 20.0),
+                ],
+                gray_frame=gray,
+            )
+
+        self.assertNotIn("guarded_decal_identity_center_mild_state_mild", decision.points)
+
+    def test_guarded_decal_identity_avoids_periodic_background_candidate(self):
+        pool = TransparentLiveFamilyPool(
+            window=8,
+            min_frames=3,
+            catalog_min_lag=3,
+            catalog_max_lag=3,
+            enable_guarded_decal_identity=True,
+            guarded_decal_min_background_frames=2,
+        )
+        gray = np.zeros((80, 180), dtype=np.float32)
+
+        pool.update(0, candidates=[(100.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray, white_anchor=(0.0, 0.0))
+        for frame, bg_x, target_x in (
+            (1, 100.0, 10.0),
+            (2, 110.0, 20.0),
+            (3, 120.0, 30.0),
+            (4, 100.0, 40.0),
+            (5, 110.0, 50.0),
+        ):
+            decision = pool.update(
+                frame,
+                candidates=[
+                    (bg_x, 0.0, 0.99, 20.0, 20.0),
+                    (target_x, 0.0, 0.20, 20.0, 20.0),
+                ],
+                gray_frame=gray,
+            )
+
+        family = "guarded_decal_identity_center_mild_state_mild"
+        self.assertEqual(decision.points[family], (50.0, 0.0))
+        self.assertTrue(decision.debug["guarded_decal_identity"]["accepted"])
+        self.assertGreaterEqual(decision.debug["guarded_decal_identity"]["background_frames"], 2)
+        self.assertEqual(decision.debug["guarded_decal_identity"]["background_ratio"], 0.0)
+
+    def test_guarded_decal_identity_rejects_large_jump_path(self):
+        pool = TransparentLiveFamilyPool(
+            window=8,
+            min_frames=3,
+            catalog_min_lag=3,
+            catalog_max_lag=3,
+            enable_guarded_decal_identity=True,
+            guarded_decal_min_background_frames=2,
+            guarded_decal_max_step_px=40.0,
+        )
+        gray = np.zeros((80, 260), dtype=np.float32)
+
+        pool.update(0, candidates=[(100.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray, white_anchor=(0.0, 0.0))
+        for frame, bg_x, target_x in (
+            (1, 100.0, 10.0),
+            (2, 110.0, 20.0),
+            (3, 120.0, 30.0),
+            (4, 100.0, 40.0),
+            (5, 110.0, 180.0),
+        ):
+            decision = pool.update(
+                frame,
+                candidates=[
+                    (bg_x, 0.0, 0.99, 20.0, 20.0),
+                    (target_x, 0.0, 0.20, 20.0, 20.0),
+                ],
+                gray_frame=gray,
+            )
+
+        self.assertNotIn("guarded_decal_identity_center_mild_state_mild", decision.points)
+        self.assertFalse(decision.debug["guarded_decal_identity"]["accepted"])
+        self.assertEqual(decision.debug["guarded_decal_identity"]["reason"], "max_step")
+
     def test_reset_clears_history(self):
         pool = TransparentLiveFamilyPool(window=3, min_frames=2)
         gray = np.zeros((20, 20), dtype=np.float32)

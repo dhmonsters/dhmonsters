@@ -215,6 +215,28 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertTrue(allowed["rescue_allowed"])
         self.assertEqual(allowed["merge_context"]["frames"], 1)
 
+    def test_shadow_rescue_allows_guarded_decal_identity_without_merge_gate(self):
+        family = "guarded_decal_identity_center_mild_state_mild"
+        runtime = FakeRuntime(selected_family=family)
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(40.0, 10.0, 0.8, 20.0, 20.0)],
+            anchors={family: (40.0, 10.0)},
+        )
+
+        self.assertTrue(result["rescue_allowed"])
+        self.assertEqual(result["family"], family)
+        self.assertEqual(runtime.calls[-1]["kwargs"]["meta"][family]["source"], "guarded_decal_identity")
+
     def test_default_merge_gate_uses_wjsonl_sized_thresholds(self):
         runtime = FakeRuntime(selected_family="bg_split_viterbi_center_mild_state_mild")
         shadow = TransparentSelectorShadow(

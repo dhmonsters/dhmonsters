@@ -62,6 +62,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.current_frame_candidates: dict[int, list[dict[object, object]]] = {}
         self.current_frame_evidence: dict[int, list[dict[object, object]]] = {}
         self.current_frame_identity: dict[int, dict[object, object]] = {}
+        self.current_frame_guarded: dict[int, dict[object, object]] = {}
         self.current_cctv_source_path: str | None = None
         self.selected_frame_index: int | None = None
         self.setObjectName("puzzleConsoleWindow")
@@ -191,12 +192,16 @@ class PuzzleConsoleWindow(QMainWindow):
         self.cctv_identity_summary_label = QLabel("identity -")
         self.cctv_identity_summary_label.setObjectName("puzzleCctvIdentitySummary")
         self.cctv_identity_summary_label.setWordWrap(True)
+        self.cctv_guarded_summary_label = QLabel("guarded -")
+        self.cctv_guarded_summary_label.setObjectName("puzzleCctvGuardedSummary")
+        self.cctv_guarded_summary_label.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(self.cctv_frame_label, 1)
         layout.addWidget(self.cctv_status_label, 0)
         layout.addWidget(self.cctv_candidate_summary_label, 0)
         layout.addWidget(self.cctv_evidence_summary_label, 0)
         layout.addWidget(self.cctv_identity_summary_label, 0)
+        layout.addWidget(self.cctv_guarded_summary_label, 0)
         return frame
 
     def _build_analysis_panel(self) -> QFrame:
@@ -320,6 +325,10 @@ class PuzzleConsoleWindow(QMainWindow):
         if event_type == "IDENTITY_STATE":
             self._apply_identity_metrics(payload)
             self._apply_identity(frame_index, payload)
+            return
+
+        if event_type in {"LIVE_FAMILY", "SELECTOR_SHADOW"}:
+            self._apply_guarded(frame_index, payload)
 
     def load_trace_summary(self, trace_path: str | Path) -> int:
         path = Path(trace_path)
@@ -375,6 +384,10 @@ class PuzzleConsoleWindow(QMainWindow):
             self.cctv_identity_summary_label.setText(_identity_summary(frame_index, identity))
             self._apply_identity_metrics(identity)
 
+        guarded = self.current_frame_guarded.get(frame_index)
+        if guarded is not None:
+            self.cctv_guarded_summary_label.setText(_guarded_summary(frame_index, guarded))
+
         self._refresh_timeline_frames_summary()
         return True
 
@@ -410,6 +423,7 @@ class PuzzleConsoleWindow(QMainWindow):
             | set(self.current_frame_candidates)
             | set(self.current_frame_evidence)
             | set(self.current_frame_identity)
+            | set(self.current_frame_guarded)
         )
 
     def _refresh_timeline_frames_summary(self) -> None:
@@ -423,6 +437,7 @@ class PuzzleConsoleWindow(QMainWindow):
             or frame_index in self.current_frame_candidates
             or frame_index in self.current_frame_evidence
             or frame_index in self.current_frame_identity
+            or frame_index in self.current_frame_guarded
         )
 
     def _append_trace_timeline(
@@ -479,6 +494,13 @@ class PuzzleConsoleWindow(QMainWindow):
             return
         self.current_frame_identity[frame_index] = dict(payload)
         self.cctv_identity_summary_label.setText(_identity_summary(frame_index, payload))
+        self._refresh_timeline_frames_summary()
+
+    def _apply_guarded(self, frame_index: object, payload: dict[object, object]) -> None:
+        if not isinstance(frame_index, int):
+            return
+        self.current_frame_guarded[frame_index] = dict(payload)
+        self.cctv_guarded_summary_label.setText(_guarded_summary(frame_index, payload))
         self._refresh_timeline_frames_summary()
 
     def _apply_identity_metrics(self, payload: dict[object, object]) -> None:
@@ -743,6 +765,29 @@ def _evidence_count(payload: dict[object, object]) -> int:
     return 0
 
 
+def _guarded_summary(frame_index: int, payload: dict[object, object]) -> str:
+    debug = payload.get("debug")
+    if isinstance(debug, dict):
+        guarded = debug.get("guarded_decal_identity")
+    else:
+        guarded = payload.get("guarded_decal_identity")
+    if not isinstance(guarded, dict):
+        return f"frame {frame_index} guarded -"
+
+    status = "accepted" if guarded.get("accepted") else str(guarded.get("reason") or "blocked")
+    parts = [f"frame {frame_index}", "guarded_decal_identity", status]
+    ratio = guarded.get("background_ratio")
+    if isinstance(ratio, (int, float)):
+        parts.append(f"bg {float(ratio):.2f}")
+    frames = guarded.get("background_frames")
+    if isinstance(frames, int):
+        parts.append(f"bg_frames {frames}")
+    max_step = guarded.get("max_step")
+    if isinstance(max_step, (int, float)):
+        parts.append(f"step {float(max_step):.1f}")
+    return " | ".join(parts)
+
+
 def _timeline_frames_summary(frames: list[int], selected_frame_index: int | None) -> str:
     if not frames:
         return "frames 0"
@@ -775,4 +820,14 @@ def _timeline_item(
     if event_type == "IDENTITY_STATE":
         state = str(payload.get("state") or "IDENTITY_STATE")
         return f"{prefix} {state}"
+    if event_type == "LIVE_FAMILY":
+        debug = payload.get("debug")
+        guarded = debug.get("guarded_decal_identity") if isinstance(debug, dict) else None
+        if isinstance(guarded, dict):
+            status = "accepted" if guarded.get("accepted") else str(guarded.get("reason") or "blocked")
+            return f"{prefix} GUARDED {status}"
+        return f"{prefix} LIVE_FAMILY"
+    if event_type == "SELECTOR_SHADOW":
+        family = str(payload.get("family") or "SELECTOR_SHADOW")
+        return f"{prefix} {family}"
     return None
