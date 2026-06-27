@@ -128,12 +128,14 @@ def test_frames_from_jsonl_rows_normalizes_candidates_and_anchor():
             track_hint=(5.0, 6.0),
             background_penalties=(0.0,),
             target_supports=(0.0,),
+            background_ids=(None,),
         ),
         TemporalFrame(
             1,
             ((30.0, 40.0, 0.8, 12.0, 14.0),),
             background_penalties=(0.0,),
             target_supports=(0.0,),
+            background_ids=(None,),
         ),
     ]
 
@@ -163,3 +165,38 @@ def test_frames_from_jsonl_rows_marks_motion_outlier_as_target_support():
     frames, _anchor = frames_from_jsonl_rows(rows, default_size=20.0)
 
     assert frames[1].target_supports[3] > frames[1].target_supports[0]
+
+
+def test_selector_penalizes_long_run_on_same_background_id():
+    frames = [
+        TemporalFrame(
+            1,
+            ((10.0, 0.0, 0.99, 20.0, 20.0), (12.0, 0.0, 0.40, 20.0, 20.0)),
+            background_ids=(7, None),
+        ),
+        TemporalFrame(
+            2,
+            ((20.0, 0.0, 0.99, 20.0, 20.0), (24.0, 0.0, 0.40, 20.0, 20.0)),
+            background_ids=(7, None),
+        ),
+        TemporalFrame(
+            3,
+            ((30.0, 0.0, 0.99, 20.0, 20.0), (36.0, 0.0, 0.40, 20.0, 20.0)),
+            background_ids=(7, None),
+        ),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            track_hint_weight=0.0,
+            target_support_weight=0.0,
+            background_penalty_weight=0.0,
+            background_run_weight=30.0,
+            background_run_grace=1,
+        ),
+    )
+
+    assert result.path[3] == (36.0, 0.0)

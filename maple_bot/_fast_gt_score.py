@@ -9,6 +9,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Mapping, Sequence
 
+from _background_identity_signal import load_expected_background_with_ids
 from _selector_shadow_gt_replay_score import load_red_gt
 from _temporal_identity_selector import temporal_identity_path_from_rows
 
@@ -182,12 +183,17 @@ def score_clip(
 ) -> dict[str, object]:
     rows = load_jsonl_rows(root / "_record_debug" / f"{name}.jsonl")
     gt = load_red_gt(name, root=root, min_frame=min_gt_frame)
+    expected_background, _background_meta = load_expected_background_with_ids(
+        name,
+        range(max(0, int(min_gt_frame)), len(rows)),
+    )
     paths = {
         "track": track_path_from_rows(rows, source="track"),
         "engine": track_path_from_rows(rows, source="engine"),
         "temporal_identity": temporal_identity_path_from_rows(
             rows,
             default_size=default_candidate_size,
+            expected_background_by_frame=expected_background,
         ),
         "raw_center_oracle": raw_center_oracle_path(rows, gt, default_size=default_candidate_size),
         "raw_box_oracle": raw_box_oracle_path(rows, gt, default_size=default_candidate_size),

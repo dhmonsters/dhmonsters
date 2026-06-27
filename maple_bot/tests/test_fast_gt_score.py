@@ -1,5 +1,7 @@
 # 투명도형 퍼즐 16GT 경량 채점기의 순수 계산을 검증한다.
+from pathlib import Path
 
+import _fast_gt_score as fast_gt_score
 from _fast_gt_score import (
     METRICS,
     markdown_report,
@@ -83,3 +85,62 @@ def test_markdown_report_includes_temporal_identity_metric():
     assert "temporal identity" in text
     assert "`temporal_identity`: 1/1" in text
     assert "temporal_identity" in METRICS
+
+
+def test_score_clip_passes_expected_background_to_temporal_identity():
+    calls = {}
+    rows = [{"cands": []} for _index in range(53)]
+    expected = {
+        50: [(7, (10.0, 20.0, 24.0, 24.0, 0.9))],
+        51: [(7, (12.0, 20.0, 24.0, 24.0, 0.9))],
+        52: [(7, (14.0, 20.0, 24.0, 24.0, 0.9))],
+    }
+
+    original_load_rows = fast_gt_score.load_jsonl_rows
+    original_load_gt = fast_gt_score.load_red_gt
+    original_temporal = fast_gt_score.temporal_identity_path_from_rows
+    original_background = getattr(fast_gt_score, "load_expected_background_with_ids", None)
+    try:
+        fast_gt_score.load_jsonl_rows = lambda _path: rows
+        fast_gt_score.load_red_gt = lambda _name, root, min_frame: {50: (10.0, 20.0)}
+
+        def fake_background(name, frames):
+            calls["background_name"] = name
+            calls["background_frames"] = list(frames)
+            return expected, {"period": 12}
+
+        def fake_temporal_identity_path_from_rows(
+            input_rows,
+            *,
+            default_size,
+            expected_background_by_frame=None,
+        ):
+            calls["rows"] = input_rows
+            calls["default_size"] = default_size
+            calls["expected_background"] = expected_background_by_frame
+            return {50: (10.0, 20.0)}
+
+        fast_gt_score.load_expected_background_with_ids = fake_background
+        fast_gt_score.temporal_identity_path_from_rows = fake_temporal_identity_path_from_rows
+
+        result = fast_gt_score.score_clip(
+            "clip",
+            root=Path("unused"),
+            min_gt_frame=50,
+            default_candidate_size=30.0,
+        )
+
+        assert result["temporal_identity"]["success"] is True
+        assert calls["background_name"] == "clip"
+        assert calls["background_frames"] == [50, 51, 52]
+        assert calls["rows"] is rows
+        assert calls["default_size"] == 30.0
+        assert calls["expected_background"] == expected
+    finally:
+        fast_gt_score.load_jsonl_rows = original_load_rows
+        fast_gt_score.load_red_gt = original_load_gt
+        fast_gt_score.temporal_identity_path_from_rows = original_temporal
+        if original_background is None:
+            delattr(fast_gt_score, "load_expected_background_with_ids")
+        else:
+            fast_gt_score.load_expected_background_with_ids = original_background

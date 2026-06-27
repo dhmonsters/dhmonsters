@@ -1,0 +1,11 @@
+# Task 38 체크리스트
+- [x] Task38 계획과 맥락 노트 작성.
+- [x] background identity 신호 분포 확인.
+- [x] background identity 실패 테스트 추가.
+- [x] 실패 테스트 확인.
+- [x] `TemporalFrame` background identity 연결.
+- [x] `_fast_gt_score.py` selector 입력에 expected background 연결.
+- [x] 16GT 실제 실행과 결과 문서 생성.
+- [x] 관련 puzzle 테스트 통과 확인.
+- [x] 문법 검사와 공백 검사 통과 확인.
+- [x] 커밋.

@@ -18,6 +18,7 @@ class TemporalFrame:
     track_hint: Point | None = None
     background_penalties: tuple[float, ...] = ()
     target_supports: tuple[float, ...] = ()
+    background_ids: tuple[int | None, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,8 @@ class TemporalIdentityConfig:
     background_penalty_weight: float = 35.0
     target_support_weight: float = 45.0
     track_signal_radius: float = 90.0
+    background_run_weight: float = 18.0
+    background_run_grace: int = 2
     merge_center_penalty: float = 35.0
     hold_cost: float = 4.0
     missing_cost: float = 12.0
@@ -49,6 +52,8 @@ class TemporalIdentityResult:
     states: dict[int, IdentityState]
     candidate_indices: dict[int, int | None]
     cost: float
+    background_id: int | None = None
+    background_run: int = 0
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,7 @@ class _State:
     candidate_index: int | None
     local_cost: float
     state: IdentityState
+    background_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,8 @@ class _Hypothesis:
     path: dict[int, Point]
     states: dict[int, IdentityState]
     candidate_indices: dict[int, int | None]
+    background_id: int | None = None
+    background_run: int = 0
 
 
 def frames_from_jsonl_rows(
@@ -75,10 +83,12 @@ def frames_from_jsonl_rows(
     *,
     default_size: float = 24.0,
     anchor_source: str = "track",
+    expected_background_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
 ) -> tuple[list[TemporalFrame], Point | None]:
     frames: list[TemporalFrame] = []
     anchor: Point | None = None
     previous_candidates: tuple[Candidate, ...] = ()
+    expected_background_by_frame = expected_background_by_frame or {}
     for frame_index, row in enumerate(rows):
         track_hint = _point(row.get(anchor_source))
         if anchor is None:
@@ -99,6 +109,7 @@ def frames_from_jsonl_rows(
                     _target_supports(candidates, track_hint, radius=float(default_size) * 4.0),
                     _motion_outlier_supports(candidates, previous_candidates),
                 ),
+                _background_ids(candidates, expected_background_by_frame.get(int(frame_index), ())),
             )
         )
         previous_candidates = candidates
@@ -110,8 +121,13 @@ def temporal_identity_path_from_rows(
     *,
     config: TemporalIdentityConfig | None = None,
     default_size: float = 24.0,
+    expected_background_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
 ) -> dict[int, Point]:
-    frames, anchor = frames_from_jsonl_rows(rows, default_size=default_size)
+    frames, anchor = frames_from_jsonl_rows(
+        rows,
+        default_size=default_size,
+        expected_background_by_frame=expected_background_by_frame,
+    )
     result = select_temporal_identity(frames, anchor=anchor, config=config)
     return dict(result.path)
 
@@ -128,7 +144,7 @@ def select_temporal_identity(
         return TemporalIdentityResult({}, {}, {}, 0.0)
 
     start = _initial_point(ordered, anchor)
-    hypotheses = [_Hypothesis(0.0, start, 0.0, 0.0, {}, {}, {})]
+    hypotheses = [_Hypothesis(0.0, start, 0.0, 0.0, {}, {}, {}, None, 0)]
 
     for frame in ordered:
         candidates = _ranked_candidates(frame.candidates, cfg)
@@ -144,6 +160,7 @@ def select_temporal_identity(
                 frame.track_hint,
                 frame.background_penalties,
                 frame.target_supports,
+                frame.background_ids,
                 cfg,
             )
             for state in _best_states_for_hypothesis(states, predicted, cfg):
@@ -156,6 +173,8 @@ def select_temporal_identity(
         states=dict(best.states),
         candidate_indices=dict(best.candidate_indices),
         cost=float(best.cost),
+        background_id=best.background_id,
+        background_run=best.background_run,
     )
 
 
@@ -193,11 +212,7 @@ def _initial_point(frames: Sequence[TemporalFrame], anchor: Point | None) -> Poi
 
 
 def _ranked_candidates(candidates: Sequence[Candidate], cfg: TemporalIdentityConfig) -> list[Candidate]:
-    return sorted(
-        list(candidates),
-        key=lambda candidate: float(candidate[2]),
-        reverse=True,
-    )[: max(1, int(cfg.max_candidates))]
+    return list(candidates)[: max(1, int(cfg.max_candidates))]
 
 
 def _states_for_frame(
@@ -206,6 +221,7 @@ def _states_for_frame(
     track_hint: Point | None,
     background_penalties: Sequence[float],
     target_supports: Sequence[float],
+    background_ids: Sequence[int | None],
     cfg: TemporalIdentityConfig,
 ) -> list[_State]:
     if not candidates:
@@ -215,6 +231,7 @@ def _states_for_frame(
                 None,
                 float(cfg.missing_cost) + _track_hint_cost(predicted, track_hint, cfg),
                 "IDENTITY_HOLD",
+                None,
             )
         ]
 
@@ -228,7 +245,8 @@ def _states_for_frame(
         center_cost += _candidate_signal_cost(index, background_penalties, target_supports, cfg)
         if merge_like:
             center_cost += float(cfg.merge_center_penalty)
-        states.append(_State(center, index, center_cost, "TRACK_CONFIDENT"))
+        bg_id = background_ids[index] if index < len(background_ids) else None
+        states.append(_State(center, index, center_cost, "TRACK_CONFIDENT", bg_id))
 
         if merge_like and _inside_box(predicted, candidate, scale=1.05):
             states.append(
@@ -240,6 +258,7 @@ def _states_for_frame(
                     + _candidate_signal_cost(index, background_penalties, target_supports, cfg)
                     + _track_hint_cost(predicted, track_hint, cfg),
                     "IDENTITY_HOLD",
+                    bg_id,
                 )
             )
     return states
@@ -276,6 +295,9 @@ def _advance(
         + _dist(state.point, predicted) * float(cfg.continuity_weight)
         + accel * float(cfg.accel_weight)
     )
+    background_id = state.background_id
+    background_run = _next_background_run(hypothesis, background_id)
+    step_cost += _background_run_cost(background_id, background_run, cfg)
     if state.state == "TRACK_CONFIDENT" and _was_holding(hypothesis.states):
         state_name = "REACQUIRE"
     else:
@@ -301,6 +323,8 @@ def _advance(
         path=path,
         states=states,
         candidate_indices=candidate_indices,
+        background_id=background_id,
+        background_run=background_run,
     )
 
 
@@ -309,6 +333,25 @@ def _was_holding(states: Mapping[int, IdentityState]) -> bool:
         return False
     latest_frame = max(states)
     return states[latest_frame] == "IDENTITY_HOLD"
+
+
+def _next_background_run(hypothesis: _Hypothesis, background_id: int | None) -> int:
+    if background_id is None:
+        return 0
+    if hypothesis.background_id == background_id:
+        return int(hypothesis.background_run) + 1
+    return 1
+
+
+def _background_run_cost(
+    background_id: int | None,
+    background_run: int,
+    cfg: TemporalIdentityConfig,
+) -> float:
+    if background_id is None:
+        return 0.0
+    over = max(0, int(background_run) - int(cfg.background_run_grace))
+    return float(over) * float(cfg.background_run_weight)
 
 
 def _is_merge_like(
@@ -363,6 +406,38 @@ def _background_penalties(
         1.0 if distance <= 1.0 and best_distance <= 1.0 and float(candidate[2]) < 0.6 else 0.0
         for candidate, distance in zip(candidates, distances)
     )
+
+
+def _background_ids(
+    candidates: Sequence[Candidate],
+    expected_background: Sequence[tuple[int, Sequence[float]]],
+    *,
+    pos_tol: float = 18.0,
+) -> tuple[int | None, ...]:
+    return tuple(
+        _match_background_id((candidate[0], candidate[1]), expected_background, pos_tol=pos_tol)
+        for candidate in candidates
+    )
+
+
+def _match_background_id(
+    point: Point,
+    expected_background: Sequence[tuple[int, Sequence[float]]],
+    *,
+    pos_tol: float,
+) -> int | None:
+    best: tuple[float, int] | None = None
+    for bg_id, expected in expected_background:
+        expected_point = _point(expected)
+        if expected_point is None:
+            continue
+        distance = _dist(point, expected_point)
+        if distance > float(pos_tol):
+            continue
+        item = (distance, int(bg_id))
+        if best is None or item < best:
+            best = item
+    return best[1] if best is not None else None
 
 
 def _target_supports(
