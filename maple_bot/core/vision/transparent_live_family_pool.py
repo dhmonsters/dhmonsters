@@ -87,6 +87,8 @@ class TransparentLiveFamilyPool:
         guarded_decal_min_background_frames: int = 3,
         guarded_decal_max_background_ratio: float = 0.34,
         guarded_decal_max_step_px: float = 80.0,
+        guarded_decal_match_distance_px: float = 10.0,
+        guarded_decal_shape_pct: float = 6.0,
         guarded_decal_background_penalty: float = 80.0,
         guarded_decal_transition_scale: float = 26.0,
         guarded_decal_start_scale: float = 35.0,
@@ -115,6 +117,8 @@ class TransparentLiveFamilyPool:
         self.guarded_decal_min_background_frames = max(1, int(guarded_decal_min_background_frames))
         self.guarded_decal_max_background_ratio = float(guarded_decal_max_background_ratio)
         self.guarded_decal_max_step_px = float(guarded_decal_max_step_px)
+        self.guarded_decal_match_distance_px = max(0.0, float(guarded_decal_match_distance_px))
+        self.guarded_decal_shape_pct = max(0.0, float(guarded_decal_shape_pct))
         self.guarded_decal_background_penalty = float(guarded_decal_background_penalty)
         self.guarded_decal_transition_scale = float(guarded_decal_transition_scale)
         self.guarded_decal_start_scale = float(guarded_decal_start_scale)
@@ -985,15 +989,14 @@ class TransparentLiveFamilyPool:
         expected: Sequence[Candidate],
     ) -> bool:
         for background in expected:
-            if math.hypot(candidate[0] - background[0], candidate[1] - background[1]) > 10.0:
+            if math.hypot(candidate[0] - background[0], candidate[1] - background[1]) > self.guarded_decal_match_distance_px:
                 continue
             if not self._candidate_shape_close(candidate, background):
                 continue
             return True
         return False
 
-    @staticmethod
-    def _candidate_shape_close(candidate: Candidate, expected: Candidate) -> bool:
+    def _candidate_shape_close(self, candidate: Candidate, expected: Candidate) -> bool:
         if not (
             math.isfinite(candidate[3])
             and math.isfinite(candidate[4])
@@ -1010,8 +1013,8 @@ class TransparentLiveFamilyPool:
         aspect_a = float(candidate[3]) / max(float(candidate[4]), 1e-6)
         aspect_b = float(expected[3]) / max(float(expected[4]), 1e-6)
         return (
-            TransparentLiveFamilyPool._pct_delta(area_a, area_b) <= 6.0
-            and TransparentLiveFamilyPool._pct_delta(aspect_a, aspect_b) <= 6.0
+            TransparentLiveFamilyPool._pct_delta(area_a, area_b) <= self.guarded_decal_shape_pct
+            and TransparentLiveFamilyPool._pct_delta(aspect_a, aspect_b) <= self.guarded_decal_shape_pct
         )
 
     @staticmethod

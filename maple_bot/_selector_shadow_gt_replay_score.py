@@ -289,6 +289,10 @@ def score_gt_clip(
     success_px: float = 40.0,
     include_local_box: bool = True,
     enable_guarded_decal_identity: bool = False,
+    guarded_decal_min_background_frames: int = 3,
+    guarded_decal_match_distance_px: float = 10.0,
+    guarded_decal_shape_pct: float = 6.0,
+    guarded_decal_max_step_px: float = 80.0,
 ) -> dict:
     source = root / "_record_debug" / f"{name}.jsonl"
     rows = _load_jsonl(source)
@@ -307,6 +311,10 @@ def score_gt_clip(
         merge_min_size=175.0,
         merge_size_ratio=1.30,
         enable_guarded_decal_identity=enable_guarded_decal_identity,
+        guarded_decal_min_background_frames=guarded_decal_min_background_frames,
+        guarded_decal_match_distance_px=guarded_decal_match_distance_px,
+        guarded_decal_shape_pct=guarded_decal_shape_pct,
+        guarded_decal_max_step_px=guarded_decal_max_step_px,
         include_live_family=enable_guarded_decal_identity,
     )
     gt = load_red_gt(name, root=root, min_frame=min_gt_frame)
@@ -339,6 +347,12 @@ def score_gt_clip(
         "selector_records": sum(1 for row in backfilled if isinstance(row.get("selector_shadow"), Mapping)),
         "include_local_box": bool(include_local_box),
         "enable_guarded_decal_identity": bool(enable_guarded_decal_identity),
+        "guarded_config": {
+            "min_background_frames": int(guarded_decal_min_background_frames),
+            "match_distance_px": float(guarded_decal_match_distance_px),
+            "shape_pct": float(guarded_decal_shape_pct),
+            "max_step_px": float(guarded_decal_max_step_px),
+        },
         "guarded_emitted_frames": len(guarded_emitted_path),
         "guarded_selected_frames": len(guarded_path),
         "guarded_reason_counts": guarded_reason_counts,
@@ -362,6 +376,10 @@ def score_all_gt_clips(
     success_px: float = 40.0,
     include_local_box: bool = True,
     enable_guarded_decal_identity: bool = False,
+    guarded_decal_min_background_frames: int = 3,
+    guarded_decal_match_distance_px: float = 10.0,
+    guarded_decal_shape_pct: float = 6.0,
+    guarded_decal_max_step_px: float = 80.0,
 ) -> list[dict]:
     from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
 
@@ -380,6 +398,10 @@ def score_all_gt_clips(
             success_px=success_px,
             include_local_box=include_local_box,
             enable_guarded_decal_identity=enable_guarded_decal_identity,
+            guarded_decal_min_background_frames=guarded_decal_min_background_frames,
+            guarded_decal_match_distance_px=guarded_decal_match_distance_px,
+            guarded_decal_shape_pct=guarded_decal_shape_pct,
+            guarded_decal_max_step_px=guarded_decal_max_step_px,
         )
         for name in names
     ]
@@ -559,6 +581,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--success-px", type=float, default=40.0)
     parser.add_argument("--no-local-box", action="store_true")
     parser.add_argument("--guarded-decal-identity", action="store_true")
+    parser.add_argument("--guarded-min-background-frames", type=int, default=3)
+    parser.add_argument("--guarded-match-distance-px", type=float, default=10.0)
+    parser.add_argument("--guarded-shape-pct", type=float, default=6.0)
+    parser.add_argument("--guarded-max-step-px", type=float, default=80.0)
     args = parser.parse_args(argv)
 
     results = score_all_gt_clips(
@@ -566,6 +592,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         success_px=args.success_px,
         include_local_box=not args.no_local_box,
         enable_guarded_decal_identity=args.guarded_decal_identity,
+        guarded_decal_min_background_frames=args.guarded_min_background_frames,
+        guarded_decal_match_distance_px=args.guarded_match_distance_px,
+        guarded_decal_shape_pct=args.guarded_shape_pct,
+        guarded_decal_max_step_px=args.guarded_max_step_px,
     )
     text = markdown_report(results)
     print(text)

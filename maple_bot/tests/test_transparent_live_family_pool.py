@@ -544,6 +544,39 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
         self.assertGreaterEqual(decision.debug["guarded_decal_identity"]["background_frames"], 2)
         self.assertEqual(decision.debug["guarded_decal_identity"]["background_ratio"], 0.0)
 
+    def test_guarded_decal_identity_match_distance_can_be_relaxed(self):
+        pool = TransparentLiveFamilyPool(
+            window=8,
+            min_frames=3,
+            catalog_min_lag=3,
+            catalog_max_lag=3,
+            enable_guarded_decal_identity=True,
+            guarded_decal_min_background_frames=2,
+            guarded_decal_match_distance_px=15.0,
+        )
+        gray = np.zeros((80, 180), dtype=np.float32)
+
+        pool.update(0, candidates=[(100.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray, white_anchor=(0.0, 0.0))
+        for frame, bg_x, target_x in (
+            (1, 100.0, 10.0),
+            (2, 110.0, 20.0),
+            (3, 120.0, 30.0),
+            (4, 112.0, 40.0),
+            (5, 122.0, 50.0),
+        ):
+            decision = pool.update(
+                frame,
+                candidates=[
+                    (bg_x, 0.0, 0.99, 20.0, 20.0),
+                    (target_x, 0.0, 0.20, 20.0, 20.0),
+                ],
+                gray_frame=gray,
+            )
+
+        family = "guarded_decal_identity_center_mild_state_mild"
+        self.assertEqual(decision.points[family], (50.0, 0.0))
+        self.assertGreaterEqual(decision.debug["guarded_decal_identity"]["background_frames"], 2)
+
     def test_guarded_decal_identity_rejects_large_jump_path(self):
         pool = TransparentLiveFamilyPool(
             window=8,

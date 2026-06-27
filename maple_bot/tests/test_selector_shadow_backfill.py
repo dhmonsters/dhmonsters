@@ -346,6 +346,43 @@ class SelectorShadowBackfillTests(unittest.TestCase):
 
         self.assertTrue(instances[0].kwargs["enable_guarded_decal_identity"])
 
+    def test_backfill_forwards_guarded_decal_tuning_options(self):
+        instances = []
+
+        class FakeLivePool:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+                instances.append(self)
+
+            def update(self, frame_index, *, candidates, gray_frame=None, white_anchor=None):
+                return SimpleNamespace(points={})
+
+        rows = [
+            {
+                "i": 0,
+                "track": [0.0, 0.0],
+                "cands": [[0.0, 0.0, 0.9, 20.0, 20.0]],
+            }
+        ]
+
+        with patch("_selector_shadow_backfill.TransparentLiveFamilyPool", FakeLivePool):
+            backfill_selector_shadow_rows(
+                rows,
+                runtime=FakeRuntime("panel_default_center_mild_state_mild"),
+                min_frames=1,
+                include_local_box=False,
+                enable_guarded_decal_identity=True,
+                guarded_decal_min_background_frames=2,
+                guarded_decal_match_distance_px=16.0,
+                guarded_decal_shape_pct=12.0,
+                guarded_decal_max_step_px=180.0,
+            )
+
+        self.assertEqual(instances[0].kwargs["guarded_decal_min_background_frames"], 2)
+        self.assertEqual(instances[0].kwargs["guarded_decal_match_distance_px"], 16.0)
+        self.assertEqual(instances[0].kwargs["guarded_decal_shape_pct"], 12.0)
+        self.assertEqual(instances[0].kwargs["guarded_decal_max_step_px"], 180.0)
+
     def test_backfill_can_keep_live_family_points_and_debug(self):
         class FakeLivePool:
             def __init__(self, **kwargs):

@@ -283,9 +283,17 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
                                 runtime=object(),
                                 include_local_box=False,
                                 enable_guarded_decal_identity=True,
+                                guarded_decal_min_background_frames=2,
+                                guarded_decal_match_distance_px=16.0,
+                                guarded_decal_shape_pct=12.0,
+                                guarded_decal_max_step_px=180.0,
                             )
 
         self.assertTrue(captured["enable_guarded_decal_identity"])
+        self.assertEqual(captured["guarded_decal_min_background_frames"], 2)
+        self.assertEqual(captured["guarded_decal_match_distance_px"], 16.0)
+        self.assertEqual(captured["guarded_decal_shape_pct"], 12.0)
+        self.assertEqual(captured["guarded_decal_max_step_px"], 180.0)
         self.assertEqual(result["guarded_emitted_frames"], 0)
         self.assertEqual(result["guarded_selected_frames"], 1)
         self.assertEqual(result["guarded_reason_counts"], {"background_signal": 1})

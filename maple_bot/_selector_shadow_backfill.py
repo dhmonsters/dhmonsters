@@ -190,6 +190,10 @@ def backfill_selector_shadow_rows(
     merge_min_size: float = 175.0,
     merge_size_ratio: float = 1.30,
     enable_guarded_decal_identity: bool = False,
+    guarded_decal_min_background_frames: int = 3,
+    guarded_decal_match_distance_px: float = 10.0,
+    guarded_decal_shape_pct: float = 6.0,
+    guarded_decal_max_step_px: float = 80.0,
     include_live_family: bool = False,
 ) -> list[dict]:
     runtime = runtime or TransparentFamilySelectorRuntime()
@@ -198,6 +202,10 @@ def backfill_selector_shadow_rows(
         window=window,
         min_frames=min_frames,
         enable_guarded_decal_identity=enable_guarded_decal_identity,
+        guarded_decal_min_background_frames=guarded_decal_min_background_frames,
+        guarded_decal_match_distance_px=guarded_decal_match_distance_px,
+        guarded_decal_shape_pct=guarded_decal_shape_pct,
+        guarded_decal_max_step_px=guarded_decal_max_step_px,
     )
     shadow = TransparentSelectorShadow(
         runtime,
