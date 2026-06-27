@@ -105,6 +105,73 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
         self.assertEqual(decisions[2]["source"], "rescue")
         self.assertEqual(decisions[2]["reason"], "primary_immediate_jump")
 
+    def test_health_selection_gate_allows_strong_consensus_rescue(self):
+        rows = [
+            {"track": [0.0, 0.0]},
+            {"track": [10.0, 0.0]},
+            {
+                "track": [250.0, 0.0],
+                "selector_shadow": {
+                    "available": True,
+                    "rescue_allowed": False,
+                    "consensus_rescue_allowed": True,
+                    "consensus_rescue_point": [20.0, 0.0],
+                },
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_consensus": {
+                            "accepted": True,
+                            "support_weight": 4.0,
+                            "avg_dist": 8.0,
+                        }
+                    }
+                },
+            },
+        ]
+
+        path, decisions = apply_live_health_selection(
+            rows,
+            frame_shape=(300, 300),
+            consensus_gate_config={},
+        )
+
+        self.assertEqual(path[2], (20.0, 0.0))
+        self.assertEqual(decisions[2]["source"], "rescue")
+
+    def test_health_selection_gate_blocks_weak_consensus_and_falls_back_to_regular_rescue(self):
+        rows = [
+            {"track": [0.0, 0.0]},
+            {"track": [10.0, 0.0]},
+            {
+                "track": [250.0, 0.0],
+                "selector_shadow": {
+                    "available": True,
+                    "rescue_allowed": True,
+                    "rescue_point": [30.0, 0.0],
+                    "consensus_rescue_allowed": True,
+                    "consensus_rescue_point": [20.0, 0.0],
+                },
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_consensus": {
+                            "accepted": True,
+                            "support_weight": 1.0,
+                            "avg_dist": 8.0,
+                        }
+                    }
+                },
+            },
+        ]
+
+        path, decisions = apply_live_health_selection(
+            rows,
+            frame_shape=(300, 300),
+            consensus_gate_config={},
+        )
+
+        self.assertEqual(path[2], (30.0, 0.0))
+        self.assertEqual(decisions[2]["source"], "rescue")
+
     def test_score_path_reports_success_by_mean_error(self):
         gt = {0: (0.0, 0.0), 1: (10.0, 0.0), 2: (20.0, 0.0)}
         path = {0: (3.0, 4.0), 1: (16.0, 8.0)}
@@ -304,6 +371,7 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
                                 root=root,
                                 runtime=object(),
                                 include_local_box=False,
+                                enable_consensus_gate=True,
                                 live_max_candidates=24,
                                 enable_guarded_decal_identity=True,
                                 guarded_decal_min_background_frames=2,
@@ -319,6 +387,7 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
         self.assertEqual(captured["guarded_decal_max_step_px"], 180.0)
         self.assertEqual(captured["live_max_candidates"], 24)
         self.assertEqual(result["live_max_candidates"], 24)
+        self.assertTrue(result["enable_consensus_gate"])
         self.assertEqual(result["guarded_emitted_frames"], 0)
         self.assertEqual(result["guarded_selected_frames"], 1)
         self.assertEqual(result["guarded_reason_counts"], {"background_signal": 1})

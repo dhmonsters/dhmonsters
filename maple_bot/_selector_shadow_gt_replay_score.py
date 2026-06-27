@@ -214,13 +214,30 @@ def apply_live_health_selection(
     *,
     frame_shape: Sequence[int] | None,
     health_selector: TransparentTrackHealthSelector | None = None,
+    consensus_gate_config: Mapping[str, object] | None = None,
 ) -> tuple[dict[int, Point], dict[int, dict]]:
     selector = health_selector or TransparentTrackHealthSelector()
     path: dict[int, Point] = {}
     decisions: dict[int, dict] = {}
+    previous_track: Point | None = None
+    previous_consensus: Point | None = None
     for frame, row in enumerate(rows):
         primary = _point(row.get("track"))
-        rescue = _allowed_selector_rescue(row)
+        consensus = _selector_consensus_point(row)
+        consensus_gate_features = None
+        if consensus_gate_config is not None:
+            consensus_gate_features = _consensus_gate_features(
+                row,
+                primary=primary,
+                consensus=consensus,
+                previous_track=previous_track,
+                previous_consensus=previous_consensus,
+            )
+        rescue = _allowed_selector_rescue(
+            row,
+            consensus_gate_config=consensus_gate_config,
+            consensus_gate_features=consensus_gate_features,
+        )
         decision = selector.update(
             primary=primary,
             rescue=rescue,
@@ -236,7 +253,15 @@ def apply_live_health_selection(
             "rescue_hold": decision.rescue_hold,
             "primary_error": decision.primary_error,
             "out_of_bounds": decision.out_of_bounds,
+            "consensus_gate_passed": _consensus_gate_passed(
+                consensus_gate_config,
+                consensus_gate_features,
+            ),
         }
+        if primary is not None:
+            previous_track = primary
+        if consensus is not None:
+            previous_consensus = consensus
     return path, decisions
 
 
@@ -289,6 +314,7 @@ def score_gt_clip(
     success_px: float = 40.0,
     include_local_box: bool = True,
     live_max_candidates: int = 8,
+    enable_consensus_gate: bool = False,
     enable_guarded_decal_identity: bool = False,
     guarded_decal_min_background_frames: int = 3,
     guarded_decal_match_distance_px: float = 10.0,
@@ -332,6 +358,7 @@ def score_gt_clip(
     selected_path, decisions = apply_live_health_selection(
         backfilled,
         frame_shape=frame_shape,
+        consensus_gate_config={} if enable_consensus_gate else None,
     )
     rescue_used = [
         frame
@@ -348,6 +375,7 @@ def score_gt_clip(
         "selector_records": sum(1 for row in backfilled if isinstance(row.get("selector_shadow"), Mapping)),
         "include_local_box": bool(include_local_box),
         "live_max_candidates": int(live_max_candidates),
+        "enable_consensus_gate": bool(enable_consensus_gate),
         "enable_guarded_decal_identity": bool(enable_guarded_decal_identity),
         "guarded_config": {
             "min_background_frames": int(guarded_decal_min_background_frames),
@@ -378,6 +406,7 @@ def score_all_gt_clips(
     success_px: float = 40.0,
     include_local_box: bool = True,
     live_max_candidates: int = 8,
+    enable_consensus_gate: bool = False,
     enable_guarded_decal_identity: bool = False,
     guarded_decal_min_background_frames: int = 3,
     guarded_decal_match_distance_px: float = 10.0,
@@ -401,6 +430,7 @@ def score_all_gt_clips(
             success_px=success_px,
             include_local_box=include_local_box,
             live_max_candidates=live_max_candidates,
+            enable_consensus_gate=enable_consensus_gate,
             enable_guarded_decal_identity=enable_guarded_decal_identity,
             guarded_decal_min_background_frames=guarded_decal_min_background_frames,
             guarded_decal_match_distance_px=guarded_decal_match_distance_px,
@@ -471,7 +501,12 @@ def markdown_report(results: Sequence[Mapping[str, object]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _allowed_selector_rescue(row: Mapping[str, object]) -> Point | None:
+def _allowed_selector_rescue(
+    row: Mapping[str, object],
+    *,
+    consensus_gate_config: Mapping[str, object] | None = None,
+    consensus_gate_features: Mapping[str, object] | None = None,
+) -> Point | None:
     record = row.get("selector_shadow")
     if not isinstance(record, Mapping):
         return None
@@ -480,10 +515,78 @@ def _allowed_selector_rescue(row: Mapping[str, object]) -> Point | None:
     if bool(record.get("consensus_rescue_allowed", False)):
         consensus = _point(record.get("consensus_rescue_point"))
         if consensus is not None:
-            return consensus
+            if consensus_gate_config is None:
+                return consensus
+            if _consensus_gate_passed(consensus_gate_config, consensus_gate_features):
+                return consensus
     if not bool(record.get("rescue_allowed", False)):
         return None
     return _point(record.get("rescue_point"))
+
+
+def _selector_consensus_point(row: Mapping[str, object]) -> Point | None:
+    record = row.get("selector_shadow")
+    if not isinstance(record, Mapping):
+        return None
+    if not bool(record.get("available", False)):
+        return None
+    if not bool(record.get("consensus_rescue_allowed", False)):
+        return None
+    return _point(record.get("consensus_rescue_point"))
+
+
+def _consensus_gate_features(
+    row: Mapping[str, object],
+    *,
+    primary: Point | None,
+    consensus: Point | None,
+    previous_track: Point | None,
+    previous_consensus: Point | None,
+) -> dict[str, object] | None:
+    if primary is None or consensus is None:
+        return None
+    record = row.get("selector_shadow")
+    record_map = record if isinstance(record, Mapping) else {}
+    merge_context = record_map.get("merge_context")
+    merge_map = merge_context if isinstance(merge_context, Mapping) else {}
+    debug = _guarded_consensus_debug_from_row(row)
+    return {
+        "primary_consensus_dist": _dist(primary, consensus),
+        "track_step": _dist(primary, previous_track) if previous_track is not None else 0.0,
+        "consensus_step": _dist(consensus, previous_consensus) if previous_consensus is not None else 0.0,
+        "support_count": int(debug.get("support_count", 0) or 0),
+        "support_weight": float(debug.get("support_weight", 0.0) or 0.0),
+        "avg_dist": float(debug.get("avg_dist", 0.0) or 0.0),
+        "accepted": bool(debug.get("accepted", False)),
+        "background_expected": bool(debug.get("background_expected", False)),
+        "rank_center": float(record_map.get("rank_center", 0.0) or 0.0),
+        "rank_rough": float(record_map.get("rank_rough", 0.0) or 0.0),
+        "merge_frames": int(merge_map.get("frames", 0) or 0),
+    }
+
+
+def _consensus_gate_passed(
+    config: Mapping[str, object] | None,
+    features: Mapping[str, object] | None,
+) -> bool:
+    if config is None or features is None:
+        return False
+    from _consensus_rescue_gate_report import consensus_gate_passes
+
+    return consensus_gate_passes(features, **dict(config))
+
+
+def _guarded_consensus_debug_from_row(row: Mapping[str, object]) -> Mapping[str, object]:
+    live_family = row.get("live_family")
+    if not isinstance(live_family, Mapping):
+        return {}
+    debug = live_family.get("debug")
+    if not isinstance(debug, Mapping):
+        return {}
+    consensus = debug.get("guarded_decal_consensus")
+    if not isinstance(consensus, Mapping):
+        return {}
+    return consensus
 
 
 def _guarded_debug_from_row(row: Mapping[str, object]) -> Mapping[str, object] | None:
@@ -589,6 +692,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--success-px", type=float, default=40.0)
     parser.add_argument("--no-local-box", action="store_true")
     parser.add_argument("--live-max-candidates", type=int, default=8)
+    parser.add_argument("--consensus-gate", action="store_true")
     parser.add_argument("--guarded-decal-identity", action="store_true")
     parser.add_argument("--guarded-min-background-frames", type=int, default=3)
     parser.add_argument("--guarded-match-distance-px", type=float, default=10.0)
@@ -601,6 +705,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         success_px=args.success_px,
         include_local_box=not args.no_local_box,
         live_max_candidates=args.live_max_candidates,
+        enable_consensus_gate=args.consensus_gate,
         enable_guarded_decal_identity=args.guarded_decal_identity,
         guarded_decal_min_background_frames=args.guarded_min_background_frames,
         guarded_decal_match_distance_px=args.guarded_match_distance_px,
