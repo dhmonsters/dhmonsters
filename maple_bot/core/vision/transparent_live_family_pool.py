@@ -190,6 +190,7 @@ class TransparentLiveFamilyPool:
         self._start_point: Point | None = None
         self._raw_last_points: dict[str, Point] = {}
         self._raw_offset_histories: dict[str, list[Point]] = {}
+        self._raw_projected_histories: dict[str, list[Point]] = {}
         self._raw_beams: list[_RawBeam] = []
 
     def update(
@@ -327,6 +328,10 @@ class TransparentLiveFamilyPool:
                 offset_family = self._raw_box_offset_family_name(family)
                 self._raw_offset_histories[offset_family] = [point]
                 out[offset_family] = point
+                projected_family = self._raw_box_projected_family_name(family)
+                self._raw_projected_histories[projected_family] = [point]
+                out[projected_family] = point
+                out.update(self._raw_box_relative_points(family, candidate))
             out.update(self._raw_beam_family_points(ranked))
             return out
 
@@ -335,6 +340,10 @@ class TransparentLiveFamilyPool:
         next_histories = {
             family: list(history[-2:])
             for family, history in self._raw_offset_histories.items()
+        }
+        next_projected_histories = {
+            family: list(history[-2:])
+            for family, history in self._raw_projected_histories.items()
         }
         for family in sorted(self._raw_last_points):
             previous = self._raw_last_points[family]
@@ -364,6 +373,16 @@ class TransparentLiveFamilyPool:
             history = (next_histories.get(offset_family, []) + [offset_point])[-2:]
             next_histories[offset_family] = history
             out[offset_family] = offset_point
+            projected_family = self._raw_box_projected_family_name(family)
+            projected_point = self._raw_box_projected_point(
+                candidate,
+                point,
+                next_projected_histories.get(projected_family, []),
+            )
+            projected_history = (next_projected_histories.get(projected_family, []) + [projected_point])[-2:]
+            next_projected_histories[projected_family] = projected_history
+            out[projected_family] = projected_point
+            out.update(self._raw_box_relative_points(family, candidate))
 
         if len(next_last) < self.raw_continuity_families:
             for candidate in ranked:
@@ -376,11 +395,16 @@ class TransparentLiveFamilyPool:
                 offset_family = self._raw_box_offset_family_name(family)
                 next_histories[offset_family] = [point]
                 out[offset_family] = point
+                projected_family = self._raw_box_projected_family_name(family)
+                next_projected_histories[projected_family] = [point]
+                out[projected_family] = point
+                out.update(self._raw_box_relative_points(family, candidate))
                 if len(next_last) >= self.raw_continuity_families:
                     break
 
         self._raw_last_points = next_last
         self._raw_offset_histories = next_histories
+        self._raw_projected_histories = next_projected_histories
         out.update(self._raw_beam_family_points(ranked))
         return out
 
@@ -498,6 +522,40 @@ class TransparentLiveFamilyPool:
             "_box_offset_state_mild",
         )
 
+    @staticmethod
+    def _raw_box_projected_family_name(family: str) -> str:
+        return str(family).replace(
+            "_center_mild_state_mild",
+            "_box_projected_state_mild",
+        )
+
+    @staticmethod
+    def _raw_box_relative_points(family: str, candidate: Candidate) -> dict[str, Point]:
+        cx, cy, _score, width, height = candidate
+        half_w = max(0.0, float(width) / 2.0)
+        half_h = max(0.0, float(height) / 2.0)
+        out: dict[str, Point] = {}
+        axis = (
+            ("n1", -1.0),
+            ("n05", -0.5),
+            ("z0", 0.0),
+            ("p05", 0.5),
+            ("p1", 1.0),
+        )
+        for x_label, x_scale in axis:
+            for y_label, y_scale in axis:
+                if x_label == "z0" and y_label == "z0":
+                    continue
+                name = str(family).replace(
+                    "_center_mild_state_mild",
+                    f"_box_rel_{x_label}_{y_label}_state_mild",
+                )
+                out[name] = (
+                    float(cx) + half_w * x_scale,
+                    float(cy) + half_h * y_scale,
+                )
+        return out
+
     def _raw_beam_family_points(self, candidates: Sequence[Candidate]) -> dict[str, Point]:
         if self.raw_beam_families <= 0:
             return {}
@@ -565,6 +623,15 @@ class TransparentLiveFamilyPool:
     ) -> Point:
         if not self._is_merge_like_candidate(int(frame), candidate):
             return (float(point[0]), float(point[1]))
+        prediction = self._raw_offset_prediction(history, point)
+        return self._clamp_point_to_candidate_box(candidate, prediction)
+
+    def _raw_box_projected_point(
+        self,
+        candidate: Candidate,
+        point: Point,
+        history: Sequence[Point],
+    ) -> Point:
         prediction = self._raw_offset_prediction(history, point)
         return self._clamp_point_to_candidate_box(candidate, prediction)
 

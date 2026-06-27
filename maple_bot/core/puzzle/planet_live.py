@@ -10,6 +10,7 @@ import numpy as np
 from core.puzzle.defaults import fixed_detect_roi, fixed_popup_preview_roi
 from core.puzzle.evidence import EvidenceJudges
 from core.puzzle.identity import IdentityTracker
+from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
 from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision, RoiSpec
 from core.puzzle.roi import crop_by_roi
 
@@ -37,6 +38,7 @@ class PlanetLiveResult:
     candidates: list[Candidate] = field(default_factory=list)
     evidence: dict[str, CandidateEvidence] = field(default_factory=dict)
     decision: IdentityDecision | Any | None = None
+    temporal_decision: LiveTemporalDecision | None = None
     mouse_move: MouseMoveResult | None = None
 
 
@@ -137,11 +139,13 @@ class PlanetLiveSolver:
         mouse: PlanetMouseController | None = None,
         evidence_judges: EvidenceJudges | None = None,
         identity_tracker: IdentityTracker | None = None,
+        temporal_selector: Any | None = None,
     ) -> None:
         self.detector = detector
         self.mouse = mouse or PlanetMouseController()
         self.evidence_judges = evidence_judges or EvidenceJudges()
         self.identity_tracker = identity_tracker or IdentityTracker()
+        self.temporal_selector = temporal_selector or LiveTemporalSelector()
         self._noauth_detector: Any | None = None
         self._noauth_detector_loaded = False
 
@@ -164,7 +168,14 @@ class PlanetLiveSolver:
             candidates=candidates,
             evidence=evidence,
         )
-        det_point = _board_point_to_det_point(decision.point, detect_roi=detect_roi, board_roi=board_roi)
+        temporal_decision = self.temporal_selector.update(
+            frame_index=packet.frame_index,
+            candidates=_candidate_rows_from_candidates(candidates),
+            primary_point=decision.point,
+            frame_shape=_frame_shape(packet.board_frame),
+        )
+        target_point = temporal_decision.point if temporal_decision.point is not None else decision.point
+        det_point = _board_point_to_det_point(target_point, detect_roi=detect_roi, board_roi=board_roi)
         mouse_move = self.mouse.move_to_det_point(
             detect_roi=detect_roi,
             point=det_point,
@@ -176,14 +187,15 @@ class PlanetLiveSolver:
             packet.source_frame,
             candidates=det_candidates,
             track_pos=det_point,
-            engine=_decision_engine_name(decision),
+            engine=_decision_engine_name(decision, temporal_decision),
         )
         return PlanetLiveResult(
             preview_frame=preview,
-            trace_events=_trace_events(candidates, evidence, decision, mouse_move),
+            trace_events=_trace_events(candidates, evidence, decision, temporal_decision, mouse_move),
             candidates=candidates,
             evidence=evidence,
             decision=decision,
+            temporal_decision=temporal_decision,
             mouse_move=mouse_move,
         )
 
@@ -342,6 +354,15 @@ def _det_rows_from_candidates(
     return rows
 
 
+def _candidate_rows_from_candidates(candidates: Sequence[Candidate]) -> list[tuple[float, float, float, float, float]]:
+    rows: list[tuple[float, float, float, float, float]] = []
+    for candidate in candidates:
+        width = candidate.bbox[2] - candidate.bbox[0]
+        height = candidate.bbox[3] - candidate.bbox[1]
+        rows.append((candidate.center[0], candidate.center[1], candidate.score, width, height))
+    return rows
+
+
 def _board_point_to_det_point(
     point: tuple[float, float] | None,
     *,
@@ -357,6 +378,7 @@ def _trace_events(
     candidates: Sequence[Candidate],
     evidence: dict[str, CandidateEvidence],
     decision: IdentityDecision,
+    temporal_decision: LiveTemporalDecision,
     mouse_move: MouseMoveResult,
 ) -> list[tuple[str, dict[str, object]]]:
     return [
@@ -376,6 +398,7 @@ def _trace_events(
             },
         ),
         ("IDENTITY_STATE", _identity_payload(decision)),
+        ("TEMPORAL_SELECTOR", _temporal_payload(temporal_decision)),
         (
             "MOUSE_MOVE",
             {
@@ -427,6 +450,18 @@ def _identity_payload(decision: IdentityDecision) -> dict[str, object]:
     }
 
 
+def _temporal_payload(decision: LiveTemporalDecision) -> dict[str, object]:
+    return {
+        "point": decision.point,
+        "source": decision.source,
+        "reason": decision.reason,
+        "family": decision.family,
+        "selector_record": decision.selector_record,
+        "live_family_points": dict(decision.live_family_points),
+        "debug": dict(decision.debug),
+    }
+
+
 def _roi_from_payload(payload: object, *, fallback_name: str) -> RoiSpec:
     if not isinstance(payload, dict):
         raise ValueError(f"missing {fallback_name} ROI payload")
@@ -446,10 +481,18 @@ def _roi_from_payload(payload: object, *, fallback_name: str) -> RoiSpec:
     )
 
 
-def _decision_engine_name(decision: IdentityDecision) -> str:
+def _decision_engine_name(decision: IdentityDecision, temporal_decision: LiveTemporalDecision | None = None) -> str:
+    if temporal_decision is not None and temporal_decision.point is not None:
+        return "TEMP"
     if decision.candidate_id:
         return "ID"
     return "WAIT"
+
+
+def _frame_shape(frame: Any) -> tuple[int, int] | None:
+    if frame is None or not hasattr(frame, "shape"):
+        return None
+    return tuple(frame.shape[:2])
 
 
 def _contains_point(row: tuple[float, float, float, float], point: tuple[float, float] | None) -> bool:

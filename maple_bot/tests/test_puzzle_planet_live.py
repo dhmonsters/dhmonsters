@@ -8,8 +8,9 @@ from unittest.mock import patch
 
 import numpy as np
 
-from core.puzzle.models import RoiSpec
-from core.puzzle.planet_live import PlanetMouseController, render_planet_cctv_preview
+from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
+from core.puzzle.models import FramePacket, IdentityDecision, RoiSpec
+from core.puzzle.planet_live import PlanetLiveSolver, PlanetMouseController, render_planet_cctv_preview
 from core.puzzle.planet_noauth import PlanetNoAuthDetector
 
 
@@ -86,6 +87,84 @@ class PlanetNoAuthDetectorTest(unittest.TestCase):
 
         self.assertEqual(calls, [((120, 200), 192, 0.2)])
         self.assertEqual(rows, [(30, 50, 0.8100000023841858, 40, 60)])
+
+
+class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
+    def test_live_temporal_selector_defaults_to_fast_family_pool(self) -> None:
+        selector = LiveTemporalSelector()
+
+        self.assertFalse(selector.family_pool.enable_bg_mht)
+        self.assertFalse(selector.family_pool.enable_raw_mht)
+        self.assertFalse(selector.family_pool.enable_phase_mht)
+
+    def test_analyze_uses_temporal_selector_point_for_mouse_target(self) -> None:
+        clicked: list[tuple[int, int]] = []
+
+        class _FakeDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return [(10.0, 20.0, 0.8, 12.0, 14.0)]
+
+        class _FakeIdentityTracker:
+            def update(self, **_kwargs):
+                return IdentityDecision(
+                    "TRACK_CONFIDENT",
+                    (999.0, 999.0),
+                    "wrong",
+                    0.1,
+                    "fake_wrong_identity",
+                    0,
+                    {},
+                )
+
+        class _FakeTemporalSelector:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def update(self, **kwargs):
+                self.calls.append(kwargs)
+                return LiveTemporalDecision(
+                    point=(60.0, 70.0),
+                    source="selector_shadow",
+                    reason="selected_family",
+                    family="good_family",
+                )
+
+        temporal_selector = _FakeTemporalSelector()
+        solver = PlanetLiveSolver(
+            detector=_FakeDetector(),
+            identity_tracker=_FakeIdentityTracker(),
+            temporal_selector=temporal_selector,
+            mouse=PlanetMouseController(
+                background_clicker=lambda x, y: clicked.append((x, y)),
+                client_origin_getter=lambda: (0, 0),
+            ),
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 120,
+            "h": 120,
+        }
+        frame = np.zeros((180, 180, 3), dtype=np.uint8)
+        packet = FramePacket(
+            session_id="s",
+            frame_index=7,
+            timestamp_ms=0,
+            source_frame=frame,
+            board_frame=frame[20:140, 10:130],
+            source_kind="test",
+            roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+        )
+
+        result = solver.analyze(packet, solver_running=True)
+
+        self.assertEqual(clicked, [(70, 90)])
+        self.assertEqual(result.mouse_move.det_point, (60.0, 70.0))
+        self.assertEqual(result.temporal_decision.family, "good_family")
+        self.assertEqual(temporal_selector.calls[0]["primary_point"], (999.0, 999.0))
 
 
 if __name__ == "__main__":

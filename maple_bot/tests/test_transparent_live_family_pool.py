@@ -193,6 +193,57 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
             (30.0, 0.0),
         )
 
+    def test_raw_candidate_box_projected_uses_velocity_inside_normal_box(self):
+        pool = TransparentLiveFamilyPool(
+            window=5,
+            min_frames=2,
+            raw_rank_families=0,
+            raw_continuity_families=1,
+            raw_max_step_px=90.0,
+        )
+        gray = np.zeros((80, 160), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(1, candidates=[(10.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        pool.update(2, candidates=[(20.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        decision = pool.update(
+            3,
+            candidates=[(35.0, 0.0, 0.95, 20.0, 20.0)],
+            gray_frame=gray,
+        )
+
+        self.assertEqual(
+            decision.points["raw_candidate_cont0_box_projected_state_mild"],
+            (30.0, 0.0),
+        )
+
+    def test_raw_candidate_box_relative_points_include_box_corners(self):
+        pool = TransparentLiveFamilyPool(
+            window=5,
+            min_frames=2,
+            raw_rank_families=0,
+            raw_continuity_families=1,
+            raw_max_step_px=90.0,
+        )
+        gray = np.zeros((80, 160), dtype=np.float32)
+
+        pool.update(0, candidates=[], gray_frame=gray, white_anchor=(0.0, 0.0))
+        pool.update(1, candidates=[(10.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray)
+        decision = pool.update(
+            2,
+            candidates=[(30.0, 40.0, 0.95, 20.0, 30.0)],
+            gray_frame=gray,
+        )
+
+        self.assertEqual(
+            decision.points["raw_candidate_cont0_box_rel_n1_n1_state_mild"],
+            (20.0, 25.0),
+        )
+        self.assertEqual(
+            decision.points["raw_candidate_cont0_box_rel_p1_p1_state_mild"],
+            (40.0, 55.0),
+        )
+
     def test_raw_candidate_mht_prefers_smooth_branch_over_far_high_score(self):
         pool = TransparentLiveFamilyPool(
             window=5,
