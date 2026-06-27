@@ -145,6 +145,30 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
         self.assertEqual(summary["rescue_allowed_frames"], 1)
         self.assertEqual(summary["first_bg_split_frame"], 10)
 
+    def test_summarize_counts_guarded_decal_family_event(self):
+        rows = [
+            {
+                "i": 12,
+                "selector_shadow": {
+                    "family": "guarded_decal_identity_center_mild_state_mild",
+                    "point": [4, 5],
+                    "rescue_point": [4.0, 5.0],
+                    "rescue_allowed": True,
+                    "merge_context": {
+                        "frames": 0,
+                        "max_size": 80.0,
+                        "max_ratio": 1.0,
+                    },
+                },
+            },
+        ]
+
+        summary = summarize_backfilled_rows("clip.jsonl", rows)
+
+        self.assertEqual(summary["guarded_decal_frames"], 1)
+        self.assertEqual(summary["first_guarded_decal_frame"], 12)
+        self.assertEqual(summary["events"][0]["kind"], "guarded_decal")
+
     def test_write_markdown_report_includes_merge_context_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "report.md"
@@ -237,13 +261,15 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     merge_context_frames=4,
                     merge_min_size=201.0,
                     merge_size_ratio=1.45,
+                    enable_guarded_decal_identity=True,
                 )
 
         self.assertEqual(captured[0]["merge_context_frames"], 4)
         self.assertEqual(captured[0]["merge_min_size"], 201.0)
         self.assertEqual(captured[0]["merge_size_ratio"], 1.45)
+        self.assertTrue(captured[0]["enable_guarded_decal_identity"])
 
-    def test_main_accepts_merge_gate_cli_options(self):
+    def test_main_accepts_merge_gate_and_guarded_cli_options(self):
         captured = {}
 
         def fake_analyze(path, **kwargs):
@@ -261,12 +287,14 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                         "--merge-context-frames", "4",
                         "--merge-min-size", "201",
                         "--merge-size-ratio", "1.45",
+                        "--guarded-decal-identity",
                     ])
 
         self.assertEqual(result, 0)
         self.assertEqual(captured["merge_context_frames"], 4)
         self.assertEqual(captured["merge_min_size"], 201.0)
         self.assertEqual(captured["merge_size_ratio"], 1.45)
+        self.assertTrue(captured["enable_guarded_decal_identity"])
 
     def test_write_markdown_report_returns_none_on_permission_error(self):
         with tempfile.TemporaryDirectory() as tmp:

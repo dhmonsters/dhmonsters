@@ -346,6 +346,47 @@ class SelectorShadowBackfillTests(unittest.TestCase):
 
         self.assertTrue(instances[0].kwargs["enable_guarded_decal_identity"])
 
+    def test_backfill_can_keep_live_family_points_and_debug(self):
+        class FakeLivePool:
+            def __init__(self, **kwargs):
+                pass
+
+            def update(self, frame_index, *, candidates, gray_frame=None, white_anchor=None):
+                return SimpleNamespace(
+                    points={
+                        "guarded_decal_identity_center_mild_state_mild": (10.0, 20.0),
+                    },
+                    debug={
+                        "guarded_decal_identity": {
+                            "accepted": True,
+                            "background_ratio": 0.0,
+                        },
+                    },
+                )
+
+        rows = [
+            {
+                "i": 0,
+                "track": [0.0, 0.0],
+                "cands": [[0.0, 0.0, 0.9, 20.0, 20.0]],
+            }
+        ]
+
+        with patch("_selector_shadow_backfill.TransparentLiveFamilyPool", FakeLivePool):
+            out = backfill_selector_shadow_rows(
+                rows,
+                runtime=FakeRuntime("panel_default_center_mild_state_mild"),
+                min_frames=1,
+                include_local_box=False,
+                include_live_family=True,
+            )
+
+        self.assertEqual(
+            out[0]["live_family"]["points"]["guarded_decal_identity_center_mild_state_mild"],
+            [10, 20],
+        )
+        self.assertTrue(out[0]["live_family"]["debug"]["guarded_decal_identity"]["accepted"])
+
 
 if __name__ == "__main__":
     unittest.main()

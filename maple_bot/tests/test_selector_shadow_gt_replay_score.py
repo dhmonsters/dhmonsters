@@ -3,7 +3,10 @@ import unittest
 
 from _selector_shadow_gt_replay_score import (
     apply_live_health_selection,
+    guarded_emitted_path_from_rows,
+    guarded_selected_path_from_rows,
     score_path,
+    score_gt_clip,
     track_path_from_rows,
 )
 
@@ -89,6 +92,96 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
         self.assertAlmostEqual(score["max"], 10.0)
         self.assertTrue(score["success"])
         self.assertEqual(score["worst"][0]["frame"], 1)
+
+    def test_guarded_selected_path_uses_only_guarded_selector_family(self):
+        rows = [
+            {
+                "selector_shadow": {
+                    "available": True,
+                    "family": "guarded_decal_identity_center_mild_state_mild",
+                    "point": [10.0, 20.0],
+                },
+            },
+            {
+                "selector_shadow": {
+                    "available": True,
+                    "family": "bg_split_viterbi_center_mild_state_mild",
+                    "point": [30.0, 40.0],
+                },
+            },
+        ]
+
+        path = guarded_selected_path_from_rows(rows)
+
+        self.assertEqual(path, {0: (10.0, 20.0)})
+
+    def test_guarded_emitted_path_uses_live_family_points(self):
+        rows = [
+            {
+                "live_family": {
+                    "points": {
+                        "guarded_decal_identity_center_mild_state_mild": [12.0, 34.0],
+                    }
+                }
+            },
+            {
+                "live_family": {
+                    "points": {
+                        "balanced_viterbi_center_mild_state_mild": [56.0, 78.0],
+                    }
+                }
+            },
+        ]
+
+        path = guarded_emitted_path_from_rows(rows)
+
+        self.assertEqual(path, {0: (12.0, 34.0)})
+
+    def test_score_gt_clip_forwards_guarded_decal_option(self):
+        captured = {}
+
+        def fake_backfill(rows, **kwargs):
+            captured.update(kwargs)
+            return list(rows)
+
+        rows = [
+            {
+                "track": [0.0, 0.0],
+                "selector_shadow": {
+                    "available": True,
+                    "family": "guarded_decal_identity_center_mild_state_mild",
+                    "point": [0.0, 0.0],
+                    "rescue_allowed": True,
+                    "rescue_point": [0.0, 0.0],
+                },
+            }
+        ]
+
+        from unittest.mock import patch
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = root / "_record_debug"
+            record.mkdir()
+            (record / "sample.jsonl").write_text("{}\n", encoding="utf-8")
+            with patch("_selector_shadow_backfill._load_jsonl", return_value=rows):
+                with patch("_selector_shadow_backfill.backfill_selector_shadow_rows", fake_backfill):
+                    with patch("_selector_shadow_gt_replay_score.load_red_gt", return_value={0: (0.0, 0.0)}):
+                        with patch("_selector_shadow_gt_replay_score.frame_shape_from_mp4", return_value=(100, 100)):
+                            result = score_gt_clip(
+                                "sample",
+                                root=root,
+                                runtime=object(),
+                                include_local_box=False,
+                                enable_guarded_decal_identity=True,
+                            )
+
+        self.assertTrue(captured["enable_guarded_decal_identity"])
+        self.assertEqual(result["guarded_emitted_frames"], 0)
+        self.assertEqual(result["guarded_selected_frames"], 1)
+        self.assertTrue(result["guarded_selected"]["success"])
 
 
 if __name__ == "__main__":

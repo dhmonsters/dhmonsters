@@ -33,6 +33,10 @@ def _is_bg_split(family: str) -> bool:
     )
 
 
+def _is_guarded_decal(family: str) -> bool:
+    return family.lower().startswith("guarded_decal_identity")
+
+
 def _first_frame(events: Sequence[Mapping[str, object]], *, kind: str) -> int | None:
     for event in events:
         if event.get("kind") == kind:
@@ -83,6 +87,7 @@ def summarize_backfilled_rows(
     families: Counter[str] = Counter()
     shadow_frames = 0
     bg_split_frames = 0
+    guarded_decal_frames = 0
     rescue_allowed_frames = 0
     merge_context_frames = 0
     merge_context_max_size = 0.0
@@ -102,17 +107,20 @@ def summarize_backfilled_rows(
         rescue_point = record.get("rescue_point")
         rescue_allowed = bool(record.get("rescue_allowed", False)) and rescue_point is not None
         bg_split = _is_bg_split(family)
+        guarded_decal = _is_guarded_decal(family)
         merge_context = _merge_context(record.get("merge_context"))
         merge_context_frames = max(merge_context_frames, int(merge_context.get("frames", 0) or 0))
         merge_context_max_size = max(merge_context_max_size, float(merge_context.get("max_size", 0.0) or 0.0))
         merge_context_max_ratio = max(merge_context_max_ratio, float(merge_context.get("max_ratio", 0.0) or 0.0))
         if bg_split:
             bg_split_frames += 1
+        if guarded_decal:
+            guarded_decal_frames += 1
         if rescue_allowed:
             rescue_allowed_frames += 1
-        if bg_split or rescue_allowed:
+        if bg_split or guarded_decal or rescue_allowed:
             events.append({
-                "kind": "bg_split" if bg_split else "rescue_allowed",
+                "kind": "guarded_decal" if guarded_decal else ("bg_split" if bg_split else "rescue_allowed"),
                 "frame": _frame(row),
                 "family": family,
                 "point": record.get("point"),
@@ -127,11 +135,13 @@ def summarize_backfilled_rows(
         "frames": len(rows),
         "shadow_frames": shadow_frames,
         "bg_split_frames": bg_split_frames,
+        "guarded_decal_frames": guarded_decal_frames,
         "rescue_allowed_frames": rescue_allowed_frames,
         "merge_context_frames": int(merge_context_frames),
         "merge_context_max_size": round(float(merge_context_max_size), 1),
         "merge_context_max_ratio": round(float(merge_context_max_ratio), 3),
         "first_bg_split_frame": _first_frame(events, kind="bg_split"),
+        "first_guarded_decal_frame": _first_frame(events, kind="guarded_decal"),
         "first_rescue_allowed_frame": _first_rescue_allowed_frame(events),
         "families": dict(families),
         "events": events,
@@ -154,6 +164,7 @@ def analyze_record_file_fast(
     merge_context_frames: int = 6,
     merge_min_size: float = 175.0,
     merge_size_ratio: float = 1.30,
+    enable_guarded_decal_identity: bool = False,
 ) -> dict:
     source = Path(path)
     rows = _load_jsonl(source, limit=limit)
@@ -172,6 +183,7 @@ def analyze_record_file_fast(
         merge_context_frames=merge_context_frames,
         merge_min_size=merge_min_size,
         merge_size_ratio=merge_size_ratio,
+        enable_guarded_decal_identity=enable_guarded_decal_identity,
     )
     elapsed_ms = int((time.perf_counter() - start) * 1000.0)
     return summarize_backfilled_rows(source.name, backfilled, elapsed_ms=elapsed_ms)
@@ -215,22 +227,25 @@ def write_markdown_report(
         f"- 분석 파일: {len(items)}개",
         f"- shadow 프레임: {sum(int(item.get('shadow_frames', 0) or 0) for item in items)}개",
         f"- bg_split 프레임: {sum(int(item.get('bg_split_frames', 0) or 0) for item in items)}개",
+        f"- guarded decal 프레임: {sum(int(item.get('guarded_decal_frames', 0) or 0) for item in items)}개",
         f"- rescue_allowed 프레임: {sum(int(item.get('rescue_allowed_frames', 0) or 0) for item in items)}개",
         "",
-        "| 파일 | 프레임 | shadow | bg_split | allowed | first_bg | first_allowed | merge_frames | merge_max | merge_ratio | ms | 주요 family |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| 파일 | 프레임 | shadow | bg_split | guarded | allowed | first_bg | first_guarded | first_allowed | merge_frames | merge_max | merge_ratio | ms | 주요 family |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in items:
         lines.append(
-            "| {name} | {frames} | {shadow} | {bg_split} | {allowed} | "
-            "{first_bg} | {first_allowed} | {merge_frames} | {merge_max} | {merge_ratio} | "
+            "| {name} | {frames} | {shadow} | {bg_split} | {guarded} | {allowed} | "
+            "{first_bg} | {first_guarded} | {first_allowed} | {merge_frames} | {merge_max} | {merge_ratio} | "
             "{elapsed} | {family} |".format(
                 name=item.get("name", ""),
                 frames=item.get("frames", 0),
                 shadow=item.get("shadow_frames", 0),
                 bg_split=item.get("bg_split_frames", 0),
+                guarded=item.get("guarded_decal_frames", 0),
                 allowed=item.get("rescue_allowed_frames", 0),
                 first_bg=item.get("first_bg_split_frame") or "-",
+                first_guarded=item.get("first_guarded_decal_frame") or "-",
                 first_allowed=item.get("first_rescue_allowed_frame") or "-",
                 merge_frames=item.get("merge_context_frames", 0),
                 merge_max=item.get("merge_context_max_size", 0.0),
@@ -279,6 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--merge-context-frames", type=int, default=6)
     parser.add_argument("--merge-min-size", type=float, default=175.0)
     parser.add_argument("--merge-size-ratio", type=float, default=1.30)
+    parser.add_argument("--guarded-decal-identity", action="store_true")
     parser.add_argument("--with-local-box", action="store_true")
     args = parser.parse_args(argv)
 
@@ -296,6 +312,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         merge_context_frames=args.merge_context_frames,
         merge_min_size=args.merge_min_size,
         merge_size_ratio=args.merge_size_ratio,
+        enable_guarded_decal_identity=args.guarded_decal_identity,
     )
     report = write_markdown_report(summaries, args.out)
     print(f"selector_shadow_batch files={len(summaries)} report={report}")

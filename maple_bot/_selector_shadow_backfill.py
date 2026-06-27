@@ -190,6 +190,7 @@ def backfill_selector_shadow_rows(
     merge_min_size: float = 175.0,
     merge_size_ratio: float = 1.30,
     enable_guarded_decal_identity: bool = False,
+    include_live_family: bool = False,
 ) -> list[dict]:
     runtime = runtime or TransparentFamilySelectorRuntime()
     shadow_frames = int(min_frames if shadow_min_frames is None else shadow_min_frames)
@@ -234,6 +235,14 @@ def backfill_selector_shadow_rows(
         anchors: dict[str, Point] = {}
         for family, point in live_decision.points.items():
             anchors[str(family)] = (float(point[0]), float(point[1]))
+        if include_live_family:
+            copied["live_family"] = {
+                "points": {
+                    str(name): [int(point[0]), int(point[1])]
+                    for name, point in live_decision.points.items()
+                },
+                "debug": dict(live_decision.debug),
+            }
         if track is not None:
             anchors["panel_default_center_mild_state_mild"] = track
         engine_track = _engine_track(row)
@@ -292,6 +301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--merge-min-size", type=float, default=175.0)
     parser.add_argument("--merge-size-ratio", type=float, default=1.30)
     parser.add_argument("--guarded-decal-identity", action="store_true")
+    parser.add_argument("--include-live-family", action="store_true")
     parser.add_argument("--no-local-box", action="store_true")
     parser.add_argument("--no-width-sidecar", action="store_true")
     args = parser.parse_args(argv)
@@ -314,6 +324,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         merge_min_size=args.merge_min_size,
         merge_size_ratio=args.merge_size_ratio,
         enable_guarded_decal_identity=args.guarded_decal_identity,
+        include_live_family=args.include_live_family,
     )
     print(f"selector_shadow_backfill input={source} output={result}")
     return 0

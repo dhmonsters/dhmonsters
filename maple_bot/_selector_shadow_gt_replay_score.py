@@ -99,6 +99,40 @@ def shadow_point_path_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[in
     return path
 
 
+def guarded_selected_path_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[int, Point]:
+    path = {}
+    for frame, row in enumerate(rows):
+        record = row.get("selector_shadow")
+        if not isinstance(record, Mapping) or not bool(record.get("available", False)):
+            continue
+        family = str(record.get("family", ""))
+        if not family.lower().startswith("guarded_decal_identity"):
+            continue
+        point = _point(record.get("point"))
+        if point is not None:
+            path[int(frame)] = point
+    return path
+
+
+def guarded_emitted_path_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[int, Point]:
+    path = {}
+    for frame, row in enumerate(rows):
+        live_family = row.get("live_family")
+        if not isinstance(live_family, Mapping):
+            continue
+        points = live_family.get("points")
+        if not isinstance(points, Mapping):
+            continue
+        for family, value in points.items():
+            if not str(family).lower().startswith("guarded_decal_identity"):
+                continue
+            point = _point(value)
+            if point is not None:
+                path[int(frame)] = point
+                break
+    return path
+
+
 def allowed_rescue_path_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[int, Point]:
     path = {}
     for frame, row in enumerate(rows):
@@ -187,6 +221,7 @@ def score_gt_clip(
     min_gt_frame: int = 50,
     success_px: float = 40.0,
     include_local_box: bool = True,
+    enable_guarded_decal_identity: bool = False,
 ) -> dict:
     from _selector_shadow_backfill import _load_jsonl, backfill_selector_shadow_rows
     from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
@@ -207,6 +242,8 @@ def score_gt_clip(
         merge_context_frames=6,
         merge_min_size=175.0,
         merge_size_ratio=1.30,
+        enable_guarded_decal_identity=enable_guarded_decal_identity,
+        include_live_family=enable_guarded_decal_identity,
     )
     gt = load_red_gt(name, root=root, min_frame=min_gt_frame)
     frames = [frame for frame in sorted(gt) if frame < len(backfilled)]
@@ -214,6 +251,8 @@ def score_gt_clip(
 
     track_path = track_path_from_rows(backfilled)
     shadow_path = shadow_point_path_from_rows(backfilled)
+    guarded_emitted_path = guarded_emitted_path_from_rows(backfilled)
+    guarded_path = guarded_selected_path_from_rows(backfilled)
     rescue_path = allowed_rescue_path_from_rows(backfilled)
     selected_path, decisions = apply_live_health_selection(
         backfilled,
@@ -233,11 +272,16 @@ def score_gt_clip(
         "frame_shape": frame_shape,
         "selector_records": sum(1 for row in backfilled if isinstance(row.get("selector_shadow"), Mapping)),
         "include_local_box": bool(include_local_box),
+        "enable_guarded_decal_identity": bool(enable_guarded_decal_identity),
+        "guarded_emitted_frames": len(guarded_emitted_path),
+        "guarded_selected_frames": len(guarded_path),
         "rescue_allowed_frames": len(rescue_path),
         "rescue_used_frames": len(rescue_used),
         "rescue_used_sample": rescue_used[:10],
         "track": score_path(track_path, gt, frames, success_px=success_px),
         "shadow": score_path(shadow_path, gt, frames, success_px=success_px),
+        "guarded_emitted": score_path(guarded_emitted_path, gt, frames, success_px=success_px),
+        "guarded_selected": score_path(guarded_path, gt, frames, success_px=success_px),
         "rescue_allowed": score_path(rescue_path, gt, frames, success_px=success_px),
         "selected": score_path(selected_path, gt, frames, success_px=success_px),
     }
@@ -249,6 +293,7 @@ def score_all_gt_clips(
     names: Sequence[str] | None = None,
     success_px: float = 40.0,
     include_local_box: bool = True,
+    enable_guarded_decal_identity: bool = False,
 ) -> list[dict]:
     from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
 
@@ -266,6 +311,7 @@ def score_all_gt_clips(
             runtime=runtime,
             success_px=success_px,
             include_local_box=include_local_box,
+            enable_guarded_decal_identity=enable_guarded_decal_identity,
         )
         for name in names
     ]
@@ -275,20 +321,24 @@ def markdown_report(results: Sequence[Mapping[str, object]]) -> str:
     lines = [
         "# selector shadow GT 리플레이 채점 결과",
         "",
-        "현재 라이브와 같은 구조로 selector shadow rescue를 건강 선택기에 넣어 16개 빨간점 GT를 재생했다.",
+        "현재 라이브와 같은 구조로 selector shadow rescue를 건강 선택기에 넣어 선택한 빨간점 GT를 재생했다.",
         "",
-        "| 클립 | GT | track | shadow | allowed rescue | selected | allowed/used |",
-        "|---|---:|---|---|---|---|---:|",
+        "| 클립 | GT | track | shadow | guarded emitted | guarded selected | allowed rescue | selected | emitted/selected/allowed/used |",
+        "|---|---:|---|---|---|---|---|---|---:|",
     ]
     for result in results:
         lines.append(
-            "| `{name}` | {gt} | {track} | {shadow} | {allowed} | {selected} | {allowed_count}/{used_count} |".format(
+            "| `{name}` | {gt} | {track} | {shadow} | {guarded_emitted} | {guarded_selected} | {allowed} | {selected} | {emitted_count}/{selected_count}/{allowed_count}/{used_count} |".format(
                 name=result.get("name", ""),
                 gt=result.get("scored_frames", 0),
                 track=_fmt_score(result.get("track", {})),
                 shadow=_fmt_score(result.get("shadow", {})),
+                guarded_emitted=_fmt_score(result.get("guarded_emitted", {})),
+                guarded_selected=_fmt_score(result.get("guarded_selected", {})),
                 allowed=_fmt_score(result.get("rescue_allowed", {})),
                 selected=_fmt_score(result.get("selected", {})),
+                emitted_count=result.get("guarded_emitted_frames", 0),
+                selected_count=result.get("guarded_selected_frames", 0),
                 allowed_count=result.get("rescue_allowed_frames", 0),
                 used_count=result.get("rescue_used_frames", 0),
             )
@@ -350,12 +400,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", default="03_output/2026-06-26_selector_shadow_gt_replay_score_v1.md")
     parser.add_argument("--success-px", type=float, default=40.0)
     parser.add_argument("--no-local-box", action="store_true")
+    parser.add_argument("--guarded-decal-identity", action="store_true")
     args = parser.parse_args(argv)
 
     results = score_all_gt_clips(
         names=args.names or None,
         success_px=args.success_px,
         include_local_box=not args.no_local_box,
+        enable_guarded_decal_identity=args.guarded_decal_identity,
     )
     text = markdown_report(results)
     print(text)
