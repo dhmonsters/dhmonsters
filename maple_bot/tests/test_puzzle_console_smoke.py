@@ -79,11 +79,17 @@ class _Widget:
     def setChecked(self, value: bool) -> None:
         self._checked = value
 
+    def isChecked(self) -> bool:
+        return bool(getattr(self, "_checked", False))
+
     def setPixmap(self, pixmap) -> None:
         self._pixmap = pixmap
 
     def pixmap(self):
         return getattr(self, "_pixmap", None)
+
+    def setScaledContents(self, value: bool) -> None:
+        self._scaled_contents = value
 
     def append(self, text: str) -> None:
         self._text = f"{self._text}\n{text}" if self._text else text
@@ -182,6 +188,7 @@ def _install_fake_qt(monkeypatch) -> None:
     qtwidgets.QLabel = _Widget
     qtwidgets.QMainWindow = _Widget
     qtwidgets.QPushButton = _Widget
+    qtwidgets.QCheckBox = _Widget
     qtwidgets.QSplitter = _Splitter
     qtwidgets.QTextEdit = _Widget
     qtwidgets.QVBoxLayout = _Layout
@@ -195,6 +202,8 @@ def _install_fake_qt(monkeypatch) -> None:
         AlignCenter = "center"
 
     class _Key:
+        Key_F1 = "f1"
+        Key_F2 = "f2"
         Key_F3 = "f3"
 
     qtcore = types.ModuleType("PyQt6.QtCore")
@@ -224,10 +233,11 @@ def test_puzzle_console_window_exposes_main_regions(monkeypatch):
 
     assert window.objectName() == "puzzleConsoleWindow"
     assert window.cctv_view.objectName() == "puzzleCctvView"
-    assert window.input_panel.objectName() == "puzzleInputPanel"
-    assert window.analysis_panel.objectName() == "puzzleAnalysisPanel"
-    assert window.timeline_panel.objectName() == "puzzleTimelinePanel"
+    assert window.control_panel.objectName() == "puzzleControlPanel"
     assert window.event_log.objectName() == "puzzleEventLog"
+    assert window.telegram_alert_checkbox.objectName() == "telegramAlertCheckbox"
+    assert window.gpu_enabled_checkbox.objectName() == "gpuEnabledCheckbox"
+    assert window.puzzle_detect_alert_checkbox.objectName() == "puzzleDetectAlertCheckbox"
     assert "투명도형" in window.windowTitle()
 
 
@@ -237,16 +247,27 @@ def test_puzzle_console_window_exposes_expected_commands(monkeypatch):
 
     window = module.PuzzleConsoleWindow()
 
-    assert window.open_image_sequence_button.objectName() == "openImageSequenceButton"
-    assert window.open_video_button.objectName() == "openVideoButton"
-    assert window.open_replay_button.objectName() == "openReplayButton"
     assert window.start_watch_button.objectName() == "startWatchButton"
-    assert window.run_default_test_button.objectName() == "runDefaultPuzzleTestButton"
-    assert window.roi_settings_button.objectName() == "roiSettingsButton"
-    assert window.capture_check_button.objectName() == "captureCheckButton"
-    assert window.open_recording_folder_button.objectName() == "openRecordingFolderButton"
+    assert window.stop_solver_button.objectName() == "stopSolverButton"
     assert window.stop_recording_button.objectName() == "stopRecordingButton"
+    assert window.solver_start_badge.objectName() == "solverStartBadge"
+    assert window.solver_stop_badge.objectName() == "solverStopBadge"
+    assert window.recording_stop_badge.objectName() == "recordingStopBadge"
     assert "F3" in window.stop_recording_button.text()
+
+
+def test_puzzle_console_preview_keeps_pixmap_visible(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    preview_path = tmp_path / "live_watch_preview.png"
+    preview_path.write_bytes(b"fake image")
+
+    window = module.PuzzleConsoleWindow()
+
+    window._load_cctv_frame_preview(str(preview_path))
+
+    assert window.cctv_frame_label.pixmap().path == str(preview_path)
+    assert window.cctv_frame_label.text() == ""
 
 
 def test_puzzle_console_stop_recording_button_calls_handler(monkeypatch):

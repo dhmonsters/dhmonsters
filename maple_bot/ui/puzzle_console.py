@@ -10,6 +10,7 @@ from pathlib import Path
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -35,6 +36,22 @@ SolverStopHandler = Callable[[], bool]
 LiveStatusHandler = Callable[[], object]
 CaptureCheckHandler = Callable[[], str | Path | None]
 TRACE_TIMELINE_LIMIT = 5
+BADGE_BASE_STYLE = (
+    "padding:6px 10px; border-radius:4px; background:#2a2f36; "
+    "color:#b7c0cc; font-weight:700;"
+)
+SOLVER_ON_STYLE = (
+    "padding:6px 10px; border-radius:4px; background:#1f8f4d; "
+    "color:#ffffff; font-weight:800;"
+)
+SOLVER_STOP_STYLE = (
+    "padding:6px 10px; border-radius:4px; background:#c98217; "
+    "color:#ffffff; font-weight:800;"
+)
+RECORDING_STOP_STYLE = (
+    "padding:6px 10px; border-radius:4px; background:#b83a3a; "
+    "color:#ffffff; font-weight:800;"
+)
 
 
 class PuzzleConsoleWindow(QMainWindow):
@@ -82,10 +99,11 @@ class PuzzleConsoleWindow(QMainWindow):
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
+        self._create_legacy_replay_controls()
+        self.analysis_panel = self._build_analysis_panel()
+        self.timeline_panel = self._build_timeline_panel()
         root_layout.addWidget(self._build_header(), 0)
         root_layout.addWidget(self._build_main_area(), 1)
-        root_layout.addWidget(self._build_timeline_panel(), 0)
-        root_layout.addWidget(self._build_event_log(), 0)
         self.setCentralWidget(root)
         self._live_status_timer: QTimer | None = None
         if self._live_status_handler is not None:
@@ -108,27 +126,55 @@ class PuzzleConsoleWindow(QMainWindow):
         self.session_label.setObjectName("puzzleSessionLabel")
         self.state_label = QLabel("WAITING")
         self.state_label.setObjectName("statusChip")
+        self.solver_start_badge = QLabel("F1 SOLVER")
+        self.solver_start_badge.setObjectName("solverStartBadge")
+        self.solver_start_badge.setStyleSheet(BADGE_BASE_STYLE)
+        self.solver_stop_badge = QLabel("F2 STOP")
+        self.solver_stop_badge.setObjectName("solverStopBadge")
+        self.solver_stop_badge.setStyleSheet(BADGE_BASE_STYLE)
+        self.recording_stop_badge = QLabel("F3 REC")
+        self.recording_stop_badge.setObjectName("recordingStopBadge")
+        self.recording_stop_badge.setStyleSheet(BADGE_BASE_STYLE)
 
         layout.addWidget(title)
         layout.addSpacing(SPACING["sm"])
         layout.addWidget(self.session_label)
         layout.addStretch(1)
+        layout.addWidget(self.solver_start_badge)
+        layout.addWidget(self.solver_stop_badge)
+        layout.addWidget(self.recording_stop_badge)
         layout.addWidget(self.state_label)
         return header
 
     def _build_main_area(self) -> QSplitter:
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("puzzleMainSplitter")
-        self.input_panel = self._build_input_panel()
         self.cctv_view = self._build_cctv_view()
-        self.analysis_panel = self._build_analysis_panel()
-        splitter.addWidget(self.input_panel)
+        self.control_panel = self._build_control_panel()
         splitter.addWidget(self.cctv_view)
-        splitter.addWidget(self.analysis_panel)
-        splitter.setStretchFactor(0, 0)
+        splitter.addWidget(self.control_panel)
+        splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
         return splitter
+
+    def _create_legacy_replay_controls(self) -> None:
+        self.open_image_sequence_button = _command_button("image sequence", "openImageSequenceButton")
+        self.open_video_button = _command_button("video", "openVideoButton")
+        self.open_replay_button = _command_button("JSONL replay", "openReplayButton")
+        self.run_default_test_button = _command_button("default test", "runDefaultPuzzleTestButton")
+        self.roi_settings_button = _command_button("ROI", "roiSettingsButton")
+        self.capture_check_button = _command_button("capture check", "captureCheckButton")
+        self.open_recording_folder_button = _command_button("recording folder", "openRecordingFolderButton")
+
+        self.open_image_sequence_button.clicked.connect(
+            lambda _checked=False: self.run_replay_input("image_sequence")
+        )
+        self.open_video_button.clicked.connect(lambda _checked=False: self.run_replay_input("video"))
+        self.open_replay_button.clicked.connect(lambda _checked=False: self.run_replay_input("jsonl_replay"))
+        self.run_default_test_button.clicked.connect(lambda _checked=False: self.run_default_test_input())
+        self.roi_settings_button.clicked.connect(lambda _checked=False: self.append_log("고정 ROI 사용 중"))
+        self.capture_check_button.clicked.connect(lambda _checked=False: self.capture_check_input())
+        self.open_recording_folder_button.clicked.connect(lambda _checked=False: self.open_last_recording_folder())
 
     def _build_input_panel(self) -> QFrame:
         panel = QFrame()
@@ -194,7 +240,8 @@ class PuzzleConsoleWindow(QMainWindow):
         self.cctv_frame_label = QLabel("preview 없음")
         self.cctv_frame_label.setObjectName("puzzleCctvFramePreview")
         self.cctv_frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cctv_frame_label.setMinimumHeight(360)
+        self.cctv_frame_label.setMinimumHeight(540)
+        self.cctv_frame_label.setScaledContents(True)
         self.cctv_status_label = QLabel("입력 대기")
         self.cctv_status_label.setObjectName("puzzleCctvStatus")
         self.cctv_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -213,11 +260,49 @@ class PuzzleConsoleWindow(QMainWindow):
         layout.addWidget(title)
         layout.addWidget(self.cctv_frame_label, 1)
         layout.addWidget(self.cctv_status_label, 0)
-        layout.addWidget(self.cctv_candidate_summary_label, 0)
-        layout.addWidget(self.cctv_evidence_summary_label, 0)
-        layout.addWidget(self.cctv_identity_summary_label, 0)
-        layout.addWidget(self.cctv_guarded_summary_label, 0)
         return frame
+
+    def _build_control_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("puzzleControlPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(SPACING["md"], SPACING["md"], SPACING["md"], SPACING["md"])
+        layout.setSpacing(SPACING["sm"])
+
+        title = QLabel("제어")
+        title.setObjectName("cardTitle")
+        layout.addWidget(title)
+
+        self.start_watch_button = _command_button("솔버 시작 F1", "startWatchButton", primary=True)
+        self.stop_solver_button = _command_button("솔버 종료 F2", "stopSolverButton")
+        self.stop_recording_button = _command_button("녹화 종료 F3", "stopRecordingButton")
+        self.start_watch_button.clicked.connect(lambda _checked=False: self.start_watch_input())
+        self.stop_solver_button.clicked.connect(lambda _checked=False: self.stop_solver_input())
+        self.stop_recording_button.clicked.connect(lambda _checked=False: self.stop_recording_input())
+        layout.addWidget(self.start_watch_button)
+        layout.addWidget(self.stop_solver_button)
+        layout.addWidget(self.stop_recording_button)
+
+        settings_title = QLabel("설정")
+        settings_title.setObjectName("cardTitle")
+        layout.addWidget(settings_title)
+        self.telegram_alert_checkbox = QCheckBox("텔레그램 알림")
+        self.telegram_alert_checkbox.setObjectName("telegramAlertCheckbox")
+        self.gpu_enabled_checkbox = QCheckBox("GPU 사용")
+        self.gpu_enabled_checkbox.setObjectName("gpuEnabledCheckbox")
+        self.gpu_enabled_checkbox.setChecked(True)
+        self.puzzle_detect_alert_checkbox = QCheckBox("퍼즐 감지 알람")
+        self.puzzle_detect_alert_checkbox.setObjectName("puzzleDetectAlertCheckbox")
+        self.puzzle_detect_alert_checkbox.setChecked(True)
+        layout.addWidget(self.telegram_alert_checkbox)
+        layout.addWidget(self.gpu_enabled_checkbox)
+        layout.addWidget(self.puzzle_detect_alert_checkbox)
+
+        log_title = QLabel("로그")
+        log_title.setObjectName("cardTitle")
+        layout.addWidget(log_title)
+        layout.addWidget(self._build_event_log(), 1)
+        return panel
 
     def _build_analysis_panel(self) -> QFrame:
         panel = QFrame()
@@ -486,7 +571,7 @@ class PuzzleConsoleWindow(QMainWindow):
             return
         self.current_cctv_source_path = str(path)
         self.cctv_frame_label.setPixmap(pixmap)
-        self.cctv_frame_label.setText(path.name)
+        self.cctv_frame_label.setText("")
 
     def _apply_candidates(self, frame_index: object, payload: dict[object, object]) -> None:
         if not isinstance(frame_index, int):
@@ -536,6 +621,16 @@ class PuzzleConsoleWindow(QMainWindow):
         if label is not None:
             label.setText(value)
 
+    def _mark_solver_on(self) -> None:
+        self.solver_start_badge.setStyleSheet(SOLVER_ON_STYLE)
+        self.solver_stop_badge.setStyleSheet(BADGE_BASE_STYLE)
+
+    def _mark_solver_stopped(self) -> None:
+        self.solver_stop_badge.setStyleSheet(SOLVER_STOP_STYLE)
+
+    def _mark_recording_stopped(self) -> None:
+        self.recording_stop_badge.setStyleSheet(RECORDING_STOP_STYLE)
+
     def append_log(self, message: str) -> None:
         self.event_log.append(f"[ui] {message}")
 
@@ -570,6 +665,7 @@ class PuzzleConsoleWindow(QMainWindow):
             return False
         stopped = bool(self._recording_stop_handler())
         if stopped:
+            self._mark_recording_stopped()
             self.append_log("recording stop")
         else:
             self.append_log("recording stop skipped")
@@ -591,11 +687,13 @@ class PuzzleConsoleWindow(QMainWindow):
             self.last_session_dir = session_dir
             self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
             self.set_identity_state("RECORDING")
+            self._mark_solver_on()
             self.append_log(f"recording start: {self.last_session_dir}")
             if preview_path is not None:
                 self._load_cctv_frame_preview(str(preview_path))
             return True
         self.set_identity_state("SOLVER_ON")
+        self._mark_solver_on()
         self.cctv_status_label.setText("solver on: waiting puzzle")
         self.append_log("solver on: waiting puzzle")
         return True
@@ -607,6 +705,7 @@ class PuzzleConsoleWindow(QMainWindow):
         stopped = bool(self._solver_stop_handler())
         if stopped:
             self.set_identity_state("SOLVER_STOPPED")
+            self._mark_solver_stopped()
             self.append_log("solver stop")
         else:
             self.append_log("solver stop skipped")
@@ -631,6 +730,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.last_session_dir = session_dir
             self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
             self.set_identity_state("RECORDING")
+            self._mark_solver_on()
             self.append_log(f"recording start: {self.last_session_dir}")
         if preview_path is not None and str(preview_path) != self.current_cctv_source_path:
             self._load_cctv_frame_preview(str(preview_path))

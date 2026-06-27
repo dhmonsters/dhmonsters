@@ -55,6 +55,7 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
         self.assertEqual(calls, ["start"])
         self.assertEqual(window.state_label.text(), "SOLVER_ON")
         self.assertIsNone(window.last_session_dir)
+        self.assertIn("#1f8f4d", window.solver_start_badge.styleSheet())
         self.assertIn("solver on", window.event_log.toPlainText())
 
     def test_f2_keypress_stops_solver_without_closing_recording(self) -> None:
@@ -71,7 +72,23 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
 
         self.assertEqual(calls, ["solver_stop"])
         self.assertEqual(window.state_label.text(), "SOLVER_STOPPED")
+        self.assertIn("#c98217", window.solver_stop_badge.styleSheet())
         self.assertIn("solver stop", window.event_log.toPlainText())
+
+    def test_f3_keypress_marks_recording_stop_badge(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        calls: list[str] = []
+
+        class _Event:
+            def key(self):
+                return module.Qt.Key.Key_F3
+
+        window = module.PuzzleConsoleWindow(recording_stop_handler=lambda: calls.append("recording_stop") or True)
+
+        window.keyPressEvent(_Event())
+
+        self.assertEqual(calls, ["recording_stop"])
+        self.assertIn("#b83a3a", window.recording_stop_badge.styleSheet())
 
     def test_live_status_poll_marks_recording_after_detection(self) -> None:
         module = importlib.import_module("ui.puzzle_console")
