@@ -288,6 +288,7 @@ def score_gt_clip(
     min_gt_frame: int = 50,
     success_px: float = 40.0,
     include_local_box: bool = True,
+    live_max_candidates: int = 8,
     enable_guarded_decal_identity: bool = False,
     guarded_decal_min_background_frames: int = 3,
     guarded_decal_match_distance_px: float = 10.0,
@@ -305,7 +306,7 @@ def score_gt_clip(
         shadow_min_frames=1,
         emit_every=1,
         max_candidates=8,
-        live_max_candidates=8,
+        live_max_candidates=int(live_max_candidates),
         include_local_box=include_local_box,
         merge_context_frames=6,
         merge_min_size=175.0,
@@ -346,6 +347,7 @@ def score_gt_clip(
         "frame_shape": frame_shape,
         "selector_records": sum(1 for row in backfilled if isinstance(row.get("selector_shadow"), Mapping)),
         "include_local_box": bool(include_local_box),
+        "live_max_candidates": int(live_max_candidates),
         "enable_guarded_decal_identity": bool(enable_guarded_decal_identity),
         "guarded_config": {
             "min_background_frames": int(guarded_decal_min_background_frames),
@@ -375,6 +377,7 @@ def score_all_gt_clips(
     names: Sequence[str] | None = None,
     success_px: float = 40.0,
     include_local_box: bool = True,
+    live_max_candidates: int = 8,
     enable_guarded_decal_identity: bool = False,
     guarded_decal_min_background_frames: int = 3,
     guarded_decal_match_distance_px: float = 10.0,
@@ -397,6 +400,7 @@ def score_all_gt_clips(
             runtime=runtime,
             success_px=success_px,
             include_local_box=include_local_box,
+            live_max_candidates=live_max_candidates,
             enable_guarded_decal_identity=enable_guarded_decal_identity,
             guarded_decal_min_background_frames=guarded_decal_min_background_frames,
             guarded_decal_match_distance_px=guarded_decal_match_distance_px,
@@ -580,6 +584,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", default="03_output/2026-06-26_selector_shadow_gt_replay_score_v1.md")
     parser.add_argument("--success-px", type=float, default=40.0)
     parser.add_argument("--no-local-box", action="store_true")
+    parser.add_argument("--live-max-candidates", type=int, default=8)
     parser.add_argument("--guarded-decal-identity", action="store_true")
     parser.add_argument("--guarded-min-background-frames", type=int, default=3)
     parser.add_argument("--guarded-match-distance-px", type=float, default=10.0)
@@ -591,6 +596,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         names=args.names or None,
         success_px=args.success_px,
         include_local_box=not args.no_local_box,
+        live_max_candidates=args.live_max_candidates,
         enable_guarded_decal_identity=args.guarded_decal_identity,
         guarded_decal_min_background_frames=args.guarded_min_background_frames,
         guarded_decal_match_distance_px=args.guarded_match_distance_px,

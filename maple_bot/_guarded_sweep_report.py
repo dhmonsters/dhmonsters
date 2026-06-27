@@ -24,18 +24,21 @@ def sweep_configs(
     match_distances: Sequence[float],
     shape_pcts: Sequence[float],
     max_steps: Sequence[float],
+    live_max_candidates: Sequence[int] = (8,),
 ) -> list[dict[str, float | int]]:
     configs = []
     for min_bg in min_background_frames:
         for match_px in match_distances:
             for shape_pct in shape_pcts:
                 for max_step in max_steps:
-                    configs.append({
-                        "min_bg": int(min_bg),
-                        "match_px": float(match_px),
-                        "shape_pct": float(shape_pct),
-                        "max_step": float(max_step),
-                    })
+                    for live_max in live_max_candidates:
+                        configs.append({
+                            "min_bg": int(min_bg),
+                            "match_px": float(match_px),
+                            "shape_pct": float(shape_pct),
+                            "max_step": float(max_step),
+                            "live_max_candidates": int(live_max),
+                        })
     return configs
 
 
@@ -72,6 +75,7 @@ def summarize_sweep_item(
         "match_px": float(config.get("match_px", 0.0) or 0.0),
         "shape_pct": float(config.get("shape_pct", 0.0) or 0.0),
         "max_step": float(config.get("max_step", 0.0) or 0.0),
+        "live_max_candidates": int(config.get("live_max_candidates", 8) or 8),
         "clips": len(results),
         "guarded_success": guarded_success,
         "selected_success": selected_success,
@@ -104,6 +108,7 @@ def run_sweep(
                 guarded_decal_match_distance_px=float(config["match_px"]),
                 guarded_decal_shape_pct=float(config["shape_pct"]),
                 guarded_decal_max_step_px=float(config["max_step"]),
+                live_max_candidates=int(config.get("live_max_candidates", 8) or 8),
             )
             for name in names
         ]
@@ -116,16 +121,17 @@ def write_markdown_report(summaries: Iterable[Mapping[str, object]]) -> str:
     lines = [
         "# guarded parameter sweep 리포트",
         "",
-        "| min_bg | match_px | shape_pct | max_step | clips | guarded_success | selected_success | emitted | selected | guarded_mean | selected_mean | reasons |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| min_bg | match_px | shape_pct | max_step | live_max | clips | guarded_success | selected_success | emitted | selected | guarded_mean | selected_mean | reasons |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for item in items:
         lines.append(
-            "| {min_bg} | {match_px:.1f} | {shape_pct:.1f} | {max_step:.1f} | {clips} | {guarded_success} | {selected_success} | {emitted_frames} | {selected_frames} | {guarded_mean} | {selected_mean} | {reasons} |".format(
+            "| {min_bg} | {match_px:.1f} | {shape_pct:.1f} | {max_step:.1f} | {live_max} | {clips} | {guarded_success} | {selected_success} | {emitted_frames} | {selected_frames} | {guarded_mean} | {selected_mean} | {reasons} |".format(
                 min_bg=int(item.get("min_bg", 0) or 0),
                 match_px=float(item.get("match_px", 0.0) or 0.0),
                 shape_pct=float(item.get("shape_pct", 0.0) or 0.0),
                 max_step=float(item.get("max_step", 0.0) or 0.0),
+                live_max=int(item.get("live_max_candidates", 8) or 8),
                 clips=int(item.get("clips", 0) or 0),
                 guarded_success=int(item.get("guarded_success", 0) or 0),
                 selected_success=int(item.get("selected_success", 0) or 0),
@@ -201,6 +207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--match-px", default="10,16")
     parser.add_argument("--shape-pct", default="6")
     parser.add_argument("--max-step", default="80,180")
+    parser.add_argument("--live-max-candidates", default="8")
     parser.add_argument("--success-px", type=float, default=40.0)
     parser.add_argument("--with-local-box", action="store_true")
     args = parser.parse_args(argv)
@@ -216,6 +223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         match_distances=parse_float_list(args.match_px),
         shape_pcts=parse_float_list(args.shape_pct),
         max_steps=parse_float_list(args.max_step),
+        live_max_candidates=parse_int_list(args.live_max_candidates),
     )
     summaries = run_sweep(
         names,
