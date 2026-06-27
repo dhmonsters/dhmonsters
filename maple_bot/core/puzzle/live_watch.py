@@ -28,6 +28,7 @@ class WatchStartResult:
     status: str
     session_dir: Path | None = None
     preview_path: Path | None = None
+    preview_frame: Any | None = None
     message: str = ""
 
 

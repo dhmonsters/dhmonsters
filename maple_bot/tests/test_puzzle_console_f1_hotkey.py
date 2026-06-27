@@ -142,6 +142,27 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
             self.assertIsNone(window.last_session_dir)
             self.assertTrue(window.cctv_frame_label.pixmap().path.startswith("bytes:"))
 
+    def test_live_status_poll_updates_armed_preview_from_memory_frame(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        status = types.SimpleNamespace(
+            status="armed",
+            session_dir=None,
+            preview_path=None,
+            preview_frame=b"memory preview frame",
+        )
+
+        window = module.PuzzleConsoleWindow(
+            watch_start_handler=lambda: None,
+            live_status_handler=lambda: status,
+        )
+
+        window.start_watch_input()
+        window._poll_live_status()
+
+        self.assertEqual(window.state_label.text(), "SOLVER_ON")
+        self.assertIsNone(window.last_session_dir)
+        self.assertTrue(window.cctv_frame_label.pixmap().path.startswith("bytes:"))
+
     def test_live_status_poll_reloads_same_armed_preview_path(self) -> None:
         module = importlib.import_module("ui.puzzle_console")
 

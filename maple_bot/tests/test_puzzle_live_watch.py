@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
 
 from core.puzzle.defaults import DEFAULT_BOARD_ROI_RATIOS, DEFAULT_DETECT_ROI_RATIOS
 from core.puzzle.live_recording import LiveRecordingRuntime
-from core.puzzle.live_watch import LivePuzzleActivationDetector
+from core.puzzle.live_watch import LivePuzzleActivationDetector, WatchStartResult
 from core.puzzle.models import RoiSpec
 
 
@@ -77,6 +78,26 @@ class LivePuzzleActivationDetectorTest(unittest.TestCase):
 
         self.assertTrue(result.active)
         self.assertEqual(result.reason, "white_shape")
+
+
+class WatchPreviewFrameTest(unittest.TestCase):
+    def test_watch_start_result_can_carry_memory_preview_without_path(self) -> None:
+        preview_frame = np.full((8, 12, 3), 90, dtype=np.uint8)
+
+        result = WatchStartResult("armed", preview_frame=preview_frame)
+
+        self.assertIsNone(result.preview_path)
+        self.assertIs(result.preview_frame, preview_frame)
+
+    def test_build_watch_preview_frame_does_not_write_png(self) -> None:
+        import puzzle
+
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        with TemporaryDirectory() as tmp:
+            preview = puzzle._build_watch_preview_frame(frame, popup_score=0.14)
+
+            self.assertEqual(list(Path(tmp).rglob("*.png")), [])
+            self.assertEqual(preview.shape[:2], (619, 695))
 
 
 class LiveRecordingActivationFrameTest(unittest.TestCase):

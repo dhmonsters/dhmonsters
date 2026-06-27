@@ -6,6 +6,7 @@ import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
@@ -583,6 +584,15 @@ class PuzzleConsoleWindow(QMainWindow):
         self.cctv_frame_label.setPixmap(pixmap)
         self.cctv_frame_label.setText("")
 
+    def _load_cctv_frame_preview_data(self, frame: Any) -> None:
+        pixmap = _load_pixmap_from_frame(frame)
+        if pixmap.isNull():
+            return
+        self.current_cctv_source_path = None
+        self.current_cctv_file_signature = None
+        self.cctv_frame_label.setPixmap(pixmap)
+        self.cctv_frame_label.setText("")
+
     def _apply_candidates(self, frame_index: object, payload: dict[object, object]) -> None:
         if not isinstance(frame_index, int):
             return
@@ -693,13 +703,16 @@ class PuzzleConsoleWindow(QMainWindow):
             return False
         session_dir = _watch_result_session_dir(result)
         preview_path = _watch_result_preview_path(result)
+        preview_frame = _watch_result_preview_frame(result)
         if session_dir is not None:
             self.last_session_dir = session_dir
             self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
             self.set_identity_state("RECORDING")
             self._mark_solver_on()
             self.append_log(f"recording start: {self.last_session_dir}")
-            if preview_path is not None:
+            if preview_frame is not None:
+                self._load_cctv_frame_preview_data(preview_frame)
+            elif preview_path is not None:
                 self._load_cctv_frame_preview(str(preview_path))
             return True
         self.set_identity_state("SOLVER_ON")
@@ -731,8 +744,11 @@ class PuzzleConsoleWindow(QMainWindow):
             return
         session_dir = _watch_result_session_dir(result)
         preview_path = _watch_result_preview_path(result)
+        preview_frame = _watch_result_preview_frame(result)
         if session_dir is None:
-            if preview_path is not None:
+            if preview_frame is not None:
+                self._load_cctv_frame_preview_data(preview_frame)
+            elif preview_path is not None:
                 self._load_cctv_frame_preview(str(preview_path))
             return
         is_new_recording = self.last_session_dir != session_dir or self.state_label.text() != "RECORDING"
@@ -742,7 +758,9 @@ class PuzzleConsoleWindow(QMainWindow):
             self.set_identity_state("RECORDING")
             self._mark_solver_on()
             self.append_log(f"recording start: {self.last_session_dir}")
-        if preview_path is not None:
+        if preview_frame is not None:
+            self._load_cctv_frame_preview_data(preview_frame)
+        elif preview_path is not None:
             self._load_cctv_frame_preview(str(preview_path))
 
     def capture_check_input(self) -> bool:
@@ -840,6 +858,39 @@ def _load_pixmap_uncached(path: Path) -> QPixmap:
     return QPixmap(str(path))
 
 
+def _load_pixmap_from_frame(frame: Any) -> QPixmap:
+    pixmap = QPixmap()
+    data = _preview_frame_to_png_bytes(frame)
+    if not data:
+        return pixmap
+    load_from_data = getattr(pixmap, "loadFromData", None)
+    if callable(load_from_data) and load_from_data(data):
+        return pixmap
+    return pixmap
+
+
+def _preview_frame_to_png_bytes(frame: Any) -> bytes | None:
+    if isinstance(frame, bytes):
+        return frame
+    if isinstance(frame, bytearray):
+        return bytes(frame)
+    if isinstance(frame, memoryview):
+        return frame.tobytes()
+    try:
+        import cv2
+        import numpy as np
+
+        arr = np.asarray(frame)
+        if arr.size == 0:
+            return None
+        ok, encoded = cv2.imencode(".png", arr)
+    except Exception:
+        return None
+    if not ok:
+        return None
+    return encoded.tobytes()
+
+
 def _open_folder(path: Path) -> None:
     if hasattr(os, "startfile"):
         os.startfile(str(path))
@@ -870,6 +921,12 @@ def _watch_result_preview_path(result: object) -> Path | None:
     if preview_path is None:
         return None
     return Path(preview_path)
+
+
+def _watch_result_preview_frame(result: object) -> Any | None:
+    if result is None:
+        return None
+    return getattr(result, "preview_frame", None)
 
 
 def _candidate_count(payload: dict[object, object]) -> int:
