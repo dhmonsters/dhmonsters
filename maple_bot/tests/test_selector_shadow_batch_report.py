@@ -169,6 +169,47 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
         self.assertEqual(summary["first_guarded_decal_frame"], 12)
         self.assertEqual(summary["events"][0]["kind"], "guarded_decal")
 
+    def test_summarize_counts_guarded_decal_reasons_from_live_family_debug(self):
+        rows = [
+            {
+                "i": 10,
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "period",
+                            "accepted": False,
+                        }
+                    }
+                },
+            },
+            {
+                "i": 11,
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                        }
+                    }
+                },
+            },
+            {
+                "i": 12,
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                        }
+                    }
+                },
+            },
+        ]
+
+        summary = summarize_backfilled_rows("clip.jsonl", rows)
+
+        self.assertEqual(summary["guarded_reason_counts"], {"background_signal": 2, "period": 1})
+
     def test_write_markdown_report_includes_merge_context_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "report.md"
@@ -185,6 +226,9 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     "merge_context_frames": 2,
                     "merge_context_max_size": 181.5,
                     "merge_context_max_ratio": 1.34,
+                    "guarded_reason_counts": {
+                        "background_signal": 2,
+                    },
                     "families": {
                         "bg_split_viterbi_center_mild_state_mild": 1,
                     },
@@ -198,6 +242,7 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
         self.assertIn("merge_frames", text)
         self.assertIn("181.5", text)
         self.assertIn("1.34", text)
+        self.assertIn("background_signal=2", text)
 
     def test_analyze_record_path_fast_limits_files_and_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,16 +261,17 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-            summaries = analyze_record_path_fast(
-                root,
-                runtime=FakeRuntime(),
-                max_files=2,
-                limit=2,
-                min_frames=1,
-                shadow_min_frames=1,
-                emit_every=1,
-                include_local_box=False,
-            )
+            with patch("_selector_shadow_batch_report.backfill_selector_shadow_rows", lambda rows, **_kwargs: list(rows)):
+                summaries = analyze_record_path_fast(
+                    root,
+                    runtime=FakeRuntime(),
+                    max_files=2,
+                    limit=2,
+                    min_frames=1,
+                    shadow_min_frames=1,
+                    emit_every=1,
+                    include_local_box=False,
+                )
 
         self.assertEqual([item["name"] for item in summaries], ["a.jsonl", "b.jsonl"])
         self.assertEqual([item["frames"] for item in summaries], [2, 2])
@@ -268,6 +314,7 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
         self.assertEqual(captured[0]["merge_min_size"], 201.0)
         self.assertEqual(captured[0]["merge_size_ratio"], 1.45)
         self.assertTrue(captured[0]["enable_guarded_decal_identity"])
+        self.assertTrue(captured[0]["include_live_family"])
 
     def test_main_accepts_merge_gate_and_guarded_cli_options(self):
         captured = {}

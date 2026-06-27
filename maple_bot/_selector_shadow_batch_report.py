@@ -3,12 +3,132 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import json
 from pathlib import Path
 import time
 from typing import Iterable, Mapping, Sequence
 
-from _selector_shadow_backfill import _load_jsonl, backfill_selector_shadow_rows
-from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
+
+def _load_jsonl(
+    path: str | Path,
+    *,
+    limit: int | None = None,
+    use_width_sidecar: bool = True,
+) -> list[dict]:
+    rows = []
+    max_rows = None if limit is None or int(limit) <= 0 else int(limit)
+    with Path(path).open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                rows.append(item)
+                if max_rows is not None and len(rows) >= max_rows:
+                    break
+    if use_width_sidecar:
+        rows = _merge_width_sidecar(rows, _load_width_sidecar(path, limit=limit))
+    return rows
+
+
+def _load_width_sidecar(path: str | Path, *, limit: int | None = None) -> list[list[list[float]]]:
+    source = Path(path)
+    sidecar = source.with_suffix(".wjsonl")
+    if source.suffix.lower() == ".wjsonl" or not sidecar.exists():
+        return []
+    rows = []
+    max_rows = None if limit is None or int(limit) <= 0 else int(limit)
+    with sidecar.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                item = []
+            rows.append(item if isinstance(item, list) else [])
+            if max_rows is not None and len(rows) >= max_rows:
+                break
+    return rows
+
+
+def _merge_width_sidecar(rows: list[dict], width_rows: Sequence[Sequence[Sequence[float]]]) -> list[dict]:
+    if not width_rows:
+        return rows
+    merged = []
+    for index, row in enumerate(rows):
+        copied = dict(row)
+        width_candidates = width_rows[index] if index < len(width_rows) else []
+        copied["cands"] = _merge_candidate_widths(copied.get("cands", []), width_candidates)
+        merged.append(copied)
+    return merged
+
+
+def _merge_candidate_widths(candidates: object, width_candidates: Sequence[Sequence[float]]) -> object:
+    if not isinstance(candidates, Sequence) or isinstance(candidates, (str, bytes)):
+        return candidates
+    out = []
+    for candidate in candidates:
+        if not isinstance(candidate, Sequence) or isinstance(candidate, (str, bytes)) or len(candidate) < 3:
+            out.append(candidate)
+            continue
+        if len(candidate) >= 5:
+            out.append(candidate)
+            continue
+        width_match = _nearest_width_candidate(candidate, width_candidates)
+        if width_match is None:
+            out.append(candidate)
+            continue
+        out.append([
+            float(candidate[0]),
+            float(candidate[1]),
+            float(candidate[2]),
+            float(width_match[2]),
+            float(width_match[3]),
+        ])
+    return out
+
+
+def _nearest_width_candidate(
+    candidate: Sequence[float],
+    width_candidates: Sequence[Sequence[float]],
+    *,
+    max_distance: float = 16.0,
+) -> Sequence[float] | None:
+    best = None
+    best_dist = None
+    for width_candidate in width_candidates:
+        if not isinstance(width_candidate, Sequence) or len(width_candidate) < 4:
+            continue
+        try:
+            dx = float(candidate[0]) - float(width_candidate[0])
+            dy = float(candidate[1]) - float(width_candidate[1])
+        except (TypeError, ValueError):
+            continue
+        dist = (dx * dx + dy * dy) ** 0.5
+        if best_dist is None or dist < best_dist:
+            best = width_candidate
+            best_dist = dist
+    if best_dist is None or best_dist > float(max_distance):
+        return None
+    return best
+
+
+def backfill_selector_shadow_rows(*args, **kwargs):
+    from _selector_shadow_backfill import backfill_selector_shadow_rows as backfill
+
+    return backfill(*args, **kwargs)
+
+
+def _new_runtime():
+    from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
+
+    return TransparentFamilySelectorRuntime()
 
 
 def _shadow_record(row: Mapping[str, object]) -> Mapping[str, object] | None:
@@ -67,6 +187,22 @@ def _merge_context(value: object) -> dict:
     }
 
 
+def _guarded_reason(row: Mapping[str, object]) -> str | None:
+    live_family = row.get("live_family")
+    if not isinstance(live_family, Mapping):
+        return None
+    debug = live_family.get("debug")
+    if not isinstance(debug, Mapping):
+        return None
+    guarded = debug.get("guarded_decal_identity")
+    if not isinstance(guarded, Mapping):
+        return None
+    reason = str(guarded.get("reason") or "")
+    if not reason and bool(guarded.get("accepted", False)):
+        reason = "accepted"
+    return reason or None
+
+
 def _jsonl_files(path: str | Path, max_files: int | None = None) -> list[Path]:
     source = Path(path)
     if source.is_file():
@@ -85,6 +221,7 @@ def summarize_backfilled_rows(
     max_events: int = 20,
 ) -> dict:
     families: Counter[str] = Counter()
+    guarded_reasons: Counter[str] = Counter()
     shadow_frames = 0
     bg_split_frames = 0
     guarded_decal_frames = 0
@@ -95,6 +232,10 @@ def summarize_backfilled_rows(
     events = []
 
     for row in rows:
+        reason = _guarded_reason(row)
+        if reason:
+            guarded_reasons[reason] += 1
+
         record = _shadow_record(row)
         if record is None:
             continue
@@ -144,6 +285,7 @@ def summarize_backfilled_rows(
         "first_guarded_decal_frame": _first_frame(events, kind="guarded_decal"),
         "first_rescue_allowed_frame": _first_rescue_allowed_frame(events),
         "families": dict(families),
+        "guarded_reason_counts": _sorted_counts(guarded_reasons),
         "events": events,
         "elapsed_ms": int(elapsed_ms),
     }
@@ -184,6 +326,7 @@ def analyze_record_file_fast(
         merge_min_size=merge_min_size,
         merge_size_ratio=merge_size_ratio,
         enable_guarded_decal_identity=enable_guarded_decal_identity,
+        include_live_family=enable_guarded_decal_identity,
     )
     elapsed_ms = int((time.perf_counter() - start) * 1000.0)
     return summarize_backfilled_rows(source.name, backfilled, elapsed_ms=elapsed_ms)
@@ -196,7 +339,7 @@ def analyze_record_path_fast(
     max_files: int = 0,
     **kwargs,
 ) -> list[dict]:
-    shared_runtime = runtime or TransparentFamilySelectorRuntime()
+    shared_runtime = runtime or _new_runtime()
     summaries = []
     for source in _jsonl_files(path, max_files=max_files):
         summaries.append(analyze_record_file_fast(
@@ -212,6 +355,23 @@ def _top_family(summary: Mapping[str, object]) -> str:
     if not isinstance(families, Mapping) or not families:
         return "-"
     return str(max(families.items(), key=lambda pair: int(pair[1]))[0])
+
+
+def _sorted_counts(counts: Mapping[str, int]) -> dict[str, int]:
+    return {
+        str(key): int(value)
+        for key, value in sorted(
+            counts.items(),
+            key=lambda item: (-int(item[1]), str(item[0])),
+        )
+    }
+
+
+def _fmt_counts(value: object) -> str:
+    if not isinstance(value, Mapping) or not value:
+        return "-"
+    counts = _sorted_counts({str(key): int(count) for key, count in value.items()})
+    return ", ".join(f"{key}={count}" for key, count in counts.items())
 
 
 def write_markdown_report(
@@ -230,13 +390,13 @@ def write_markdown_report(
         f"- guarded decal 프레임: {sum(int(item.get('guarded_decal_frames', 0) or 0) for item in items)}개",
         f"- rescue_allowed 프레임: {sum(int(item.get('rescue_allowed_frames', 0) or 0) for item in items)}개",
         "",
-        "| 파일 | 프레임 | shadow | bg_split | guarded | allowed | first_bg | first_guarded | first_allowed | merge_frames | merge_max | merge_ratio | ms | 주요 family |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| 파일 | 프레임 | shadow | bg_split | guarded | allowed | first_bg | first_guarded | first_allowed | merge_frames | merge_max | merge_ratio | guard_reasons | ms | 주요 family |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|",
     ]
     for item in items:
         lines.append(
             "| {name} | {frames} | {shadow} | {bg_split} | {guarded} | {allowed} | "
-            "{first_bg} | {first_guarded} | {first_allowed} | {merge_frames} | {merge_max} | {merge_ratio} | "
+            "{first_bg} | {first_guarded} | {first_allowed} | {merge_frames} | {merge_max} | {merge_ratio} | {guard_reasons} | "
             "{elapsed} | {family} |".format(
                 name=item.get("name", ""),
                 frames=item.get("frames", 0),
@@ -250,6 +410,7 @@ def write_markdown_report(
                 merge_frames=item.get("merge_context_frames", 0),
                 merge_max=item.get("merge_context_max_size", 0.0),
                 merge_ratio=item.get("merge_context_max_ratio", 0.0),
+                guard_reasons=_fmt_counts(item.get("guarded_reason_counts", {})),
                 elapsed=item.get("elapsed_ms", 0),
                 family=_top_family(item),
             )

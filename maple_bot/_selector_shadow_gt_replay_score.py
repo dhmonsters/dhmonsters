@@ -5,6 +5,7 @@ import argparse
 import glob
 import json
 import math
+from collections import Counter
 from pathlib import Path
 from statistics import median
 from typing import Mapping, Sequence
@@ -14,6 +15,24 @@ from core.vision.transparent_track_health import TransparentTrackHealthSelector
 
 ROOT = Path(__file__).resolve().parent
 Point = tuple[float, float]
+
+
+def _load_jsonl(*args, **kwargs):
+    from _selector_shadow_backfill import _load_jsonl as load_jsonl
+
+    return load_jsonl(*args, **kwargs)
+
+
+def backfill_selector_shadow_rows(*args, **kwargs):
+    from _selector_shadow_backfill import backfill_selector_shadow_rows as backfill
+
+    return backfill(*args, **kwargs)
+
+
+def _new_runtime():
+    from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
+
+    return TransparentFamilySelectorRuntime()
 
 
 def _point(value: object) -> Point | None:
@@ -133,6 +152,20 @@ def guarded_emitted_path_from_rows(rows: Sequence[Mapping[str, object]]) -> dict
     return path
 
 
+def guarded_reason_counts_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        guarded = _guarded_debug_from_row(row)
+        if guarded is None:
+            continue
+        reason = str(guarded.get("reason") or "")
+        if not reason and bool(guarded.get("accepted", False)):
+            reason = "accepted"
+        if reason:
+            counts[reason] += 1
+    return _sorted_counts(counts)
+
+
 def allowed_rescue_path_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[int, Point]:
     path = {}
     for frame, row in enumerate(rows):
@@ -223,14 +256,11 @@ def score_gt_clip(
     include_local_box: bool = True,
     enable_guarded_decal_identity: bool = False,
 ) -> dict:
-    from _selector_shadow_backfill import _load_jsonl, backfill_selector_shadow_rows
-    from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
-
     source = root / "_record_debug" / f"{name}.jsonl"
     rows = _load_jsonl(source)
     backfilled = backfill_selector_shadow_rows(
         rows,
-        runtime=runtime or TransparentFamilySelectorRuntime(),
+        runtime=runtime or _new_runtime(),
         clip_id=name,
         window=24,
         min_frames=8,
@@ -253,6 +283,7 @@ def score_gt_clip(
     shadow_path = shadow_point_path_from_rows(backfilled)
     guarded_emitted_path = guarded_emitted_path_from_rows(backfilled)
     guarded_path = guarded_selected_path_from_rows(backfilled)
+    guarded_reason_counts = guarded_reason_counts_from_rows(backfilled)
     rescue_path = allowed_rescue_path_from_rows(backfilled)
     selected_path, decisions = apply_live_health_selection(
         backfilled,
@@ -275,6 +306,7 @@ def score_gt_clip(
         "enable_guarded_decal_identity": bool(enable_guarded_decal_identity),
         "guarded_emitted_frames": len(guarded_emitted_path),
         "guarded_selected_frames": len(guarded_path),
+        "guarded_reason_counts": guarded_reason_counts,
         "rescue_allowed_frames": len(rescue_path),
         "rescue_used_frames": len(rescue_used),
         "rescue_used_sample": rescue_used[:10],
@@ -353,6 +385,13 @@ def markdown_report(results: Sequence[Mapping[str, object]]) -> str:
         f"- track 통과: {track_success}/{len(results)}.",
         f"- selected 통과: {selected_success}/{len(results)}.",
         "",
+        "## guarded reason counts",
+        "",
+    ])
+    for result in results:
+        lines.append(f"- `{result.get('name', '')}`: {_fmt_counts(result.get('guarded_reason_counts', {}))}.")
+    lines.extend([
+        "",
         "## rescue 사용 샘플",
         "",
     ])
@@ -374,6 +413,19 @@ def _allowed_selector_rescue(row: Mapping[str, object]) -> Point | None:
     return _point(record.get("rescue_point"))
 
 
+def _guarded_debug_from_row(row: Mapping[str, object]) -> Mapping[str, object] | None:
+    live_family = row.get("live_family")
+    if not isinstance(live_family, Mapping):
+        return None
+    debug = live_family.get("debug")
+    if not isinstance(debug, Mapping):
+        return None
+    guarded = debug.get("guarded_decal_identity")
+    if isinstance(guarded, Mapping):
+        return guarded
+    return None
+
+
 def _import_cv2_np():
     import cv2
     import numpy as np
@@ -392,6 +444,23 @@ def _fmt_score(score: object) -> str:
         f"{float(score['mean']):.1f}px "
         f"({'성공' if score.get('success') else '실패'})"
     )
+
+
+def _sorted_counts(counts: Mapping[str, int]) -> dict[str, int]:
+    return {
+        str(key): int(value)
+        for key, value in sorted(
+            counts.items(),
+            key=lambda item: (-int(item[1]), str(item[0])),
+        )
+    }
+
+
+def _fmt_counts(value: object) -> str:
+    if not isinstance(value, Mapping) or not value:
+        return "-"
+    counts = _sorted_counts({str(key): int(count) for key, count in value.items()})
+    return ", ".join(f"{key}={count}" for key, count in counts.items())
 
 
 def main(argv: Sequence[str] | None = None) -> int:

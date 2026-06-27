@@ -3,6 +3,7 @@ import unittest
 
 from _selector_shadow_gt_replay_score import (
     apply_live_health_selection,
+    guarded_reason_counts_from_rows,
     guarded_emitted_path_from_rows,
     guarded_selected_path_from_rows,
     score_path,
@@ -137,6 +138,54 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
 
         self.assertEqual(path, {0: (12.0, 34.0)})
 
+    def test_guarded_reason_counts_from_live_family_debug(self):
+        rows = [
+            {
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "period",
+                            "accepted": False,
+                        }
+                    }
+                }
+            },
+            {
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                        }
+                    }
+                }
+            },
+            {
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                        }
+                    }
+                }
+            },
+            {
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "accepted",
+                            "accepted": True,
+                        }
+                    }
+                }
+            },
+        ]
+
+        counts = guarded_reason_counts_from_rows(rows)
+
+        self.assertEqual(counts, {"background_signal": 2, "period": 1, "accepted": 1})
+
     def test_score_gt_clip_forwards_guarded_decal_option(self):
         captured = {}
 
@@ -154,6 +203,14 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
                     "rescue_allowed": True,
                     "rescue_point": [0.0, 0.0],
                 },
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                        }
+                    }
+                },
             }
         ]
 
@@ -166,8 +223,8 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
             record = root / "_record_debug"
             record.mkdir()
             (record / "sample.jsonl").write_text("{}\n", encoding="utf-8")
-            with patch("_selector_shadow_backfill._load_jsonl", return_value=rows):
-                with patch("_selector_shadow_backfill.backfill_selector_shadow_rows", fake_backfill):
+            with patch("_selector_shadow_gt_replay_score._load_jsonl", return_value=rows):
+                with patch("_selector_shadow_gt_replay_score.backfill_selector_shadow_rows", fake_backfill):
                     with patch("_selector_shadow_gt_replay_score.load_red_gt", return_value={0: (0.0, 0.0)}):
                         with patch("_selector_shadow_gt_replay_score.frame_shape_from_mp4", return_value=(100, 100)):
                             result = score_gt_clip(
@@ -181,6 +238,7 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
         self.assertTrue(captured["enable_guarded_decal_identity"])
         self.assertEqual(result["guarded_emitted_frames"], 0)
         self.assertEqual(result["guarded_selected_frames"], 1)
+        self.assertEqual(result["guarded_reason_counts"], {"background_signal": 1})
         self.assertTrue(result["guarded_selected"]["success"])
 
 
