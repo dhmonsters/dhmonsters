@@ -79,6 +79,39 @@ def test_selector_uses_track_hint_as_soft_identity_evidence():
     assert result.path[2] == (70.0, 0.0)
 
 
+def test_selector_uses_candidate_background_penalty_and_target_support():
+    frames = [
+        TemporalFrame(
+            1,
+            ((10.0, 0.0, 0.99, 20.0, 20.0), (12.0, 0.0, 0.30, 20.0, 20.0)),
+            background_penalties=(1.0, 0.0),
+            target_supports=(0.0, 1.0),
+        ),
+        TemporalFrame(
+            2,
+            ((20.0, 0.0, 0.99, 20.0, 20.0), (24.0, 0.0, 0.30, 20.0, 20.0)),
+            background_penalties=(1.0, 0.0),
+            target_supports=(0.0, 1.0),
+        ),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            track_hint_weight=0.0,
+            background_penalty_weight=20.0,
+            target_support_weight=20.0,
+        ),
+    )
+
+    assert result.path == {
+        1: (12.0, 0.0),
+        2: (24.0, 0.0),
+    }
+
+
 def test_frames_from_jsonl_rows_normalizes_candidates_and_anchor():
     rows = [
         {"track": [5, 6], "cands": [[10, 20, 0.9], ["bad"]]},
@@ -89,6 +122,44 @@ def test_frames_from_jsonl_rows_normalizes_candidates_and_anchor():
 
     assert anchor == (5.0, 6.0)
     assert frames == [
-        TemporalFrame(0, ((10.0, 20.0, 0.9, 24.0, 24.0),), track_hint=(5.0, 6.0)),
-        TemporalFrame(1, ((30.0, 40.0, 0.8, 12.0, 14.0),)),
+        TemporalFrame(
+            0,
+            ((10.0, 20.0, 0.9, 24.0, 24.0),),
+            track_hint=(5.0, 6.0),
+            background_penalties=(0.0,),
+            target_supports=(0.0,),
+        ),
+        TemporalFrame(
+            1,
+            ((30.0, 40.0, 0.8, 12.0, 14.0),),
+            background_penalties=(0.0,),
+            target_supports=(0.0,),
+        ),
     ]
+
+
+def test_frames_from_jsonl_rows_marks_motion_outlier_as_target_support():
+    rows = [
+        {
+            "track": [0, 0],
+            "cands": [
+                [0, 0, 0.9, 20, 20],
+                [20, 0, 0.9, 20, 20],
+                [40, 0, 0.9, 20, 20],
+                [100, 0, 0.6, 20, 20],
+            ],
+        },
+        {
+            "track": [0, 0],
+            "cands": [
+                [2, 0, 0.9, 20, 20],
+                [22, 0, 0.9, 20, 20],
+                [42, 0, 0.9, 20, 20],
+                [130, 0, 0.6, 20, 20],
+            ],
+        },
+    ]
+
+    frames, _anchor = frames_from_jsonl_rows(rows, default_size=20.0)
+
+    assert frames[1].target_supports[3] > frames[1].target_supports[0]

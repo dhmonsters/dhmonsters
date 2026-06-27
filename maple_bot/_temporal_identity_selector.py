@@ -16,6 +16,8 @@ class TemporalFrame:
     frame_index: int
     candidates: tuple[Candidate, ...]
     track_hint: Point | None = None
+    background_penalties: tuple[float, ...] = ()
+    target_supports: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -30,9 +32,12 @@ class TemporalIdentityConfig:
     velocity_alpha: float = 0.55
     continuity_weight: float = 1.0
     accel_weight: float = 0.35
-    score_weight: float = 2.0
-    track_hint_weight: float = 0.45
+    score_weight: float = 4.0
+    track_hint_weight: float = 0.05
     track_hint_cap: float = 90.0
+    background_penalty_weight: float = 35.0
+    target_support_weight: float = 45.0
+    track_signal_radius: float = 90.0
     merge_center_penalty: float = 35.0
     hold_cost: float = 4.0
     missing_cost: float = 12.0
@@ -73,9 +78,11 @@ def frames_from_jsonl_rows(
 ) -> tuple[list[TemporalFrame], Point | None]:
     frames: list[TemporalFrame] = []
     anchor: Point | None = None
+    previous_candidates: tuple[Candidate, ...] = ()
     for frame_index, row in enumerate(rows):
+        track_hint = _point(row.get(anchor_source))
         if anchor is None:
-            anchor = _point(row.get(anchor_source))
+            anchor = track_hint
         candidates = tuple(
             candidate
             for value in row.get("cands", [])
@@ -86,9 +93,15 @@ def frames_from_jsonl_rows(
             TemporalFrame(
                 int(frame_index),
                 candidates,
-                _point(row.get(anchor_source)),
+                track_hint,
+                _background_penalties(candidates, track_hint),
+                _combine_supports(
+                    _target_supports(candidates, track_hint, radius=float(default_size) * 4.0),
+                    _motion_outlier_supports(candidates, previous_candidates),
+                ),
             )
         )
+        previous_candidates = candidates
     return frames, anchor
 
 
@@ -125,7 +138,14 @@ def select_temporal_identity(
                 float(hypothesis.last[0]) + float(hypothesis.vx),
                 float(hypothesis.last[1]) + float(hypothesis.vy),
             )
-            states = _states_for_frame(candidates, predicted, frame.track_hint, cfg)
+            states = _states_for_frame(
+                candidates,
+                predicted,
+                frame.track_hint,
+                frame.background_penalties,
+                frame.target_supports,
+                cfg,
+            )
             for state in _best_states_for_hypothesis(states, predicted, cfg):
                 expanded.append(_advance(hypothesis, frame.frame_index, state, cfg))
         hypotheses = sorted(expanded, key=lambda item: item.cost)[: max(1, int(cfg.keep))]
@@ -184,6 +204,8 @@ def _states_for_frame(
     candidates: Sequence[Candidate],
     predicted: Point,
     track_hint: Point | None,
+    background_penalties: Sequence[float],
+    target_supports: Sequence[float],
     cfg: TemporalIdentityConfig,
 ) -> list[_State]:
     if not candidates:
@@ -203,6 +225,7 @@ def _states_for_frame(
         merge_like = _is_merge_like(candidate, median_size, cfg)
         center_cost = -float(candidate[2]) * float(cfg.score_weight)
         center_cost += _track_hint_cost(center, track_hint, cfg)
+        center_cost += _candidate_signal_cost(index, background_penalties, target_supports, cfg)
         if merge_like:
             center_cost += float(cfg.merge_center_penalty)
         states.append(_State(center, index, center_cost, "TRACK_CONFIDENT"))
@@ -214,6 +237,7 @@ def _states_for_frame(
                     index,
                     float(cfg.hold_cost)
                     - float(candidate[2]) * float(cfg.score_weight) * 0.25
+                    + _candidate_signal_cost(index, background_penalties, target_supports, cfg)
                     + _track_hint_cost(predicted, track_hint, cfg),
                     "IDENTITY_HOLD",
                 )
@@ -311,6 +335,96 @@ def _track_hint_cost(
     if track_hint is None or float(cfg.track_hint_weight) <= 0.0:
         return 0.0
     return min(_dist(point, track_hint), float(cfg.track_hint_cap)) * float(cfg.track_hint_weight)
+
+
+def _candidate_signal_cost(
+    index: int,
+    background_penalties: Sequence[float],
+    target_supports: Sequence[float],
+    cfg: TemporalIdentityConfig,
+) -> float:
+    background = float(background_penalties[index]) if index < len(background_penalties) else 0.0
+    support = float(target_supports[index]) if index < len(target_supports) else 0.0
+    return (
+        background * float(cfg.background_penalty_weight)
+        - support * float(cfg.target_support_weight)
+    )
+
+
+def _background_penalties(
+    candidates: Sequence[Candidate],
+    track_hint: Point | None,
+) -> tuple[float, ...]:
+    if track_hint is None or not candidates:
+        return tuple(0.0 for _candidate in candidates)
+    distances = [_dist((candidate[0], candidate[1]), track_hint) for candidate in candidates]
+    best_distance = min(distances)
+    return tuple(
+        1.0 if distance <= 1.0 and best_distance <= 1.0 and float(candidate[2]) < 0.6 else 0.0
+        for candidate, distance in zip(candidates, distances)
+    )
+
+
+def _target_supports(
+    candidates: Sequence[Candidate],
+    track_hint: Point | None,
+    *,
+    radius: float,
+) -> tuple[float, ...]:
+    if track_hint is None or not candidates:
+        return tuple(0.0 for _candidate in candidates)
+    nearby = [
+        (float(candidate[2]), index)
+        for index, candidate in enumerate(candidates)
+        if _dist((candidate[0], candidate[1]), track_hint) <= float(radius)
+    ]
+    if not nearby:
+        return tuple(0.0 for _candidate in candidates)
+    scores = [score for score, _index in nearby]
+    min_score = min(scores)
+    max_score = max(scores)
+    scale = max(max_score - min_score, 1e-6)
+    support = [0.0 for _candidate in candidates]
+    for score, index in nearby:
+        support[index] = (score - min_score) / scale
+    return tuple(support)
+
+
+def _motion_outlier_supports(
+    candidates: Sequence[Candidate],
+    previous_candidates: Sequence[Candidate],
+) -> tuple[float, ...]:
+    if not candidates or not previous_candidates:
+        return tuple(0.0 for _candidate in candidates)
+
+    displacements = []
+    for candidate in candidates:
+        previous = min(
+            previous_candidates,
+            key=lambda item: _dist((item[0], item[1]), (candidate[0], candidate[1])),
+        )
+        displacements.append((
+            float(candidate[0]) - float(previous[0]),
+            float(candidate[1]) - float(previous[1]),
+        ))
+    median_dx = _median([dx for dx, _dy in displacements])
+    median_dy = _median([dy for _dx, dy in displacements])
+    magnitudes = [
+        math.hypot(float(dx) - median_dx, float(dy) - median_dy)
+        for dx, dy in displacements
+    ]
+    max_magnitude = max(magnitudes) if magnitudes else 0.0
+    if max_magnitude <= 1e-6:
+        return tuple(0.0 for _candidate in candidates)
+    return tuple(float(value) / max_magnitude for value in magnitudes)
+
+
+def _combine_supports(*items: Sequence[float]) -> tuple[float, ...]:
+    size = max((len(item) for item in items), default=0)
+    out = []
+    for index in range(size):
+        out.append(max(float(item[index]) if index < len(item) else 0.0 for item in items))
+    return tuple(out)
 
 
 def _inside_box(point: Point, candidate: Candidate, *, scale: float = 1.0) -> bool:
