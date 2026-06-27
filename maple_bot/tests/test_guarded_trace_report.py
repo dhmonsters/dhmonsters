@@ -16,6 +16,7 @@ class GuardedTraceReportTests(unittest.TestCase):
                 "live_family": {
                     "points": {
                         "guarded_decal_identity_center_mild_state_mild": [0.0, 0.0],
+                        "raw_candidate_cont0_center_mild_state_mild": [0.0, 0.0],
                     },
                     "debug": {
                         "guarded_decal_identity": {
@@ -34,6 +35,8 @@ class GuardedTraceReportTests(unittest.TestCase):
                 "live_family": {
                     "points": {
                         "guarded_decal_identity_center_mild_state_mild": [180.0, 0.0],
+                        "raw_candidate_cont0_center_mild_state_mild": [10.0, 0.0],
+                        "phase_catalog_live_center_mild_state_mild": [160.0, 0.0],
                     },
                     "debug": {
                         "guarded_decal_identity": {
@@ -55,9 +58,15 @@ class GuardedTraceReportTests(unittest.TestCase):
         self.assertEqual(trace[0]["step_from_previous"], 180.0)
         self.assertEqual(trace[0]["reason"], "accepted")
         self.assertEqual(trace[0]["nearest_candidates"][0]["point"], [180.0, 0.0])
+        self.assertEqual(trace[0]["nearest_candidates"][0]["score_rank"], 1)
         self.assertEqual(trace[0]["nearest_candidates"][1]["dist_to_gt"], 0.0)
+        self.assertEqual(trace[0]["gt_nearest_candidates"][0]["score_rank"], 0)
+        self.assertTrue(trace[0]["gt_nearest_candidates"][0]["in_live_top8"])
         self.assertEqual(trace[0]["gt_nearest_candidates"][0]["point"], [10.0, 0.0])
         self.assertEqual(trace[0]["gt_nearest_candidates"][1]["dist_to_point"], 0.0)
+        self.assertEqual(trace[0]["family_nearest_to_gt"][0]["family"], "raw_candidate_cont0_center_mild_state_mild")
+        self.assertEqual(trace[0]["family_nearest_to_gt"][0]["dist_to_gt"], 0.0)
+        self.assertEqual(trace[0]["family_nearest_to_selected"][0]["family"], "guarded_decal_identity_center_mild_state_mild")
 
     def test_write_markdown_report_includes_candidate_distances(self):
         text = write_markdown_report({
@@ -79,10 +88,26 @@ class GuardedTraceReportTests(unittest.TestCase):
                     "step_from_previous": 180.0,
                     "nearest_candidates": [
                         {"point": [180.0, 0.0], "score": 0.6, "dist_to_point": 0.0, "dist_to_gt": 170.0},
-                        {"point": [10.0, 0.0], "score": 0.8, "dist_to_point": 170.0, "dist_to_gt": 0.0},
+                        {"point": [10.0, 0.0], "score": 0.8, "dist_to_point": 170.0, "dist_to_gt": 0.0, "score_rank": 0, "in_live_top8": True},
                     ],
                     "gt_nearest_candidates": [
-                        {"point": [10.0, 0.0], "score": 0.8, "dist_to_point": 170.0, "dist_to_gt": 0.0},
+                        {"point": [10.0, 0.0], "score": 0.8, "dist_to_point": 170.0, "dist_to_gt": 0.0, "score_rank": 0, "in_live_top8": True},
+                    ],
+                    "family_nearest_to_gt": [
+                        {
+                            "family": "raw_candidate_cont0_center_mild_state_mild",
+                            "point": [10.0, 0.0],
+                            "dist_to_point": 170.0,
+                            "dist_to_gt": 0.0,
+                        },
+                    ],
+                    "family_nearest_to_selected": [
+                        {
+                            "family": "guarded_decal_identity_center_mild_state_mild",
+                            "point": [180.0, 0.0],
+                            "dist_to_point": 0.0,
+                            "dist_to_gt": 170.0,
+                        },
                     ],
                 }
             ],
@@ -92,7 +117,11 @@ class GuardedTraceReportTests(unittest.TestCase):
         self.assertIn("f11", text)
         self.assertIn("err=170.0", text)
         self.assertIn("cand0", text)
+        self.assertIn("rank=0", text)
+        self.assertIn("live8=True", text)
         self.assertIn("gt_cand0", text)
+        self.assertIn("gt_family0 raw_candidate_cont0_center_mild_state_mild", text)
+        self.assertIn("sel_family0 guarded_decal_identity_center_mild_state_mild", text)
         self.assertIn("d_gt=0.0", text)
 
 
