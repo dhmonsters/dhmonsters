@@ -1,6 +1,8 @@
 # 투명도형 퍼즐 16GT 경량 채점기의 순수 계산을 검증한다.
 
 from _fast_gt_score import (
+    METRICS,
+    markdown_report,
     raw_box_oracle_path,
     raw_center_oracle_path,
     score_path,
@@ -61,3 +63,23 @@ def test_summarize_results_counts_each_metric_success():
         "track": 1,
         "raw_center_oracle": 1,
     }
+
+
+def test_markdown_report_includes_temporal_identity_metric():
+    results = [
+        {
+            "name": "clip",
+            "gt_frames": 1,
+            "track": {"n": 1, "mean": 100.0, "success": False},
+            "engine": {"n": 0, "mean": float("inf"), "success": False},
+            "temporal_identity": {"n": 1, "mean": 20.0, "success": True},
+            "raw_center_oracle": {"n": 1, "mean": 10.0, "success": True},
+            "raw_box_oracle": {"n": 1, "mean": 5.0, "success": True},
+        }
+    ]
+
+    text = markdown_report(results)
+
+    assert "temporal identity" in text
+    assert "`temporal_identity`: 1/1" in text
+    assert "temporal_identity" in METRICS

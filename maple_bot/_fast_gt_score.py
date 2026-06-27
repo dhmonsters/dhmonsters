@@ -10,11 +10,12 @@ from statistics import mean
 from typing import Mapping, Sequence
 
 from _selector_shadow_gt_replay_score import load_red_gt
+from _temporal_identity_selector import temporal_identity_path_from_rows
 
 
 ROOT = Path(__file__).resolve().parent
 Point = tuple[float, float]
-METRICS = ("track", "engine", "raw_center_oracle", "raw_box_oracle")
+METRICS = ("track", "engine", "temporal_identity", "raw_center_oracle", "raw_box_oracle")
 
 
 def _point(value: object) -> Point | None:
@@ -184,6 +185,10 @@ def score_clip(
     paths = {
         "track": track_path_from_rows(rows, source="track"),
         "engine": track_path_from_rows(rows, source="engine"),
+        "temporal_identity": temporal_identity_path_from_rows(
+            rows,
+            default_size=default_candidate_size,
+        ),
         "raw_center_oracle": raw_center_oracle_path(rows, gt, default_size=default_candidate_size),
         "raw_box_oracle": raw_box_oracle_path(rows, gt, default_size=default_candidate_size),
     }
@@ -246,16 +251,17 @@ def markdown_report(results: Sequence[Mapping[str, object]], *, elapsed_s: float
         lines.append(f"- elapsed: {elapsed_s:.2f}s.")
         lines.append("")
     lines.extend([
-        "| clip | GT | track | engine | raw center oracle | raw box oracle |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| clip | GT | track | engine | temporal identity | raw center oracle | raw box oracle |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ])
     for result in results:
         lines.append(
-            "| `{name}` | {gt} | {track} | {engine} | {raw_center} | {raw_box} |".format(
+            "| `{name}` | {gt} | {track} | {engine} | {temporal_identity} | {raw_center} | {raw_box} |".format(
                 name=result.get("name", ""),
                 gt=int(result.get("gt_frames", 0) or 0),
                 track=_fmt_score(result.get("track")),
                 engine=_fmt_score(result.get("engine")),
+                temporal_identity=_fmt_score(result.get("temporal_identity")),
                 raw_center=_fmt_score(result.get("raw_center_oracle")),
                 raw_box=_fmt_score(result.get("raw_box_oracle")),
             )
