@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import math
 from typing import Mapping, Sequence
 
+from _temporal_decal_identity import background_identity_penalties, split_recovery_supports
+
 
 Point = tuple[float, float]
 Candidate = tuple[float, float, float, float, float]
@@ -22,6 +24,8 @@ class TemporalFrame:
     color_supports: tuple[float, ...] = ()
     merge_likelihoods: tuple[float, ...] = ()
     appearance_supports: tuple[float, ...] = ()
+    background_identity_penalties: tuple[float, ...] = ()
+    split_supports: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,11 +48,14 @@ class TemporalIdentityConfig:
     track_signal_radius: float = 90.0
     background_run_weight: float = 18.0
     background_run_grace: int = 2
+    background_identity_penalty_weight: float = 0.0
     merge_center_penalty: float = 35.0
     overlap_center_penalty_weight: float = 20.0
     overlap_hold_relief_weight: float = 10.0
     color_support_weight: float = 10.0
     appearance_support_weight: float = 0.0
+    split_support_weight: float = 0.0
+    split_support_gate: float = 40.0
     color_fade_frames: int = 20
     post_hold_support_bonus: float = 8.0
     hold_cost: float = 4.0
@@ -79,6 +86,7 @@ class _State:
     state: IdentityState
     background_id: int | None = None
     target_support: float = 0.0
+    split_support: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -115,6 +123,7 @@ def frames_from_jsonl_rows(
             for candidate in [_candidate(value, default_size=default_size)]
             if candidate is not None
         )
+        background_ids = _background_ids(candidates, expected_background_by_frame.get(int(frame_index), ()))
         frames.append(
             TemporalFrame(
                 int(frame_index),
@@ -125,9 +134,11 @@ def frames_from_jsonl_rows(
                     _target_supports(candidates, track_hint, radius=float(default_size) * 4.0),
                     _motion_outlier_supports(candidates, previous_candidates),
                 ),
-                _background_ids(candidates, expected_background_by_frame.get(int(frame_index), ())),
+                background_ids,
                 (),
                 _merge_likelihoods(candidates),
+                (),
+                background_identity_penalties(background_ids),
                 (),
             )
         )
@@ -184,6 +195,8 @@ def select_temporal_identity(
                 frame.color_supports,
                 frame.merge_likelihoods,
                 frame.appearance_supports,
+                frame.background_identity_penalties,
+                frame.split_supports,
                 cfg,
                 start_frame_index=start_frame_index,
                 frame_index=frame.frame_index,
@@ -250,6 +263,8 @@ def _states_for_frame(
     color_supports: Sequence[float],
     merge_likelihoods: Sequence[float],
     appearance_supports: Sequence[float],
+    background_identity_penalties: Sequence[float],
+    split_supports: Sequence[float],
     cfg: TemporalIdentityConfig,
     *,
     start_frame_index: int,
@@ -269,6 +284,17 @@ def _states_for_frame(
     median_size = _median([max(candidate[3], candidate[4]) for candidate in candidates])
     states: list[_State] = []
     color_weight = _color_weight(frame_index, start_frame_index, cfg)
+    effective_split_supports = _combine_supports(
+        split_supports,
+        split_recovery_supports(
+            candidates,
+            predicted=predicted,
+            background_penalties=background_identity_penalties,
+            gate=float(cfg.split_support_gate),
+        )
+        if float(cfg.split_support_weight) > 0.0
+        else (),
+    )
     for index, candidate in enumerate(candidates):
         center = (float(candidate[0]), float(candidate[1]))
         merge_like = _is_merge_like(candidate, median_size, cfg)
@@ -280,6 +306,7 @@ def _states_for_frame(
             target_supports,
             color_supports,
             appearance_supports,
+            background_identity_penalties,
             cfg,
             color_weight=color_weight,
         )
@@ -295,6 +322,7 @@ def _states_for_frame(
                 "TRACK_CONFIDENT",
                 bg_id,
                 _sequence_value(target_supports, index),
+                _sequence_value(effective_split_supports, index),
             )
         )
 
@@ -311,6 +339,7 @@ def _states_for_frame(
                         target_supports,
                         color_supports,
                         appearance_supports,
+                        background_identity_penalties,
                         cfg,
                         color_weight=color_weight,
                     )
@@ -318,6 +347,7 @@ def _states_for_frame(
                     "MERGED_HOLD",
                     bg_id,
                     _sequence_value(target_supports, index),
+                    _sequence_value(effective_split_supports, index),
                 )
             )
         if (
@@ -338,12 +368,14 @@ def _states_for_frame(
                         color_supports,
                         merge_likelihoods,
                         appearance_supports,
+                        background_identity_penalties,
                         cfg,
                         color_weight=color_weight,
                     ),
                     "RELEASE_PENDING",
                     bg_id,
                     _sequence_value(target_supports, index),
+                    _sequence_value(effective_split_supports, index),
                 )
             )
     nearest = _nearest_candidate(predicted, candidates)
@@ -368,6 +400,7 @@ def _states_for_frame(
                         color_supports,
                         merge_likelihoods,
                         appearance_supports,
+                        background_identity_penalties,
                         cfg,
                         color_weight=color_weight,
                     )
@@ -375,6 +408,7 @@ def _states_for_frame(
                     "RELEASE_PENDING",
                     bg_id,
                     _sequence_value(target_supports, nearest_index),
+                    _sequence_value(effective_split_supports, nearest_index),
                 )
             )
     return states
@@ -416,6 +450,7 @@ def _advance(
     step_cost += _background_run_cost(background_id, background_run, cfg)
     if state.state == "TRACK_CONFIDENT" and _was_holding(hypothesis.states):
         step_cost -= float(state.target_support) * float(cfg.post_hold_support_bonus)
+        step_cost -= float(state.split_support) * float(cfg.split_support_weight)
         state_name = "REACQUIRE_CANDIDATE"
     else:
         state_name = state.state
@@ -462,6 +497,7 @@ def _prediction_hold_cost(
     color_supports: Sequence[float],
     merge_likelihoods: Sequence[float],
     appearance_supports: Sequence[float],
+    background_identity_penalties: Sequence[float],
     cfg: TemporalIdentityConfig,
     *,
     color_weight: float,
@@ -482,6 +518,7 @@ def _prediction_hold_cost(
             target_supports,
             color_supports,
             appearance_supports,
+            background_identity_penalties,
             cfg,
             color_weight=color_weight,
         )
@@ -572,6 +609,7 @@ def _candidate_signal_cost(
     target_supports: Sequence[float],
     color_supports: Sequence[float],
     appearance_supports: Sequence[float],
+    background_identity_penalties: Sequence[float],
     cfg: TemporalIdentityConfig,
     *,
     color_weight: float = 0.0,
@@ -580,8 +618,10 @@ def _candidate_signal_cost(
     support = _sequence_value(target_supports, index)
     color = _sequence_value(color_supports, index) * float(color_weight)
     appearance = _sequence_value(appearance_supports, index)
+    background_identity = _sequence_value(background_identity_penalties, index)
     return (
         background * float(cfg.background_penalty_weight)
+        + background_identity * float(cfg.background_identity_penalty_weight)
         - support * float(cfg.target_support_weight)
         - color * float(cfg.color_support_weight)
         - appearance * float(cfg.appearance_support_weight)

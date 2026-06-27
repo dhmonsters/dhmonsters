@@ -240,6 +240,7 @@ def test_frames_from_jsonl_rows_normalizes_candidates_and_anchor():
             background_ids=(None,),
             color_supports=(),
             merge_likelihoods=(0.0,),
+            background_identity_penalties=(0.0,),
         ),
         TemporalFrame(
             1,
@@ -249,6 +250,7 @@ def test_frames_from_jsonl_rows_normalizes_candidates_and_anchor():
             background_ids=(None,),
             color_supports=(),
             merge_likelihoods=(0.0,),
+            background_identity_penalties=(0.0,),
         ),
     ]
 
@@ -458,3 +460,87 @@ def test_selector_uses_appearance_support_without_color_fade():
     )
 
     assert result.path[25] == (10.0, 0.0)
+
+
+def test_selector_penalizes_background_identity_candidate_directly():
+    frames = [
+        TemporalFrame(
+            1,
+            (
+                (10.0, 0.0, 0.95, 20.0, 20.0),
+                (12.0, 0.0, 0.20, 20.0, 20.0),
+            ),
+            background_identity_penalties=(1.0, 0.0),
+        ),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            score_weight=4.0,
+            background_identity_penalty_weight=20.0,
+        ),
+    )
+
+    assert result.path[1] == (12.0, 0.0)
+
+
+def test_selector_rewards_split_support_only_after_hold():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(2, ((80.0, 0.0, 0.95, 160.0, 40.0),)),
+        TemporalFrame(
+            3,
+            (
+                (32.0, 0.0, 0.99, 20.0, 20.0),
+                (30.0, 0.0, 0.20, 20.0, 20.0),
+            ),
+            split_supports=(0.0, 1.0),
+        ),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            prediction_hold_cost=1.0,
+            score_weight=4.0,
+            split_support_weight=12.0,
+        ),
+    )
+
+    assert result.states[2] == "MERGED_HOLD"
+    assert result.path[3] == (30.0, 0.0)
+
+
+def test_selector_builds_split_support_from_background_identity_after_hold():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(2, ((80.0, 0.0, 0.95, 160.0, 40.0),)),
+        TemporalFrame(
+            3,
+            (
+                (32.0, 0.0, 0.99, 20.0, 20.0),
+                (30.0, 0.0, 0.20, 20.0, 20.0),
+            ),
+            background_identity_penalties=(1.0, 0.0),
+        ),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            prediction_hold_cost=1.0,
+            score_weight=4.0,
+            split_support_weight=12.0,
+            split_support_gate=40.0,
+        ),
+    )
+
+    assert result.states[2] == "MERGED_HOLD"
+    assert result.path[3] == (30.0, 0.0)
