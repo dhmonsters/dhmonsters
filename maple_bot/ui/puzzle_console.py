@@ -133,7 +133,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.open_video_button = _command_button("영상", "openVideoButton")
         self.open_replay_button = _command_button("JSONL replay", "openReplayButton")
         self.run_default_test_button = _command_button("기본 테스트", "runDefaultPuzzleTestButton")
-        self.start_watch_button = _command_button("화면 감시", "startWatchButton", primary=True)
+        self.start_watch_button = _command_button("화면 감시 F1", "startWatchButton", primary=True)
         self.roi_settings_button = _command_button("ROI 설정", "roiSettingsButton")
         self.capture_check_button = _command_button("캡처 점검", "captureCheckButton")
         self.open_recording_folder_button = _command_button("녹화 폴더", "openRecordingFolderButton")
@@ -595,6 +595,9 @@ class PuzzleConsoleWindow(QMainWindow):
         return True
 
     def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_F1:
+            self.start_watch_input()
+            return
         if event.key() == Qt.Key.Key_F3:
             self.stop_recording_input()
             return

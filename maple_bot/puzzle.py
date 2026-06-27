@@ -257,16 +257,17 @@ def _attach_puzzle_hotkeys(window: object) -> None:
         from core.hotkey_manager import HotkeyManager
     except Exception as exc:
         if hasattr(window, "append_log"):
-            window.append_log(f"global F3 hotkey unavailable: {exc}")
+            window.append_log(f"global puzzle hotkey unavailable: {exc}")
         return
 
     try:
         manager = HotkeyManager(window)
+        manager.register("puzzle_start_recording", "f1", window.start_watch_input)
         manager.register("puzzle_stop_recording", "f3", window.stop_recording_input)
         setattr(window, "_puzzle_hotkey_manager", manager)
     except Exception as exc:
         if hasattr(window, "append_log"):
-            window.append_log(f"global F3 hotkey unavailable: {exc}")
+            window.append_log(f"global puzzle hotkey unavailable: {exc}")
 
 
 def _open_replay_source(replay_path: Path, session):
