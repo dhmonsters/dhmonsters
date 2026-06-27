@@ -19,6 +19,8 @@ class TemporalFrame:
     background_penalties: tuple[float, ...] = ()
     target_supports: tuple[float, ...] = ()
     background_ids: tuple[int | None, ...] = ()
+    color_supports: tuple[float, ...] = ()
+    merge_likelihoods: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,11 @@ class TemporalIdentityConfig:
     background_run_weight: float = 18.0
     background_run_grace: int = 2
     merge_center_penalty: float = 35.0
+    overlap_center_penalty_weight: float = 20.0
+    overlap_hold_relief_weight: float = 10.0
+    color_support_weight: float = 10.0
+    color_fade_frames: int = 20
+    post_hold_support_bonus: float = 8.0
     hold_cost: float = 4.0
     prediction_hold_cost: float = 80.0
     prediction_hold_box_scale: float = 1.20
@@ -69,6 +76,7 @@ class _State:
     local_cost: float
     state: IdentityState
     background_id: int | None = None
+    target_support: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,8 @@ def frames_from_jsonl_rows(
                     _motion_outlier_supports(candidates, previous_candidates),
                 ),
                 _background_ids(candidates, expected_background_by_frame.get(int(frame_index), ())),
+                (),
+                _merge_likelihoods(candidates),
             )
         )
         previous_candidates = candidates
@@ -152,6 +162,7 @@ def select_temporal_identity(
     start = _initial_point(ordered, anchor)
     hypotheses = [_Hypothesis(0.0, start, 0.0, 0.0, {}, {}, {}, None, 0)]
 
+    start_frame_index = int(ordered[0].frame_index)
     for frame in ordered:
         candidates = _ranked_candidates(frame.candidates, cfg)
         expanded: list[_Hypothesis] = []
@@ -167,7 +178,11 @@ def select_temporal_identity(
                 frame.background_penalties,
                 frame.target_supports,
                 frame.background_ids,
+                frame.color_supports,
+                frame.merge_likelihoods,
                 cfg,
+                start_frame_index=start_frame_index,
+                frame_index=frame.frame_index,
             )
             for state in _best_states_for_hypothesis(states, predicted, cfg):
                 expanded.append(_advance(hypothesis, frame.frame_index, state, cfg))
@@ -228,7 +243,12 @@ def _states_for_frame(
     background_penalties: Sequence[float],
     target_supports: Sequence[float],
     background_ids: Sequence[int | None],
+    color_supports: Sequence[float],
+    merge_likelihoods: Sequence[float],
     cfg: TemporalIdentityConfig,
+    *,
+    start_frame_index: int,
+    frame_index: int,
 ) -> list[_State]:
     if not candidates:
         return [
@@ -243,16 +263,34 @@ def _states_for_frame(
 
     median_size = _median([max(candidate[3], candidate[4]) for candidate in candidates])
     states: list[_State] = []
+    color_weight = _color_weight(frame_index, start_frame_index, cfg)
     for index, candidate in enumerate(candidates):
         center = (float(candidate[0]), float(candidate[1]))
         merge_like = _is_merge_like(candidate, median_size, cfg)
         center_cost = -float(candidate[2]) * float(cfg.score_weight)
         center_cost += _track_hint_cost(center, track_hint, cfg)
-        center_cost += _candidate_signal_cost(index, background_penalties, target_supports, cfg)
+        center_cost += _candidate_signal_cost(
+            index,
+            background_penalties,
+            target_supports,
+            color_supports,
+            cfg,
+            color_weight=color_weight,
+        )
+        center_cost += _merge_likelihood(index, merge_likelihoods) * float(cfg.overlap_center_penalty_weight)
         if merge_like:
             center_cost += float(cfg.merge_center_penalty)
         bg_id = background_ids[index] if index < len(background_ids) else None
-        states.append(_State(center, index, center_cost, "TRACK_CONFIDENT", bg_id))
+        states.append(
+            _State(
+                center,
+                index,
+                center_cost,
+                "TRACK_CONFIDENT",
+                bg_id,
+                _sequence_value(target_supports, index),
+            )
+        )
 
         if merge_like and _inside_box(predicted, candidate, scale=1.05):
             states.append(
@@ -261,10 +299,18 @@ def _states_for_frame(
                     index,
                     float(cfg.hold_cost)
                     - float(candidate[2]) * float(cfg.score_weight) * 0.25
-                    + _candidate_signal_cost(index, background_penalties, target_supports, cfg)
+                    + _candidate_signal_cost(
+                        index,
+                        background_penalties,
+                        target_supports,
+                        color_supports,
+                        cfg,
+                        color_weight=color_weight,
+                    )
                     + _track_hint_cost(predicted, track_hint, cfg),
                     "MERGED_HOLD",
                     bg_id,
+                    _sequence_value(target_supports, index),
                 )
             )
         if (
@@ -282,10 +328,14 @@ def _states_for_frame(
                         track_hint,
                         background_penalties,
                         target_supports,
+                        color_supports,
+                        merge_likelihoods,
                         cfg,
+                        color_weight=color_weight,
                     ),
                     "RELEASE_PENDING",
                     bg_id,
+                    _sequence_value(target_supports, index),
                 )
             )
     nearest = _nearest_candidate(predicted, candidates)
@@ -307,11 +357,15 @@ def _states_for_frame(
                         track_hint,
                         background_penalties,
                         target_supports,
+                        color_supports,
+                        merge_likelihoods,
                         cfg,
+                        color_weight=color_weight,
                     )
                     + nearest_distance * float(cfg.prediction_hold_distance_weight),
                     "RELEASE_PENDING",
                     bg_id,
+                    _sequence_value(target_supports, nearest_index),
                 )
             )
     return states
@@ -352,6 +406,7 @@ def _advance(
     background_run = _next_background_run(hypothesis, background_id)
     step_cost += _background_run_cost(background_id, background_run, cfg)
     if state.state == "TRACK_CONFIDENT" and _was_holding(hypothesis.states):
+        step_cost -= float(state.target_support) * float(cfg.post_hold_support_bonus)
         state_name = "REACQUIRE_CANDIDATE"
     else:
         state_name = state.state
@@ -395,7 +450,11 @@ def _prediction_hold_cost(
     track_hint: Point | None,
     background_penalties: Sequence[float],
     target_supports: Sequence[float],
+    color_supports: Sequence[float],
+    merge_likelihoods: Sequence[float],
     cfg: TemporalIdentityConfig,
+    *,
+    color_weight: float,
 ) -> float:
     center = (float(candidate[0]), float(candidate[1]))
     score_relief = (
@@ -407,7 +466,16 @@ def _prediction_hold_cost(
         float(cfg.prediction_hold_cost)
         + _dist(center, predicted) * float(cfg.prediction_hold_distance_weight)
         - score_relief
-        + _candidate_signal_cost(index, background_penalties, target_supports, cfg) * 0.5
+        + _candidate_signal_cost(
+            index,
+            background_penalties,
+            target_supports,
+            color_supports,
+            cfg,
+            color_weight=color_weight,
+        )
+        * 0.5
+        - _merge_likelihood(index, merge_likelihoods) * float(cfg.overlap_hold_relief_weight)
         + _track_hint_cost(predicted, track_hint, cfg)
     )
 
@@ -491,14 +559,38 @@ def _candidate_signal_cost(
     index: int,
     background_penalties: Sequence[float],
     target_supports: Sequence[float],
+    color_supports: Sequence[float],
     cfg: TemporalIdentityConfig,
+    *,
+    color_weight: float = 0.0,
 ) -> float:
-    background = float(background_penalties[index]) if index < len(background_penalties) else 0.0
-    support = float(target_supports[index]) if index < len(target_supports) else 0.0
+    background = _sequence_value(background_penalties, index)
+    support = _sequence_value(target_supports, index)
+    color = _sequence_value(color_supports, index) * float(color_weight)
     return (
         background * float(cfg.background_penalty_weight)
         - support * float(cfg.target_support_weight)
+        - color * float(cfg.color_support_weight)
     )
+
+
+def _color_weight(
+    frame_index: int,
+    start_frame_index: int,
+    cfg: TemporalIdentityConfig,
+) -> float:
+    if int(cfg.color_fade_frames) <= 0:
+        return 0.0
+    elapsed = max(0, int(frame_index) - int(start_frame_index))
+    return max(0.0, min(1.0, 1.0 - elapsed / float(cfg.color_fade_frames)))
+
+
+def _merge_likelihood(index: int, merge_likelihoods: Sequence[float]) -> float:
+    return _sequence_value(merge_likelihoods, index)
+
+
+def _sequence_value(values: Sequence[float], index: int) -> float:
+    return float(values[index]) if index < len(values) else 0.0
 
 
 def _background_penalties(
@@ -525,6 +617,31 @@ def _background_ids(
         _match_background_id((candidate[0], candidate[1]), expected_background, pos_tol=pos_tol)
         for candidate in candidates
     )
+
+
+def _merge_likelihoods(candidates: Sequence[Candidate]) -> tuple[float, ...]:
+    if not candidates:
+        return ()
+    median_size = _median([max(float(candidate[3]), float(candidate[4])) for candidate in candidates])
+    scores = []
+    for index, candidate in enumerate(candidates):
+        nearest = min(
+            (
+                _dist((candidate[0], candidate[1]), (other[0], other[1]))
+                for other_index, other in enumerate(candidates)
+                if other_index != index
+            ),
+            default=None,
+        )
+        if nearest is None:
+            scores.append(0.0)
+            continue
+        diagonal = max(math.hypot(float(candidate[3]), float(candidate[4])), 1.0)
+        proximity = max(0.0, min(1.0, 1.0 - float(nearest) / diagonal))
+        size_ratio = max(float(candidate[3]), float(candidate[4])) / max(median_size, 1.0)
+        size_score = max(0.0, min(1.0, (size_ratio - 0.75) / 0.75))
+        scores.append(round(proximity * size_score, 6))
+    return tuple(scores)
 
 
 def _match_background_id(

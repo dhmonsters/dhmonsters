@@ -238,6 +238,8 @@ def test_frames_from_jsonl_rows_normalizes_candidates_and_anchor():
             background_penalties=(0.0,),
             target_supports=(0.0,),
             background_ids=(None,),
+            color_supports=(),
+            merge_likelihoods=(0.0,),
         ),
         TemporalFrame(
             1,
@@ -245,6 +247,8 @@ def test_frames_from_jsonl_rows_normalizes_candidates_and_anchor():
             background_penalties=(0.0,),
             target_supports=(0.0,),
             background_ids=(None,),
+            color_supports=(),
+            merge_likelihoods=(0.0,),
         ),
     ]
 
@@ -274,6 +278,24 @@ def test_frames_from_jsonl_rows_marks_motion_outlier_as_target_support():
     frames, _anchor = frames_from_jsonl_rows(rows, default_size=20.0)
 
     assert frames[1].target_supports[3] > frames[1].target_supports[0]
+
+
+def test_frames_from_jsonl_rows_marks_close_large_candidates_as_merge_likely():
+    rows = [
+        {
+            "track": [0, 0],
+            "cands": [
+                [10, 10, 0.9, 40, 40],
+                [20, 10, 0.9, 38, 38],
+                [100, 100, 0.9, 20, 20],
+            ],
+        }
+    ]
+
+    frames, _anchor = frames_from_jsonl_rows(rows, default_size=20.0)
+
+    assert frames[0].merge_likelihoods[0] > frames[0].merge_likelihoods[2]
+    assert frames[0].merge_likelihoods[0] > 0.0
 
 
 def test_selector_penalizes_long_run_on_same_background_id():
@@ -309,3 +331,104 @@ def test_selector_penalizes_long_run_on_same_background_id():
     )
 
     assert result.path[3] == (36.0, 0.0)
+
+
+def test_selector_fades_color_support_after_initial_frames():
+    early = select_temporal_identity(
+        [
+            TemporalFrame(
+                0,
+                (
+                    (5.0, 0.0, 0.80, 20.0, 20.0),
+                    (10.0, 0.0, 0.80, 20.0, 20.0),
+                ),
+                color_supports=(0.0, 1.0),
+            )
+        ],
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            color_support_weight=10.0,
+            color_fade_frames=20,
+            score_weight=0.0,
+        ),
+    )
+    late = select_temporal_identity(
+        [
+            TemporalFrame(0, ()),
+            TemporalFrame(
+                25,
+                (
+                    (5.0, 0.0, 0.80, 20.0, 20.0),
+                    (10.0, 0.0, 0.80, 20.0, 20.0),
+                ),
+                color_supports=(0.0, 1.0),
+            )
+        ],
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            color_support_weight=10.0,
+            color_fade_frames=20,
+            score_weight=0.0,
+        ),
+    )
+
+    assert early.path[0] == (10.0, 0.0)
+    assert late.path[25] == (5.0, 0.0)
+
+
+def test_selector_penalizes_overlap_center_candidate():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(
+            2,
+            (
+                (24.0, 0.0, 0.50, 20.0, 20.0),
+                (20.0, 0.0, 0.99, 20.0, 20.0),
+            ),
+            merge_likelihoods=(0.0, 0.5),
+        ),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            score_weight=4.0,
+            overlap_center_penalty_weight=20.0,
+        ),
+    )
+
+    assert result.path[2] == (24.0, 0.0)
+
+
+def test_selector_rewards_supported_candidate_after_hold_release():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),)),
+        TemporalFrame(2, ((80.0, 0.0, 0.95, 160.0, 40.0),)),
+        TemporalFrame(
+            3,
+            (
+                (32.0, 0.0, 0.99, 20.0, 20.0),
+                (30.0, 0.0, 0.20, 20.0, 20.0),
+            ),
+            target_supports=(0.0, 1.0),
+        ),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            prediction_hold_cost=1.0,
+            score_weight=4.0,
+            target_support_weight=0.0,
+            post_hold_support_bonus=8.0,
+        ),
+    )
+
+    assert result.states[2] == "MERGED_HOLD"
+    assert result.path[3] == (30.0, 0.0)
