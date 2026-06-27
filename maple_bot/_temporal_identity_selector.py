@@ -34,7 +34,7 @@ class TemporalIdentityConfig:
     continuity_weight: float = 1.0
     accel_weight: float = 0.35
     score_weight: float = 4.0
-    track_hint_weight: float = 0.05
+    track_hint_weight: float = 0.0
     track_hint_cap: float = 90.0
     background_penalty_weight: float = 35.0
     target_support_weight: float = 45.0

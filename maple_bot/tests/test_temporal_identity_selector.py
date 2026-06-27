@@ -145,6 +145,25 @@ def test_selector_defers_identity_when_track_agrees_with_prediction_gate():
     assert result.states[3] == "RELEASE_PENDING"
 
 
+def test_selector_default_does_not_use_conflicting_track_hint_as_identity_cost():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),), track_hint=(10.0, 0.0)),
+        TemporalFrame(2, ((20.0, 0.0, 0.80, 20.0, 20.0),), track_hint=(20.0, 0.0)),
+        TemporalFrame(
+            3,
+            (
+                (30.0, 45.0, 0.80, 20.0, 20.0),
+                (30.0, -45.0, 0.80, 20.0, 20.0),
+            ),
+            track_hint=(30.0, -45.0),
+        ),
+    ]
+
+    result = select_temporal_identity(frames, anchor=(0.0, 0.0))
+
+    assert result.path[3] == (30.0, 45.0)
+
+
 def test_selector_uses_track_hint_as_soft_identity_evidence():
     frames = [
         TemporalFrame(
