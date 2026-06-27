@@ -9,6 +9,7 @@ from core.puzzle.models import Candidate, FramePacket
 
 CandidateSource = Literal["yolo", "raw", "live_family", "replay"]
 ALLOWED_SOURCES = {"yolo", "raw", "live_family", "replay"}
+DEFAULT_CANDIDATE_BOX_SIZE = 20.0
 
 
 class CandidateProvider:
@@ -135,14 +136,16 @@ def parse_candidate_row(row: Any) -> dict[str, Any]:
 
 
 def _parse_sequence_row(row: Sequence[Any]) -> dict[str, Any]:
-    if len(row) < 5:
-        raise ValueError("candidate row sequence must contain cx, cy, score, w, h")
+    if len(row) < 3:
+        raise ValueError("candidate row sequence must contain cx, cy, score")
+    width = float(row[3]) if len(row) >= 4 else DEFAULT_CANDIDATE_BOX_SIZE
+    height = float(row[4]) if len(row) >= 5 else DEFAULT_CANDIDATE_BOX_SIZE
     return {
         "cx": float(row[0]),
         "cy": float(row[1]),
         "score": float(row[2]),
-        "w": float(row[3]),
-        "h": float(row[4]),
+        "w": width,
+        "h": height,
         "class_name": str(row[5]) if len(row) > 5 else "",
     }
 

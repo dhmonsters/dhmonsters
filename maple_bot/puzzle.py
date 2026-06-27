@@ -165,7 +165,10 @@ def run_headless_replay(
         recorder=SessionRecorder(session, trace_logger=trace),
         trace_logger=trace,
     )
-    candidate_provider = CandidateProvider(_empty_replay_rows, source="replay")
+    candidate_provider = CandidateProvider(
+        _candidate_rows_from_replay_companion(replay_path),
+        source="replay",
+    )
     evidence_judges = EvidenceJudges()
     identity_tracker = IdentityTracker()
     processed = 0
@@ -284,6 +287,38 @@ def default_transparent_test_replay_path() -> Path:
 
 def _empty_replay_rows(_packet: FramePacket) -> list[object]:
     return []
+
+
+def _candidate_rows_from_replay_companion(replay_path: str | Path):
+    companion = _companion_candidate_jsonl_path(replay_path)
+    if companion is None:
+        return _empty_replay_rows
+
+    rows_by_frame: dict[int, list[object]] = {}
+    with companion.open("r", encoding="utf-8") as fp:
+        for frame_index, line in enumerate(fp):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            cands = row.get("cands") if isinstance(row, dict) else None
+            if isinstance(cands, list):
+                rows_by_frame[frame_index] = cands
+
+    def provider(packet: FramePacket) -> list[object]:
+        return rows_by_frame.get(int(packet.frame_index), [])
+
+    return provider
+
+
+def _companion_candidate_jsonl_path(replay_path: str | Path) -> Path | None:
+    path = Path(replay_path)
+    if path.suffix.lower() == ".jsonl":
+        return path if path.exists() else None
+    stem = path.stem
+    if stem.endswith("_png"):
+        stem = stem[:-4]
+    candidate = path.with_name(f"{stem}.jsonl")
+    return candidate if candidate.exists() else None
 
 
 def _candidate_to_payload(candidate: Candidate) -> dict[str, object]:

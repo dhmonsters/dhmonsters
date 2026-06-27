@@ -36,6 +36,19 @@ def test_candidate_from_row_preserves_board_frame_coordinates():
     assert candidate.class_name == "triangle"
 
 
+def test_candidate_from_three_value_row_uses_default_box_size():
+    candidate = candidate_from_row(
+        (40.0, 50.0, 0.82),
+        frame_index=7,
+        source="raw",
+        row_index=2,
+    )
+
+    assert candidate.center == (40.0, 50.0)
+    assert candidate.bbox == (30.0, 40.0, 50.0, 60.0)
+    assert candidate.score == 0.82
+
+
 def test_candidate_provider_limits_candidates_and_records_drop_reasons():
     rows = [
         (10.0, 11.0, 0.9, 4.0, 6.0),
