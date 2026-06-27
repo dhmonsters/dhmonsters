@@ -127,6 +127,7 @@ class TransparentLiveFamilyPool:
         self._mht_family_name = "bg_split_viterbi_center_mild_state_mild"
         self._raw_mht_family_name = "raw_candidate_mht_center_mild_state_mild"
         self._guarded_decal_family_name = "guarded_decal_identity_center_mild_state_mild"
+        self._guarded_consensus_family_name = "guarded_decal_identity_consensus_center_mild_state_mild"
         self._mht_config = SolverConfig(
             keep=64,
             branch=8,
@@ -282,6 +283,9 @@ class TransparentLiveFamilyPool:
         guarded_path, guarded_debug = self._guarded_decal_identity_path(usable_frames)
         if frame in guarded_path:
             points[self._guarded_decal_family_name] = guarded_path[frame]
+        consensus_point, consensus_debug = self._guarded_consensus_point(points, frame=frame)
+        if consensus_point is not None:
+            points[self._guarded_consensus_family_name] = consensus_point
         debug = {
             "frames": len(usable_frames),
             "ready": bool(points),
@@ -289,6 +293,8 @@ class TransparentLiveFamilyPool:
         }
         if guarded_debug is not None:
             debug["guarded_decal_identity"] = guarded_debug
+        if consensus_debug:
+            debug["guarded_decal_consensus"] = consensus_debug
         return LiveFamilyDecision(points, debug)
 
     def _raw_candidate_family_points(
@@ -377,6 +383,113 @@ class TransparentLiveFamilyPool:
         self._raw_offset_histories = next_histories
         out.update(self._raw_beam_family_points(ranked))
         return out
+
+    def _guarded_consensus_point(
+        self,
+        points: Mapping[str, Point],
+        *,
+        frame: int | None = None,
+        radius_px: float = 36.0,
+        min_support_weight: float = 3.0,
+    ) -> tuple[Point | None, dict[str, object]]:
+        expected = self._guarded_consensus_expected_background(frame)
+        weighted_points = [
+            (str(family), (float(point[0]), float(point[1])), self._guarded_consensus_weight(str(family)))
+            for family, point in points.items()
+            if self._guarded_consensus_weight(str(family)) > 0.0
+            and not self._guarded_consensus_matches_background(point, expected)
+        ]
+        if not weighted_points:
+            return None, {"accepted": False, "reason": "no_points"}
+
+        ranked = []
+        for family, point, _weight in weighted_points:
+            supporters = []
+            for other_family, other_point, other_weight in weighted_points:
+                dist = math.hypot(point[0] - other_point[0], point[1] - other_point[1])
+                if dist <= float(radius_px):
+                    supporters.append((other_family, dist, other_weight))
+            support_weight = sum(item[2] for item in supporters)
+            avg_dist = sum(item[1] for item in supporters) / float(len(supporters))
+            ranked.append({
+                "family": family,
+                "point": point,
+                "support_count": len(supporters),
+                "support_weight": support_weight,
+                "avg_dist": avg_dist,
+                "supporters": supporters,
+            })
+
+        ranked.sort(
+            key=lambda item: (
+                -float(item["support_weight"]),
+                float(item["avg_dist"]),
+                -int(item["support_count"]),
+                str(item["family"]),
+            )
+        )
+        best = ranked[0]
+        selected_point = best["point"]
+        support_weight = float(best["support_weight"])
+        accepted = support_weight >= float(min_support_weight)
+        debug = {
+            "accepted": bool(accepted),
+            "reason": "accepted" if accepted else "support",
+            "selected_family": str(best["family"]),
+            "selected_point": [round(float(selected_point[0]), 1), round(float(selected_point[1]), 1)],
+            "support_count": int(best["support_count"]),
+            "support_weight": round(support_weight, 3),
+            "avg_dist": round(float(best["avg_dist"]), 3),
+            "radius_px": float(radius_px),
+            "background_expected": bool(expected),
+            "top": [
+                {
+                    "family": str(item["family"]),
+                    "point": [round(float(item["point"][0]), 1), round(float(item["point"][1]), 1)],
+                    "support_count": int(item["support_count"]),
+                    "support_weight": round(float(item["support_weight"]), 3),
+                    "avg_dist": round(float(item["avg_dist"]), 3),
+                }
+                for item in ranked[:5]
+            ],
+        }
+        if not accepted:
+            return None, debug
+        return (float(selected_point[0]), float(selected_point[1])), debug
+
+    def _guarded_consensus_expected_background(self, frame: int | None) -> Sequence[Candidate]:
+        if frame is None or self._catalog_period is None:
+            return ()
+        lag = self._choose_catalog_lag(int(frame), int(self._catalog_period))
+        return self._catalog_candidate_sets.get(int(frame) - int(lag), ())
+
+    def _guarded_consensus_matches_background(
+        self,
+        point: Point,
+        expected: Sequence[Candidate],
+    ) -> bool:
+        if not expected:
+            return False
+        candidate = (float(point[0]), float(point[1]), 0.0, 0.0, 0.0)
+        return self._candidate_matches_background(candidate, expected)
+
+    def _guarded_consensus_weight(self, family: str) -> float:
+        name = str(family).lower()
+        if name.startswith("guarded_decal_identity"):
+            return 0.0
+        if name.startswith("phase_catalog"):
+            return 1.2
+        if name.startswith("balanced_viterbi"):
+            return 1.2
+        if name.startswith("raw_candidate"):
+            if "box_offset" in name:
+                return 0.8
+            return 1.0
+        if name.startswith("strict_transition_viterbi"):
+            return 0.35
+        if name.startswith("bg_split_viterbi") or name.startswith("merge_context"):
+            return 0.25
+        return 0.0
 
     @staticmethod
     def _raw_box_offset_family_name(family: str) -> str:

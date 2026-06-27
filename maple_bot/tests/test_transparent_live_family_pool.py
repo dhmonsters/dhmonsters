@@ -552,6 +552,53 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
         )
         self.assertFalse(decision.debug["guarded_decal_identity"]["latest_candidates"][0]["is_background"])
 
+    def test_guarded_consensus_point_prefers_supported_cluster(self):
+        pool = TransparentLiveFamilyPool(window=4, min_frames=3)
+        point, debug = pool._guarded_consensus_point({
+            "guarded_decal_identity_center_mild_state_mild": (500.0, 500.0),
+            "raw_candidate_cont4_center_mild_state_mild": (100.0, 100.0),
+            "raw_candidate_rank10_center_mild_state_mild": (102.0, 99.0),
+            "balanced_viterbi_center_mild_state_mild": (98.0, 103.0),
+            "raw_candidate_cont9_center_mild_state_mild": (300.0, 300.0),
+        })
+
+        self.assertEqual(point, (100.0, 100.0))
+        self.assertGreaterEqual(debug["support_count"], 3)
+        self.assertEqual(debug["selected_family"], "raw_candidate_cont4_center_mild_state_mild")
+
+    def test_guarded_consensus_family_is_emitted_when_cluster_has_support(self):
+        pool = TransparentLiveFamilyPool(
+            window=8,
+            min_frames=3,
+            catalog_min_lag=3,
+            catalog_max_lag=3,
+            enable_guarded_decal_identity=True,
+            guarded_decal_min_background_frames=2,
+        )
+        gray = np.zeros((80, 180), dtype=np.float32)
+
+        pool.update(0, candidates=[(100.0, 0.0, 0.9, 20.0, 20.0)], gray_frame=gray, white_anchor=(0.0, 0.0))
+        for frame, bg_x, target_x in (
+            (1, 100.0, 10.0),
+            (2, 110.0, 20.0),
+            (3, 120.0, 30.0),
+            (4, 100.0, 40.0),
+            (5, 110.0, 50.0),
+        ):
+            decision = pool.update(
+                frame,
+                candidates=[
+                    (bg_x, 0.0, 0.99, 20.0, 20.0),
+                    (target_x, 0.0, 0.20, 20.0, 20.0),
+                ],
+                gray_frame=gray,
+            )
+
+        family = "guarded_decal_identity_consensus_center_mild_state_mild"
+        self.assertIn(family, decision.points)
+        self.assertEqual(decision.points[family], (50.0, 0.0))
+        self.assertTrue(decision.debug["guarded_decal_consensus"]["accepted"])
+
     def test_guarded_decal_identity_match_distance_can_be_relaxed(self):
         pool = TransparentLiveFamilyPool(
             window=8,
