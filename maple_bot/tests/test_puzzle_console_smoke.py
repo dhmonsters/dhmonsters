@@ -226,6 +226,7 @@ def test_puzzle_console_window_exposes_expected_commands(monkeypatch):
     assert window.start_watch_button.objectName() == "startWatchButton"
     assert window.run_default_test_button.objectName() == "runDefaultPuzzleTestButton"
     assert window.roi_settings_button.objectName() == "roiSettingsButton"
+    assert window.capture_check_button.objectName() == "captureCheckButton"
     assert window.open_recording_folder_button.objectName() == "openRecordingFolderButton"
     assert window.stop_recording_button.objectName() == "stopRecordingButton"
     assert "F3" in window.stop_recording_button.text()
@@ -281,6 +282,27 @@ def test_puzzle_console_start_watch_button_calls_live_recording_handler(monkeypa
     assert "recording start" in window.event_log.toPlainText()
 
 
+def test_puzzle_console_capture_check_button_calls_handler(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+    calls = []
+    report_path = tmp_path / "capture_check.md"
+    report_path.write_text("# capture\n", encoding="utf-8")
+
+    def capture_check():
+        calls.append("check")
+        return report_path
+
+    window = module.PuzzleConsoleWindow(capture_check_handler=capture_check)
+
+    window.capture_check_button.clicked.emit()
+
+    assert calls == ["check"]
+    assert window.state_label.text() == "CAPTURE_OK"
+    assert window.last_report_path == report_path
+    assert "capture check" in window.event_log.toPlainText()
+
+
 def test_puzzle_entrypoint_builds_parser_and_window(monkeypatch):
     _install_fake_qt(monkeypatch)
     puzzle = importlib.import_module("puzzle")
@@ -316,6 +338,61 @@ def test_puzzle_live_record_command_invokes_runtime(monkeypatch, tmp_path):
 
     assert code == 0
     assert calls == [(str(tmp_path), 2)]
+
+
+def test_puzzle_live_capture_check_command_returns_success(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    puzzle = importlib.import_module("puzzle")
+    calls = []
+
+    class _Result:
+        ok = True
+        report_path = tmp_path / "capture_check.md"
+        error = ""
+
+    def fake_capture_check(*, output_root=None):
+        calls.append(output_root)
+        _Result.report_path.write_text("# ok\n", encoding="utf-8")
+        return _Result()
+
+    monkeypatch.setattr(puzzle, "run_live_capture_check", fake_capture_check)
+
+    code = puzzle.run_gui([
+        "--live-capture-check",
+        "--output-root",
+        str(tmp_path),
+    ])
+
+    assert code == 0
+    assert calls == [str(tmp_path)]
+
+
+def test_puzzle_live_capture_check_command_returns_failure(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    puzzle = importlib.import_module("puzzle")
+
+    class _Sink:
+        def write(self, _text):
+            return None
+
+        def flush(self):
+            return None
+
+    class _Result:
+        ok = False
+        report_path = tmp_path / "capture_check.md"
+        error = "screen capture failed"
+
+    def fake_capture_check(*, output_root=None):
+        _Result.report_path.write_text("# failed\n", encoding="utf-8")
+        return _Result()
+
+    monkeypatch.setattr(puzzle, "run_live_capture_check", fake_capture_check)
+    monkeypatch.setattr(sys, "stderr", _Sink())
+
+    code = puzzle.run_gui(["--live-capture-check"])
+
+    assert code == 2
 
 
 def test_puzzle_console_connects_image_sequence_button_to_replay_runner(monkeypatch):

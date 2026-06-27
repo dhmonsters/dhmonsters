@@ -31,6 +31,7 @@ PathPicker = Callable[[str], str | Path | None]
 FolderOpener = Callable[[Path], None]
 RecordingStopHandler = Callable[[], bool]
 WatchStartHandler = Callable[[], str | Path | None]
+CaptureCheckHandler = Callable[[], str | Path | None]
 TRACE_TIMELINE_LIMIT = 5
 
 
@@ -43,6 +44,7 @@ class PuzzleConsoleWindow(QMainWindow):
         folder_opener: FolderOpener | None = None,
         recording_stop_handler: RecordingStopHandler | None = None,
         watch_start_handler: WatchStartHandler | None = None,
+        capture_check_handler: CaptureCheckHandler | None = None,
         default_test_path: str | Path | None = None,
     ) -> None:
         super().__init__()
@@ -51,6 +53,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._folder_opener = folder_opener or _open_folder
         self._recording_stop_handler = recording_stop_handler
         self._watch_start_handler = watch_start_handler
+        self._capture_check_handler = capture_check_handler
         self._default_test_path = str(default_test_path) if default_test_path is not None else ""
         self.last_report_path: Path | None = None
         self.last_session_dir: Path | None = None
@@ -131,6 +134,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.run_default_test_button = _command_button("기본 테스트", "runDefaultPuzzleTestButton")
         self.start_watch_button = _command_button("화면 감시", "startWatchButton", primary=True)
         self.roi_settings_button = _command_button("ROI 설정", "roiSettingsButton")
+        self.capture_check_button = _command_button("캡처 점검", "captureCheckButton")
         self.open_recording_folder_button = _command_button("녹화 폴더", "openRecordingFolderButton")
         self.stop_recording_button = _command_button("녹화 종료 F3", "stopRecordingButton")
 
@@ -142,6 +146,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.run_default_test_button.clicked.connect(lambda _checked=False: self.run_default_test_input())
         self.start_watch_button.clicked.connect(lambda _checked=False: self.start_watch_input())
         self.roi_settings_button.clicked.connect(lambda _checked=False: self.append_log("고정 ROI 사용 중"))
+        self.capture_check_button.clicked.connect(lambda _checked=False: self.capture_check_input())
         self.open_recording_folder_button.clicked.connect(lambda _checked=False: self.open_last_recording_folder())
         self.stop_recording_button.clicked.connect(lambda _checked=False: self.stop_recording_input())
 
@@ -152,6 +157,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.run_default_test_button,
             self.start_watch_button,
             self.roi_settings_button,
+            self.capture_check_button,
             self.open_recording_folder_button,
             self.stop_recording_button,
         ):
@@ -547,6 +553,23 @@ class PuzzleConsoleWindow(QMainWindow):
             self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
         self.set_identity_state("RECORDING")
         self.append_log(f"recording start: {self.last_session_dir or '-'}")
+        return True
+
+    def capture_check_input(self) -> bool:
+        if self._capture_check_handler is None:
+            self.append_log("capture check 대기: handler 없음")
+            return False
+        try:
+            report_path = self._capture_check_handler()
+        except Exception as exc:
+            self.set_identity_state("CAPTURE_FAILED")
+            self.append_log(f"capture check 실패: {exc}")
+            return False
+        if report_path is not None:
+            self.last_report_path = Path(report_path)
+            self.cctv_status_label.setText(f"capture check: {self.last_report_path}")
+        self.set_identity_state("CAPTURE_OK")
+        self.append_log(f"capture check: {self.last_report_path or '-'}")
         return True
 
     def keyPressEvent(self, event) -> None:

@@ -1,5 +1,6 @@
 # 투명도형 퍼즐 분석 콘솔의 핵심 모델과 처리 모듈을 묶는 패키지.
 from core.puzzle.candidates import CandidateProvider, candidate_from_row
+from core.puzzle.capture_preflight import CaptureCheckResult, run_capture_check
 from core.puzzle.defaults import (
     DEFAULT_BOARD_ROI_RATIOS,
     DEFAULT_DETECT_BASE_SIZE,
@@ -37,6 +38,7 @@ __all__ = [
     "Candidate",
     "CandidateEvidence",
     "CandidateProvider",
+    "CaptureCheckResult",
     "DEFAULT_BOARD_ROI_RATIOS",
     "DEFAULT_DETECT_BASE_SIZE",
     "DEFAULT_DETECT_REGION",
@@ -63,4 +65,5 @@ __all__ = [
     "fixed_board_roi",
     "fixed_detect_roi",
     "fixed_puzzle_rois",
+    "run_capture_check",
 ]

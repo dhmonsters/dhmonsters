@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 
 from core.puzzle.candidates import CandidateProvider
+from core.puzzle.capture_preflight import CaptureCheckResult, run_capture_check
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
 from core.puzzle.evidence import EvidenceJudges
 from core.puzzle.frame_source import ImageSequenceFrameSource, JsonlReplayFrameSource, VideoFrameSource
@@ -34,6 +35,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-frames", type=int, default=5, help="replay에서 처리할 최대 frame 수")
     parser.add_argument("--live-record", action="store_true", help="GUI 없이 현재 화면 녹화를 시작한다")
     parser.add_argument("--live-max-frames", type=int, default=0, help="live-record 검증용 최대 frame 수. 0은 수동 종료")
+    parser.add_argument("--live-capture-check", action="store_true", help="현재 화면 캡처 가능 여부를 점검한다")
     return parser
 
 
@@ -60,9 +62,16 @@ def create_window(args: argparse.Namespace | None = None):
         live_thread["thread"].start()
         return session.output_dir
 
+    def run_capture_check_from_ui() -> Path | None:
+        result = run_live_capture_check(output_root=(args.output_root or None) if args is not None else None)
+        if not result.ok:
+            raise RuntimeError(result.error)
+        return result.report_path
+
     window = PuzzleConsoleWindow(
         replay_runner=_run_replay_from_ui,
         watch_start_handler=start_live_recording,
+        capture_check_handler=run_capture_check_from_ui,
         recording_stop_handler=lambda: live_runtime.stop_recording(reason="manual_f3"),
         default_test_path=default_test_path if default_test_path.exists() else None,
     )
@@ -75,6 +84,14 @@ def create_window(args: argparse.Namespace | None = None):
 def run_gui(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    if args.live_capture_check:
+        result = run_live_capture_check(output_root=args.output_root or None)
+        print(result.report_path)
+        if not result.ok:
+            print(result.error, file=sys.stderr)
+            return 2
+        return 0
+
     if args.live_record:
         report_path = run_live_recording(
             output_root=args.output_root or None,
@@ -226,6 +243,10 @@ def run_live_recording(
     except KeyboardInterrupt:
         runtime.stop_recording(reason="keyboard_interrupt")
         return runtime.finish(reason="keyboard_interrupt")
+
+
+def run_live_capture_check(*, output_root: str | Path | None = None) -> CaptureCheckResult:
+    return run_capture_check(output_root=output_root)
 
 
 def _attach_puzzle_hotkeys(window: object) -> None:
