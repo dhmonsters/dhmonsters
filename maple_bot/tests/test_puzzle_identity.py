@@ -26,6 +26,7 @@ def _evidence(
     bg_score: float = 0.0,
     motion_divergence: float = 0.0,
     rigid_violation: float = 0.0,
+    color_residual: float = 0.0,
 ) -> dict[str, CandidateEvidence]:
     return {
         candidate.candidate_id: CandidateEvidence(
@@ -33,9 +34,16 @@ def _evidence(
             bg_score=bg_score,
             motion_divergence=motion_divergence,
             rigid_violation=rigid_violation,
+            color_residual=color_residual,
             merge_likelihood=merge_likelihood,
         )
     }
+
+
+def _evidence_many(
+    *items: tuple[Candidate, CandidateEvidence],
+) -> dict[str, CandidateEvidence]:
+    return {candidate.candidate_id: evidence for candidate, evidence in items}
 
 
 def test_white_anchor_initializes_visible_identity():
@@ -144,3 +152,67 @@ def test_hold_limit_without_reacquire_becomes_lost():
     assert decision.point is None
     assert decision.candidate_id is None
     assert decision.reason == "hold_limit_exceeded"
+
+
+def test_color_support_fades_after_initial_visible_frames():
+    tracker = IdentityTracker(color_fade_frames=20)
+    tracker.update(frame_index=10, candidates=[], evidence={}, white_anchor=(50.0, 50.0))
+    near_plain = _candidate("near_plain", (55.0, 50.0))
+    far_colored = _candidate("far_colored", (60.0, 50.0))
+    early_evidence = _evidence_many(
+        (
+            near_plain,
+            CandidateEvidence(candidate_id=near_plain.candidate_id),
+        ),
+        (
+            far_colored,
+            CandidateEvidence(candidate_id=far_colored.candidate_id, color_residual=1.0),
+        ),
+    )
+
+    early = tracker.update(
+        frame_index=11,
+        candidates=[near_plain, far_colored],
+        evidence=early_evidence,
+    )
+
+    assert early.candidate_id == "far_colored"
+
+    tracker = IdentityTracker(color_fade_frames=20)
+    tracker.update(frame_index=10, candidates=[], evidence={}, white_anchor=(50.0, 50.0))
+    late = tracker.update(
+        frame_index=35,
+        candidates=[near_plain, far_colored],
+        evidence=early_evidence,
+    )
+
+    assert late.candidate_id == "near_plain"
+
+
+def test_overlap_candidate_gets_extra_switch_penalty():
+    tracker = IdentityTracker(merge_threshold=0.95, overlap_switch_penalty=20.0)
+    tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(50.0, 50.0))
+    target = _candidate("target", (54.0, 50.0))
+    tracker.update(frame_index=2, candidates=[target], evidence=_evidence(target))
+    continuation = _candidate("target", (61.0, 50.0), score=0.75)
+    overlap_decoy = _candidate("overlap_decoy", (58.0, 50.0), score=0.95)
+    evidence = _evidence_many(
+        (
+            continuation,
+            CandidateEvidence(candidate_id=continuation.candidate_id),
+        ),
+        (
+            overlap_decoy,
+            CandidateEvidence(candidate_id=overlap_decoy.candidate_id, merge_likelihood=0.3),
+        ),
+    )
+
+    decision = tracker.update(
+        frame_index=3,
+        candidates=[continuation, overlap_decoy],
+        evidence=evidence,
+    )
+
+    assert decision.state == "TRACK_CONFIDENT"
+    assert decision.candidate_id == "target"
+    assert decision.point == (61.0, 50.0)

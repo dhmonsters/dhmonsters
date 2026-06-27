@@ -15,6 +15,8 @@ class IdentityTracker:
         merge_threshold: float = 0.65,
         max_hold_frames: int = 4,
         reacquire_distance: float = 45.0,
+        color_fade_frames: int = 20,
+        overlap_switch_penalty: float = 20.0,
     ) -> None:
         if jump_distance <= 0.0:
             raise ValueError("jump_distance must be positive")
@@ -24,15 +26,22 @@ class IdentityTracker:
             raise ValueError("max_hold_frames must be positive")
         if reacquire_distance <= 0.0:
             raise ValueError("reacquire_distance must be positive")
+        if color_fade_frames < 0:
+            raise ValueError("color_fade_frames must not be negative")
+        if overlap_switch_penalty < 0.0:
+            raise ValueError("overlap_switch_penalty must not be negative")
 
         self.jump_distance = float(jump_distance)
         self.merge_threshold = float(merge_threshold)
         self.max_hold_frames = int(max_hold_frames)
         self.reacquire_distance = float(reacquire_distance)
+        self.color_fade_frames = int(color_fade_frames)
+        self.overlap_switch_penalty = float(overlap_switch_penalty)
         self.state = "LOST"
         self.last_point: tuple[float, float] | None = None
         self.last_candidate_id: str | None = None
         self.last_frame_index: int | None = None
+        self.identity_start_frame_index: int | None = None
         self.velocity: tuple[float, float] = (0.0, 0.0)
         self.hold_frames = 0
 
@@ -49,6 +58,7 @@ class IdentityTracker:
             self.last_point = white_anchor
             self.last_candidate_id = None
             self.last_frame_index = frame_index
+            self.identity_start_frame_index = frame_index
             self.velocity = (0.0, 0.0)
             self.hold_frames = 0
             return self._decision(1.0, "white_anchor", debug={"anchor": white_anchor})
@@ -57,20 +67,32 @@ class IdentityTracker:
             if not candidates:
                 self.state = "LOST"
                 return IdentityDecision("LOST", None, None, 0.0, "no_identity", 0, {})
-            best, best_evidence, distance = self._best_candidate(candidates, evidence, candidates[0].center)
+            if self.identity_start_frame_index is None:
+                self.identity_start_frame_index = frame_index
+            best, best_evidence, distance = self._best_candidate(
+                candidates,
+                evidence,
+                candidates[0].center,
+                frame_index=frame_index,
+            )
             self._accept_candidate(frame_index, best)
             self.state = "TRACK_CONFIDENT"
             return self._decision(
                 _confidence(best, best_evidence, distance, self.jump_distance),
                 "cold_start_candidate",
-                debug={"distance": distance},
+                debug={"distance": distance, "color_weight": self._color_weight(frame_index)},
             )
 
         predicted = self._predicted_point()
         if not candidates:
             return self._hold_or_lost("hold_no_candidates", frame_index, predicted)
 
-        best, best_evidence, distance = self._best_candidate(candidates, evidence, predicted)
+        best, best_evidence, distance = self._best_candidate(
+            candidates,
+            evidence,
+            predicted,
+            frame_index=frame_index,
+        )
         if self.state in {"OCCLUSION_SUSPECTED", "IDENTITY_HOLD"}:
             if distance <= self.reacquire_distance and best_evidence.merge_likelihood < self.merge_threshold:
                 self._accept_candidate(frame_index, best)
@@ -79,7 +101,7 @@ class IdentityTracker:
                 return self._decision(
                     _confidence(best, best_evidence, distance, self.reacquire_distance),
                     "reacquired",
-                    debug={"distance": distance, "candidate": best.candidate_id},
+                    debug={"distance": distance, "candidate": best.candidate_id, "color_weight": self._color_weight(frame_index)},
                 )
             return self._hold_or_lost("hold_ambiguous_candidate", frame_index, predicted)
 
@@ -102,7 +124,7 @@ class IdentityTracker:
         return self._decision(
             _confidence(best, best_evidence, distance, self.jump_distance),
             "candidate_continuity",
-            debug={"distance": distance, "candidate": best.candidate_id},
+            debug={"distance": distance, "candidate": best.candidate_id, "color_weight": self._color_weight(frame_index)},
         )
 
     def _best_candidate(
@@ -110,12 +132,28 @@ class IdentityTracker:
         candidates: Sequence[Candidate],
         evidence: Mapping[str, CandidateEvidence],
         predicted: tuple[float, float],
+        *,
+        frame_index: int,
     ) -> tuple[Candidate, CandidateEvidence, float]:
         ranked = []
+        color_weight = self._color_weight(frame_index)
         for candidate in candidates:
             item_evidence = evidence.get(candidate.candidate_id, CandidateEvidence(candidate.candidate_id))
             distance = _distance(candidate.center, predicted)
-            ranked.append((_candidate_cost(candidate, item_evidence, distance), candidate, item_evidence, distance))
+            ranked.append(
+                (
+                    _candidate_cost(
+                        candidate,
+                        item_evidence,
+                        distance,
+                        color_weight=color_weight,
+                        overlap_switch_penalty=self.overlap_switch_penalty,
+                    ),
+                    candidate,
+                    item_evidence,
+                    distance,
+                )
+            )
         ranked.sort(key=lambda item: item[0])
         _, candidate, item_evidence, distance = ranked[0]
         return candidate, item_evidence, distance
@@ -156,6 +194,14 @@ class IdentityTracker:
             return (0.0, 0.0)
         return (self.last_point[0] + self.velocity[0], self.last_point[1] + self.velocity[1])
 
+    def _color_weight(self, frame_index: int) -> float:
+        if self.color_fade_frames <= 0:
+            return 0.0
+        if self.identity_start_frame_index is None:
+            return 0.0
+        elapsed = max(0, frame_index - self.identity_start_frame_index)
+        return max(0.0, min(1.0, 1.0 - elapsed / self.color_fade_frames))
+
     def _decision(
         self,
         confidence: float,
@@ -178,10 +224,14 @@ def _candidate_cost(
     candidate: Candidate,
     evidence: CandidateEvidence,
     distance: float,
+    *,
+    color_weight: float = 1.0,
+    overlap_switch_penalty: float = 0.0,
 ) -> float:
-    target_support = evidence.motion_divergence + evidence.rigid_violation + evidence.color_residual
+    target_support = evidence.motion_divergence + evidence.rigid_violation + evidence.color_residual * color_weight
     background_cost = evidence.bg_score + evidence.texture_bg_score + evidence.phase_similarity
-    return distance - candidate.score * 8.0 - target_support * 10.0 + background_cost * 10.0 + evidence.merge_likelihood * 12.0
+    merge_cost = evidence.merge_likelihood * (12.0 + overlap_switch_penalty)
+    return distance - candidate.score * 8.0 - target_support * 10.0 + background_cost * 10.0 + merge_cost
 
 
 def _confidence(
