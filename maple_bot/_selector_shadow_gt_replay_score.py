@@ -15,6 +15,13 @@ from core.vision.transparent_track_health import TransparentTrackHealthSelector
 
 ROOT = Path(__file__).resolve().parent
 Point = tuple[float, float]
+GUARDED_DEBUG_NUMERIC_FIELDS = (
+    "period",
+    "background_frames",
+    "expected_frames",
+    "background_ratio",
+    "max_step",
+)
 
 
 def _load_jsonl(*args, **kwargs):
@@ -158,12 +165,39 @@ def guarded_reason_counts_from_rows(rows: Sequence[Mapping[str, object]]) -> dic
         guarded = _guarded_debug_from_row(row)
         if guarded is None:
             continue
-        reason = str(guarded.get("reason") or "")
-        if not reason and bool(guarded.get("accepted", False)):
-            reason = "accepted"
+        reason = _guarded_reason_from_debug(guarded)
         if reason:
             counts[reason] += 1
     return _sorted_counts(counts)
+
+
+def guarded_debug_stats_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, dict[str, object]]:
+    counts: Counter[str] = Counter()
+    buckets: dict[str, dict[str, list[float]]] = {}
+    for row in rows:
+        guarded = _guarded_debug_from_row(row)
+        if guarded is None:
+            continue
+        reason = _guarded_reason_from_debug(guarded)
+        if not reason:
+            continue
+        counts[reason] += 1
+        fields = buckets.setdefault(reason, {})
+        for field in GUARDED_DEBUG_NUMERIC_FIELDS:
+            value = guarded.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            fields.setdefault(field, []).append(float(value))
+
+    out: dict[str, dict[str, object]] = {}
+    for reason, count in _sorted_counts(counts).items():
+        item: dict[str, object] = {"count": int(count)}
+        for field in GUARDED_DEBUG_NUMERIC_FIELDS:
+            values = buckets.get(reason, {}).get(field, [])
+            if values:
+                item[field] = _number_summary(values)
+        out[reason] = item
+    return out
 
 
 def allowed_rescue_path_from_rows(rows: Sequence[Mapping[str, object]]) -> dict[int, Point]:
@@ -284,6 +318,7 @@ def score_gt_clip(
     guarded_emitted_path = guarded_emitted_path_from_rows(backfilled)
     guarded_path = guarded_selected_path_from_rows(backfilled)
     guarded_reason_counts = guarded_reason_counts_from_rows(backfilled)
+    guarded_debug_stats = guarded_debug_stats_from_rows(backfilled)
     rescue_path = allowed_rescue_path_from_rows(backfilled)
     selected_path, decisions = apply_live_health_selection(
         backfilled,
@@ -307,6 +342,7 @@ def score_gt_clip(
         "guarded_emitted_frames": len(guarded_emitted_path),
         "guarded_selected_frames": len(guarded_path),
         "guarded_reason_counts": guarded_reason_counts,
+        "guarded_debug_stats": guarded_debug_stats,
         "rescue_allowed_frames": len(rescue_path),
         "rescue_used_frames": len(rescue_used),
         "rescue_used_sample": rescue_used[:10],
@@ -392,6 +428,13 @@ def markdown_report(results: Sequence[Mapping[str, object]]) -> str:
         lines.append(f"- `{result.get('name', '')}`: {_fmt_counts(result.get('guarded_reason_counts', {}))}.")
     lines.extend([
         "",
+        "## guarded debug stats",
+        "",
+    ])
+    for result in results:
+        lines.append(f"- `{result.get('name', '')}`: {_fmt_guarded_debug_stats(result.get('guarded_debug_stats', {}))}.")
+    lines.extend([
+        "",
         "## rescue 사용 샘플",
         "",
     ])
@@ -424,6 +467,13 @@ def _guarded_debug_from_row(row: Mapping[str, object]) -> Mapping[str, object] |
     if isinstance(guarded, Mapping):
         return guarded
     return None
+
+
+def _guarded_reason_from_debug(guarded: Mapping[str, object]) -> str:
+    reason = str(guarded.get("reason") or "")
+    if not reason and bool(guarded.get("accepted", False)):
+        reason = "accepted"
+    return reason
 
 
 def _import_cv2_np():
@@ -461,6 +511,45 @@ def _fmt_counts(value: object) -> str:
         return "-"
     counts = _sorted_counts({str(key): int(count) for key, count in value.items()})
     return ", ".join(f"{key}={count}" for key, count in counts.items())
+
+
+def _number_summary(values: Sequence[float]) -> dict[str, float]:
+    if not values:
+        return {"min": 0.0, "mean": 0.0, "max": 0.0}
+    return {
+        "min": round(float(min(values)), 3),
+        "mean": round(float(sum(values) / len(values)), 3),
+        "max": round(float(max(values)), 3),
+    }
+
+
+def _fmt_number(value: object) -> str:
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _fmt_guarded_debug_stats(value: object) -> str:
+    if not isinstance(value, Mapping) or not value:
+        return "-"
+    parts = []
+    for reason, stats in value.items():
+        if not isinstance(stats, Mapping):
+            continue
+        fields = [f"{reason} count={int(stats.get('count', 0) or 0)}"]
+        for field in GUARDED_DEBUG_NUMERIC_FIELDS:
+            summary = stats.get(field)
+            if not isinstance(summary, Mapping):
+                continue
+            fields.append(
+                f"{field}="
+                f"{_fmt_number(summary.get('min'))}/"
+                f"{_fmt_number(summary.get('mean'))}/"
+                f"{_fmt_number(summary.get('max'))}"
+            )
+        parts.append(" ".join(fields))
+    return "; ".join(parts) if parts else "-"
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -3,6 +3,7 @@ import unittest
 
 from _selector_shadow_gt_replay_score import (
     apply_live_health_selection,
+    guarded_debug_stats_from_rows,
     guarded_reason_counts_from_rows,
     guarded_emitted_path_from_rows,
     guarded_selected_path_from_rows,
@@ -185,6 +186,55 @@ class SelectorShadowGtReplayScoreTests(unittest.TestCase):
         counts = guarded_reason_counts_from_rows(rows)
 
         self.assertEqual(counts, {"background_signal": 2, "period": 1, "accepted": 1})
+
+    def test_guarded_debug_stats_groups_numeric_fields_by_reason(self):
+        rows = [
+            {
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                            "background_frames": 1,
+                            "expected_frames": 4,
+                        }
+                    }
+                }
+            },
+            {
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                            "background_frames": 2,
+                            "expected_frames": 5,
+                        }
+                    }
+                }
+            },
+            {
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "max_step",
+                            "accepted": False,
+                            "background_frames": 3,
+                            "expected_frames": 5,
+                            "background_ratio": 0.2,
+                            "max_step": 91.0,
+                        }
+                    }
+                }
+            },
+        ]
+
+        stats = guarded_debug_stats_from_rows(rows)
+
+        self.assertEqual(stats["background_signal"]["count"], 2)
+        self.assertEqual(stats["background_signal"]["background_frames"], {"min": 1.0, "mean": 1.5, "max": 2.0})
+        self.assertEqual(stats["background_signal"]["expected_frames"], {"min": 4.0, "mean": 4.5, "max": 5.0})
+        self.assertEqual(stats["max_step"]["max_step"], {"min": 91.0, "mean": 91.0, "max": 91.0})
 
     def test_score_gt_clip_forwards_guarded_decal_option(self):
         captured = {}

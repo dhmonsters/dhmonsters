@@ -210,6 +210,43 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
 
         self.assertEqual(summary["guarded_reason_counts"], {"background_signal": 2, "period": 1})
 
+    def test_summarize_includes_guarded_decal_debug_stats(self):
+        rows = [
+            {
+                "i": 10,
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                            "background_frames": 1,
+                            "expected_frames": 4,
+                        }
+                    }
+                },
+            },
+            {
+                "i": 11,
+                "live_family": {
+                    "debug": {
+                        "guarded_decal_identity": {
+                            "reason": "background_signal",
+                            "accepted": False,
+                            "background_frames": 2,
+                            "expected_frames": 6,
+                        }
+                    }
+                },
+            },
+        ]
+
+        summary = summarize_backfilled_rows("clip.jsonl", rows)
+
+        stats = summary["guarded_debug_stats"]["background_signal"]
+        self.assertEqual(stats["count"], 2)
+        self.assertEqual(stats["background_frames"], {"min": 1.0, "mean": 1.5, "max": 2.0})
+        self.assertEqual(stats["expected_frames"], {"min": 4.0, "mean": 5.0, "max": 6.0})
+
     def test_write_markdown_report_includes_merge_context_columns(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "report.md"
@@ -229,6 +266,13 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
                     "guarded_reason_counts": {
                         "background_signal": 2,
                     },
+                    "guarded_debug_stats": {
+                        "background_signal": {
+                            "count": 2,
+                            "background_frames": {"min": 1.0, "mean": 1.5, "max": 2.0},
+                            "expected_frames": {"min": 4.0, "mean": 5.0, "max": 6.0},
+                        },
+                    },
                     "families": {
                         "bg_split_viterbi_center_mild_state_mild": 1,
                     },
@@ -243,6 +287,8 @@ class SelectorShadowBatchReportTests(unittest.TestCase):
         self.assertIn("181.5", text)
         self.assertIn("1.34", text)
         self.assertIn("background_signal=2", text)
+        self.assertIn("background_signal count=2", text)
+        self.assertIn("background_frames=1.0/1.5/2.0", text)
 
     def test_analyze_record_path_fast_limits_files_and_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

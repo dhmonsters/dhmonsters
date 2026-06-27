@@ -8,6 +8,14 @@ from pathlib import Path
 import time
 from typing import Iterable, Mapping, Sequence
 
+GUARDED_DEBUG_NUMERIC_FIELDS = (
+    "period",
+    "background_frames",
+    "expected_frames",
+    "background_ratio",
+    "max_step",
+)
+
 
 def _load_jsonl(
     path: str | Path,
@@ -188,6 +196,14 @@ def _merge_context(value: object) -> dict:
 
 
 def _guarded_reason(row: Mapping[str, object]) -> str | None:
+    guarded = _guarded_debug(row)
+    if guarded is None:
+        return None
+    reason = _guarded_reason_from_debug(guarded)
+    return reason or None
+
+
+def _guarded_debug(row: Mapping[str, object]) -> Mapping[str, object] | None:
     live_family = row.get("live_family")
     if not isinstance(live_family, Mapping):
         return None
@@ -197,10 +213,14 @@ def _guarded_reason(row: Mapping[str, object]) -> str | None:
     guarded = debug.get("guarded_decal_identity")
     if not isinstance(guarded, Mapping):
         return None
+    return guarded
+
+
+def _guarded_reason_from_debug(guarded: Mapping[str, object]) -> str:
     reason = str(guarded.get("reason") or "")
     if not reason and bool(guarded.get("accepted", False)):
         reason = "accepted"
-    return reason or None
+    return reason
 
 
 def _jsonl_files(path: str | Path, max_files: int | None = None) -> list[Path]:
@@ -222,6 +242,7 @@ def summarize_backfilled_rows(
 ) -> dict:
     families: Counter[str] = Counter()
     guarded_reasons: Counter[str] = Counter()
+    guarded_stats: dict[str, dict[str, list[float]]] = {}
     shadow_frames = 0
     bg_split_frames = 0
     guarded_decal_frames = 0
@@ -232,9 +253,16 @@ def summarize_backfilled_rows(
     events = []
 
     for row in rows:
-        reason = _guarded_reason(row)
+        guarded = _guarded_debug(row)
+        reason = _guarded_reason_from_debug(guarded) if guarded is not None else None
         if reason:
             guarded_reasons[reason] += 1
+            fields = guarded_stats.setdefault(reason, {})
+            for field in GUARDED_DEBUG_NUMERIC_FIELDS:
+                value = guarded.get(field)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
+                fields.setdefault(field, []).append(float(value))
 
         record = _shadow_record(row)
         if record is None:
@@ -286,6 +314,7 @@ def summarize_backfilled_rows(
         "first_rescue_allowed_frame": _first_rescue_allowed_frame(events),
         "families": dict(families),
         "guarded_reason_counts": _sorted_counts(guarded_reasons),
+        "guarded_debug_stats": _guarded_debug_stats(guarded_reasons, guarded_stats),
         "events": events,
         "elapsed_ms": int(elapsed_ms),
     }
@@ -374,6 +403,60 @@ def _fmt_counts(value: object) -> str:
     return ", ".join(f"{key}={count}" for key, count in counts.items())
 
 
+def _guarded_debug_stats(
+    counts: Mapping[str, int],
+    buckets: Mapping[str, Mapping[str, Sequence[float]]],
+) -> dict[str, dict[str, object]]:
+    out: dict[str, dict[str, object]] = {}
+    for reason, count in _sorted_counts(counts).items():
+        item: dict[str, object] = {"count": int(count)}
+        for field in GUARDED_DEBUG_NUMERIC_FIELDS:
+            values = list(buckets.get(reason, {}).get(field, []))
+            if values:
+                item[field] = _number_summary(values)
+        out[reason] = item
+    return out
+
+
+def _number_summary(values: Sequence[float]) -> dict[str, float]:
+    if not values:
+        return {"min": 0.0, "mean": 0.0, "max": 0.0}
+    return {
+        "min": round(float(min(values)), 3),
+        "mean": round(float(sum(values) / len(values)), 3),
+        "max": round(float(max(values)), 3),
+    }
+
+
+def _fmt_number(value: object) -> str:
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _fmt_guarded_debug_stats(value: object) -> str:
+    if not isinstance(value, Mapping) or not value:
+        return "-"
+    parts = []
+    for reason, stats in value.items():
+        if not isinstance(stats, Mapping):
+            continue
+        fields = [f"{reason} count={int(stats.get('count', 0) or 0)}"]
+        for field in GUARDED_DEBUG_NUMERIC_FIELDS:
+            summary = stats.get(field)
+            if not isinstance(summary, Mapping):
+                continue
+            fields.append(
+                f"{field}="
+                f"{_fmt_number(summary.get('min'))}/"
+                f"{_fmt_number(summary.get('mean'))}/"
+                f"{_fmt_number(summary.get('max'))}"
+            )
+        parts.append(" ".join(fields))
+    return "; ".join(parts) if parts else "-"
+
+
 def write_markdown_report(
     summaries: Iterable[Mapping[str, object]],
     out_path: str | Path,
@@ -390,13 +473,13 @@ def write_markdown_report(
         f"- guarded decal 프레임: {sum(int(item.get('guarded_decal_frames', 0) or 0) for item in items)}개",
         f"- rescue_allowed 프레임: {sum(int(item.get('rescue_allowed_frames', 0) or 0) for item in items)}개",
         "",
-        "| 파일 | 프레임 | shadow | bg_split | guarded | allowed | first_bg | first_guarded | first_allowed | merge_frames | merge_max | merge_ratio | guard_reasons | ms | 주요 family |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|",
+        "| 파일 | 프레임 | shadow | bg_split | guarded | allowed | first_bg | first_guarded | first_allowed | merge_frames | merge_max | merge_ratio | guard_reasons | guard_stats | ms | 주요 family |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---|",
     ]
     for item in items:
         lines.append(
             "| {name} | {frames} | {shadow} | {bg_split} | {guarded} | {allowed} | "
-            "{first_bg} | {first_guarded} | {first_allowed} | {merge_frames} | {merge_max} | {merge_ratio} | {guard_reasons} | "
+            "{first_bg} | {first_guarded} | {first_allowed} | {merge_frames} | {merge_max} | {merge_ratio} | {guard_reasons} | {guard_stats} | "
             "{elapsed} | {family} |".format(
                 name=item.get("name", ""),
                 frames=item.get("frames", 0),
@@ -411,6 +494,7 @@ def write_markdown_report(
                 merge_max=item.get("merge_context_max_size", 0.0),
                 merge_ratio=item.get("merge_context_max_ratio", 0.0),
                 guard_reasons=_fmt_counts(item.get("guarded_reason_counts", {})),
+                guard_stats=_fmt_guarded_debug_stats(item.get("guarded_debug_stats", {})),
                 elapsed=item.get("elapsed_ms", 0),
                 family=_top_family(item),
             )
