@@ -16,12 +16,15 @@ from core.puzzle.roi import crop_by_roi
 
 CursorSetter = Callable[[int, int], None]
 CursorDetector = Callable[[Any], tuple[float, float] | None]
+BackgroundClicker = Callable[[int, int], None]
+ClientOriginGetter = Callable[[], tuple[int, int]]
 
 
 @dataclass(frozen=True)
 class MouseMoveResult:
     moved: bool
     abs_point: tuple[int, int] | None
+    client_point: tuple[int, int] | None
     det_point: tuple[float, float] | None
     offset: tuple[float, float]
     reason: str
@@ -43,9 +46,14 @@ class PlanetMouseController:
         *,
         cursor_setter: CursorSetter | None = None,
         cursor_detector: CursorDetector | None = None,
+        background_clicker: BackgroundClicker | None = None,
+        client_origin_getter: ClientOriginGetter | None = None,
         offset_limit: float = 200.0,
         offset_alpha: float = 0.5,
     ) -> None:
+        bridge = _NoAuthMouseBridge()
+        self.background_clicker = background_clicker or cursor_setter or bridge.click
+        self.client_origin_getter = client_origin_getter or bridge.client_origin
         self.cursor_setter = cursor_setter or _default_cursor_setter
         self.cursor_detector = cursor_detector or detect_pink_cursor
         self.offset_limit = float(offset_limit)
@@ -62,24 +70,63 @@ class PlanetMouseController:
         enabled: bool,
     ) -> MouseMoveResult:
         if point is None:
-            return MouseMoveResult(False, None, None, (self.offset_x, self.offset_y), "no_target")
+            return MouseMoveResult(False, None, None, None, (0.0, 0.0), "no_target")
         if not enabled:
-            return MouseMoveResult(False, None, point, (self.offset_x, self.offset_y), "disabled")
+            return MouseMoveResult(False, None, None, point, (0.0, 0.0), "disabled")
 
         cx = max(0.0, min(float(detect_roi.w - 1), float(point[0])))
         cy = max(0.0, min(float(detect_roi.h - 1), float(point[1])))
-        if det_frame is not None:
-            cursor = self.cursor_detector(det_frame)
-            if cursor is not None:
-                self.offset_x += (cx - float(cursor[0])) * self.offset_alpha
-                self.offset_y += (cy - float(cursor[1])) * self.offset_alpha
-                self.offset_x = _clamp(self.offset_x, -self.offset_limit, self.offset_limit)
-                self.offset_y = _clamp(self.offset_y, -self.offset_limit, self.offset_limit)
+        _ = det_frame
+        client_x = detect_roi.x + int(cx)
+        client_y = detect_roi.y + int(cy)
+        origin_x, origin_y = self._client_origin()
+        abs_x = origin_x + client_x
+        abs_y = origin_y + client_y
+        try:
+            self.background_clicker(client_x, client_y)
+        except Exception as exc:
+            return MouseMoveResult(
+                False,
+                (abs_x, abs_y),
+                (client_x, client_y),
+                (cx, cy),
+                (0.0, 0.0),
+                f"click_failed:{exc.__class__.__name__}",
+            )
+        return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (0.0, 0.0), "bg_click")
 
-        abs_x = detect_roi.x + int(cx + self.offset_x)
-        abs_y = detect_roi.y + int(cy + self.offset_y)
-        self.cursor_setter(abs_x, abs_y)
-        return MouseMoveResult(True, (abs_x, abs_y), (cx, cy), (self.offset_x, self.offset_y), "moved")
+    def _client_origin(self) -> tuple[int, int]:
+        try:
+            origin_x, origin_y = self.client_origin_getter()
+            return int(origin_x), int(origin_y)
+        except Exception:
+            return (0, 0)
+
+
+class _NoAuthMouseBridge:
+    def __init__(self) -> None:
+        self._hwnd: int | None = None
+
+    def click(self, client_x: int, client_y: int) -> None:
+        from planet_live_solver import bg_click
+
+        bg_click(self._require_hwnd(), int(client_x), int(client_y))
+
+    def client_origin(self) -> tuple[int, int]:
+        from planet_live_solver import get_client_rect_screen
+
+        x, y, _w, _h = get_client_rect_screen(self._require_hwnd())
+        return int(x), int(y)
+
+    def _require_hwnd(self) -> int:
+        if self._hwnd is None:
+            from planet_live_solver import find_maple_hwnd
+
+            hwnd = find_maple_hwnd()
+            if hwnd is None:
+                raise RuntimeError("maple_hwnd_not_found")
+            self._hwnd = int(hwnd)
+        return self._hwnd
 
 
 class PlanetLiveSolver:
@@ -334,6 +381,7 @@ def _trace_events(
             {
                 "moved": mouse_move.moved,
                 "abs_point": mouse_move.abs_point,
+                "client_point": mouse_move.client_point,
                 "det_point": mouse_move.det_point,
                 "offset": mouse_move.offset,
                 "reason": mouse_move.reason,

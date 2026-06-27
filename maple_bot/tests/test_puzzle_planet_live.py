@@ -14,26 +14,27 @@ from core.puzzle.planet_noauth import PlanetNoAuthDetector
 
 
 class PlanetMouseControllerTest(unittest.TestCase):
-    def test_move_to_det_point_uses_cursor_offset_learning(self) -> None:
-        moved: list[tuple[int, int]] = []
+    def test_move_to_det_point_uses_noauth_client_roi_click(self) -> None:
+        clicked: list[tuple[int, int]] = []
         controller = PlanetMouseController(
-            cursor_setter=lambda x, y: moved.append((x, y)),
-            cursor_detector=lambda _frame: (20.0, 30.0),
+            background_clicker=lambda x, y: clicked.append((x, y)),
+            client_origin_getter=lambda: (1000, 500),
         )
         detect_roi = RoiSpec("detect", "window_client", 100, 200, 300, 250)
-        det_frame = np.zeros((250, 300, 3), dtype=np.uint8)
 
         result = controller.move_to_det_point(
             detect_roi=detect_roi,
             point=(50.0, 60.0),
-            det_frame=det_frame,
+            det_frame=None,
             enabled=True,
         )
 
         self.assertTrue(result.moved)
-        self.assertEqual(moved, [(165, 275)])
-        self.assertEqual(result.abs_point, (165, 275))
-        self.assertEqual(result.offset, (15.0, 15.0))
+        self.assertEqual(clicked, [(150, 260)])
+        self.assertEqual(result.client_point, (150, 260))
+        self.assertEqual(result.abs_point, (1150, 760))
+        self.assertEqual(result.offset, (0.0, 0.0))
+        self.assertEqual(result.reason, "bg_click")
 
     def test_move_to_det_point_skips_when_disabled(self) -> None:
         moved: list[tuple[int, int]] = []
