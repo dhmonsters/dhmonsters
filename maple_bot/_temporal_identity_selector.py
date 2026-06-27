@@ -48,6 +48,7 @@ class TemporalIdentityConfig:
     prediction_hold_distance_gate: float = 28.0
     prediction_hold_distance_weight: float = 0.35
     prediction_hold_score_weight: float = 0.10
+    prediction_hold_track_gate: float = 40.0
     missing_cost: float = 12.0
 
 
@@ -266,7 +267,10 @@ def _states_for_frame(
                     bg_id,
                 )
             )
-        if _inside_box(predicted, candidate, scale=float(cfg.prediction_hold_box_scale)):
+        if (
+            _prediction_hold_track_allowed(predicted, track_hint, cfg)
+            and _inside_box(predicted, candidate, scale=float(cfg.prediction_hold_box_scale))
+        ):
             states.append(
                 _State(
                     _clamp_point_to_candidate_box(predicted, candidate),
@@ -287,7 +291,10 @@ def _states_for_frame(
     nearest = _nearest_candidate(predicted, candidates)
     if nearest is not None:
         nearest_index, nearest_candidate, nearest_distance = nearest
-        if nearest_distance <= float(cfg.prediction_hold_distance_gate):
+        if (
+            _prediction_hold_track_allowed(predicted, track_hint, cfg)
+            and nearest_distance <= float(cfg.prediction_hold_distance_gate)
+        ):
             bg_id = background_ids[nearest_index] if nearest_index < len(background_ids) else None
             states.append(
                 _State(
@@ -403,6 +410,19 @@ def _prediction_hold_cost(
         + _candidate_signal_cost(index, background_penalties, target_supports, cfg) * 0.5
         + _track_hint_cost(predicted, track_hint, cfg)
     )
+
+
+def _prediction_hold_track_allowed(
+    predicted: Point,
+    track_hint: Point | None,
+    cfg: TemporalIdentityConfig,
+) -> bool:
+    if track_hint is None:
+        return True
+    gate = float(cfg.prediction_hold_track_gate)
+    if gate <= 0.0:
+        return True
+    return _dist(predicted, track_hint) <= gate
 
 
 def _next_background_run(hypothesis: _Hypothesis, background_id: int | None) -> int:

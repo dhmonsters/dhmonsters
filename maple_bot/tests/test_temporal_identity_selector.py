@@ -101,6 +101,50 @@ def test_selector_restores_internal_point_when_prediction_is_inside_small_box():
     assert result.states[3] == "RELEASE_PENDING"
 
 
+def test_selector_does_not_defer_identity_when_track_disagrees_with_prediction():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),), track_hint=(10.0, 0.0)),
+        TemporalFrame(2, ((20.0, 0.0, 0.80, 20.0, 20.0),), track_hint=(20.0, 0.0)),
+        TemporalFrame(3, ((34.0, 0.0, 0.99, 30.0, 20.0),), track_hint=(120.0, 120.0)),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            prediction_hold_cost=1.0,
+            prediction_hold_track_gate=40.0,
+            score_weight=0.0,
+        ),
+    )
+
+    assert result.path[3] == (34.0, 0.0)
+    assert result.states[3] == "TRACK_CONFIDENT"
+
+
+def test_selector_defers_identity_when_track_agrees_with_prediction_gate():
+    frames = [
+        TemporalFrame(1, ((10.0, 0.0, 0.80, 20.0, 20.0),), track_hint=(10.0, 0.0)),
+        TemporalFrame(2, ((20.0, 0.0, 0.80, 20.0, 20.0),), track_hint=(20.0, 0.0)),
+        TemporalFrame(3, ((34.0, 0.0, 0.99, 30.0, 20.0),), track_hint=(31.0, 0.0)),
+    ]
+
+    result = select_temporal_identity(
+        frames,
+        anchor=(0.0, 0.0),
+        config=TemporalIdentityConfig(
+            keep=8,
+            prediction_hold_cost=1.0,
+            prediction_hold_track_gate=40.0,
+            score_weight=0.0,
+        ),
+    )
+
+    assert result.path[3] == (30.0, 0.0)
+    assert result.states[3] == "RELEASE_PENDING"
+
+
 def test_selector_uses_track_hint_as_soft_identity_evidence():
     frames = [
         TemporalFrame(
