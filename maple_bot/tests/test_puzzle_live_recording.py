@@ -1,10 +1,12 @@
 # 투명도형 퍼즐 라이브 화면 녹화 리허설 runtime을 검증한다.
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 
 from core.puzzle.live_recording import LiveRecordingRuntime, _select_main_monitor
+from core.puzzle.planet_live import PlanetLiveResult
 
 
 def _frames(count: int):
@@ -103,6 +105,44 @@ def test_live_recording_start_can_use_activation_frame_without_extra_grab(tmp_pa
     assert session.output_dir.exists()
     assert runtime.frame_count == 1
     assert grabbed["count"] == 0
+
+
+def test_live_recording_calls_planet_solver_and_records_solver_trace(tmp_path):
+    calls = []
+
+    class _FakePlanetSolver:
+        def analyze(self, packet, *, solver_running: bool):
+            calls.append((packet.frame_index, solver_running))
+            return PlanetLiveResult(
+                preview_frame=np.full((6, 8, 3), 140, dtype=np.uint8),
+                trace_events=[
+                    (
+                        "PLANET_SOLVER_TEST",
+                        {
+                            "solver_running": solver_running,
+                            "frame_index": packet.frame_index,
+                        },
+                    )
+                ],
+                decision=SimpleNamespace(point=(1.0, 2.0)),
+            )
+
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(1),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+        live_solver=_FakePlanetSolver(),
+    )
+
+    session = runtime.start()
+
+    events = _events(session.trace_path)
+    solver_events = [event for event in events if event["type"] == "PLANET_SOLVER_TEST"]
+    assert calls == [(0, True)]
+    assert solver_events[0]["payload"]["solver_running"] is True
+    assert runtime.latest_preview_path is not None
+    assert runtime.latest_preview_path.exists()
 
 
 def test_live_recording_failure_closes_recording_and_writes_report(tmp_path):

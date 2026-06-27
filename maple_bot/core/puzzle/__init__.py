@@ -5,9 +5,11 @@ from core.puzzle.defaults import (
     DEFAULT_BOARD_ROI_RATIOS,
     DEFAULT_DETECT_ROI_RATIOS,
     DEFAULT_POPUP_HEADER_ROI_RATIOS,
+    DEFAULT_POPUP_PREVIEW_ROI_RATIOS,
     fixed_board_roi,
     fixed_detect_roi,
     fixed_popup_header_roi,
+    fixed_popup_preview_roi,
     fixed_puzzle_rois,
 )
 from core.puzzle.evidence import EvidenceJudges
@@ -42,6 +44,7 @@ __all__ = [
     "DEFAULT_BOARD_ROI_RATIOS",
     "DEFAULT_DETECT_ROI_RATIOS",
     "DEFAULT_POPUP_HEADER_ROI_RATIOS",
+    "DEFAULT_POPUP_PREVIEW_ROI_RATIOS",
     "DetectionEvent",
     "DetectionGate",
     "EvidenceJudges",
@@ -64,6 +67,7 @@ __all__ = [
     "fixed_board_roi",
     "fixed_detect_roi",
     "fixed_popup_header_roi",
+    "fixed_popup_preview_roi",
     "fixed_puzzle_rois",
     "run_capture_check",
 ]

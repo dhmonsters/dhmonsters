@@ -5,6 +5,7 @@ import argparse
 import json
 import sys
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from core.puzzle.candidates import CandidateProvider
@@ -15,6 +16,7 @@ from core.puzzle.frame_source import ImageSequenceFrameSource, JsonlReplayFrameS
 from core.puzzle.identity import IdentityTracker
 from core.puzzle.live_recording import LiveRecordingRuntime
 from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision
+from core.puzzle.planet_live import render_planet_cctv_preview
 from core.puzzle.recorder import SessionRecorder
 from core.puzzle.recording_controller import RecordingController
 from core.puzzle.report import ReportBuilder
@@ -48,6 +50,7 @@ def create_window(args: argparse.Namespace | None = None):
     live_detector = LivePuzzleActivationDetector()
     live_thread: dict[str, threading.Thread | None] = {"thread": None}
     live_stop: dict[str, threading.Event | None] = {"event": None}
+    live_watch_preview: dict[str, Path | None] = {"path": None}
 
     def start_live_watch() -> WatchStartResult:
         thread = live_thread["thread"]
@@ -58,16 +61,23 @@ def create_window(args: argparse.Namespace | None = None):
                 live_runtime.latest_preview_path,
             )
         if thread is not None and thread.is_alive():
-            return WatchStartResult("armed")
+            return WatchStartResult("armed", preview_path=live_watch_preview["path"])
         stop_event = threading.Event()
         live_stop["event"] = stop_event
 
         def worker() -> None:
             try:
                 frame_period_s = 1.0 / live_runtime.fps
+                watch_frame_index = 0
                 while not stop_event.is_set() and not live_runtime.is_recording:
                     frame = live_runtime.frame_grabber()
                     activation = live_detector.detect(frame)
+                    if watch_frame_index % 5 == 0:
+                        live_watch_preview["path"] = _write_watch_preview(
+                            frame,
+                            output_root=(args.output_root or None) if args is not None else None,
+                            popup_score=activation.score,
+                        )
                     if activation.active:
                         live_runtime.start(
                             initial_frame=frame,
@@ -95,6 +105,7 @@ def create_window(args: argparse.Namespace | None = None):
                                 },
                             )
                         break
+                    watch_frame_index += 1
                     live_runtime.sleeper(frame_period_s)
                 if live_runtime.is_recording:
                     live_runtime.run_until_stopped()
@@ -131,7 +142,7 @@ def create_window(args: argparse.Namespace | None = None):
             )
         thread = live_thread.get("thread")
         if thread is not None and thread.is_alive():
-            return WatchStartResult("armed")
+            return WatchStartResult("armed", preview_path=live_watch_preview["path"])
         return WatchStartResult("idle")
 
     def run_capture_check_from_ui() -> Path | None:
@@ -324,6 +335,27 @@ def run_live_recording(
 
 def run_live_capture_check(*, output_root: str | Path | None = None) -> CaptureCheckResult:
     return run_capture_check(output_root=output_root)
+
+
+def _write_watch_preview(
+    frame: object,
+    *,
+    output_root: str | Path | None,
+    popup_score: float | None,
+) -> Path | None:
+    try:
+        import cv2
+
+        root = Path(output_root) if output_root is not None else Path(__file__).resolve().parent / "03_output"
+        preview_dir = root / f"{datetime.now().strftime('%Y-%m-%d')}_transparent_puzzle_watch"
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        preview_path = preview_dir / "live_watch_preview.png"
+        preview = render_planet_cctv_preview(frame, popup_score=popup_score)
+        if cv2.imwrite(str(preview_path), preview):
+            return preview_path
+    except Exception:
+        return None
+    return None
 
 
 def _attach_puzzle_hotkeys(window: object) -> None:

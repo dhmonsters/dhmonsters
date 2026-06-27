@@ -100,6 +100,30 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
             self.assertEqual(window.cctv_frame_label.pixmap().path, str(preview_path))
             self.assertIn("recording start", window.event_log.toPlainText())
 
+    def test_live_status_poll_updates_armed_preview_before_recording(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+
+        with TemporaryDirectory() as tmp:
+            preview_path = Path(tmp) / "watch_preview.png"
+            preview_path.write_bytes(b"fake image")
+            status = types.SimpleNamespace(
+                status="armed",
+                session_dir=None,
+                preview_path=preview_path,
+            )
+
+            window = module.PuzzleConsoleWindow(
+                watch_start_handler=lambda: None,
+                live_status_handler=lambda: status,
+            )
+
+            window.start_watch_input()
+            window._poll_live_status()
+
+            self.assertEqual(window.state_label.text(), "SOLVER_ON")
+            self.assertIsNone(window.last_session_dir)
+            self.assertEqual(window.cctv_frame_label.pixmap().path, str(preview_path))
+
     def test_global_f1_f2_and_f3_hotkeys_are_registered(self) -> None:
         fake_hotkey_module = types.ModuleType("core.hotkey_manager")
         registered: list[tuple[str, str, object]] = []

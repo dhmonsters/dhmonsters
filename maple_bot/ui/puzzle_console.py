@@ -623,6 +623,8 @@ class PuzzleConsoleWindow(QMainWindow):
         session_dir = _watch_result_session_dir(result)
         preview_path = _watch_result_preview_path(result)
         if session_dir is None:
+            if preview_path is not None and str(preview_path) != self.current_cctv_source_path:
+                self._load_cctv_frame_preview(str(preview_path))
             return
         is_new_recording = self.last_session_dir != session_dir or self.state_label.text() != "RECORDING"
         if is_new_recording:

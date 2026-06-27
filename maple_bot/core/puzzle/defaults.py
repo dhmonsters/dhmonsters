@@ -24,6 +24,12 @@ DEFAULT_BOARD_ROI_RATIOS = {
     "w_ratio": 0.680 - 0.318,
     "h_ratio": 0.775 - 0.188,
 }
+DEFAULT_POPUP_PREVIEW_ROI_RATIOS = {
+    "x_ratio": DEFAULT_BOARD_ROI_RATIOS["x_ratio"],
+    "y_ratio": DEFAULT_POPUP_HEADER_ROI_RATIOS["y_ratio"],
+    "w_ratio": DEFAULT_BOARD_ROI_RATIOS["w_ratio"],
+    "h_ratio": 0.775 - 0.202,
+}
 
 
 def fixed_detect_roi(*, frame_w: int, frame_h: int, window_title: str = "") -> RoiSpec:
@@ -54,6 +60,17 @@ def fixed_popup_header_roi(*, frame_w: int, frame_h: int, window_title: str = ""
         frame_w=frame_w,
         frame_h=frame_h,
         name="popup_header",
+        basis="window_client",
+        window_title=window_title,
+    )
+
+
+def fixed_popup_preview_roi(*, frame_w: int, frame_h: int, window_title: str = "") -> RoiSpec:
+    return resolve_ratio_roi(
+        DEFAULT_POPUP_PREVIEW_ROI_RATIOS,
+        frame_w=frame_w,
+        frame_h=frame_h,
+        name="popup_preview",
         basis="window_client",
         window_title=window_title,
     )

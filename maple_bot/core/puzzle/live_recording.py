@@ -8,6 +8,7 @@ from typing import Any
 
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
 from core.puzzle.models import FramePacket, PuzzleSession, RoiSpec
+from core.puzzle.planet_live import PlanetLiveResult, PlanetLiveSolver, render_planet_cctv_preview
 from core.puzzle.recorder import SessionRecorder
 from core.puzzle.recording_controller import RecordingController
 from core.puzzle.report import ReportBuilder
@@ -28,6 +29,7 @@ class LiveRecordingRuntime:
         frame_grabber: FrameGrabber | None = None,
         fps: float = 30.0,
         sleeper: Sleeper | None = None,
+        live_solver: Any | None = None,
     ) -> None:
         if fps <= 0:
             raise ValueError("fps must be positive")
@@ -35,6 +37,7 @@ class LiveRecordingRuntime:
         self.frame_grabber = frame_grabber or grab_screen_bgr
         self.fps = fps
         self.sleeper = sleeper or time.sleep
+        self.live_solver = live_solver if live_solver is not None else PlanetLiveSolver()
         self.session: PuzzleSession | None = None
         self.trace: TraceLogger | None = None
         self.recording: RecordingController | None = None
@@ -169,7 +172,8 @@ class LiveRecordingRuntime:
             source_path=f"live_screen#frame={frame_index}",
         )
         self.recording.write(packet, overlay_frame=frame)
-        self._write_live_preview(packet)
+        live_result = self._analyze_live_frame(packet)
+        self._write_live_preview(packet, preview_frame=live_result.preview_frame if live_result else None)
         self.trace.write_event(
             "FRAME_RECORDED",
             frame_index,
@@ -182,13 +186,26 @@ class LiveRecordingRuntime:
         self.frame_count += 1
         return True
 
-    def _write_live_preview(self, packet: FramePacket) -> None:
+    def _analyze_live_frame(self, packet: FramePacket) -> PlanetLiveResult | None:
+        if self.trace is None or self.recording is None or self.live_solver is None:
+            return None
+        try:
+            result = self.live_solver.analyze(packet, solver_running=self.recording.is_solver_running)
+        except Exception as exc:
+            self.trace.write_event("PLANET_LIVE_SOLVER_FAILED", packet.frame_index, {"error": str(exc)})
+            return None
+        for event_type, payload in result.trace_events:
+            self.trace.write_event(event_type, packet.frame_index, payload)
+        return result
+
+    def _write_live_preview(self, packet: FramePacket, *, preview_frame: Any | None = None) -> None:
         if self.session is None:
             return
         if packet.frame_index != 0 and packet.frame_index % self._preview_stride != 0:
             return
         preview_path = self.session.output_dir / "snapshots" / f"live_preview_{packet.frame_index:06d}.png"
-        ok = _cv2().imwrite(str(preview_path), packet.board_frame)
+        frame = preview_frame if preview_frame is not None else render_planet_cctv_preview(packet.source_frame)
+        ok = _cv2().imwrite(str(preview_path), frame)
         if ok:
             self.latest_preview_path = preview_path
 
