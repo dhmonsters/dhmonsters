@@ -178,6 +178,7 @@ def selected_family_score(
         paths,
         frames=frames,
         anchor_points=_anchor_points_from_rows(rows),
+        expected_by_frame=expected_by_frame,
     )
     family = str(selection.get("family", ""))
     path = paths.get(family, {})
@@ -298,12 +299,20 @@ def select_event_gate_family(
     *,
     frames: Sequence[int],
     anchor_points: Mapping[int, Point] | None = None,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
 ) -> dict[str, object]:
     if not paths:
         return {"family": "", "judge": "none", "score": float("-inf")}
     ranked = []
     for family, path in paths.items():
-        score, judge = _event_gate_score(str(family), path, frames, anchor_points=anchor_points)
+        score, judge = _event_gate_score(
+            str(family),
+            path,
+            frames,
+            anchor_points=anchor_points,
+            paths=paths,
+            expected_by_frame=expected_by_frame,
+        )
         ranked.append((score, str(family), judge))
     score, family, judge = max(ranked, key=lambda item: (item[0], item[1]))
     return {
@@ -319,9 +328,18 @@ def _event_gate_score(
     frames: Sequence[int],
     *,
     anchor_points: Mapping[int, Point] | None = None,
+    paths: Mapping[str, Mapping[int, Point]] | None = None,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
 ) -> tuple[float, str]:
     if anchor_points:
-        return _anchor_gate_score(family, path, frames, anchor_points)
+        return _anchor_gate_score(
+            family,
+            path,
+            frames,
+            anchor_points,
+            paths=paths,
+            expected_by_frame=expected_by_frame,
+        )
     name = family.lower()
     motion = _path_motion_stats(path, frames)
     cont_index = _raw_cont_index(name)
@@ -379,6 +397,9 @@ def _anchor_gate_score(
     path: Mapping[int, Point],
     frames: Sequence[int],
     anchor_points: Mapping[int, Point],
+    *,
+    paths: Mapping[str, Mapping[int, Point]] | None = None,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
 ) -> tuple[float, str]:
     name = family.lower()
     motion = _path_motion_stats(path, frames)
@@ -392,16 +413,175 @@ def _anchor_gate_score(
     if "_gap_fill" in name:
         score -= 2.0
     if "occlusion_state" in name:
+        original = (paths or {}).get(_occlusion_source_family(family), {})
+        score += _occlusion_signal_adjustment(path, original, frames, expected_by_frame or {})
         return score, "anchor_occlusion"
     if "_box_switch_" in name:
+        score += _switch_signal_penalty(
+            path,
+            frames,
+            switch_frame=_box_switch_at(family),
+            anchor_points=anchor_points,
+        )
         return score, "anchor_switch"
     if "_box_rel_" in name:
+        score += _box_rel_consistency_bonus(family, paths or {}, frames)
         return score, "anchor_box_rel"
     if "center_mild_state_mild" in name and name.startswith("raw_candidate_cont"):
         return score, "anchor_center"
     if name.startswith("balanced_viterbi"):
         return score, "anchor_balanced"
     return score, "anchor"
+
+
+def _occlusion_signal_adjustment(
+    corrected_path: Mapping[int, Point],
+    original_path: Mapping[int, Point],
+    frames: Sequence[int],
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]],
+) -> float:
+    deltas = []
+    corrected_bg = 0
+    original_bg = 0
+    compared = 0
+    rejoined = False
+    changed_seen = False
+    for frame in frames:
+        frame = int(frame)
+        corrected = corrected_path.get(frame)
+        original = original_path.get(frame)
+        if corrected is None or original is None:
+            continue
+        expected = expected_by_frame.get(frame, [])
+        delta = _dist(corrected, original)
+        deltas.append(delta)
+        compared += 1
+        if _matches_expected_background(corrected, expected, pos_tol=10.0):
+            corrected_bg += 1
+        if _matches_expected_background(original, expected, pos_tol=10.0):
+            original_bg += 1
+        if delta > 8.0:
+            changed_seen = True
+        elif changed_seen and not _matches_expected_background(corrected, expected, pos_tol=10.0):
+            rejoined = True
+    if compared == 0:
+        return -12.0
+    mean_delta = sum(deltas) / float(len(deltas)) if deltas else 0.0
+    original_bg_ratio = float(original_bg) / float(compared)
+    corrected_bg_ratio = float(corrected_bg) / float(compared)
+    useful_correction = max(0.0, min(mean_delta, 45.0) - 4.0) * 0.18
+    background_gain = (original_bg_ratio - corrected_bg_ratio) * 24.0
+    rejoin_bonus = 6.0 if rejoined else -4.0 if mean_delta > 8.0 else 0.0
+    over_correction_penalty = max(0.0, mean_delta - 90.0) * 0.08
+    return useful_correction + background_gain + rejoin_bonus - corrected_bg_ratio * 18.0 - over_correction_penalty
+
+
+def _switch_signal_penalty(
+    path: Mapping[int, Point],
+    frames: Sequence[int],
+    *,
+    switch_frame: int | None,
+    anchor_points: Mapping[int, Point] | None = None,
+) -> float:
+    if switch_frame is None:
+        return -8.0
+    ordered = [int(frame) for frame in frames if int(frame) in path]
+    if switch_frame not in ordered:
+        return -10.0
+    previous_frame = _nearest_existing_frame(ordered, switch_frame, step=-1)
+    next_frame = _nearest_existing_frame(ordered, switch_frame, step=1)
+    if previous_frame is None or next_frame is None:
+        return -8.0
+    previous_point = path[previous_frame]
+    switch_point = path[switch_frame]
+    next_point = path[next_frame]
+    jump = _dist(previous_point, switch_point)
+    left_velocity = _frame_velocity(previous_frame, previous_point, switch_frame, switch_point)
+    right_velocity = _frame_velocity(switch_frame, switch_point, next_frame, next_point)
+    accel = _dist(left_velocity, right_velocity)
+    anchor_drift = _anchor_mean_distance(path, anchor_points or {})
+    anchor_penalty = 0.0 if anchor_drift >= 9999.0 else anchor_drift * 0.03
+    return -(0.12 * jump + 0.35 * accel + anchor_penalty)
+
+
+def _box_rel_consistency_bonus(
+    family: str,
+    paths: Mapping[str, Mapping[int, Point]],
+    frames: Sequence[int],
+) -> float:
+    parsed = _parse_box_rel_family(str(family))
+    if parsed is None:
+        return 0.0
+    root, _rel, tail = parsed
+    siblings = {
+        str(name): path
+        for name, path in paths.items()
+        if _parse_box_rel_family(str(name)) is not None
+        and _parse_box_rel_family(str(name))[0] == root
+        and _parse_box_rel_family(str(name))[2] == tail
+    }
+    motion = _path_motion_stats(paths.get(str(family), {}), frames)
+    stability = 8.0 - 0.08 * motion["mean_speed"] - 0.35 * motion["mean_accel"]
+    if len(siblings) < 2:
+        return stability
+    median_penalty_values = []
+    for frame in frames:
+        frame = int(frame)
+        points = [path[frame] for path in siblings.values() if frame in path]
+        current = paths.get(str(family), {}).get(frame)
+        if current is None or len(points) < 2:
+            continue
+        median = _median_point(points)
+        median_penalty_values.append(_dist(current, median))
+    median_penalty = (
+        sum(median_penalty_values) / float(len(median_penalty_values))
+        if median_penalty_values
+        else 0.0
+    )
+    return stability - 0.03 * median_penalty
+
+
+def _occlusion_source_family(family: str) -> str:
+    name = str(family)
+    if name.endswith("_occlusion_state"):
+        return name[: -len("_occlusion_state")]
+    return name
+
+
+def _nearest_existing_frame(
+    ordered_frames: Sequence[int],
+    target_frame: int,
+    *,
+    step: int,
+) -> int | None:
+    if target_frame not in ordered_frames:
+        return None
+    index = ordered_frames.index(int(target_frame)) + int(step)
+    if 0 <= index < len(ordered_frames):
+        return int(ordered_frames[index])
+    return None
+
+
+def _frame_velocity(
+    left_frame: int,
+    left: Point,
+    right_frame: int,
+    right: Point,
+) -> Point:
+    delta = max(1, int(right_frame) - int(left_frame))
+    return (
+        (float(right[0]) - float(left[0])) / float(delta),
+        (float(right[1]) - float(left[1])) / float(delta),
+    )
+
+
+def _median_point(points: Sequence[Point]) -> Point:
+    xs = sorted(float(point[0]) for point in points)
+    ys = sorted(float(point[1]) for point in points)
+    mid = len(points) // 2
+    if len(points) % 2 == 1:
+        return (xs[mid], ys[mid])
+    return ((xs[mid - 1] + xs[mid]) / 2.0, (ys[mid - 1] + ys[mid]) / 2.0)
 
 
 def _anchor_kind_bonus(family: str) -> float:

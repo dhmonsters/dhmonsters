@@ -5,6 +5,9 @@ from unittest.mock import patch
 from _live_family_pool_gt_score import (
     DEFAULT_FAST_BOX_REL_PAIRS,
     _fast_family_pool,
+    _occlusion_signal_adjustment,
+    _switch_signal_penalty,
+    _box_rel_consistency_bonus,
     best_family_score,
     box_switch_variant_paths,
     build_family_paths,
@@ -292,6 +295,87 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
 
         self.assertEqual(selected["family"], "raw_candidate_cont11_center_mild_state_mild")
         self.assertEqual(selected["judge"], "anchor_center")
+
+    def test_occlusion_signal_rewards_corrected_release_and_penalizes_background_stick(self) -> None:
+        expected = {
+            1: [(1, (20.0, 0.0, 10.0, 10.0))],
+            2: [(1, (30.0, 0.0, 10.0, 10.0))],
+            3: [(1, (40.0, 0.0, 10.0, 10.0))],
+        }
+        original = {
+            0: (0.0, 0.0),
+            1: (20.0, 0.0),
+            2: (30.0, 0.0),
+            3: (40.0, 0.0),
+        }
+        released = {
+            0: (0.0, 0.0),
+            1: (10.0, 0.0),
+            2: (20.0, 0.0),
+            3: (30.0, 0.0),
+        }
+        stuck = dict(original)
+
+        self.assertGreater(
+            _occlusion_signal_adjustment(released, original, [0, 1, 2, 3], expected),
+            _occlusion_signal_adjustment(stuck, original, [0, 1, 2, 3], expected),
+        )
+
+    def test_switch_signal_penalizes_discontinuous_switch_and_anchor_drift(self) -> None:
+        smooth = {
+            0: (0.0, 0.0),
+            1: (5.0, 0.0),
+            2: (10.0, 0.0),
+            3: (15.0, 0.0),
+        }
+        jump = {
+            0: (0.0, 0.0),
+            1: (5.0, 0.0),
+            2: (100.0, 0.0),
+            3: (105.0, 0.0),
+        }
+
+        self.assertLess(
+            _switch_signal_penalty(
+                jump,
+                [0, 1, 2, 3],
+                switch_frame=2,
+                anchor_points={0: (0.0, 0.0), 1: (5.0, 0.0)},
+            ),
+            _switch_signal_penalty(
+                smooth,
+                [0, 1, 2, 3],
+                switch_frame=2,
+                anchor_points={0: (0.0, 0.0), 1: (5.0, 0.0)},
+            ),
+        )
+
+    def test_box_rel_consistency_prefers_stable_offset_member(self) -> None:
+        paths = {
+            "raw_candidate_cont4_box_rel_p05_z0_state_mild": {
+                0: (5.0, 0.0),
+                1: (6.0, 0.0),
+                2: (7.0, 0.0),
+            },
+            "raw_candidate_cont4_box_rel_p1_z0_state_mild": {
+                0: (20.0, 0.0),
+                1: (28.0, 0.0),
+                2: (45.0, 0.0),
+            },
+        }
+
+        self.assertGreater(
+            _box_rel_consistency_bonus(
+                "raw_candidate_cont4_box_rel_p05_z0_state_mild",
+                paths,
+                [0, 1, 2],
+            ),
+            _box_rel_consistency_bonus(
+                "raw_candidate_cont4_box_rel_p1_z0_state_mild",
+                paths,
+                [0, 1, 2],
+            ),
+        )
 
     def test_selected_family_score_scores_selector_pick_separately_from_upper(self) -> None:
         class _FakePool:
