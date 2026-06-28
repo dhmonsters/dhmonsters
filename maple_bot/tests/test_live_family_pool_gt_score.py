@@ -3,7 +3,10 @@ import unittest
 from unittest.mock import patch
 
 from _live_family_pool_gt_score import (
+    _fast_family_pool,
     best_family_score,
+    box_switch_variant_paths,
+    gap_fill_variant_paths,
     occlusion_variant_paths,
     score_clip,
     score_all,
@@ -54,6 +57,15 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
         self.assertEqual(len(created), 2)
         self.assertIs(score_clip.call_args_list[0].kwargs["family_pool"], created[0])
         self.assertIs(score_clip.call_args_list[1].kwargs["family_pool"], created[1])
+
+    def test_fast_family_pool_keeps_expanded_candidate_width(self) -> None:
+        pool = _fast_family_pool()
+
+        self.assertEqual(pool.raw_rank_families, 20)
+        self.assertEqual(pool.raw_continuity_families, 20)
+        self.assertEqual(pool.raw_beam_families, 8)
+        self.assertEqual(pool.raw_beam_spawn, 8)
+        self.assertEqual(pool.raw_max_candidates_per_frame, 24)
 
     def test_score_all_forwards_occlusion_variant_option(self) -> None:
         with patch("_live_family_pool_gt_score.score_clip") as score_clip_mock:
@@ -113,6 +125,52 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
 
         self.assertEqual(variants["observed_occlusion_state"][3], (30.0, 0.0))
         self.assertEqual(variants["observed_occlusion_state"][4], (40.0, 0.0))
+
+    def test_gap_fill_variant_paths_interpolates_short_missing_run(self) -> None:
+        variants = gap_fill_variant_paths(
+            {"observed": {0: (0.0, 0.0), 1: (10.0, 0.0), 4: (40.0, 0.0)}},
+            frames=[0, 1, 2, 3, 4],
+            max_gap=2,
+        )
+
+        self.assertEqual(variants["observed_gap_fill"][2], (20.0, 0.0))
+        self.assertEqual(variants["observed_gap_fill"][3], (30.0, 0.0))
+
+    def test_gap_fill_variant_paths_keeps_large_gap_missing(self) -> None:
+        variants = gap_fill_variant_paths(
+            {"observed": {0: (0.0, 0.0), 4: (40.0, 0.0)}},
+            frames=[0, 1, 2, 3, 4],
+            max_gap=2,
+        )
+
+        self.assertNotIn(1, variants["observed_gap_fill"])
+        self.assertNotIn(2, variants["observed_gap_fill"])
+        self.assertNotIn(3, variants["observed_gap_fill"])
+
+    def test_box_switch_variant_paths_splices_same_raw_box_family(self) -> None:
+        variants = box_switch_variant_paths(
+            {
+                "raw_candidate_cont0_box_rel_p05_p1_state_mild": {
+                    0: (0.0, 10.0),
+                    1: (10.0, 10.0),
+                    2: (20.0, 10.0),
+                },
+                "raw_candidate_cont0_box_rel_n1_z0_state_mild": {
+                    0: (0.0, -10.0),
+                    1: (10.0, -10.0),
+                    2: (20.0, -10.0),
+                },
+            },
+            frames=[0, 1, 2],
+            switch_stride=1,
+        )
+
+        path = variants[
+            "raw_candidate_cont0_box_switch_p05_p1_to_n1_z0_at1_state_mild"
+        ]
+        self.assertEqual(path[0], (0.0, 10.0))
+        self.assertEqual(path[1], (10.0, -10.0))
+        self.assertEqual(path[2], (20.0, -10.0))
 
     def test_best_family_score_can_select_occlusion_variant(self) -> None:
         class _FakePool:

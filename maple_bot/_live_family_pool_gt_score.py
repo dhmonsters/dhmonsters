@@ -78,12 +78,14 @@ def best_family_score(
         live_max_candidates=live_max_candidates,
     )
     if include_occlusion_variants:
+        paths.update(gap_fill_variant_paths(paths, frames=frames))
         paths.update(occlusion_variant_paths(
             paths,
             frames=frames,
             expected_by_frame=expected_by_frame or {},
             candidate_sets=candidate_sets or candidate_sets_from_rows(rows),
         ))
+        paths.update(box_switch_variant_paths(paths, frames=frames))
     best: dict[str, object] | None = None
     for family, path in paths.items():
         score = _score_path(
@@ -109,6 +111,119 @@ def best_family_score(
             "success": False,
         }
     return best
+
+
+def box_switch_variant_paths(
+    paths: Mapping[str, Mapping[int, Point]],
+    *,
+    frames: Sequence[int],
+    switch_stride: int = 2,
+    min_coverage: float = 0.9,
+) -> dict[str, dict[int, Point]]:
+    variants: dict[str, dict[int, Point]] = {}
+    ordered = [int(frame) for frame in frames]
+    if not ordered:
+        return variants
+    groups: dict[tuple[str, str], dict[str, tuple[str, Mapping[int, Point]]]] = {}
+    for family, path in paths.items():
+        parsed = _parse_box_rel_family(str(family))
+        if parsed is None:
+            continue
+        root, rel, tail = parsed
+        coverage = sum(1 for frame in ordered if int(frame) in path) / float(len(ordered))
+        if coverage < float(min_coverage):
+            continue
+        groups.setdefault((root, tail), {})[rel] = (str(family), path)
+
+    for (root, tail), rel_paths in groups.items():
+        rels = sorted(rel_paths)
+        for left_rel in rels:
+            _left_family, left_path = rel_paths[left_rel]
+            for right_rel in rels:
+                if right_rel == left_rel:
+                    continue
+                _right_family, right_path = rel_paths[right_rel]
+                for index, switch in enumerate(ordered):
+                    if index == 0 or index % max(1, int(switch_stride)) != 0:
+                        continue
+                    path: dict[int, Point] = {}
+                    for frame in ordered:
+                        source = left_path if frame < switch else right_path
+                        point = source.get(int(frame))
+                        if point is not None:
+                            path[int(frame)] = (float(point[0]), float(point[1]))
+                    if path:
+                        name = f"{root}_box_switch_{left_rel}_to_{right_rel}_at{switch}{tail}"
+                        variants[name] = path
+    return variants
+
+
+def _parse_box_rel_family(family: str) -> tuple[str, str, str] | None:
+    if "_gap_fill" in family or "_occlusion_state" in family:
+        return None
+    marker = "_box_rel_"
+    if marker not in family:
+        return None
+    root, suffix = family.split(marker, 1)
+    parts = suffix.split("_")
+    if len(parts) < 3:
+        return None
+    x_label, y_label = parts[0], parts[1]
+    labels = {"n1", "n05", "z0", "p05", "p1"}
+    if x_label not in labels or y_label not in labels:
+        return None
+    return root, f"{x_label}_{y_label}", "_" + "_".join(parts[2:])
+
+
+def gap_fill_variant_paths(
+    paths: Mapping[str, Mapping[int, Point]],
+    *,
+    frames: Sequence[int],
+    max_gap: int = 2,
+) -> dict[str, dict[int, Point]]:
+    variants: dict[str, dict[int, Point]] = {}
+    ordered = [int(frame) for frame in frames]
+    for family, path in paths.items():
+        filled = {int(frame): (float(point[0]), float(point[1])) for frame, point in path.items()}
+        for index, frame in enumerate(ordered):
+            if frame in filled:
+                continue
+            previous = _nearest_known_frame(ordered, filled, index, step=-1)
+            following = _nearest_known_frame(ordered, filled, index, step=1)
+            if previous is None or following is None:
+                continue
+            previous_index, previous_frame = previous
+            following_index, following_frame = following
+            if following_index - previous_index - 1 > int(max_gap):
+                continue
+            span = float(following_frame - previous_frame)
+            if span <= 0.0:
+                continue
+            left = filled[previous_frame]
+            right = filled[following_frame]
+            ratio = float(frame - previous_frame) / span
+            filled[frame] = (
+                float(left[0]) + (float(right[0]) - float(left[0])) * ratio,
+                float(left[1]) + (float(right[1]) - float(left[1])) * ratio,
+            )
+        variants[f"{family}_gap_fill"] = filled
+    return variants
+
+
+def _nearest_known_frame(
+    ordered_frames: Sequence[int],
+    path: Mapping[int, Point],
+    start_index: int,
+    *,
+    step: int,
+) -> tuple[int, int] | None:
+    index = int(start_index) + int(step)
+    while 0 <= index < len(ordered_frames):
+        frame = int(ordered_frames[index])
+        if frame in path:
+            return index, frame
+        index += int(step)
+    return None
 
 
 def occlusion_variant_paths(
@@ -355,10 +470,10 @@ def _fast_family_pool() -> TransparentLiveFamilyPool:
         enable_phase_mht=False,
         enable_raw_mht=False,
         enable_guarded_decal_identity=False,
-        raw_rank_families=16,
-        raw_continuity_families=16,
-        raw_beam_families=6,
-        raw_beam_spawn=6,
+        raw_rank_families=20,
+        raw_continuity_families=20,
+        raw_beam_families=8,
+        raw_beam_spawn=8,
         raw_max_candidates_per_frame=24,
     )
 

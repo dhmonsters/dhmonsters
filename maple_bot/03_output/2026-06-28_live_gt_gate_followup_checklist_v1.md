@@ -11,8 +11,11 @@
 - [x] occlusion variant 후보를 빠른 scoring 경로에 넣었다.
 - [x] fast-mode 후보 풀을 확장했다.
 - [x] fast-mode + occlusion variant 기준 13/16을 재현했다.
-- [ ] 실패 3개 trace를 만든다.
-- [ ] occlusion release 조건을 보강한다.
-- [ ] 13/16 이상 유지 여부를 재검증한다.
+- [x] 후보 폭 확장으로 14/16을 재현했다.
+- [x] gap fill variant로 15/16을 재현했다.
+- [x] box switch variant로 16/16을 재현했다.
+- [x] 실패한 release 중심 판정 가설은 폐기했다.
+- [x] 16/16 유지 여부를 재검증했다.
+- [ ] switch family 수를 live selector용으로 줄인다.
 - [ ] live selector 경로에는 검증된 gate만 연결한다.
 - [ ] live selector 기준 16GT를 다시 채점한다.
