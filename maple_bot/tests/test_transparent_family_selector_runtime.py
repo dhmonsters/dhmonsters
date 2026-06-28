@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from _final_candidate_selector import LinearSelectorModel
 from _final_candidate_selector import load_feature_rows_cache, summarize_selected_rows
@@ -170,13 +171,17 @@ class TransparentFamilySelectorRuntimeTests(unittest.TestCase):
             save_gt_free_selector_model(path, model)
             runtime = TransparentFamilySelectorRuntime(path)
 
-            selected, rows = runtime.select_from_path_pool(
-                "live_clip",
-                paths,
-                [0, 1, 2],
-                candidate_sets=candidate_sets,
-                anchor_points={0: (106.5, 0.0), 1: (116.5, 0.0), 2: (126.5, 0.0)},
-            )
+            with patch(
+                "core.vision.transparent_family_selector_runtime.build_transparent_feature_rows",
+                side_effect=AssertionError("scoreboard selection should skip feature rows"),
+            ):
+                selected, rows = runtime.select_from_path_pool(
+                    "live_clip",
+                    paths,
+                    [0, 1, 2],
+                    candidate_sets=candidate_sets,
+                    anchor_points={0: (106.5, 0.0), 1: (116.5, 0.0), 2: (126.5, 0.0)},
+                )
 
         self.assertEqual(
             selected["live_clip"]["family"],
@@ -184,7 +189,7 @@ class TransparentFamilySelectorRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(selected["live_clip"]["selector"], "judge_scoreboard")
         self.assertIn("judge_total_score", selected["live_clip"])
-        self.assertGreaterEqual(len(rows), 2)
+        self.assertEqual(len(rows), 1)
 
 
 if __name__ == "__main__":

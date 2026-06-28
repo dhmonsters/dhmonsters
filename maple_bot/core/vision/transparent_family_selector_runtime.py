@@ -75,6 +75,8 @@ class TransparentFamilySelectorRuntime:
             expected_by_frame=expected_by_frame,
             anchor_points=anchor_points,
         )
+        if scoreboard:
+            return {clip: scoreboard}, [scoreboard]
         rows = build_transparent_feature_rows(
             clip,
             paths,

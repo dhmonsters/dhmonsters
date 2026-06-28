@@ -22,7 +22,13 @@
 
 ## 검증 결과
 
-- `test_transparent_family_selector_runtime`, `test_selector_judge_scoreboard`, `test_live_family_pool_gt_score` 총 58개 테스트 통과.
+- `test_transparent_family_selector_runtime`, `test_transparent_selector_shadow`, `test_puzzle_planet_live`, `test_selector_judge_scoreboard`, `test_live_family_pool_gt_score` 총 77개 테스트 통과.
 - `_live_family_pool_gt_score.py --fast-mode --occlusion-variants --event-gate-shortlist --selector-scoreboard` 결과 `selected_summary 16/16` 유지.
-- `test_transparent_selector_shadow`, `test_puzzle_planet_live` 총 17개 테스트 통과.
 
+## 라이브 replay 추가 진단
+
+`_live_temporal_selector_gt_score.py --summary-only --names 000_0614_121417` 기준 현재 causal live 경로는 평균 오차 113.04px로 실패한다. 오프라인 16/16과 다른 이유는 live selector가 매 프레임 현재까지의 shadow window로만 고르고, 오프라인 채점은 전체 recording path pool과 더 풍부한 expected background 신호를 사용하기 때문이다.
+
+점수판이 선택을 끝냈는데도 기존 모델용 feature row를 300개 이상 다시 계산하면서 업데이트 1회가 4초에서 9초까지 느려지는 병목이 있었다. 점수판 선택이 있으면 feature row 계산을 건너뛰게 바꾼 뒤 같은 25프레임 샘플에서 0.06초에서 0.12초 수준으로 내려왔다.
+
+live expected background 전달 경로는 옵션으로 추가했지만 기본값은 꺼두었다. 현재 live catalog expected를 바로 켜면 `000_0614_121417` 평균 오차가 159.07px로 악화되어, 이 신호는 품질 검증과 제한 조건이 더 필요하다.

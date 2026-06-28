@@ -61,6 +61,38 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(call["kwargs"]["candidate_sets"][2][0][0], 12.0)
         self.assertEqual(result["clip"], "live")
 
+    def test_shadow_forwards_expected_background_to_runtime(self):
+        runtime = FakeRuntime()
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=3,
+            min_frames=2,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        shadow.update(
+            0,
+            candidates=[(10.0, 20.0, 0.9, 30.0, 30.0)],
+            anchors={
+                "panel_default_center_mild_state_mild": (10.0, 20.0),
+            },
+            expected_by_frame={0: [(7, (100.0, 200.0, 0.8, 20.0, 20.0))]},
+        )
+        shadow.update(
+            1,
+            candidates=[(11.0, 20.0, 0.9, 30.0, 30.0)],
+            anchors={
+                "panel_default_center_mild_state_mild": (11.0, 20.0),
+            },
+            expected_by_frame={1: [(8, (101.0, 201.0, 0.8, 20.0, 20.0))]},
+        )
+
+        expected = runtime.calls[-1]["kwargs"]["expected_by_frame"]
+        self.assertEqual(expected[0][0][0], 7)
+        self.assertEqual(expected[1][0][0], 8)
+
     def test_shadow_converts_candidate_order_for_local_box_paths(self):
         runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
         shadow = TransparentSelectorShadow(

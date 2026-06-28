@@ -493,6 +493,21 @@ class TransparentLiveFamilyPool:
         lag = self._choose_catalog_lag(int(frame), int(self._catalog_period))
         return self._catalog_candidate_sets.get(int(frame) - int(lag), ())
 
+    def expected_background_by_frame(
+        self,
+        frames: Sequence[int],
+    ) -> dict[int, list[tuple[int, Candidate]]]:
+        expected: dict[int, list[tuple[int, Candidate]]] = {}
+        for frame in frames:
+            candidates = self._guarded_consensus_expected_background(int(frame))
+            if not candidates:
+                continue
+            expected[int(frame)] = [
+                (index, candidate)
+                for index, candidate in enumerate(candidates)
+            ]
+        return expected
+
     def _guarded_consensus_matches_background(
         self,
         point: Point,

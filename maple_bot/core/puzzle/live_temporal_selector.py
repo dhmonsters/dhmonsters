@@ -40,6 +40,7 @@ class LiveTemporalSelector:
         min_frames: int = 8,
         live_max_candidates: int = 24,
         include_local_box: bool = False,
+        use_expected_background: bool = False,
     ) -> None:
         self.runtime = runtime or TransparentFamilySelectorRuntime()
         self.family_pool = family_pool or TransparentLiveFamilyPool(
@@ -64,6 +65,7 @@ class LiveTemporalSelector:
         )
         self.health_selector = health_selector or TransparentTrackHealthSelector()
         self.live_max_candidates = max(1, int(live_max_candidates))
+        self.use_expected_background = bool(use_expected_background)
         self._seeded = False
 
     def reset(self, *, point: Point | None = None) -> None:
@@ -114,6 +116,14 @@ class LiveTemporalSelector:
                 int(frame_index),
                 candidates=clean_candidates,
                 anchors=anchors,
+                expected_by_frame=(
+                    _expected_background_by_frame(
+                        self.family_pool,
+                        [int(frame_index)],
+                    )
+                    if self.use_expected_background
+                    else {}
+                ),
             )
 
         selected = _selector_point(selector_record)
@@ -157,6 +167,19 @@ def _normalize_candidates(candidates: Sequence[Sequence[float]]) -> list[Candida
         height = float(row[4]) if len(row) >= 5 else 24.0
         out.append((float(row[0]), float(row[1]), score, width, height))
     return out
+
+
+def _expected_background_by_frame(
+    family_pool: Any,
+    frames: Sequence[int],
+) -> Mapping[int, Sequence[tuple[int, Sequence[float]]]]:
+    getter = getattr(family_pool, "expected_background_by_frame", None)
+    if not callable(getter):
+        return {}
+    expected = getter(frames)
+    if not isinstance(expected, Mapping):
+        return {}
+    return expected
 
 
 def _limit_candidates(candidates: Sequence[CandidateRow], limit: int) -> list[CandidateRow]:

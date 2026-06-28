@@ -97,6 +97,56 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertFalse(selector.family_pool.enable_raw_mht)
         self.assertFalse(selector.family_pool.enable_phase_mht)
 
+    def test_live_temporal_selector_passes_expected_background_to_shadow(self) -> None:
+        class _FakeFamilyPool:
+            def __init__(self) -> None:
+                self.frames = []
+
+            def update(self, frame_index, **_kwargs):
+                self.frames.append(frame_index)
+                return types.SimpleNamespace(
+                    points={"panel_default_center_mild_state_mild": (10.0, 20.0)},
+                    debug={},
+                )
+
+            def expected_background_by_frame(self, frames):
+                return {
+                    int(frame): [(99, (100.0, 200.0, 0.8, 20.0, 20.0))]
+                    for frame in frames
+                }
+
+        class _FakeShadow:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def reset(self, **_kwargs):
+                pass
+
+            def update(self, frame_index, **kwargs):
+                self.calls.append((frame_index, kwargs))
+                return {
+                    "family": "panel_default_center_mild_state_mild",
+                    "point": [10, 20],
+                    "rescue_point": [10.0, 20.0],
+                    "rescue_allowed": False,
+                }
+
+        shadow = _FakeShadow()
+        selector = LiveTemporalSelector(
+            family_pool=_FakeFamilyPool(),
+            selector_shadow=shadow,
+            use_expected_background=True,
+        )
+
+        selector.update(
+            frame_index=5,
+            candidates=[(10.0, 20.0, 0.9, 20.0, 20.0)],
+            primary_point=(10.0, 20.0),
+        )
+
+        expected = shadow.calls[-1][1]["expected_by_frame"]
+        self.assertEqual(expected[5][0][0], 99)
+
     def test_analyze_uses_temporal_selector_point_for_mouse_target(self) -> None:
         clicked: list[tuple[int, int]] = []
 

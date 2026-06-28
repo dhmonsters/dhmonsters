@@ -110,6 +110,7 @@ class TransparentSelectorShadow:
             self.clip_id = str(clip_id)
         self._frames: deque[int] = deque()
         self._candidate_sets: dict[int, list[Candidate]] = {}
+        self._expected_by_frame: dict[int, list[tuple[int, Sequence[float]]]] = {}
         self._paths: dict[str, dict[int, Point]] = {}
         self._meta: dict[str, dict[str, object]] = {}
         self._updates = 0
@@ -120,6 +121,7 @@ class TransparentSelectorShadow:
         *,
         candidates: Sequence[Sequence[float]],
         anchors: Mapping[str, Sequence[float] | None],
+        expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
     ) -> dict | None:
         frame = int(frame_index)
         if frame not in self._candidate_sets:
@@ -129,6 +131,12 @@ class TransparentSelectorShadow:
         clean_candidates = [candidate for candidate in normalized if candidate is not None]
         clean_candidates.sort(key=lambda candidate: candidate[2], reverse=True)
         self._candidate_sets[frame] = clean_candidates[: self.max_candidates]
+        if expected_by_frame:
+            for key, expected in expected_by_frame.items():
+                self._expected_by_frame[int(key)] = [
+                    (int(item[0]), item[1])
+                    for item in expected
+                ]
 
         for family, value in anchors.items():
             point = _point(value)
@@ -168,6 +176,10 @@ class TransparentSelectorShadow:
                 idx: self._candidate_sets.get(idx, [])
                 for idx in frames
             },
+            expected_by_frame={
+                idx: self._expected_by_frame.get(idx, [])
+                for idx in frames
+            },
         )
         selected_row = selected.get(self.clip_id)
         if not selected_row:
@@ -200,6 +212,7 @@ class TransparentSelectorShadow:
         while len(self._frames) > self.window:
             old = self._frames.popleft()
             self._candidate_sets.pop(old, None)
+            self._expected_by_frame.pop(old, None)
             for path in self._paths.values():
                 path.pop(old, None)
 
