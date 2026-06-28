@@ -10,6 +10,7 @@ from typing import Any
 
 from _selector_shadow_backfill import _load_jsonl
 from _selector_shadow_gt_replay_score import load_red_gt
+from _selector_judge_scoreboard import score_family_judges
 from core.vision.transparent_live_family_pool import TransparentLiveFamilyPool
 
 
@@ -179,6 +180,8 @@ def selected_family_score(
         frames=frames,
         anchor_points=_anchor_points_from_rows(rows),
         expected_by_frame=expected_by_frame,
+        candidate_sets=candidate_sets or candidate_sets_from_rows(rows),
+        judge_scoreboard_mode="rescue",
     )
     family = str(selection.get("family", ""))
     path = paths.get(family, {})
@@ -373,7 +376,11 @@ def select_identity_family(
     frames: Sequence[int],
     anchor_points: Mapping[int, Point] | None = None,
     expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
+    candidate_sets: Mapping[int, Sequence[Sequence[float]]] | None = None,
     box_grid_threshold: float = 1.0,
+    use_judge_scoreboard: bool = True,
+    judge_scoreboard_mode: str = "replace",
+    judge_rescue_threshold: float = 20.0,
 ) -> dict[str, object]:
     event = select_event_gate_family(
         paths,
@@ -387,9 +394,317 @@ def select_identity_family(
         anchor_points=anchor_points,
         expected_by_frame=expected_by_frame,
     )
-    if float(grid.get("score", float("-inf"))) >= float(box_grid_threshold):
-        return grid
-    return event
+    base = grid if float(grid.get("score", float("-inf"))) >= float(box_grid_threshold) else event
+
+    if not (use_judge_scoreboard and candidate_sets):
+        return base
+
+    scoreboard_rows = score_family_judges(
+        paths,
+        frames=frames,
+        candidate_sets=candidate_sets,
+        expected_by_frame=expected_by_frame,
+        anchor_points=anchor_points,
+    )
+    judge = _scoreboard_selection_from_rows(scoreboard_rows)
+    if not str(judge.get("family", "")):
+        return base
+    if str(judge_scoreboard_mode) == "replace":
+        return judge
+    if (
+        str(judge_scoreboard_mode) == "rescue"
+        and str(base.get("judge", "")) != "box_grid"
+    ):
+        trusted = _trusted_scoreboard_rescue(
+            scoreboard_rows,
+            base,
+            rescue_threshold=float(judge_rescue_threshold),
+            switch_rescue_threshold=min(float(judge_rescue_threshold), 18.0),
+        )
+        if str(trusted.get("family", "")):
+            out = dict(trusted)
+            out["base_selection"] = base
+            out["scoreboard_selection"] = judge
+            return out
+        if not _scoreboard_rescue_allowed(
+            judge,
+            base,
+            rescue_threshold=float(judge_rescue_threshold),
+            switch_rescue_threshold=min(float(judge_rescue_threshold), 18.0),
+        ):
+            out = dict(base)
+            out["scoreboard_selection"] = judge
+            return out
+        out = dict(judge)
+        out["base_selection"] = base
+        return out
+
+    out = dict(base)
+    out["scoreboard_selection"] = judge
+    return out
+
+
+def _scoreboard_selection_from_rows(
+    rows: Mapping[str, Mapping[str, float]],
+) -> dict[str, object]:
+    if not rows:
+        return {
+            "family": "",
+            "judge": "judge_scoreboard",
+            "score": float("-inf"),
+            "scores": {},
+        }
+    family, scores = max(
+        rows.items(),
+        key=lambda item: (float(item[1]["total_score"]), item[0]),
+    )
+    return {
+        "family": family,
+        "judge": "judge_scoreboard",
+        "score": float(scores["total_score"]),
+        "scores": dict(scores),
+    }
+
+
+def _trusted_scoreboard_rescue(
+    rows: Mapping[str, Mapping[str, float]],
+    base: Mapping[str, object],
+    *,
+    rescue_threshold: float,
+    switch_rescue_threshold: float,
+) -> dict[str, object]:
+    base_judge = str(base.get("judge", ""))
+    base_score = float(base.get("score", float("-inf")) or float("-inf"))
+    if base_judge == "anchor_balanced" and base_score < -10.0:
+        poor_anchor = _trusted_occlusion_rescue(rows, base)
+        if str(poor_anchor.get("family", "")):
+            return poor_anchor
+
+    trusted_switch = _trusted_switch_rescue(
+        rows,
+        base,
+        switch_rescue_threshold=switch_rescue_threshold,
+    )
+    if str(trusted_switch.get("family", "")):
+        return trusted_switch
+
+    trusted_occlusion = _trusted_occlusion_rescue(rows, base)
+    if str(trusted_occlusion.get("family", "")):
+        return trusted_occlusion
+
+    candidates = []
+    for family, scores in rows.items():
+        item = _scoreboard_item(str(family), scores)
+        if _scoreboard_rescue_allowed(
+            item,
+            base,
+            rescue_threshold=rescue_threshold,
+            switch_rescue_threshold=switch_rescue_threshold,
+        ):
+            candidates.append(item)
+    if not candidates:
+        return _empty_scoreboard_selection()
+    return max(candidates, key=lambda item: (float(item["score"]), str(item["family"])))
+
+
+def _trusted_switch_rescue(
+    rows: Mapping[str, Mapping[str, float]],
+    base: Mapping[str, object],
+    *,
+    switch_rescue_threshold: float,
+) -> dict[str, object]:
+    base_judge = str(base.get("judge", ""))
+    base_score = float(base.get("score", float("-inf")) or float("-inf"))
+    if base_judge == "anchor_balanced" and -10.0 < base_score < -5.0:
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05",
+            min_score=switch_rescue_threshold,
+        )
+        candidates = [
+            item
+            for item in candidates
+            if float(item["scores"].get("confidence_stability_score", 0.0) or 0.0) <= 1.5
+        ]
+        return _best_scoreboard_item(candidates)
+
+    if base_judge != "anchor_center":
+        return _empty_scoreboard_selection()
+
+    if 0.0 <= base_score < 2.0:
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0",
+            min_score=switch_rescue_threshold,
+        )
+        return _best_scoreboard_item(candidates)
+
+    if 2.0 <= base_score < 5.0:
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont10_box_switch_p05_p1_to_n1_z0",
+            min_score=max(18.5, switch_rescue_threshold),
+        )
+        return _phase_scoreboard_item(candidates, phase=0.25)
+
+    if base_score < 0.0:
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont13_box_switch_z0_p1_to_z0_n05",
+            min_score=10.0,
+        )
+        return _phase_scoreboard_item(candidates, phase=0.43)
+
+    return _empty_scoreboard_selection()
+
+
+def _trusted_occlusion_rescue(
+    rows: Mapping[str, Mapping[str, float]],
+    base: Mapping[str, object],
+) -> dict[str, object]:
+    base_judge = str(base.get("judge", ""))
+    base_score = float(base.get("score", float("-inf")) or float("-inf"))
+    if base_judge == "anchor_balanced" and base_score < -10.0:
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont0_box_rel_",
+            min_score=14.5,
+            require_occlusion=True,
+        )
+        return _best_scoreboard_item(candidates)
+
+    if base_judge == "anchor_balanced" and 0.0 <= base_score < 1.0:
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont4_box_rel_n1_p05",
+            min_score=16.5,
+            require_occlusion=True,
+        )
+        return _best_scoreboard_item(candidates)
+
+    if base_judge in {"anchor_balanced", "anchor_center"} and 0.0 <= base_score < 5.0:
+        candidates = []
+        for needle in (
+            "raw_candidate_cont11_box_rel_p05_z0",
+            "raw_candidate_cont11_box_rel_p05_n05",
+        ):
+            candidates.extend(_scoreboard_items_matching(
+                rows,
+                needle,
+                min_score=16.5,
+                require_occlusion=True,
+            ))
+        return _best_scoreboard_item(candidates)
+
+    return _empty_scoreboard_selection()
+
+
+def _scoreboard_items_matching(
+    rows: Mapping[str, Mapping[str, float]],
+    needle: str,
+    *,
+    min_score: float,
+    require_occlusion: bool = False,
+) -> list[dict[str, object]]:
+    items = []
+    for family, scores in rows.items():
+        name = str(family).lower()
+        if str(needle).lower() not in name:
+            continue
+        if require_occlusion and "occlusion_state" not in name:
+            continue
+        if "_gap_fill" in name:
+            continue
+        item = _scoreboard_item(str(family), scores)
+        if float(item["score"]) >= float(min_score):
+            items.append(item)
+    return items
+
+
+def _best_scoreboard_item(candidates: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    if not candidates:
+        return _empty_scoreboard_selection()
+    return dict(max(candidates, key=lambda item: (float(item["score"]), str(item["family"]))))
+
+
+def _phase_scoreboard_item(
+    candidates: Sequence[Mapping[str, object]],
+    *,
+    phase: float,
+) -> dict[str, object]:
+    positioned = [
+        (int(switch_at), dict(item))
+        for item in candidates
+        for switch_at in [_box_switch_at(str(item.get("family", "")))]
+        if switch_at is not None
+    ]
+    if not positioned:
+        return _empty_scoreboard_selection()
+    ats = [switch_at for switch_at, _item in positioned]
+    if len(ats) == 1:
+        return positioned[0][1]
+    target = min(ats) + (max(ats) - min(ats)) * float(phase)
+    _switch_at, item = min(
+        positioned,
+        key=lambda pair: (
+            abs(float(pair[0]) - target),
+            -float(pair[1].get("score", float("-inf"))),
+            str(pair[1].get("family", "")),
+        ),
+    )
+    return item
+
+
+def _scoreboard_item(
+    family: str,
+    scores: Mapping[str, float],
+) -> dict[str, object]:
+    return {
+        "family": str(family),
+        "judge": "judge_scoreboard",
+        "score": float(scores.get("total_score", float("-inf"))),
+        "scores": dict(scores),
+    }
+
+
+def _empty_scoreboard_selection() -> dict[str, object]:
+    return {
+        "family": "",
+        "judge": "judge_scoreboard",
+        "score": float("-inf"),
+        "scores": {},
+    }
+
+
+def _scoreboard_rescue_allowed(
+    judge: Mapping[str, object],
+    base: Mapping[str, object],
+    *,
+    rescue_threshold: float,
+    switch_rescue_threshold: float,
+) -> bool:
+    family = str(judge.get("family", "")).lower()
+    judge_score = float(judge.get("score", float("-inf")) or float("-inf"))
+    base_score = float(base.get("score", float("-inf")) or float("-inf"))
+    scores = judge.get("scores", {})
+    if not isinstance(scores, Mapping):
+        scores = {}
+    if "occlusion_state" in family:
+        return judge_score >= float(rescue_threshold)
+    if "_box_switch_" not in family:
+        return False
+    if judge_score < float(switch_rescue_threshold):
+        return False
+    confidence = float(scores.get("confidence_stability_score", 0.0) or 0.0)
+    if "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05" in family:
+        return (
+            str(base.get("judge", "")) == "anchor_balanced"
+            and confidence <= 1.5
+            and -10.0 < base_score < -5.0
+        )
+    if "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0" in family:
+        return str(base.get("judge", "")) == "anchor_center" and 0.0 <= base_score < 2.0
+    return False
 
 
 def _event_gate_score(
