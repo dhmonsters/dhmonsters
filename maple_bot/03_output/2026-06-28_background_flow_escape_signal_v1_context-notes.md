@@ -18,6 +18,20 @@ background-flow escape signal은 release 순간에 두 가지를 비교한다.
 - 배경 예상 위치에서 멀어지는 가지는 타겟 후보로 본다.
 - 한 프레임으로 확정하지 않고, 분리 후 몇 프레임 동안 이탈이 유지되는지 누적한다.
 
+## 구현 결과
+
+`background_flow_escape_frame_score`는 후보 박스 중심 기준으로 배경 위치에 남는 가지와 이탈하는 가지를 나눈다. 이 방식은 합성 테스트에서는 맞지만 실제 GT에서는 escape-only 0/16이었다.
+
+`background_flow_escape_point_score`는 path가 실제로 찍은 박스 내부점을 기준으로 점수화한다. 커진 박스 안에서 배경 예상 위치에서 떨어진 내부점은 escape로 볼 수 있다. 이 방식은 합성 테스트에서는 맞았지만 실제 GT에서는 escape-only 1/16이었다.
+
+합계, 평균, 비율 기준 모두 1/16이었고, 기존 selected-family 6/16을 넘지 못했다. 따라서 이 신호는 selector에 바로 통합하지 않는다.
+
+## 해석
+
+아이디어 자체는 맞다. 하지만 "배경 흐름에서 이탈했다"만 보면 오답 가지도 많이 뜬다. 지금 필요한 것은 escape 여부가 아니라 "처음 타겟 신분을 가진 가지가 escape했는가"다.
+
+다음 단계에서는 source identity, release event type, duplicate background ID, pre-merge branch, post-release continuity를 함께 묶어야 한다.
+
 ## 왜 기존 방향과 이어지는가
 
 강체 방식과 phase catalog는 배경의 큰 시계방향 흐름을 예측하기 위한 기반이었다. box grid는 겹침 박스 안에서 타겟 중심 후보를 복원하기 위한 기반이었다. lifecycle identity anchor는 겹침 후 새로 생긴 후보가 원래 어느 후보에서 왔는지 잃지 않게 하기 위한 기반이었다.

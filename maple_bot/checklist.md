@@ -5,9 +5,10 @@
 - [x] 핵심 목표 문장 고정.
 - [x] 겹침 중에는 판단을 보류하고 분리 순간에 신분을 복원한다는 원칙 고정.
 - [x] 배경 예상 시계방향 위치에 남는 가지와 이탈하는 가지를 분리하는 방향으로 다음 신호 정의.
-- [ ] release event feature 테스트 작성.
-- [ ] background-flow escape 점수 구현.
-- [ ] GT 16개 selected-family 재채점.
+- [x] release event feature 테스트 작성.
+- [x] background-flow escape 점수 구현.
+- [x] GT 16개 selected-family 재채점.
+- [ ] source identity와 escape 신호를 결합하는 lifecycle v2 설계.
 
 ## GT 채점
 
