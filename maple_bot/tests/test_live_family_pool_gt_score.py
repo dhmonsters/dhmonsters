@@ -8,13 +8,19 @@ from _live_family_pool_gt_score import (
     _occlusion_signal_adjustment,
     _switch_signal_penalty,
     _box_rel_consistency_bonus,
+    _box_grid_group_key,
+    _box_grid_rel_prior,
+    _box_grid_cont_prior,
     best_family_score,
+    box_grid_family_score,
     box_switch_variant_paths,
     build_family_paths,
     event_gate_shortlist_paths,
     gap_fill_variant_paths,
     occlusion_variant_paths,
     select_event_gate_family,
+    select_box_grid_family,
+    select_identity_family,
     selected_family_score,
     score_clip,
     score_all,
@@ -376,6 +382,111 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
                 [0, 1, 2],
             ),
         )
+
+    def test_box_grid_group_key_groups_same_raw_candidate_offsets(self) -> None:
+        self.assertEqual(
+            _box_grid_group_key("raw_candidate_cont4_box_rel_p05_z0_state_mild"),
+            _box_grid_group_key("raw_candidate_cont4_box_rel_p1_z0_state_mild"),
+        )
+        self.assertNotEqual(
+            _box_grid_group_key("raw_candidate_cont4_box_rel_p05_z0_state_mild"),
+            _box_grid_group_key("raw_candidate_cont5_box_rel_p05_z0_state_mild"),
+        )
+
+    def test_select_box_grid_family_prefers_anchor_continuity_and_background_avoidance(self) -> None:
+        paths = {
+            "raw_candidate_cont4_box_rel_p05_z0_state_mild": {
+                0: (0.0, 0.0),
+                1: (4.0, 0.0),
+                2: (8.0, 0.0),
+            },
+            "raw_candidate_cont4_box_rel_p1_z0_state_mild": {
+                0: (0.0, 0.0),
+                1: (50.0, 0.0),
+                2: (100.0, 0.0),
+            },
+        }
+
+        selected = select_box_grid_family(
+            paths,
+            frames=[0, 1, 2],
+            anchor_points={0: (0.0, 0.0), 1: (4.0, 0.0)},
+            expected_by_frame={2: [(1, (100.0, 0.0, 12.0, 12.0))]},
+        )
+
+        self.assertEqual(selected["family"], "raw_candidate_cont4_box_rel_p05_z0_state_mild")
+        self.assertEqual(selected["judge"], "box_grid")
+
+    def test_box_grid_prior_prefers_verified_offsets_and_continuity_bands(self) -> None:
+        self.assertGreater(_box_grid_rel_prior("p05_z0"), _box_grid_rel_prior("z0_p1"))
+        self.assertGreater(_box_grid_cont_prior(10), _box_grid_cont_prior(7))
+
+    def test_box_grid_family_score_scores_grid_pick_against_gt(self) -> None:
+        paths = {
+            "raw_candidate_cont4_box_rel_p05_z0_state_mild": {0: (0.0, 0.0), 1: (4.0, 0.0)},
+            "raw_candidate_cont4_box_rel_p1_z0_state_mild": {0: (50.0, 0.0), 1: (60.0, 0.0)},
+        }
+
+        score = box_grid_family_score(
+            [{"i": 0, "track": [0.0, 0.0]}, {"i": 1, "track": [4.0, 0.0]}],
+            {0: (0.0, 0.0), 1: (4.0, 0.0)},
+            paths=paths,
+            success_px=1.0,
+        )
+
+        self.assertEqual(
+            score["box_grid_family"]["family"],
+            "raw_candidate_cont4_box_rel_p05_z0_state_mild",
+        )
+        self.assertTrue(score["box_grid_family"]["success"])
+
+    def test_select_identity_family_uses_confident_box_grid(self) -> None:
+        paths = {
+            "raw_candidate_cont12_center_mild_state_mild": {
+                0: (50.0, 0.0),
+                1: (60.0, 0.0),
+            },
+            "raw_candidate_cont10_box_rel_p05_z0_state_mild": {
+                0: (0.0, 0.0),
+                1: (4.0, 0.0),
+            },
+        }
+
+        selected = select_identity_family(
+            paths,
+            frames=[0, 1],
+            anchor_points={0: (50.0, 0.0)},
+            box_grid_threshold=1.0,
+        )
+
+        self.assertEqual(selected["family"], "raw_candidate_cont10_box_rel_p05_z0_state_mild")
+        self.assertEqual(selected["judge"], "box_grid")
+
+    def test_select_identity_family_falls_back_when_box_grid_is_weak(self) -> None:
+        paths = {
+            "raw_candidate_cont12_center_mild_state_mild": {
+                0: (0.0, 0.0),
+                1: (4.0, 0.0),
+            },
+            "raw_candidate_cont10_box_rel_p05_z0_state_mild": {
+                0: (100.0, 0.0),
+                1: (104.0, 0.0),
+            },
+        }
+
+        selected = select_identity_family(
+            paths,
+            frames=[0, 1],
+            anchor_points={0: (0.0, 0.0), 1: (4.0, 0.0)},
+            expected_by_frame={
+                0: [(1, (100.0, 0.0, 20.0, 20.0))],
+                1: [(1, (104.0, 0.0, 20.0, 20.0))],
+            },
+            box_grid_threshold=1.0,
+        )
+
+        self.assertEqual(selected["family"], "raw_candidate_cont12_center_mild_state_mild")
+        self.assertEqual(selected["judge"], "anchor_center")
 
     def test_selected_family_score_scores_selector_pick_separately_from_upper(self) -> None:
         class _FakePool:

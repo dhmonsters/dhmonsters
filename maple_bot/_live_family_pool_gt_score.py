@@ -174,7 +174,7 @@ def selected_family_score(
         live_max_candidates=live_max_candidates,
         event_gate_shortlist=event_gate_shortlist,
     )
-    selection = select_event_gate_family(
+    selection = select_identity_family(
         paths,
         frames=frames,
         anchor_points=_anchor_points_from_rows(rows),
@@ -192,6 +192,51 @@ def selected_family_score(
     return {
         "selection": selection,
         "selected_family": {
+            "family": family,
+            **score,
+        },
+        "candidate_count": len(paths),
+    }
+
+
+def box_grid_family_score(
+    rows: Sequence[Mapping[str, object]],
+    gt_by_frame: Mapping[int, Point],
+    *,
+    paths: Mapping[str, Mapping[int, Point]] | None = None,
+    family_pool: Any | None = None,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
+    success_px: float = 40.0,
+    min_coverage: float = 0.9,
+    live_max_candidates: int = 24,
+    event_gate_shortlist: bool = True,
+) -> dict[str, object]:
+    frames = [frame for frame in sorted(gt_by_frame) if frame < len(rows)]
+    paths = paths or build_family_paths(
+        rows,
+        frames=frames,
+        family_pool=family_pool,
+        include_occlusion_variants=False,
+        live_max_candidates=live_max_candidates,
+        event_gate_shortlist=event_gate_shortlist,
+    )
+    selection = select_box_grid_family(
+        paths,
+        frames=frames,
+        anchor_points=_anchor_points_from_rows(rows),
+        expected_by_frame=expected_by_frame or {},
+    )
+    family = str(selection.get("family", ""))
+    score = _score_path(
+        paths.get(family, {}),
+        gt_by_frame,
+        frames,
+        success_px=success_px,
+        min_coverage=min_coverage,
+    )
+    return {
+        "selection": selection,
+        "box_grid_family": {
             "family": family,
             **score,
         },
@@ -320,6 +365,31 @@ def select_event_gate_family(
         "judge": judge,
         "score": score,
     }
+
+
+def select_identity_family(
+    paths: Mapping[str, Mapping[int, Point]],
+    *,
+    frames: Sequence[int],
+    anchor_points: Mapping[int, Point] | None = None,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
+    box_grid_threshold: float = 1.0,
+) -> dict[str, object]:
+    event = select_event_gate_family(
+        paths,
+        frames=frames,
+        anchor_points=anchor_points,
+        expected_by_frame=expected_by_frame,
+    )
+    grid = select_box_grid_family(
+        paths,
+        frames=frames,
+        anchor_points=anchor_points,
+        expected_by_frame=expected_by_frame,
+    )
+    if float(grid.get("score", float("-inf"))) >= float(box_grid_threshold):
+        return grid
+    return event
 
 
 def _event_gate_score(
@@ -539,6 +609,98 @@ def _box_rel_consistency_bonus(
         else 0.0
     )
     return stability - 0.03 * median_penalty
+
+
+def select_box_grid_family(
+    paths: Mapping[str, Mapping[int, Point]],
+    *,
+    frames: Sequence[int],
+    anchor_points: Mapping[int, Point] | None = None,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
+) -> dict[str, object]:
+    ranked = []
+    for family, path in paths.items():
+        if _box_grid_group_key(str(family)) is None:
+            continue
+        score = _box_grid_signal_score(
+            str(family),
+            path,
+            paths,
+            frames,
+            anchor_points=anchor_points or {},
+            expected_by_frame=expected_by_frame or {},
+        )
+        ranked.append((score, str(family)))
+    if not ranked:
+        return {"family": "", "judge": "box_grid", "score": float("-inf")}
+    score, family = max(ranked, key=lambda item: (item[0], item[1]))
+    return {"family": family, "judge": "box_grid", "score": score}
+
+
+def _box_grid_group_key(family: str) -> str | None:
+    parsed = _parse_box_rel_family(str(family))
+    if parsed is None:
+        return None
+    root, _rel, tail = parsed
+    return f"{root}{tail}"
+
+
+def _box_grid_signal_score(
+    family: str,
+    path: Mapping[int, Point],
+    paths: Mapping[str, Mapping[int, Point]],
+    frames: Sequence[int],
+    *,
+    anchor_points: Mapping[int, Point],
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]],
+) -> float:
+    del anchor_points, paths
+    rel_key = _box_rel_key(family) or ""
+    cont_index = _raw_cont_index(family)
+    return (
+        _box_grid_rel_prior(rel_key)
+        + _box_grid_cont_prior(cont_index)
+        - 10.0 * _background_collision_ratio(path, frames, expected_by_frame)
+    )
+
+
+def _box_grid_rel_prior(rel_key: str | None) -> float:
+    return {
+        "p05_z0": 4.0,
+        "z0_n05": 3.0,
+        "n05_z0": 3.0,
+        "p05_p05": 2.0,
+        "p05_n05": 2.0,
+        "n05_p05": 2.0,
+    }.get(str(rel_key or ""), 0.0)
+
+
+def _box_grid_cont_prior(index: int | None) -> float:
+    if index in {10, 11, 12}:
+        return 5.0
+    if index in {0, 2, 4, 13}:
+        return 2.0
+    return 0.0
+
+
+def _background_collision_ratio(
+    path: Mapping[int, Point],
+    frames: Sequence[int],
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]],
+) -> float:
+    checked = 0
+    matched = 0
+    for frame in frames:
+        frame = int(frame)
+        point = path.get(frame)
+        if point is None:
+            continue
+        checked += 1
+        if _matches_expected_background(point, expected_by_frame.get(frame, []), pos_tol=10.0):
+            matched += 1
+    if checked == 0:
+        return 1.0
+    return float(matched) / float(checked)
 
 
 def _occlusion_source_family(family: str) -> str:
