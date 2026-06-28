@@ -21,3 +21,6 @@
 - 합계, 평균, 비율 기준 모두 1/16으로 동일했다.
 - 기존 selector와 단순 threshold hybrid를 해도 현재 6/16을 넘지 못했다.
 - 따라서 selector에는 아직 통합하지 않는다.
+- source identity escape 단독은 2/16이었다.
+- source identity escape threshold hybrid도 최대 6/16으로 현재 기준을 넘지 못했다.
+- 다음은 event type, duplicate background ID, family type, box 내부 offset 방향을 조건부 feature로 묶는 단계다.

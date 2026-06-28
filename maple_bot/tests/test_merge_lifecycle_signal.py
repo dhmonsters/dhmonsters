@@ -6,7 +6,9 @@ from _merge_lifecycle_signal import (
     background_flow_escape_point_score,
     release_event_frames,
     score_paths_by_background_flow_escape,
+    score_paths_by_identity_escape,
     score_paths_by_merge_lifecycle,
+    score_paths_by_source_identity_escape,
 )
 
 
@@ -217,6 +219,135 @@ class MergeLifecycleSignalTests(unittest.TestCase):
         )
         self.assertGreater(rows["target_escape"]["background_flow_escape_ratio"], 0.9)
         self.assertLess(rows["background_flow"]["background_flow_escape_ratio"], 0.1)
+
+    def test_score_paths_by_identity_escape_prefers_pre_merge_continuity(self):
+        frames = [0, 1, 2, 3, 4, 5]
+        paths = {
+            "identity_escape": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+                3: (30.0, 0.0),
+                4: (40.0, 0.0),
+                5: (50.0, 0.0),
+            },
+            "late_escape": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+                3: (95.0, 0.0),
+                4: (105.0, 0.0),
+                5: (115.0, 0.0),
+            },
+            "background_flow": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+                3: (60.0, 0.0),
+                4: (70.0, 0.0),
+                5: (80.0, 0.0),
+            },
+        }
+        candidate_sets = {
+            3: [
+                (30.0, 0.0, 12.0, 12.0, 0.8),
+                (60.0, 0.0, 12.0, 12.0, 0.9),
+                (95.0, 0.0, 12.0, 12.0, 0.7),
+            ],
+            4: [
+                (40.0, 0.0, 12.0, 12.0, 0.8),
+                (70.0, 0.0, 12.0, 12.0, 0.9),
+                (105.0, 0.0, 12.0, 12.0, 0.7),
+            ],
+            5: [
+                (50.0, 0.0, 12.0, 12.0, 0.8),
+                (80.0, 0.0, 12.0, 12.0, 0.9),
+                (115.0, 0.0, 12.0, 12.0, 0.7),
+            ],
+        }
+        expected_by_frame = {
+            3: [(7, (60.0, 0.0, 12.0, 12.0, 0.9))],
+            4: [(7, (70.0, 0.0, 12.0, 12.0, 0.9))],
+            5: [(7, (80.0, 0.0, 12.0, 12.0, 0.9))],
+        }
+
+        rows = score_paths_by_identity_escape(
+            paths,
+            candidate_sets,
+            expected_by_frame,
+            frames,
+            sibling_radius=80.0,
+            pos_tol=18.0,
+            post_window=2,
+        )
+
+        self.assertGreater(
+            rows["identity_escape"]["identity_escape_score"],
+            rows["late_escape"]["identity_escape_score"],
+        )
+        self.assertGreater(
+            rows["identity_escape"]["identity_escape_score"],
+            rows["background_flow"]["identity_escape_score"],
+        )
+        self.assertGreater(rows["identity_escape"]["identity_escape_continuity"], 0.9)
+        self.assertLess(rows["late_escape"]["identity_escape_continuity"], 0.2)
+
+    def test_source_identity_escape_uses_original_family_history(self):
+        frames = [0, 1, 2, 3, 4, 5]
+        paths = {
+            "raw_candidate_cont0_box_rel_p05_z0_state_mild": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+            },
+            "raw_candidate_cont0_box_rel_p05_z0_state_mild_occlusion_state": {
+                3: (30.0, 0.0),
+                4: (40.0, 0.0),
+                5: (50.0, 0.0),
+            },
+            "raw_candidate_cont0_box_rel_p1_z0_state_mild": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+            },
+            "raw_candidate_cont0_box_rel_p1_z0_state_mild_occlusion_state": {
+                3: (95.0, 0.0),
+                4: (105.0, 0.0),
+                5: (115.0, 0.0),
+            },
+        }
+        candidate_sets = {
+            3: [
+                (30.0, 0.0, 12.0, 12.0, 0.8),
+                (60.0, 0.0, 12.0, 12.0, 0.9),
+                (95.0, 0.0, 12.0, 12.0, 0.7),
+            ],
+            4: [
+                (40.0, 0.0, 12.0, 12.0, 0.8),
+                (70.0, 0.0, 12.0, 12.0, 0.9),
+                (105.0, 0.0, 12.0, 12.0, 0.7),
+            ],
+        }
+        expected_by_frame = {
+            3: [(7, (60.0, 0.0, 12.0, 12.0, 0.9))],
+            4: [(7, (70.0, 0.0, 12.0, 12.0, 0.9))],
+        }
+
+        rows = score_paths_by_source_identity_escape(
+            paths,
+            candidate_sets,
+            expected_by_frame,
+            frames,
+            sibling_radius=80.0,
+            pos_tol=18.0,
+            post_window=1,
+        )
+
+        good = rows["raw_candidate_cont0_box_rel_p05_z0_state_mild_occlusion_state"]
+        late = rows["raw_candidate_cont0_box_rel_p1_z0_state_mild_occlusion_state"]
+        self.assertGreater(good["source_identity_escape_score"], late["source_identity_escape_score"])
+        self.assertGreater(good["source_identity_escape_source_continuity"], 0.9)
+        self.assertLess(late["source_identity_escape_source_continuity"], 0.2)
 
 
 if __name__ == "__main__":

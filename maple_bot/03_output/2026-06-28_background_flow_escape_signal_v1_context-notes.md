@@ -32,6 +32,16 @@ background-flow escape signal은 release 순간에 두 가지를 비교한다.
 
 다음 단계에서는 source identity, release event type, duplicate background ID, pre-merge branch, post-release continuity를 함께 묶어야 한다.
 
+## source identity escape 결과
+
+`score_paths_by_identity_escape`는 escape 점수에 겹침 전 예측 연속성과 분리 후 연속성을 더했다. 합성 테스트에서는 오답 late escape를 낮출 수 있었지만, 실제 GT에서는 단독 0/16이었다.
+
+`score_paths_by_source_identity_escape`는 occlusion/switch variant의 원본 source family 경로를 복원하고, 그 source의 과거 경로에서 분리 지점을 예측했다. 합성 테스트에서는 원본 family history와 이어지는 가지를 더 높게 골랐다.
+
+실제 GT 16개에서는 source identity escape 단독이 2/16이었다. 기존 selector와 threshold hybrid를 해도 최대 6/16으로 현재 기준을 넘지 못했다.
+
+결론은 source path 예측만으로도 부족하다는 것이다. 오답 가지도 source history와 비슷하게 이어지는 경우가 있다. 다음 단계는 source identity를 단독 점수로 쓰지 말고, release event type, duplicate background ID, family type, box 내부 offset 방향과 함께 조건부 feature로 묶어야 한다.
+
 ## 왜 기존 방향과 이어지는가
 
 강체 방식과 phase catalog는 배경의 큰 시계방향 흐름을 예측하기 위한 기반이었다. box grid는 겹침 박스 안에서 타겟 중심 후보를 복원하기 위한 기반이었다. lifecycle identity anchor는 겹침 후 새로 생긴 후보가 원래 어느 후보에서 왔는지 잃지 않게 하기 위한 기반이었다.

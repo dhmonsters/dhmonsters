@@ -8,7 +8,10 @@
 - [x] release event feature 테스트 작성.
 - [x] background-flow escape 점수 구현.
 - [x] GT 16개 selected-family 재채점.
-- [ ] source identity와 escape 신호를 결합하는 lifecycle v2 설계.
+- [x] source identity와 escape 신호를 결합하는 lifecycle v2 설계.
+- [x] source-family history 기반 identity escape 테스트 작성.
+- [x] source-family history 기반 identity escape GT 16개 채점.
+- [ ] event type, duplicate background ID, family type, box 내부 offset 방향을 조건부 feature로 결합.
 
 ## GT 채점
 
