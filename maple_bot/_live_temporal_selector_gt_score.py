@@ -23,6 +23,7 @@ def replay_live_temporal_rows(
     selector: Any | None = None,
     frame_shape: Sequence[int] | None = None,
     live_max_candidates: int = 24,
+    collect_decisions: bool = True,
 ) -> tuple[dict[int, Point], dict[int, dict[str, object]]]:
     live_selector = selector or LiveTemporalSelector(live_max_candidates=live_max_candidates)
     path: dict[int, Point] = {}
@@ -45,7 +46,12 @@ def replay_live_temporal_rows(
         )
         if decision.point is not None:
             path[index] = decision.point
-        decisions[index] = _decision_payload(decision)
+        if collect_decisions:
+            decisions[index] = _decision_payload(decision)
+        else:
+            decisions[index] = {
+                "selector_record": decision.selector_record is not None,
+            }
     return path, decisions
 
 
@@ -58,12 +64,14 @@ def score_rows_against_gt(
     success_px: float = 40.0,
     min_coverage: float = 0.9,
     live_max_candidates: int = 24,
+    collect_decisions: bool = True,
 ) -> dict[str, object]:
     path, decisions = replay_live_temporal_rows(
         rows,
         selector=selector,
         frame_shape=frame_shape,
         live_max_candidates=live_max_candidates,
+        collect_decisions=collect_decisions,
     )
     frames = [frame for frame in sorted(gt_by_frame) if frame < len(rows)]
     return {
@@ -78,7 +86,7 @@ def score_rows_against_gt(
             min_coverage=min_coverage,
         ),
         "selector_records": sum(1 for item in decisions.values() if item.get("selector_record")),
-        "decisions": decisions,
+        "decisions": decisions if collect_decisions else {},
     }
 
 
@@ -90,6 +98,7 @@ def score_gt_clip(
     success_px: float = 40.0,
     min_coverage: float = 0.9,
     live_max_candidates: int = 24,
+    collect_decisions: bool = True,
 ) -> dict[str, object]:
     rows = _load_jsonl(root / "_record_debug" / f"{name}.jsonl")
     result = score_rows_against_gt(
@@ -99,6 +108,7 @@ def score_gt_clip(
         success_px=success_px,
         min_coverage=min_coverage,
         live_max_candidates=live_max_candidates,
+        collect_decisions=collect_decisions,
     )
     return {"name": name, **result}
 
@@ -110,6 +120,7 @@ def score_all_gt_clips(
     success_px: float = 40.0,
     min_coverage: float = 0.9,
     live_max_candidates: int = 24,
+    collect_decisions: bool = True,
 ) -> list[dict[str, object]]:
     if names is None:
         names = [
@@ -124,6 +135,7 @@ def score_all_gt_clips(
             success_px=success_px,
             min_coverage=min_coverage,
             live_max_candidates=live_max_candidates,
+            collect_decisions=collect_decisions,
         )
         for name in names
     ]
@@ -136,6 +148,25 @@ def summarize(results: Sequence[Mapping[str, object]]) -> dict[str, object]:
         "total": len(results),
         "mean": sum(float(item.get("mean", 0.0) or 0.0) for item in selected) / max(1, len(selected)),
     }
+
+
+def compact_results(results: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    compact = []
+    for result in results:
+        selected = result.get("selected", {})
+        selected_map = selected if isinstance(selected, Mapping) else {}
+        compact.append({
+            "name": result.get("name", ""),
+            "selected": {
+                "success": bool(selected_map.get("success", False)),
+                "mean": selected_map.get("mean"),
+                "max": selected_map.get("max"),
+                "coverage": selected_map.get("coverage"),
+                "n": selected_map.get("n"),
+            },
+            "selector_records": result.get("selector_records", 0),
+        })
+    return compact
 
 
 def _decision_payload(decision: LiveTemporalDecision) -> dict[str, object]:
@@ -219,14 +250,20 @@ def main() -> int:
     parser.add_argument("--min-coverage", type=float, default=0.9)
     parser.add_argument("--live-max-candidates", type=int, default=24)
     parser.add_argument("--names", nargs="*")
+    parser.add_argument("--summary-only", action="store_true")
     args = parser.parse_args()
     results = score_all_gt_clips(
         names=args.names,
         success_px=args.success_px,
         min_coverage=args.min_coverage,
         live_max_candidates=args.live_max_candidates,
+        collect_decisions=not args.summary_only,
     )
-    print(json.dumps({"summary": summarize(results), "results": results}, ensure_ascii=False, indent=2))
+    payload = {
+        "summary": summarize(results),
+        "results": compact_results(results) if args.summary_only else results,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 

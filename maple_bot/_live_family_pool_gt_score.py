@@ -63,12 +63,17 @@ def best_family_score(
     rows: Sequence[Mapping[str, object]],
     gt_by_frame: Mapping[int, Point],
     *,
+    family_pool: Any | None = None,
     success_px: float = 40.0,
     min_coverage: float = 0.9,
     live_max_candidates: int = 24,
 ) -> dict[str, object]:
     frames = [frame for frame in sorted(gt_by_frame) if frame < len(rows)]
-    paths = replay_live_family_rows(rows, live_max_candidates=live_max_candidates)
+    paths = replay_live_family_rows(
+        rows,
+        family_pool=family_pool,
+        live_max_candidates=live_max_candidates,
+    )
     best: dict[str, object] | None = None
     for family, path in paths.items():
         score = _score_path(
@@ -104,6 +109,7 @@ def score_clip(
     min_coverage: float = 0.9,
     min_gt_frame: int = 50,
     live_max_candidates: int = 24,
+    family_pool: Any | None = None,
 ) -> dict[str, object]:
     rows = _load_jsonl(root / "_record_debug" / f"{name}.jsonl")
     gt = load_red_gt(name, root=root, min_frame=min_gt_frame)
@@ -117,6 +123,7 @@ def score_clip(
             success_px=success_px,
             min_coverage=min_coverage,
             live_max_candidates=live_max_candidates,
+            family_pool=family_pool,
         ),
     }
 
@@ -128,6 +135,7 @@ def score_all(
     success_px: float = 40.0,
     min_coverage: float = 0.9,
     live_max_candidates: int = 24,
+    fast_mode: bool = False,
 ) -> list[dict[str, object]]:
     if names is None:
         names = [
@@ -135,16 +143,35 @@ def score_all(
             for path in sorted((root / "_gt_frames").iterdir())
             if path.is_dir()
         ]
-    return [
-        score_clip(
+    results = []
+    for name in names:
+        pool = _fast_family_pool() if fast_mode else None
+        results.append(score_clip(
             str(name),
             root=root,
             success_px=success_px,
             min_coverage=min_coverage,
             live_max_candidates=live_max_candidates,
-        )
-        for name in names
-    ]
+            family_pool=pool,
+        ))
+    return results
+
+
+def _fast_family_pool() -> TransparentLiveFamilyPool:
+    return TransparentLiveFamilyPool(
+        window=16,
+        min_frames=6,
+        enable_phase_catalog=False,
+        enable_bg_mht=False,
+        enable_phase_mht=False,
+        enable_raw_mht=False,
+        enable_guarded_decal_identity=False,
+        raw_rank_families=8,
+        raw_continuity_families=8,
+        raw_beam_families=4,
+        raw_beam_spawn=4,
+        raw_max_candidates_per_frame=16,
+    )
 
 
 def summarize(results: Sequence[Mapping[str, object]]) -> dict[str, object]:
@@ -242,6 +269,7 @@ def main() -> int:
     parser.add_argument("--success-px", type=float, default=40.0)
     parser.add_argument("--min-coverage", type=float, default=0.9)
     parser.add_argument("--live-max-candidates", type=int, default=24)
+    parser.add_argument("--fast-mode", action="store_true")
     parser.add_argument("--names", nargs="*")
     args = parser.parse_args()
     results = score_all(
@@ -249,6 +277,7 @@ def main() -> int:
         success_px=args.success_px,
         min_coverage=args.min_coverage,
         live_max_candidates=args.live_max_candidates,
+        fast_mode=args.fast_mode,
     )
     print(json.dumps({"summary": summarize(results), "results": results}, ensure_ascii=False, indent=2))
     return 0
