@@ -11,6 +11,7 @@ from _live_family_pool_gt_score import (
     _box_grid_group_key,
     _box_grid_rel_prior,
     _box_grid_cont_prior,
+    _identity_anchor_mean_distance,
     best_family_score,
     box_grid_family_score,
     box_switch_variant_paths,
@@ -487,6 +488,50 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
 
         self.assertEqual(selected["family"], "raw_candidate_cont12_center_mild_state_mild")
         self.assertEqual(selected["judge"], "anchor_center")
+
+    def test_identity_anchor_distance_uses_occlusion_source_family(self) -> None:
+        paths = {
+            "raw_candidate_cont11_box_rel_p05_z0_state_mild": {
+                0: (10.0, 10.0),
+                50: (100.0, 100.0),
+            },
+            "raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state": {
+                50: (101.0, 101.0),
+            },
+        }
+
+        distance = _identity_anchor_mean_distance(
+            "raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state",
+            paths["raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state"],
+            paths,
+            {0: (12.0, 10.0)},
+        )
+
+        self.assertLess(distance, 3.0)
+
+    def test_identity_anchor_distance_uses_box_switch_source_family(self) -> None:
+        paths = {
+            "raw_candidate_cont0_box_rel_z0_n05_state_mild": {
+                0: (10.0, 10.0),
+                60: (100.0, 100.0),
+            },
+            "raw_candidate_cont0_box_rel_p1_n05_state_mild": {
+                0: (80.0, 80.0),
+                60: (120.0, 120.0),
+            },
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at60_state_mild": {
+                60: (120.0, 120.0),
+            },
+        }
+
+        distance = _identity_anchor_mean_distance(
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at60_state_mild",
+            paths["raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at60_state_mild"],
+            paths,
+            {0: (12.0, 10.0)},
+        )
+
+        self.assertLess(distance, 3.0)
 
     def test_selected_family_score_scores_selector_pick_separately_from_upper(self) -> None:
         class _FakePool:

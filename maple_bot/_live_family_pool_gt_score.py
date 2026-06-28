@@ -473,7 +473,7 @@ def _anchor_gate_score(
 ) -> tuple[float, str]:
     name = family.lower()
     motion = _path_motion_stats(path, frames)
-    anchor_distance = _anchor_mean_distance(path, anchor_points)
+    anchor_distance = _identity_anchor_mean_distance(family, path, paths or {}, anchor_points)
     score = (
         -anchor_distance
         + _anchor_kind_bonus(family)
@@ -783,6 +783,48 @@ def _anchor_mean_distance(
     if not distances:
         return 9999.0
     return sum(distances) / float(len(distances))
+
+
+def _identity_anchor_mean_distance(
+    family: str,
+    path: Mapping[int, Point],
+    paths: Mapping[str, Mapping[int, Point]],
+    anchor_points: Mapping[int, Point],
+) -> float:
+    name = str(family)
+    inherited = []
+    if "occlusion_state" in name:
+        inherited.append(_occlusion_source_family(name))
+    elif "_box_switch_" in name:
+        inherited.extend(_box_switch_source_families(name))
+
+    for source in inherited:
+        source_path = paths.get(source)
+        if source_path is None:
+            continue
+        distance = _anchor_mean_distance(source_path, anchor_points)
+        if distance < 9999.0:
+            return distance
+    return _anchor_mean_distance(path, anchor_points)
+
+
+def _box_switch_source_families(family: str) -> list[str]:
+    name = str(family)
+    marker = "_box_switch_"
+    if marker not in name:
+        return []
+    root, suffix = name.split(marker, 1)
+    if "_to_" not in suffix or "_at" not in suffix:
+        return []
+    left_rel, right_suffix = suffix.split("_to_", 1)
+    right_rel, after_at = right_suffix.split("_at", 1)
+    tail = ""
+    if "_" in after_at:
+        tail = "_" + after_at.split("_", 1)[1]
+    return [
+        f"{root}_box_rel_{left_rel}{tail}",
+        f"{root}_box_rel_{right_rel}{tail}",
+    ]
 
 
 def _anchor_points_from_rows(
