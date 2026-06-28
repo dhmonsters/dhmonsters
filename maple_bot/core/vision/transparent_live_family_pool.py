@@ -81,6 +81,7 @@ class TransparentLiveFamilyPool:
         raw_beam_branch: int = 4,
         raw_beam_spawn: int = 8,
         raw_max_candidates_per_frame: int = 32,
+        raw_box_rel_pairs: Sequence[tuple[str, str]] | None = None,
         raw_mht_max_candidates_per_frame: int = 8,
         raw_max_step_px: float = 85.0,
         enable_guarded_decal_identity: bool = False,
@@ -111,6 +112,11 @@ class TransparentLiveFamilyPool:
         self.raw_beam_branch = max(1, int(raw_beam_branch))
         self.raw_beam_spawn = max(0, int(raw_beam_spawn))
         self.raw_max_candidates_per_frame = max(1, int(raw_max_candidates_per_frame))
+        self.raw_box_rel_pairs = (
+            None
+            if raw_box_rel_pairs is None
+            else frozenset((str(x_label), str(y_label)) for x_label, y_label in raw_box_rel_pairs)
+        )
         self.raw_mht_max_candidates_per_frame = max(1, int(raw_mht_max_candidates_per_frame))
         self.raw_max_step_px = float(raw_max_step_px)
         self.enable_guarded_decal_identity = bool(enable_guarded_decal_identity)
@@ -529,8 +535,7 @@ class TransparentLiveFamilyPool:
             "_box_projected_state_mild",
         )
 
-    @staticmethod
-    def _raw_box_relative_points(family: str, candidate: Candidate) -> dict[str, Point]:
+    def _raw_box_relative_points(self, family: str, candidate: Candidate) -> dict[str, Point]:
         cx, cy, _score, width, height = candidate
         half_w = max(0.0, float(width) / 2.0)
         half_h = max(0.0, float(height) / 2.0)
@@ -545,6 +550,8 @@ class TransparentLiveFamilyPool:
         for x_label, x_scale in axis:
             for y_label, y_scale in axis:
                 if x_label == "z0" and y_label == "z0":
+                    continue
+                if self.raw_box_rel_pairs is not None and (x_label, y_label) not in self.raw_box_rel_pairs:
                     continue
                 name = str(family).replace(
                     "_center_mild_state_mild",

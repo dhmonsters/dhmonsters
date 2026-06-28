@@ -16,6 +16,10 @@
 - [x] box switch variant로 16/16을 재현했다.
 - [x] 실패한 release 중심 판정 가설은 폐기했다.
 - [x] 16/16 유지 여부를 재검증했다.
+- [x] raw box-relative 후보를 검증된 pair로 줄이는 옵션을 추가했다.
+- [x] fast pool에서 제한된 box-relative pair를 사용해도 16/16 상한이 유지되는지 확인했다.
 - [ ] switch family 수를 live selector용으로 줄인다.
 - [ ] live selector 경로에는 검증된 gate만 연결한다.
 - [ ] live selector 기준 16GT를 다시 채점한다.
+- [ ] GT-free event gate가 center, occlusion, switch, balanced path 중 하나를 고르게 만든다.
+- [ ] replay GT scoring을 통과한 뒤 live temporal selector에 연결한다.

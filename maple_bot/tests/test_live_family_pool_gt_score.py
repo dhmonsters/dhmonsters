@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from _live_family_pool_gt_score import (
+    DEFAULT_FAST_BOX_REL_PAIRS,
     _fast_family_pool,
     best_family_score,
     box_switch_variant_paths,
@@ -61,11 +62,12 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
     def test_fast_family_pool_keeps_expanded_candidate_width(self) -> None:
         pool = _fast_family_pool()
 
-        self.assertEqual(pool.raw_rank_families, 20)
+        self.assertEqual(pool.raw_rank_families, 0)
         self.assertEqual(pool.raw_continuity_families, 20)
-        self.assertEqual(pool.raw_beam_families, 8)
-        self.assertEqual(pool.raw_beam_spawn, 8)
+        self.assertEqual(pool.raw_beam_families, 0)
+        self.assertEqual(pool.raw_beam_spawn, 0)
         self.assertEqual(pool.raw_max_candidates_per_frame, 24)
+        self.assertEqual(pool.raw_box_rel_pairs, DEFAULT_FAST_BOX_REL_PAIRS)
 
     def test_score_all_forwards_occlusion_variant_option(self) -> None:
         with patch("_live_family_pool_gt_score.score_clip") as score_clip_mock:
@@ -171,6 +173,26 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
         self.assertEqual(path[0], (0.0, 10.0))
         self.assertEqual(path[1], (10.0, -10.0))
         self.assertEqual(path[2], (20.0, -10.0))
+
+    def test_box_switch_variant_paths_filters_unverified_rel_pairs(self) -> None:
+        variants = box_switch_variant_paths(
+            {
+                "raw_candidate_cont0_box_rel_n1_n1_state_mild": {
+                    0: (0.0, 0.0),
+                    1: (10.0, 0.0),
+                    2: (20.0, 0.0),
+                },
+                "raw_candidate_cont0_box_rel_p1_p1_state_mild": {
+                    0: (0.0, 20.0),
+                    1: (10.0, 20.0),
+                    2: (20.0, 20.0),
+                },
+            },
+            frames=[0, 1, 2],
+            switch_stride=1,
+        )
+
+        self.assertEqual(variants, {})
 
     def test_best_family_score_can_select_occlusion_variant(self) -> None:
         class _FakePool:

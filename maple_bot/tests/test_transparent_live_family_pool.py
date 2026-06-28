@@ -716,6 +716,36 @@ class TransparentLiveFamilyPoolTests(unittest.TestCase):
         self.assertFalse(decision.debug["guarded_decal_identity"]["accepted"])
         self.assertEqual(decision.debug["guarded_decal_identity"]["reason"], "max_step")
 
+    def test_raw_box_relative_pairs_can_be_limited(self):
+        pool = TransparentLiveFamilyPool(
+            window=4,
+            min_frames=2,
+            raw_box_rel_pairs=(("p05", "n05"),),
+        )
+
+        points = pool._raw_box_relative_points(
+            "raw_candidate_cont0_center_mild_state_mild",
+            (100.0, 80.0, 0.9, 20.0, 40.0),
+        )
+
+        self.assertEqual(
+            points,
+            {"raw_candidate_cont0_box_rel_p05_n05_state_mild": (105.0, 70.0)},
+        )
+
+    def test_raw_box_relative_pairs_default_keeps_full_grid(self):
+        pool = TransparentLiveFamilyPool(window=4, min_frames=2)
+
+        points = pool._raw_box_relative_points(
+            "raw_candidate_cont0_center_mild_state_mild",
+            (100.0, 80.0, 0.9, 20.0, 40.0),
+        )
+
+        self.assertIn("raw_candidate_cont0_box_rel_p05_n05_state_mild", points)
+        self.assertIn("raw_candidate_cont0_box_rel_n1_p1_state_mild", points)
+        self.assertNotIn("raw_candidate_cont0_box_rel_z0_z0_state_mild", points)
+        self.assertEqual(len(points), 24)
+
     def test_reset_clears_history(self):
         pool = TransparentLiveFamilyPool(window=3, min_frames=2)
         gray = np.zeros((20, 20), dtype=np.float32)

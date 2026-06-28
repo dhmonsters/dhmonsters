@@ -16,6 +16,28 @@ from core.vision.transparent_live_family_pool import TransparentLiveFamilyPool
 ROOT = Path(__file__).resolve().parent
 Point = tuple[float, float]
 Candidate = tuple[float, float, float, float, float]
+DEFAULT_BOX_SWITCH_REL_PAIRS = frozenset({
+    ("z0_n05", "p1_n05"),
+    ("p1_p05", "n05_z0"),
+    ("p05_p1", "n1_z0"),
+    ("z0_p1", "z0_n05"),
+})
+DEFAULT_FAST_BOX_REL_PAIRS = frozenset({
+    ("n05", "p05"),
+    ("n05", "z0"),
+    ("n1", "p05"),
+    ("n1", "z0"),
+    ("p05", "n05"),
+    ("p05", "p05"),
+    ("p05", "p1"),
+    ("p05", "z0"),
+    ("p1", "n05"),
+    ("p1", "p05"),
+    ("p1", "z0"),
+    ("z0", "n05"),
+    ("z0", "p05"),
+    ("z0", "p1"),
+})
 
 
 def replay_live_family_rows(
@@ -119,11 +141,13 @@ def box_switch_variant_paths(
     frames: Sequence[int],
     switch_stride: int = 2,
     min_coverage: float = 0.9,
+    rel_pairs: Sequence[tuple[str, str]] | None = None,
 ) -> dict[str, dict[int, Point]]:
     variants: dict[str, dict[int, Point]] = {}
     ordered = [int(frame) for frame in frames]
     if not ordered:
         return variants
+    allowed_pairs = set(rel_pairs or DEFAULT_BOX_SWITCH_REL_PAIRS)
     groups: dict[tuple[str, str], dict[str, tuple[str, Mapping[int, Point]]]] = {}
     for family, path in paths.items():
         parsed = _parse_box_rel_family(str(family))
@@ -141,6 +165,8 @@ def box_switch_variant_paths(
             _left_family, left_path = rel_paths[left_rel]
             for right_rel in rels:
                 if right_rel == left_rel:
+                    continue
+                if (left_rel, right_rel) not in allowed_pairs:
                     continue
                 _right_family, right_path = rel_paths[right_rel]
                 for index, switch in enumerate(ordered):
@@ -470,11 +496,12 @@ def _fast_family_pool() -> TransparentLiveFamilyPool:
         enable_phase_mht=False,
         enable_raw_mht=False,
         enable_guarded_decal_identity=False,
-        raw_rank_families=20,
+        raw_rank_families=0,
         raw_continuity_families=20,
-        raw_beam_families=8,
-        raw_beam_spawn=8,
+        raw_beam_families=0,
+        raw_beam_spawn=0,
         raw_max_candidates_per_frame=24,
+        raw_box_rel_pairs=DEFAULT_FAST_BOX_REL_PAIRS,
     )
 
 
