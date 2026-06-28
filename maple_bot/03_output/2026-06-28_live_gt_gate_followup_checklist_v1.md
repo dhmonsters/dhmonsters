@@ -18,6 +18,10 @@
 - [x] 16/16 유지 여부를 재검증했다.
 - [x] raw box-relative 후보를 검증된 pair로 줄이는 옵션을 추가했다.
 - [x] fast pool에서 제한된 box-relative pair를 사용해도 16/16 상한이 유지되는지 확인했다.
+- [x] event gate shortlist 옵션을 추가했다.
+- [x] event gate shortlist가 occlusion variant family를 누락하지 않도록 파싱을 고쳤다.
+- [x] event gate shortlist 기준 16/16 상한을 재검증했다.
+- [x] O(n) feature 학습 selector의 현재 기준이 8/16임을 확인했다.
 - [ ] switch family 수를 live selector용으로 줄인다.
 - [ ] live selector 경로에는 검증된 gate만 연결한다.
 - [ ] live selector 기준 16GT를 다시 채점한다.

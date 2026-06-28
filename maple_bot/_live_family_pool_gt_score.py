@@ -38,6 +38,22 @@ DEFAULT_FAST_BOX_REL_PAIRS = frozenset({
     ("z0", "p05"),
     ("z0", "p1"),
 })
+DEFAULT_EVENT_GATE_CONT_INDICES = frozenset({0, 2, 4, 10, 11, 12, 13})
+DEFAULT_EVENT_GATE_REL_KEYS = frozenset({
+    "n05_p05",
+    "n05_z0",
+    "n1_p05",
+    "n1_z0",
+    "p05_n05",
+    "p05_p05",
+    "p05_p1",
+    "p05_z0",
+    "p1_n05",
+    "p1_p05",
+    "p1_z0",
+    "z0_n05",
+    "z0_p1",
+})
 
 
 def replay_live_family_rows(
@@ -92,6 +108,7 @@ def best_family_score(
     success_px: float = 40.0,
     min_coverage: float = 0.9,
     live_max_candidates: int = 24,
+    event_gate_shortlist: bool = False,
 ) -> dict[str, object]:
     frames = [frame for frame in sorted(gt_by_frame) if frame < len(rows)]
     paths = replay_live_family_rows(
@@ -108,6 +125,8 @@ def best_family_score(
             candidate_sets=candidate_sets or candidate_sets_from_rows(rows),
         ))
         paths.update(box_switch_variant_paths(paths, frames=frames))
+    if event_gate_shortlist:
+        paths = event_gate_shortlist_paths(paths)
     best: dict[str, object] | None = None
     for family, path in paths.items():
         score = _score_path(
@@ -133,6 +152,71 @@ def best_family_score(
             "success": False,
         }
     return best
+
+
+def event_gate_shortlist_paths(
+    paths: Mapping[str, Mapping[int, Point]],
+    *,
+    cont_indices: Sequence[int] | None = None,
+    rel_keys: Sequence[str] | None = None,
+) -> dict[str, Mapping[int, Point]]:
+    allowed_cont = set(cont_indices or DEFAULT_EVENT_GATE_CONT_INDICES)
+    allowed_rels = set(rel_keys or DEFAULT_EVENT_GATE_REL_KEYS)
+    return {
+        str(family): path
+        for family, path in paths.items()
+        if _is_event_gate_family(str(family), allowed_cont, allowed_rels)
+    }
+
+
+def _is_event_gate_family(
+    family: str,
+    allowed_cont: set[int],
+    allowed_rels: set[str],
+) -> bool:
+    name = str(family)
+    lowered = name.lower()
+    if lowered.startswith("balanced_viterbi_center_mild_state_mild"):
+        return True
+    cont_index = _raw_cont_index(lowered)
+    if cont_index is None or cont_index not in allowed_cont:
+        return False
+    if "box_switch" in lowered:
+        return True
+    rel_key = _box_rel_key(lowered)
+    if rel_key is not None:
+        return rel_key in allowed_rels
+    return "center_mild_state_mild" in lowered
+
+
+def _raw_cont_index(family: str) -> int | None:
+    marker = "raw_candidate_cont"
+    if marker not in family:
+        return None
+    suffix = family.split(marker, 1)[1]
+    digits = []
+    for char in suffix:
+        if not char.isdigit():
+            break
+        digits.append(char)
+    if not digits:
+        return None
+    return int("".join(digits))
+
+
+def _box_rel_key(family: str) -> str | None:
+    marker = "_box_rel_"
+    if marker not in family:
+        return None
+    suffix = family.split(marker, 1)[1]
+    parts = suffix.split("_")
+    if len(parts) < 2:
+        return None
+    x_label, y_label = parts[0], parts[1]
+    labels = {"n1", "n05", "z0", "p05", "p1"}
+    if x_label not in labels or y_label not in labels:
+        return None
+    return f"{x_label}_{y_label}"
 
 
 def box_switch_variant_paths(
@@ -429,6 +513,7 @@ def score_clip(
     live_max_candidates: int = 24,
     family_pool: Any | None = None,
     include_occlusion_variants: bool = False,
+    event_gate_shortlist: bool = False,
 ) -> dict[str, object]:
     rows = _load_jsonl(root / "_record_debug" / f"{name}.jsonl")
     gt = load_red_gt(name, root=root, min_frame=min_gt_frame)
@@ -452,6 +537,7 @@ def score_clip(
             include_occlusion_variants=include_occlusion_variants,
             expected_by_frame=expected_by_frame,
             candidate_sets=candidate_sets_from_rows(rows) if include_occlusion_variants else None,
+            event_gate_shortlist=event_gate_shortlist,
         ),
     }
 
@@ -465,6 +551,7 @@ def score_all(
     live_max_candidates: int = 24,
     fast_mode: bool = False,
     include_occlusion_variants: bool = False,
+    event_gate_shortlist: bool = False,
 ) -> list[dict[str, object]]:
     if names is None:
         names = [
@@ -483,6 +570,7 @@ def score_all(
             live_max_candidates=live_max_candidates,
             family_pool=pool,
             include_occlusion_variants=include_occlusion_variants,
+            event_gate_shortlist=event_gate_shortlist,
         ))
     return results
 
@@ -637,6 +725,7 @@ def main() -> int:
     parser.add_argument("--live-max-candidates", type=int, default=24)
     parser.add_argument("--fast-mode", action="store_true")
     parser.add_argument("--occlusion-variants", action="store_true")
+    parser.add_argument("--event-gate-shortlist", action="store_true")
     parser.add_argument("--names", nargs="*")
     args = parser.parse_args()
     results = score_all(
@@ -646,6 +735,7 @@ def main() -> int:
         live_max_candidates=args.live_max_candidates,
         fast_mode=args.fast_mode,
         include_occlusion_variants=args.occlusion_variants,
+        event_gate_shortlist=args.event_gate_shortlist,
     )
     print(json.dumps({"summary": summarize(results), "results": results}, ensure_ascii=False, indent=2))
     return 0

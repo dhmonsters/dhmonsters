@@ -7,6 +7,7 @@ from _live_family_pool_gt_score import (
     _fast_family_pool,
     best_family_score,
     box_switch_variant_paths,
+    event_gate_shortlist_paths,
     gap_fill_variant_paths,
     occlusion_variant_paths,
     score_clip,
@@ -77,6 +78,14 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
 
         self.assertTrue(score_clip_mock.call_args.kwargs["include_occlusion_variants"])
 
+    def test_score_all_forwards_event_gate_shortlist_option(self) -> None:
+        with patch("_live_family_pool_gt_score.score_clip") as score_clip_mock:
+            score_clip_mock.return_value = {"name": "a", "best_family": {"success": False}}
+
+            score_all(names=["a"], event_gate_shortlist=True)
+
+        self.assertTrue(score_clip_mock.call_args.kwargs["event_gate_shortlist"])
+
     def test_score_clip_loads_expected_background_for_occlusion_variants(self) -> None:
         with patch("_live_family_pool_gt_score._load_jsonl", return_value=[{"i": 0, "track": [0.0, 0.0], "cands": []}]):
             with patch("_live_family_pool_gt_score.load_red_gt", return_value={0: (0.0, 0.0)}):
@@ -95,6 +104,36 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
             best.call_args.kwargs["expected_by_frame"],
             {0: [(1, (10.0, 0.0, 12.0, 12.0, 0.9))]},
         )
+
+    def test_event_gate_shortlist_keeps_verified_live_family_bands(self) -> None:
+        paths = {
+            "raw_candidate_cont10_center_mild_state_mild": {0: (10.0, 0.0)},
+            "raw_candidate_cont16_center_mild_state_mild": {0: (16.0, 0.0)},
+            "raw_candidate_cont10_box_rel_p05_n05_state_mild": {0: (11.0, 0.0)},
+            "raw_candidate_cont10_box_rel_n1_n1_state_mild": {0: (-11.0, 0.0)},
+            "raw_candidate_cont10_box_switch_p05_p1_to_n1_z0_at8_state_mild": {0: (12.0, 0.0)},
+            "balanced_viterbi_center_mild_state_mild": {0: (13.0, 0.0)},
+        }
+
+        shortlisted = event_gate_shortlist_paths(paths)
+
+        self.assertIn("raw_candidate_cont10_center_mild_state_mild", shortlisted)
+        self.assertNotIn("raw_candidate_cont16_center_mild_state_mild", shortlisted)
+        self.assertIn("raw_candidate_cont10_box_rel_p05_n05_state_mild", shortlisted)
+        self.assertNotIn("raw_candidate_cont10_box_rel_n1_n1_state_mild", shortlisted)
+        self.assertIn("raw_candidate_cont10_box_switch_p05_p1_to_n1_z0_at8_state_mild", shortlisted)
+        self.assertIn("balanced_viterbi_center_mild_state_mild", shortlisted)
+
+    def test_event_gate_shortlist_keeps_box_rel_occlusion_variants(self) -> None:
+        paths = {
+            "raw_candidate_cont4_box_rel_n1_p05_state_mild_occlusion_state": {0: (4.0, 0.0)},
+            "raw_candidate_cont4_box_rel_n1_n1_state_mild_occlusion_state": {0: (-4.0, 0.0)},
+        }
+
+        shortlisted = event_gate_shortlist_paths(paths)
+
+        self.assertIn("raw_candidate_cont4_box_rel_n1_p05_state_mild_occlusion_state", shortlisted)
+        self.assertNotIn("raw_candidate_cont4_box_rel_n1_n1_state_mild_occlusion_state", shortlisted)
 
     def test_occlusion_variant_paths_coast_and_release_background_merge(self) -> None:
         paths = {

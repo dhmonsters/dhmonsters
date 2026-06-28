@@ -23,3 +23,13 @@ Replay GT upper remained 16/16 with fast mode and occlusion variants.
 ## Next step
 
 The next step is a GT-free event gate. The gate should first classify the clip behavior into center, occlusion, switch, or balanced fallback, then score only the reduced path pool. A generic one-line smoothness score is not enough.
+
+## Event Gate Shortlist
+
+Added `event_gate_shortlist_paths` and a CLI flag, `--event-gate-shortlist`, to score the reduced event-gate path pool separately from the full upper pool.
+
+The first shortlist pass scored only 11/16 because `_box_rel_*_occlusion_state` names were not parsed as box-relative families. The parser was fixed so occlusion variants keep their original box-relative key.
+
+After the parser fix, replay upper with `--fast-mode --occlusion-variants --event-gate-shortlist` scored 16/16.
+
+An O(n) learned selector using only family name and path-motion features scored 8/16 on the same shortlist. This confirms the shortlist is useful, but the final selector still needs event-specific signals beyond generic smoothness and family labels.
