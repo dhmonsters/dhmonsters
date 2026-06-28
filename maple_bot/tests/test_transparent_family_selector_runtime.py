@@ -141,6 +141,51 @@ class TransparentFamilySelectorRuntimeTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertIn("rank_rough", rows[0])
 
+    def test_runtime_path_pool_prefers_judge_scoreboard_when_candidate_sets_are_available(self):
+        model = LinearSelectorModel(
+            feature_names=("rank_rough",),
+            weights=(-1.0,),
+            mean=(0.0,),
+            scale=(1.0,),
+        )
+        paths = {
+            "raw_candidate_cont12_center_mild_state_mild": {
+                0: (100.0, 0.0),
+                1: (110.0, 0.0),
+                2: (120.0, 0.0),
+            },
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at1_state_mild": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+            },
+        }
+        candidate_sets = {
+            0: [(0.0, 0.0, 0.90, 24.0, 24.0), (100.0, 0.0, 0.55, 24.0, 24.0)],
+            1: [(10.0, 0.0, 0.90, 24.0, 24.0), (110.0, 0.0, 0.55, 24.0, 24.0)],
+            2: [(20.0, 0.0, 0.90, 24.0, 24.0), (120.0, 0.0, 0.55, 24.0, 24.0)],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.json"
+            save_gt_free_selector_model(path, model)
+            runtime = TransparentFamilySelectorRuntime(path)
+
+            selected, rows = runtime.select_from_path_pool(
+                "live_clip",
+                paths,
+                [0, 1, 2],
+                candidate_sets=candidate_sets,
+                anchor_points={0: (106.5, 0.0), 1: (116.5, 0.0), 2: (126.5, 0.0)},
+            )
+
+        self.assertEqual(
+            selected["live_clip"]["family"],
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at1_state_mild",
+        )
+        self.assertEqual(selected["live_clip"]["selector"], "judge_scoreboard")
+        self.assertIn("judge_total_score", selected["live_clip"])
+        self.assertGreaterEqual(len(rows), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
