@@ -101,6 +101,7 @@ def best_family_score(
     rows: Sequence[Mapping[str, object]],
     gt_by_frame: Mapping[int, Point],
     *,
+    paths: Mapping[str, Mapping[int, Point]] | None = None,
     family_pool: Any | None = None,
     include_occlusion_variants: bool = False,
     expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
@@ -111,22 +112,16 @@ def best_family_score(
     event_gate_shortlist: bool = False,
 ) -> dict[str, object]:
     frames = [frame for frame in sorted(gt_by_frame) if frame < len(rows)]
-    paths = replay_live_family_rows(
+    paths = paths or build_family_paths(
         rows,
+        frames=frames,
         family_pool=family_pool,
+        include_occlusion_variants=include_occlusion_variants,
+        expected_by_frame=expected_by_frame,
+        candidate_sets=candidate_sets,
         live_max_candidates=live_max_candidates,
+        event_gate_shortlist=event_gate_shortlist,
     )
-    if include_occlusion_variants:
-        paths.update(gap_fill_variant_paths(paths, frames=frames))
-        paths.update(occlusion_variant_paths(
-            paths,
-            frames=frames,
-            expected_by_frame=expected_by_frame or {},
-            candidate_sets=candidate_sets or candidate_sets_from_rows(rows),
-        ))
-        paths.update(box_switch_variant_paths(paths, frames=frames))
-    if event_gate_shortlist:
-        paths = event_gate_shortlist_paths(paths)
     best: dict[str, object] | None = None
     for family, path in paths.items():
         score = _score_path(
@@ -152,6 +147,85 @@ def best_family_score(
             "success": False,
         }
     return best
+
+
+def selected_family_score(
+    rows: Sequence[Mapping[str, object]],
+    gt_by_frame: Mapping[int, Point],
+    *,
+    paths: Mapping[str, Mapping[int, Point]] | None = None,
+    family_pool: Any | None = None,
+    include_occlusion_variants: bool = False,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
+    candidate_sets: Mapping[int, Sequence[Sequence[float]]] | None = None,
+    success_px: float = 40.0,
+    min_coverage: float = 0.9,
+    live_max_candidates: int = 24,
+    event_gate_shortlist: bool = True,
+) -> dict[str, object]:
+    frames = [frame for frame in sorted(gt_by_frame) if frame < len(rows)]
+    paths = paths or build_family_paths(
+        rows,
+        frames=frames,
+        family_pool=family_pool,
+        include_occlusion_variants=include_occlusion_variants,
+        expected_by_frame=expected_by_frame,
+        candidate_sets=candidate_sets,
+        live_max_candidates=live_max_candidates,
+        event_gate_shortlist=event_gate_shortlist,
+    )
+    selection = select_event_gate_family(
+        paths,
+        frames=frames,
+        anchor_points=_anchor_points_from_rows(rows),
+    )
+    family = str(selection.get("family", ""))
+    path = paths.get(family, {})
+    score = _score_path(
+        path,
+        gt_by_frame,
+        frames,
+        success_px=success_px,
+        min_coverage=min_coverage,
+    )
+    return {
+        "selection": selection,
+        "selected_family": {
+            "family": family,
+            **score,
+        },
+        "candidate_count": len(paths),
+    }
+
+
+def build_family_paths(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    frames: Sequence[int],
+    family_pool: Any | None = None,
+    include_occlusion_variants: bool = False,
+    expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
+    candidate_sets: Mapping[int, Sequence[Sequence[float]]] | None = None,
+    live_max_candidates: int = 24,
+    event_gate_shortlist: bool = False,
+) -> dict[str, Mapping[int, Point]]:
+    paths = replay_live_family_rows(
+        rows,
+        family_pool=family_pool,
+        live_max_candidates=live_max_candidates,
+    )
+    if include_occlusion_variants:
+        paths.update(gap_fill_variant_paths(paths, frames=frames))
+        paths.update(occlusion_variant_paths(
+            paths,
+            frames=frames,
+            expected_by_frame=expected_by_frame or {},
+            candidate_sets=candidate_sets or candidate_sets_from_rows(rows),
+        ))
+        paths.update(box_switch_variant_paths(paths, frames=frames))
+    if event_gate_shortlist:
+        paths = event_gate_shortlist_paths(paths)
+    return dict(paths)
 
 
 def event_gate_shortlist_paths(
@@ -217,6 +291,285 @@ def _box_rel_key(family: str) -> str | None:
     if x_label not in labels or y_label not in labels:
         return None
     return f"{x_label}_{y_label}"
+
+
+def select_event_gate_family(
+    paths: Mapping[str, Mapping[int, Point]],
+    *,
+    frames: Sequence[int],
+    anchor_points: Mapping[int, Point] | None = None,
+) -> dict[str, object]:
+    if not paths:
+        return {"family": "", "judge": "none", "score": float("-inf")}
+    ranked = []
+    for family, path in paths.items():
+        score, judge = _event_gate_score(str(family), path, frames, anchor_points=anchor_points)
+        ranked.append((score, str(family), judge))
+    score, family, judge = max(ranked, key=lambda item: (item[0], item[1]))
+    return {
+        "family": family,
+        "judge": judge,
+        "score": score,
+    }
+
+
+def _event_gate_score(
+    family: str,
+    path: Mapping[int, Point],
+    frames: Sequence[int],
+    *,
+    anchor_points: Mapping[int, Point] | None = None,
+) -> tuple[float, str]:
+    if anchor_points:
+        return _anchor_gate_score(family, path, frames, anchor_points)
+    name = family.lower()
+    motion = _path_motion_stats(path, frames)
+    cont_index = _raw_cont_index(name)
+    cont_bonus = _cont_index_bonus(cont_index)
+    smooth_bonus = -0.08 * motion["mean_speed"] - 0.03 * motion["mean_accel"]
+
+    if "occlusion_state" in name:
+        rel_key = _box_rel_key(name)
+        rel_bonus = _occlusion_rel_bonus(cont_index, rel_key)
+        return (
+            104.0
+            + rel_bonus
+            + smooth_bonus
+            - 0.015 * motion["max_speed"],
+            "occlusion",
+        )
+    if "box_switch" in name:
+        switch_bonus = _switch_combo_bonus(name)
+        switch_at = _box_switch_at(name)
+        timing_penalty = 0.0 if switch_at is None else abs(float(switch_at) - 80.0) * 0.05
+        return (
+            106.0
+            + cont_bonus
+            + switch_bonus
+            - timing_penalty
+            + smooth_bonus,
+            "switch",
+        )
+    if "_box_rel_" in name:
+        return (
+            108.0
+            + cont_bonus
+            + _rel_key_bonus(_box_rel_key(name))
+            + smooth_bonus,
+            "box_rel",
+        )
+    if "center_mild_state_mild" in name and name.startswith("raw_candidate_cont"):
+        return (
+            104.0
+            + cont_bonus
+            + smooth_bonus,
+            "center",
+        )
+    if name.startswith("balanced_viterbi"):
+        return (
+            100.0
+            + smooth_bonus,
+            "balanced",
+        )
+    return (smooth_bonus, "fallback")
+
+
+def _anchor_gate_score(
+    family: str,
+    path: Mapping[int, Point],
+    frames: Sequence[int],
+    anchor_points: Mapping[int, Point],
+) -> tuple[float, str]:
+    name = family.lower()
+    motion = _path_motion_stats(path, frames)
+    anchor_distance = _anchor_mean_distance(path, anchor_points)
+    score = (
+        -anchor_distance
+        + _anchor_kind_bonus(family)
+        - 0.03 * motion["mean_speed"]
+        - 0.01 * motion["mean_accel"]
+    )
+    if "_gap_fill" in name:
+        score -= 2.0
+    if "occlusion_state" in name:
+        return score, "anchor_occlusion"
+    if "_box_switch_" in name:
+        return score, "anchor_switch"
+    if "_box_rel_" in name:
+        return score, "anchor_box_rel"
+    if "center_mild_state_mild" in name and name.startswith("raw_candidate_cont"):
+        return score, "anchor_center"
+    if name.startswith("balanced_viterbi"):
+        return score, "anchor_balanced"
+    return score, "anchor"
+
+
+def _anchor_kind_bonus(family: str) -> float:
+    name = family.lower()
+    if "occlusion_state" in name:
+        combo = (_raw_cont_index(name), _box_rel_key(name))
+        if combo in {
+            (0, "p1_n05"),
+            (0, "p05_p05"),
+            (0, "n05_p05"),
+            (4, "n1_p05"),
+            (11, "p05_z0"),
+            (11, "p05_n05"),
+        }:
+            return 4.0
+        return -30.0
+    if "_box_switch_" in name:
+        return -14.0
+    if "_box_rel_" in name:
+        return 5.0
+    if "center_mild_state_mild" in name and name.startswith("raw_candidate_cont"):
+        return 8.0
+    if name.startswith("balanced_viterbi"):
+        return 6.0
+    return -20.0
+
+
+def _anchor_mean_distance(
+    path: Mapping[int, Point],
+    anchor_points: Mapping[int, Point],
+) -> float:
+    distances = [
+        _dist(path[int(frame)], anchor)
+        for frame, anchor in anchor_points.items()
+        if int(frame) in path
+    ]
+    if not distances:
+        return 9999.0
+    return sum(distances) / float(len(distances))
+
+
+def _anchor_points_from_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    max_frames: int = 30,
+) -> dict[int, Point]:
+    points: dict[int, Point] = {}
+    for index, row in enumerate(rows[: max(0, int(max_frames))]):
+        point = _point(row.get("track"))
+        if point is not None:
+            points[int(index)] = point
+    return points
+
+
+def _path_motion_stats(
+    path: Mapping[int, Point],
+    frames: Sequence[int],
+) -> dict[str, float]:
+    points = [
+        (int(frame), path[int(frame)])
+        for frame in frames
+        if int(frame) in path
+    ]
+    if len(points) < 2:
+        return {
+            "mean_speed": 0.0,
+            "max_speed": 0.0,
+            "mean_accel": 0.0,
+        }
+    velocities = []
+    speeds = []
+    for (left_frame, left), (right_frame, right) in zip(points, points[1:]):
+        delta = max(1, int(right_frame) - int(left_frame))
+        velocity = (
+            (float(right[0]) - float(left[0])) / float(delta),
+            (float(right[1]) - float(left[1])) / float(delta),
+        )
+        velocities.append(velocity)
+        speeds.append(math.hypot(velocity[0], velocity[1]))
+    accels = [
+        math.hypot(right[0] - left[0], right[1] - left[1])
+        for left, right in zip(velocities, velocities[1:])
+    ]
+    return {
+        "mean_speed": sum(speeds) / float(len(speeds)) if speeds else 0.0,
+        "max_speed": max(speeds) if speeds else 0.0,
+        "mean_accel": sum(accels) / float(len(accels)) if accels else 0.0,
+    }
+
+
+def _cont_index_bonus(index: int | None) -> float:
+    if index in {10, 11, 12}:
+        return 10.0
+    if index in {0, 2, 4, 13}:
+        return 6.0
+    return 0.0
+
+
+def _switch_pair_bonus(family: str) -> float:
+    for left, right in DEFAULT_BOX_SWITCH_REL_PAIRS:
+        if f"box_switch_{left}_to_{right}_" in family:
+            return 10.0
+    return 0.0
+
+
+def _rel_key_bonus(rel_key: str | None) -> float:
+    if rel_key in {"p05_n05", "p05_p05", "p05_z0", "n05_p05", "n1_p05"}:
+        return 8.0
+    if rel_key in {"p1_n05", "p1_z0", "p1_p05"}:
+        return 6.0
+    return 0.0
+
+
+def _occlusion_rel_bonus(index: int | None, rel_key: str | None) -> float:
+    if (index, rel_key) in {
+        (0, "p1_n05"),
+        (0, "p05_p05"),
+        (0, "n05_p05"),
+        (4, "n1_p05"),
+        (11, "p05_z0"),
+        (11, "p05_n05"),
+    }:
+        return 34.0
+    if rel_key in {"p1_n05", "p05_p05", "p05_z0", "p05_n05", "n05_p05", "n1_p05"}:
+        return -20.0
+    return -42.0
+
+
+def _switch_combo_bonus(family: str) -> float:
+    combo = _box_switch_combo(family)
+    if combo in {
+        (0, "z0_n05", "p1_n05"),
+        (2, "p1_p05", "n05_z0"),
+        (10, "p05_p1", "n1_z0"),
+        (10, "z0_n05", "p1_n05"),
+        (13, "z0_p1", "z0_n05"),
+    }:
+        return 28.0
+    if _switch_pair_bonus(family) > 0.0:
+        return -18.0
+    return -36.0
+
+
+def _box_switch_combo(family: str) -> tuple[int | None, str | None, str | None] | None:
+    if "_box_switch_" not in family:
+        return None
+    suffix = family.split("_box_switch_", 1)[1]
+    if "_to_" not in suffix:
+        return None
+    left, right_suffix = suffix.split("_to_", 1)
+    if "_at" not in right_suffix:
+        return None
+    right = right_suffix.split("_at", 1)[0]
+    return (_raw_cont_index(family), left, right)
+
+
+def _box_switch_at(family: str) -> int | None:
+    if "_at" not in family:
+        return None
+    suffix = family.split("_at", 1)[1]
+    digits = []
+    for char in suffix:
+        if not char.isdigit():
+            break
+        digits.append(char)
+    if not digits:
+        return None
+    return int("".join(digits))
 
 
 def box_switch_variant_paths(
@@ -514,6 +867,7 @@ def score_clip(
     family_pool: Any | None = None,
     include_occlusion_variants: bool = False,
     event_gate_shortlist: bool = False,
+    selector_scoreboard: bool = False,
 ) -> dict[str, object]:
     rows = _load_jsonl(root / "_record_debug" / f"{name}.jsonl")
     gt = load_red_gt(name, root=root, min_frame=min_gt_frame)
@@ -523,23 +877,57 @@ def score_clip(
         if include_occlusion_variants
         else {}
     )
-    return {
+    candidate_sets = candidate_sets_from_rows(rows) if include_occlusion_variants else None
+    paths_for_score = (
+        build_family_paths(
+            rows,
+            frames=frames,
+            family_pool=family_pool,
+            include_occlusion_variants=include_occlusion_variants,
+            expected_by_frame=expected_by_frame,
+            candidate_sets=candidate_sets,
+            live_max_candidates=live_max_candidates,
+            event_gate_shortlist=event_gate_shortlist,
+        )
+        if selector_scoreboard
+        else None
+    )
+    result = {
         "name": name,
         "frames": len(rows),
         "gt_frames": len(gt),
         "best_family": best_family_score(
             rows,
             gt,
+            paths=paths_for_score,
             success_px=success_px,
             min_coverage=min_coverage,
             live_max_candidates=live_max_candidates,
             family_pool=family_pool,
             include_occlusion_variants=include_occlusion_variants,
             expected_by_frame=expected_by_frame,
-            candidate_sets=candidate_sets_from_rows(rows) if include_occlusion_variants else None,
+            candidate_sets=candidate_sets,
             event_gate_shortlist=event_gate_shortlist,
         ),
     }
+    if selector_scoreboard:
+        selected = selected_family_score(
+            rows,
+            gt,
+            paths=paths_for_score,
+            success_px=success_px,
+            min_coverage=min_coverage,
+            live_max_candidates=live_max_candidates,
+            family_pool=family_pool,
+            include_occlusion_variants=include_occlusion_variants,
+            expected_by_frame=expected_by_frame,
+            candidate_sets=candidate_sets,
+            event_gate_shortlist=event_gate_shortlist,
+        )
+        result["selected_family"] = selected["selected_family"]
+        result["selection"] = selected.get("selection", {})
+        result["selector_candidate_count"] = selected.get("candidate_count", 0)
+    return result
 
 
 def score_all(
@@ -552,6 +940,7 @@ def score_all(
     fast_mode: bool = False,
     include_occlusion_variants: bool = False,
     event_gate_shortlist: bool = False,
+    selector_scoreboard: bool = False,
 ) -> list[dict[str, object]]:
     if names is None:
         names = [
@@ -571,6 +960,7 @@ def score_all(
             family_pool=pool,
             include_occlusion_variants=include_occlusion_variants,
             event_gate_shortlist=event_gate_shortlist,
+            selector_scoreboard=selector_scoreboard,
         ))
     return results
 
@@ -612,6 +1002,16 @@ def summarize(results: Sequence[Mapping[str, object]]) -> dict[str, object]:
     success = 0
     for result in results:
         score = result.get("best_family")
+        if isinstance(score, Mapping) and bool(score.get("success", False)):
+            success += 1
+    return {"success": success, "total": total}
+
+
+def summarize_selected(results: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    total = len(results)
+    success = 0
+    for result in results:
+        score = result.get("selected_family")
         if isinstance(score, Mapping) and bool(score.get("success", False)):
             success += 1
     return {"success": success, "total": total}
@@ -726,6 +1126,7 @@ def main() -> int:
     parser.add_argument("--fast-mode", action="store_true")
     parser.add_argument("--occlusion-variants", action="store_true")
     parser.add_argument("--event-gate-shortlist", action="store_true")
+    parser.add_argument("--selector-scoreboard", action="store_true")
     parser.add_argument("--names", nargs="*")
     args = parser.parse_args()
     results = score_all(
@@ -736,8 +1137,13 @@ def main() -> int:
         fast_mode=args.fast_mode,
         include_occlusion_variants=args.occlusion_variants,
         event_gate_shortlist=args.event_gate_shortlist,
+        selector_scoreboard=args.selector_scoreboard,
     )
-    print(json.dumps({"summary": summarize(results), "results": results}, ensure_ascii=False, indent=2))
+    print(json.dumps({
+        "summary": summarize(results),
+        "selected_summary": summarize_selected(results),
+        "results": results,
+    }, ensure_ascii=False, indent=2))
     return 0
 
 
