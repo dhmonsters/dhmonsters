@@ -123,7 +123,7 @@ class TransparentFamilySelectorRuntime:
         if not family:
             return None
         scores = selection.get("scores", {})
-        return {
+        row = {
             "clip": clip,
             "family": family,
             "selector": str(selection.get("judge", "judge_scoreboard")),
@@ -132,6 +132,12 @@ class TransparentFamilySelectorRuntime:
             "judge_total_score": float(selection.get("score", 0.0) or 0.0),
             "judge_scores": dict(scores) if isinstance(scores, Mapping) else {},
         }
+        point = _latest_point(path_pool.get(family, {}), frames)
+        if point is not None:
+            serial_point = [float(point[0]), float(point[1])]
+            row["point"] = serial_point
+            row["rescue_point"] = serial_point
+        return row
 
     def _load(self) -> None:
         try:
@@ -224,4 +230,12 @@ def _default_anchor_points(paths: Mapping[str, Mapping[int, Sequence[float]]]) -
                 int(frame): (float(point[0]), float(point[1]))
                 for frame, point in path.items()
             }
+    return None
+
+
+def _latest_point(path: Mapping[int, Sequence[float]], frames: Sequence[int]) -> tuple[float, float] | None:
+    for frame in reversed(frames):
+        point = path.get(int(frame))
+        if point is not None and len(point) >= 2:
+            return (float(point[0]), float(point[1]))
     return None

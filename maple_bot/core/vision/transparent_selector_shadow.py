@@ -186,7 +186,11 @@ class TransparentSelectorShadow:
             return None
 
         family = str(selected_row.get("family", ""))
-        point = self._latest_point(paths.get(family, {}), frames)
+        point = _point(selected_row.get("point"))
+        if point is None:
+            point = _point(selected_row.get("rescue_point"))
+        if point is None:
+            point = self._latest_point(paths.get(family, {}), frames)
         consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
         merge_context = self._merge_context()
         return {

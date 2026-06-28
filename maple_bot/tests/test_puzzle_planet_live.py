@@ -93,9 +93,16 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
     def test_live_temporal_selector_defaults_to_fast_family_pool(self) -> None:
         selector = LiveTemporalSelector()
 
+        self.assertFalse(selector.family_pool.enable_phase_catalog)
         self.assertFalse(selector.family_pool.enable_bg_mht)
         self.assertFalse(selector.family_pool.enable_raw_mht)
         self.assertFalse(selector.family_pool.enable_phase_mht)
+        self.assertFalse(selector.family_pool.enable_guarded_decal_identity)
+        self.assertEqual(selector.family_pool.raw_rank_families, 0)
+        self.assertEqual(selector.family_pool.raw_continuity_families, 20)
+        self.assertEqual(selector.family_pool.raw_beam_families, 0)
+        self.assertEqual(selector.family_pool.raw_max_candidates_per_frame, 24)
+        self.assertIn(("p1", "p05"), selector.family_pool.raw_box_rel_pairs)
 
     def test_live_temporal_selector_passes_expected_background_to_shadow(self) -> None:
         class _FakeFamilyPool:

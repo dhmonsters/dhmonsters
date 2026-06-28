@@ -7,10 +7,11 @@ from core.vision.transparent_selector_shadow import TransparentSelectorShadow
 
 
 class FakeRuntime:
-    def __init__(self, selected_family=None):
+    def __init__(self, selected_family=None, selected_point=None):
         self.available = True
         self.load_error = ""
         self.selected_family = selected_family
+        self.selected_point = selected_point
         self.calls = []
 
     def select_from_path_pool(self, clip, paths, frames, **kwargs):
@@ -27,6 +28,9 @@ class FakeRuntime:
             "rank_center": 0.0,
             "rank_rough": 0.0,
         }
+        if self.selected_point is not None:
+            row["point"] = list(self.selected_point)
+            row["rescue_point"] = list(self.selected_point)
         return {clip: row}, [row]
 
 
@@ -176,6 +180,40 @@ class TransparentSelectorShadowTests(unittest.TestCase):
 
         self.assertEqual(result["point"], [11, 11])
         self.assertEqual(result["rescue_point"], [11.25, 10.75])
+
+    def test_shadow_uses_runtime_point_for_augmented_family(self):
+        runtime = FakeRuntime(
+            selected_family="raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at2_state_mild",
+            selected_point=(120.25, 100.75),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=3,
+            min_frames=2,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        shadow.update(
+            0,
+            candidates=[(10.0, 10.0, 0.9, 20.0, 20.0)],
+            anchors={
+                "raw_candidate_cont2_box_rel_p1_p05_state_mild": (10.0, 10.0),
+                "raw_candidate_cont2_box_rel_n05_z0_state_mild": (100.0, 100.0),
+            },
+        )
+        result = shadow.update(
+            1,
+            candidates=[(20.0, 10.0, 0.9, 20.0, 20.0)],
+            anchors={
+                "raw_candidate_cont2_box_rel_p1_p05_state_mild": (20.0, 10.0),
+                "raw_candidate_cont2_box_rel_n05_z0_state_mild": (120.25, 100.75),
+            },
+        )
+
+        self.assertEqual(result["point"], [120, 101])
+        self.assertEqual(result["rescue_point"], [120.25, 100.75])
 
     def test_shadow_rescue_requires_bg_split_family_and_merge_context(self):
         panel_runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")

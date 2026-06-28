@@ -328,6 +328,197 @@ class SelectorJudgeScoreboardTests(unittest.TestCase):
 
         self.assertEqual(selected["family"], "")
 
+    def test_trusted_rescue_allows_cont2_switch_when_box_grid_is_only_local_base(self):
+        rows = {
+            "raw_candidate_cont12_box_rel_p05_z0_state_mild": {
+                "total_score": 9.4,
+                "confidence_stability_score": 0.0,
+            },
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at5350_state_mild": {
+                "total_score": 9.1,
+                "confidence_stability_score": 0.0,
+            },
+        }
+
+        selected = _trusted_scoreboard_rescue(
+            rows,
+            {"family": "raw_candidate_cont12_box_rel_p05_z0_state_mild", "judge": "box_grid", "score": 9.0},
+            rescue_threshold=20.0,
+            switch_rescue_threshold=18.0,
+        )
+
+        self.assertEqual(
+            selected["family"],
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at5350_state_mild",
+        )
+
+    def test_trusted_rescue_allows_cont0_switch_when_box_grid_is_only_local_base(self):
+        rows = {
+            "raw_candidate_cont12_box_rel_p05_z0_state_mild": {
+                "total_score": 9.4,
+                "confidence_stability_score": 0.0,
+            },
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at10654_state_mild": {
+                "total_score": 9.2,
+                "confidence_stability_score": 0.0,
+            },
+        }
+
+        selected = _trusted_scoreboard_rescue(
+            rows,
+            {"family": "raw_candidate_cont12_box_rel_p05_z0_state_mild", "judge": "box_grid", "score": 9.0},
+            rescue_threshold=20.0,
+            switch_rescue_threshold=18.0,
+        )
+
+        self.assertEqual(
+            selected["family"],
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at10654_state_mild",
+        )
+
+    def test_trusted_rescue_rejects_cont0_switch_when_cont2_rel_is_alive(self):
+        rows = {
+            "raw_candidate_cont2_box_rel_p05_z0_state_mild": {
+                "total_score": -1.0,
+                "confidence_stability_score": 0.0,
+            },
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at5336_state_mild": {
+                "total_score": 9.2,
+                "confidence_stability_score": 0.0,
+            },
+        }
+
+        selected = _trusted_scoreboard_rescue(
+            rows,
+            {"family": "raw_candidate_cont12_box_rel_p05_z0_state_mild", "judge": "box_grid", "score": 9.0},
+            rescue_threshold=20.0,
+            switch_rescue_threshold=18.0,
+        )
+
+        self.assertEqual(selected["family"], "")
+
+    def test_trusted_rescue_allows_cont0_center_before_switch_when_box_grid_is_only_local_base(self):
+        rows = {
+            "raw_candidate_cont0_center_mild_state_mild": {
+                "total_score": 3.1,
+                "confidence_stability_score": 0.0,
+            },
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at10654_state_mild": {
+                "total_score": 9.2,
+                "confidence_stability_score": 0.0,
+            },
+        }
+
+        selected = _trusted_scoreboard_rescue(
+            rows,
+            {"family": "raw_candidate_cont12_box_rel_p05_z0_state_mild", "judge": "box_grid", "score": 9.0},
+            rescue_threshold=20.0,
+            switch_rescue_threshold=18.0,
+        )
+
+        self.assertEqual(selected["family"], "raw_candidate_cont0_center_mild_state_mild")
+
+    def test_trusted_rescue_allows_low_score_cont0_switch_after_center_phase(self):
+        rows = {
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at10654_state_mild": {
+                "total_score": 5.2,
+                "confidence_stability_score": 0.0,
+            },
+        }
+
+        selected = _trusted_scoreboard_rescue(
+            rows,
+            {"family": "raw_candidate_cont12_box_rel_p05_z0_state_mild", "judge": "box_grid", "score": 9.0},
+            rescue_threshold=20.0,
+            switch_rescue_threshold=18.0,
+        )
+
+        self.assertEqual(
+            selected["family"],
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at10654_state_mild",
+        )
+
+    def test_trusted_rescue_allows_cont2_rel_when_cont12_grid_is_only_local_base(self):
+        rows = {
+            "raw_candidate_cont12_box_rel_p05_z0_state_mild": {
+                "total_score": 9.4,
+                "confidence_stability_score": 0.0,
+            },
+            "raw_candidate_cont2_box_rel_p05_z0_state_mild": {
+                "total_score": 3.1,
+                "confidence_stability_score": 0.0,
+            },
+        }
+
+        selected = _trusted_scoreboard_rescue(
+            rows,
+            {"family": "raw_candidate_cont12_box_rel_p05_z0_state_mild", "judge": "box_grid", "score": 9.0},
+            rescue_threshold=20.0,
+            switch_rescue_threshold=18.0,
+        )
+
+        self.assertEqual(
+            selected["family"],
+            "raw_candidate_cont2_box_rel_p05_z0_state_mild",
+        )
+
+    def test_trusted_rescue_rejects_overstable_cont2_rel_when_cont12_grid_is_better(self):
+        rows = {
+            "raw_candidate_cont12_box_rel_p05_z0_state_mild": {
+                "total_score": 10.2,
+                "confidence_stability_score": 0.0,
+            },
+            "raw_candidate_cont2_box_rel_p05_z0_state_mild": {
+                "total_score": 7.6,
+                "confidence_stability_score": 0.0,
+            },
+        }
+
+        selected = _trusted_scoreboard_rescue(
+            rows,
+            {"family": "raw_candidate_cont12_box_rel_p05_z0_state_mild", "judge": "box_grid", "score": 9.0},
+            rescue_threshold=20.0,
+            switch_rescue_threshold=18.0,
+        )
+
+        self.assertEqual(selected["family"], "")
+
+    def test_select_identity_family_rescue_checks_trusted_switch_before_box_grid_lock(self):
+        frames = [0, 1, 2]
+        paths = {
+            "raw_candidate_cont12_box_rel_p05_z0_state_mild": {
+                0: (0.0, 0.0),
+                1: (10.0, 0.0),
+                2: (20.0, 0.0),
+            },
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at2_state_mild": {
+                0: (100.0, 0.0),
+                1: (110.0, 0.0),
+                2: (120.0, 0.0),
+            },
+        }
+        candidate_sets = {
+            0: [(0.0, 0.0, 0.10, 24.0, 24.0)],
+            1: [(10.0, 0.0, 0.10, 24.0, 24.0)],
+            2: [(20.0, 0.0, 0.10, 24.0, 24.0)],
+        }
+
+        selected = select_identity_family(
+            paths,
+            frames=frames,
+            candidate_sets=candidate_sets,
+            expected_by_frame={},
+            use_judge_scoreboard=True,
+            judge_scoreboard_mode="rescue",
+            judge_rescue_threshold=20.0,
+        )
+
+        self.assertEqual(
+            selected["family"],
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at2_state_mild",
+        )
+        self.assertEqual(selected["judge"], "judge_scoreboard")
+
     def test_trusted_rescue_prioritizes_poor_anchor_occlusion_over_switch(self):
         rows = {
             "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at87_state_mild": {

@@ -13,6 +13,22 @@ from core.vision.transparent_track_health import TrackHealthDecision, Transparen
 
 Point = tuple[float, float]
 CandidateRow = tuple[float, float, float, float, float]
+FAST_LIVE_BOX_REL_PAIRS = frozenset({
+    ("n05", "p05"),
+    ("n05", "z0"),
+    ("n1", "p05"),
+    ("n1", "z0"),
+    ("p05", "n05"),
+    ("p05", "p05"),
+    ("p05", "p1"),
+    ("p05", "z0"),
+    ("p1", "n05"),
+    ("p1", "p05"),
+    ("p1", "z0"),
+    ("z0", "n05"),
+    ("z0", "p05"),
+    ("z0", "p1"),
+})
 
 
 @dataclass(frozen=True)
@@ -46,10 +62,17 @@ class LiveTemporalSelector:
         self.family_pool = family_pool or TransparentLiveFamilyPool(
             window=window,
             min_frames=min_frames,
+            enable_phase_catalog=False,
             enable_bg_mht=False,
             enable_raw_mht=False,
             enable_phase_mht=False,
-            enable_guarded_decal_identity=True,
+            enable_guarded_decal_identity=False,
+            raw_rank_families=0,
+            raw_continuity_families=20,
+            raw_beam_families=0,
+            raw_beam_spawn=0,
+            raw_max_candidates_per_frame=24,
+            raw_box_rel_pairs=FAST_LIVE_BOX_REL_PAIRS,
         )
         self.selector_shadow = selector_shadow or TransparentSelectorShadow(
             self.runtime,

@@ -411,10 +411,7 @@ def select_identity_family(
         return base
     if str(judge_scoreboard_mode) == "replace":
         return judge
-    if (
-        str(judge_scoreboard_mode) == "rescue"
-        and str(base.get("judge", "")) != "box_grid"
-    ):
+    if str(judge_scoreboard_mode) == "rescue":
         trusted = _trusted_scoreboard_rescue(
             scoreboard_rows,
             base,
@@ -424,6 +421,10 @@ def select_identity_family(
         if str(trusted.get("family", "")):
             out = dict(trusted)
             out["base_selection"] = base
+            out["scoreboard_selection"] = judge
+            return out
+        if str(base.get("judge", "")) == "box_grid":
+            out = dict(base)
             out["scoreboard_selection"] = judge
             return out
         if not _scoreboard_rescue_allowed(
@@ -488,6 +489,18 @@ def _trusted_scoreboard_rescue(
     if str(trusted_switch.get("family", "")):
         return trusted_switch
 
+    trusted_rel = _trusted_box_rel_rescue(rows, base)
+    if str(trusted_rel.get("family", "")):
+        return trusted_rel
+
+    trusted_cont0_center = _trusted_cont0_center_rescue(rows, base)
+    if str(trusted_cont0_center.get("family", "")):
+        return trusted_cont0_center
+
+    trusted_cont0_switch = _trusted_cont0_switch_rescue(rows, base)
+    if str(trusted_cont0_switch.get("family", "")):
+        return trusted_cont0_switch
+
     trusted_occlusion = _trusted_occlusion_rescue(rows, base)
     if str(trusted_occlusion.get("family", "")):
         return trusted_occlusion
@@ -528,6 +541,17 @@ def _trusted_switch_rescue(
         ]
         return _best_scoreboard_item(candidates)
 
+    if base_judge == "box_grid" and 8.0 <= base_score <= 12.0:
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0",
+            min_score=8.5,
+        )
+        selected = _best_scoreboard_item(candidates)
+        if str(selected.get("family", "")):
+            return selected
+        return _empty_scoreboard_selection()
+
     if base_judge != "anchor_center":
         return _empty_scoreboard_selection()
 
@@ -556,6 +580,87 @@ def _trusted_switch_rescue(
         return _phase_scoreboard_item(candidates, phase=0.43)
 
     return _empty_scoreboard_selection()
+
+
+def _trusted_box_rel_rescue(
+    rows: Mapping[str, Mapping[str, float]],
+    base: Mapping[str, object],
+) -> dict[str, object]:
+    base_family = str(base.get("family", "")).lower()
+    base_judge = str(base.get("judge", ""))
+    base_score = float(base.get("score", float("-inf")) or float("-inf"))
+    if (
+        base_judge == "box_grid"
+        and "raw_candidate_cont12_box_rel_p05_z0" in base_family
+        and 8.0 <= base_score <= 12.0
+    ):
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont2_box_rel_p05_z0",
+            min_score=2.5,
+        )
+        candidates = [
+            item
+            for item in candidates
+            if float(item.get("score", 0.0) or 0.0) <= 6.0
+        ]
+        return _best_scoreboard_item(candidates)
+
+    return _empty_scoreboard_selection()
+
+
+def _trusted_cont0_center_rescue(
+    rows: Mapping[str, Mapping[str, float]],
+    base: Mapping[str, object],
+) -> dict[str, object]:
+    base_judge = str(base.get("judge", ""))
+    base_score = float(base.get("score", float("-inf")) or float("-inf"))
+    if (
+        base_judge == "box_grid"
+        and 8.0 <= base_score <= 12.0
+        and not _cont2_rel_alive(rows)
+    ):
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont0_center_mild_state_mild",
+            min_score=2.5,
+        )
+        return _best_scoreboard_item(candidates)
+
+    return _empty_scoreboard_selection()
+
+
+def _trusted_cont0_switch_rescue(
+    rows: Mapping[str, Mapping[str, float]],
+    base: Mapping[str, object],
+) -> dict[str, object]:
+    base_judge = str(base.get("judge", ""))
+    base_score = float(base.get("score", float("-inf")) or float("-inf"))
+    if base_judge == "box_grid" and 8.0 <= base_score <= 12.0:
+        if _cont2_rel_alive(rows):
+            return _empty_scoreboard_selection()
+        candidates = _scoreboard_items_matching(
+            rows,
+            "raw_candidate_cont0_box_switch_z0_n05_to_p1_n05",
+            min_score=5.0,
+        )
+        return _best_scoreboard_item(candidates)
+
+    return _empty_scoreboard_selection()
+
+
+def _cont2_rel_alive(rows: Mapping[str, Mapping[str, float]]) -> bool:
+    live_cont2_rel = _scoreboard_items_matching(
+        rows,
+        "raw_candidate_cont2_box_rel_p05_z0",
+        min_score=-1.8,
+    )
+    live_cont2_rel = [
+        item
+        for item in live_cont2_rel
+        if "occlusion_state" not in str(item.get("family", "")).lower()
+    ]
+    return bool(live_cont2_rel)
 
 
 def _trusted_occlusion_rescue(

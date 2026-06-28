@@ -7,6 +7,12 @@ from unittest.mock import patch
 from _final_candidate_selector import LinearSelectorModel
 from _final_candidate_selector import load_feature_rows_cache, summarize_selected_rows
 from _gt_free_family_selector import load_gt_free_selector_model, save_gt_free_selector_model
+from _live_family_pool_gt_score import (
+    box_switch_variant_paths,
+    event_gate_shortlist_paths,
+    gap_fill_variant_paths,
+    occlusion_variant_paths,
+)
 from _offline_16gt_solver import DEFAULT_CACHE_PATH
 from core.vision.transparent_family_selector_runtime import (
     DEFAULT_MODEL_PATH,
@@ -190,6 +196,64 @@ class TransparentFamilySelectorRuntimeTests(unittest.TestCase):
         self.assertEqual(selected["live_clip"]["selector"], "judge_scoreboard")
         self.assertIn("judge_total_score", selected["live_clip"])
         self.assertEqual(len(rows), 1)
+
+    def test_runtime_path_pool_returns_augmented_switch_point(self):
+        model = LinearSelectorModel(
+            feature_names=("rank_rough",),
+            weights=(-1.0,),
+            mean=(0.0,),
+            scale=(1.0,),
+        )
+        paths = {
+            "raw_candidate_cont2_box_rel_p1_p05_state_mild": {
+                0: (10.0, 10.0),
+                1: (20.0, 10.0),
+                2: (30.0, 10.0),
+            },
+            "raw_candidate_cont2_box_rel_n05_z0_state_mild": {
+                0: (100.0, 100.0),
+                1: (110.0, 100.0),
+                2: (120.0, 100.0),
+            },
+        }
+        candidate_sets = {
+            0: [(10.0, 10.0, 0.90, 24.0, 24.0)],
+            1: [(20.0, 10.0, 0.90, 24.0, 24.0)],
+            2: [(120.0, 100.0, 0.90, 24.0, 24.0)],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "model.json"
+            save_gt_free_selector_model(path, model)
+            runtime = TransparentFamilySelectorRuntime(path)
+
+            with patch.multiple(
+                "core.vision.transparent_family_selector_runtime",
+                box_switch_variant_paths=box_switch_variant_paths,
+                event_gate_shortlist_paths=event_gate_shortlist_paths,
+                gap_fill_variant_paths=gap_fill_variant_paths,
+                occlusion_variant_paths=occlusion_variant_paths,
+                select_identity_family=lambda *_args, **_kwargs: {
+                    "family": "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at2_state_mild",
+                    "judge": "judge_scoreboard",
+                    "score": 12.0,
+                    "scores": {},
+                },
+            ):
+                selected, _rows = runtime.select_from_path_pool(
+                    "live_clip",
+                    paths,
+                    [0, 1, 2],
+                    candidate_sets=candidate_sets,
+                    anchor_points={0: (12.0, 10.0), 1: (22.0, 10.0), 2: (32.0, 10.0)},
+                )
+
+        row = selected["live_clip"]
+        self.assertEqual(
+            row["family"],
+            "raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at2_state_mild",
+        )
+        self.assertEqual(row["point"], [120.0, 100.0])
+        self.assertEqual(row["rescue_point"], [120.0, 100.0])
 
 
 if __name__ == "__main__":
