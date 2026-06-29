@@ -9,6 +9,7 @@ import numpy as np
 
 from core.puzzle.defaults import fixed_detect_roi, fixed_popup_preview_roi
 from core.puzzle.evidence import EvidenceJudges
+from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen
 from core.puzzle.identity import IdentityTracker
 from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
 from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision, RoiSpec
@@ -115,16 +116,12 @@ class _NoAuthMouseBridge:
         bg_click(self._require_hwnd(), int(client_x), int(client_y))
 
     def client_origin(self) -> tuple[int, int]:
-        from planet_live_solver import get_client_rect_screen
-
-        x, y, _w, _h = get_client_rect_screen(self._require_hwnd())
+        x, y, _w, _h = get_game_client_rect_screen(self._require_hwnd())
         return int(x), int(y)
 
     def _require_hwnd(self) -> int:
         if self._hwnd is None:
-            from planet_live_solver import find_maple_hwnd
-
-            hwnd = find_maple_hwnd()
+            hwnd = find_game_hwnd()
             if hwnd is None:
                 raise RuntimeError("maple_hwnd_not_found")
             self._hwnd = int(hwnd)

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
+from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen
 from core.puzzle.models import FramePacket, PuzzleSession, RoiSpec
 from core.puzzle.live_session_review import LiveSessionReviewBuilder
 from core.puzzle.planet_live import PlanetLiveResult, PlanetLiveSolver, render_planet_cctv_preview
@@ -312,22 +313,14 @@ def _grab_screen_region_bgr(*, left: int, top: int, width: int, height: int) -> 
 
 
 def _find_game_hwnd() -> int:
-    try:
-        from planet_live_solver import find_maple_hwnd
-    except Exception as exc:
-        raise RuntimeError(f"maple game window finder unavailable: {exc}") from exc
-    hwnd = find_maple_hwnd()
+    hwnd = find_game_hwnd()
     if hwnd is None:
         raise RuntimeError("maple game window not found")
     return int(hwnd)
 
 
 def _game_client_rect_screen(hwnd: int) -> tuple[int, int, int, int]:
-    try:
-        from planet_live_solver import get_client_rect_screen
-    except Exception as exc:
-        raise RuntimeError(f"maple game client rect unavailable: {exc}") from exc
-    left, top, width, height = get_client_rect_screen(int(hwnd))
+    left, top, width, height = get_game_client_rect_screen(int(hwnd))
     return int(left), int(top), int(width), int(height)
 
 
