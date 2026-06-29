@@ -47,3 +47,13 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 중요한 설계 선택은 selector 점수판 후보 수를 늘리지 않은 것이다. shadow의 `max_candidates=8`을 24로 올리면 `062325`가 오히려 평균 201px대로 나빠졌다. 그래서 runtime selector에는 기존 상위 후보 컷을 유지하고, motion release 판단에서만 별도 raw 후보 버퍼를 본다.
 
 검증 결과 `000_0615_062325`는 평균 34.65px, 최대 88.55px로 성공했다. 핵심 4판 `000_0614_111417`, `000_0614_121417`, `000_0614_220518`, `000_0615_062325`는 4/4 성공이다. 전체 live GT는 `success 4/16`, 평균 240.26px이다. 관련 단위 테스트는 57개 통과했다. 다음 우선 대상은 실패 중 평균 오차가 가장 낮은 `000_0615_015619`, 평균 151.16px이다.
+
+## 2026-06-29 cont11 cluster rescue 추가
+
+`000_0615_015619`는 raw 후보가 거의 항상 GT 근처에 있고, live family 안에서도 `raw_candidate_cont11_center_mild_state_mild`가 평균 14.03px 수준으로 정답에 붙어 있다. 실패 원인은 selector가 초반에 `raw_candidate_cont2_box_rel_p05_z0_state_mild_occlusion_state`를 고르고, 이후 `raw_candidate_cont0_center_mild_state_mild`로 갈아타도 계속 오른쪽 위로 밀리는 것이다.
+
+처음에는 cont2/cont0이 cont11 군집에서 멀면 무조건 cont11 center로 복구하게 했지만, 이 규칙은 기존 성공판 4개를 크게 깨뜨렸다. 이유는 다른 판에서도 cont11 군집이 존재하지만 그때는 배경 군집인 경우가 많기 때문이다.
+
+최종 규칙은 더 좁게 고정했다. cont2는 `raw_candidate_cont2_box_rel_p05_z0_state_mild_occlusion_state`일 때만 cont11 시작 복구를 허용한다. cont0은 직전 선택 identity가 cont11일 때만 이어받는다. 최근 `raw_candidate_motion_release`가 있으면 cont2에서 cont11 복구를 다시 시작하지 않는다. 이 제한이 `062325`의 75프레임 회귀를 막는다.
+
+검증 결과 `000_0615_015619`는 평균 34.43px로 성공했다. 핵심 5판 `000_0614_111417`, `000_0614_121417`, `000_0614_220518`, `000_0615_062325`, `000_0615_015619`는 5/5 성공이다. 전체 live GT는 `success 5/16`, 평균 200.43px이다. 관련 단위 테스트는 62개 통과했다. 다음 우선 대상은 실패 중 평균 오차가 가장 낮은 `000_0615_035137`, 평균 141.96px이다.

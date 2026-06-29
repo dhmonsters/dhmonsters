@@ -199,6 +199,9 @@ class TransparentSelectorShadow:
         hold = self._identity_hold_family(family, paths, frames)
         if hold is not None:
             family, point = hold
+        cluster_rescue = self._cont11_cluster_rescue(family, point, paths, frames)
+        if cluster_rescue is not None:
+            family, point = cluster_rescue
         release = self._motion_release_point(family, point, frame)
         if release is not None:
             family, point = release
@@ -371,6 +374,49 @@ class TransparentSelectorShadow:
             return None
         return previous, point
 
+    def _cont11_cluster_rescue(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if not self._cont11_rescue_target_allowed(selected_family):
+            return None
+
+        center_family = "raw_candidate_cont11_center_mild_state_mild"
+        center = self._latest_point(paths.get(center_family, {}), frames)
+        if center is None:
+            return None
+
+        support = 0
+        for family, path in paths.items():
+            if not _is_cont11_family(family):
+                continue
+            point = self._latest_point(path, frames)
+            if point is not None and _distance(point, center) <= 45.0:
+                support += 1
+        if support < 4:
+            return None
+        if _distance(selected_point, center) < 70.0:
+            return None
+        return center_family, center
+
+    def _cont11_rescue_target_allowed(self, selected_family: str) -> bool:
+        name = str(selected_family).lower()
+        if name.startswith("raw_candidate_cont2_box_rel_p05_z0_state_mild_occlusion_state"):
+            if any(_is_motion_release_family(family) for family in list(self._selected_history)[-6:]):
+                return False
+            return True
+        if name.startswith("raw_candidate_cont0_"):
+            return bool(
+                self._selected_history
+                and _is_cont11_family(self._selected_history[-1])
+            )
+        return False
+
     def _motion_release_point(
         self,
         selected_family: str,
@@ -472,6 +518,10 @@ def _is_cont2_return_family(family: str) -> bool:
         name.startswith("raw_candidate_cont2_box_rel_p05_z0")
         or name.startswith("raw_candidate_cont2_box_switch_p1_p05_to_n05_z0")
     )
+
+
+def _is_cont11_family(family: str) -> bool:
+    return str(family).lower().startswith("raw_candidate_cont11_")
 
 
 def _is_motion_release_origin(family: str) -> bool:
