@@ -391,6 +391,12 @@ class TransparentSelectorShadow:
             return None
         if not self._cont11_rescue_target_allowed(selected_family):
             return None
+        if (
+            frames
+            and _is_cont12_anchor_family(selected_family)
+            and self._motion_release_point(selected_family, selected_point, int(frames[-1])) is not None
+        ):
+            return None
 
         center_family = "raw_candidate_cont11_center_mild_state_mild"
         center = self._latest_point(paths.get(center_family, {}), frames)
@@ -477,6 +483,13 @@ class TransparentSelectorShadow:
                 return False
             return True
         if name.startswith("raw_candidate_cont0_"):
+            return bool(
+                self._selected_history
+                and _is_cont11_family(self._selected_history[-1])
+            )
+        if _is_cont12_anchor_family(name):
+            if any(_is_cont2_switch_family(family) for family in list(self._selected_history)[-8:]):
+                return False
             return bool(
                 self._selected_history
                 and _is_cont11_family(self._selected_history[-1])
