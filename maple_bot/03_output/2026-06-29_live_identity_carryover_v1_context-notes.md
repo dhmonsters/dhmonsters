@@ -133,3 +133,13 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 초기 실험에서 단순 median cluster는 오른쪽 후보를 고르며 실패했다. cont5를 무조건 우선해도 59~62프레임에서 오래된 cont5 또는 화면 밖 balanced가 섞였다. 그래서 최종 조건은 “balanced는 raw 군집과 같은 upper-left band에 있고 y가 정상 범위일 때만”, “cont13 z0_p05가 너무 아래로 밀리면 z0_n05 또는 cont5로 전환”하는 식으로 좁혔다.
 
 검증 결과 `000_0615_000258`은 평균 22.33px, 최대 54.36px로 성공했다. 핵심 13판 replay는 13/13 성공했고, 전체 live GT는 `success 13/16`, 평균 61.86px이다. `tests.test_transparent_selector_shadow` 51개가 통과했다. 남은 실패는 `000_0614_124417` 67.60px, `000_0614_185318` 288.67px, `000_0614_204718` 304.90px이다.
+
+## 2026-06-29 cont10 box band rescue 추가.
+
+`000_0614_124417`은 selector가 `raw_candidate_cont10_center_mild_state_mild` 중심에 오래 붙어 평균 67.60px로 실패했다. 실제 타겟은 cont10 중심에서 시작하지만 65프레임 이후 박스 내부 아래쪽 band로 내려가고, 중간에는 cont13 release, 후반에는 왼쪽 offset과 cont15/cont1 후보 쪽으로 꺾인다.
+
+처음에는 cont10 중심 한 프레임만 보정했지만, 뒤쪽의 cont11 cluster rescue와 balanced hold가 다시 덮어쓰면서 평균 142.55px로 악화됐다. 그래서 cont10 box band가 한 번 성립하면 `_cont10_band_active`를 켜고, 프레임 마지막에 cont10 center 기준 band 선택을 한 번 더 적용한다. 이것은 한 프레임 점수가 아니라 “cont10 내부 신분이 박스 중심에서 내부 band로 이동했다”는 시간축 상태다.
+
+회귀도 있었다. `000_0615_025624`, `000_0615_042024`, `000_0615_022618`에서 p05/p1 후보가 너무 위쪽인데도 같은 lower-band로 오인했다. 124417의 진짜 lower-band는 y가 330 이상이므로 `_is_lower_right_band`에 후보 y >= 325 조건을 추가해 좁혔다. 이 가드 뒤에는 124417은 유지되고 세 회귀판은 모두 원래 성공권으로 돌아왔다.
+
+검증 결과 `000_0614_124417`은 평균 26.48px, 최대 59.09px로 성공했다. 핵심 14판 replay는 14/14 성공했고, 전체 live GT는 `success 14/16`, 평균 59.29px이다. `tests.test_transparent_selector_shadow` 54개가 통과했다. 남은 실패는 `000_0614_185318` 288.67px, `000_0614_204718` 304.90px이다.

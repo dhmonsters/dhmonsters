@@ -41,6 +41,9 @@
 - [x] `000_0615_000258` cont0 upper-left cluster rescue로 성공 확인.
 - [x] 핵심 13판 live replay 13/13 회귀 없음 확인.
 - [x] 전체 live GT 기준점 13/16 확인.
+- [x] `000_0614_124417` cont10 box band rescue로 성공 확인.
+- [x] 핵심 14판 live replay 14/14 회귀 없음 확인.
+- [x] 전체 live GT 기준점 14/16 확인.
 - [ ] live GT 16/16 달성.
 - [x] 결과 문서 작성.
 - [x] 의미 단위 커밋.

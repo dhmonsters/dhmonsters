@@ -117,6 +117,7 @@ class TransparentSelectorShadow:
         self._meta: dict[str, dict[str, object]] = {}
         self._selected_history: deque[str] = deque(maxlen=self.window)
         self._selected_point_history: deque[tuple[int, Point]] = deque(maxlen=self.window)
+        self._cont10_band_active = False
         self._updates = 0
 
     def update(
@@ -217,6 +218,10 @@ class TransparentSelectorShadow:
         cont0_upper_left = self._cont0_upper_left_cluster_rescue(family, point, paths, frames)
         if cont0_upper_left is not None:
             family, point = cont0_upper_left
+        cont10_box_band = self._cont10_box_band_rescue(family, point, paths, frames)
+        if cont10_box_band is not None:
+            family, point = cont10_box_band
+            self._cont10_band_active = True
         upper_left_rescue = self._cont12_upper_left_rescue(family, point, paths, frames)
         if upper_left_rescue is not None:
             family, point = upper_left_rescue
@@ -244,6 +249,19 @@ class TransparentSelectorShadow:
         release = self._motion_release_point(family, point, frame)
         if release is not None:
             family, point = release
+        if self._cont10_band_active:
+            cont10_center = self._latest_point(
+                paths.get("raw_candidate_cont10_center_mild_state_mild", {}),
+                frames,
+            )
+            late_cont10_box_band = self._cont10_box_band_rescue(
+                "raw_candidate_cont10_center_mild_state_mild",
+                cont10_center,
+                paths,
+                frames,
+            )
+            if late_cont10_box_band is not None:
+                family, point = late_cont10_box_band
         consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
         merge_context = self._merge_context()
         self._selected_history.append(family)
@@ -724,6 +742,98 @@ class TransparentSelectorShadow:
         if point is not None and float(point[0]) <= 345.0 and 20.0 <= float(point[1]) <= 120.0:
             return "raw_candidate_cont5_box_rel_n1_z0_state_mild", point
         return None
+
+    def _cont10_box_band_rescue(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if selected_family != "raw_candidate_cont10_center_mild_state_mild":
+            return None
+
+        y = float(selected_point[1])
+        if y < 340.0:
+            for family in (
+                "raw_candidate_cont13_center_mild_state_mild",
+                "raw_candidate_cont13_box_rel_p05_z0_state_mild",
+                "raw_candidate_cont13_box_rel_z0_n05_state_mild",
+                "raw_candidate_cont13_box_rel_p05_p05_state_mild",
+            ):
+                point = self._latest_point(paths.get(family, {}), frames)
+                if point is None:
+                    continue
+                if 500.0 <= float(point[0]) <= 590.0 and 370.0 <= float(point[1]) <= 440.0:
+                    return family, point
+
+            for family in (
+                "balanced_viterbi_center_mild_state_mild",
+                "balanced_viterbi_center_mild_state_coast",
+                "balanced_viterbi_center_mild_offset_coast",
+            ):
+                point = self._latest_point(paths.get(family, {}), frames)
+                if point is not None and self._is_lower_right_band(selected_point, point):
+                    return family, point
+
+            for family in (
+                "raw_candidate_cont11_box_rel_z0_p1_state_mild",
+                "raw_candidate_cont10_box_rel_p05_p1_state_mild",
+                "raw_candidate_cont10_box_rel_p05_p05_state_mild",
+                "raw_candidate_cont10_box_rel_p1_p05_state_mild",
+            ):
+                point = self._latest_point(paths.get(family, {}), frames)
+                if point is not None and self._is_lower_right_band(selected_point, point):
+                    return family, point
+            return None
+
+        if y < 365.0:
+            for family in (
+                "raw_candidate_cont10_box_rel_z0_p1_state_mild",
+                "raw_candidate_cont10_box_rel_z0_p05_state_mild",
+                "raw_candidate_cont13_box_rel_p1_n05_state_mild",
+            ):
+                point = self._latest_point(paths.get(family, {}), frames)
+                if point is None:
+                    continue
+                if abs(float(point[0]) - float(selected_point[0])) <= 35.0:
+                    if float(selected_point[1]) + 25.0 <= float(point[1]) <= float(selected_point[1]) + 85.0:
+                        return family, point
+            return None
+
+        if y <= 405.0:
+            return None
+
+        for family in (
+            "raw_candidate_cont15_box_rel_n05_z0_state_mild",
+            "raw_candidate_cont15_box_rel_p05_z0_state_mild",
+            "raw_candidate_cont15_center_mild_state_mild",
+            "raw_candidate_cont15_box_rel_n1_p05_state_mild",
+            "raw_candidate_cont13_box_rel_p1_z0_state_mild",
+            "raw_candidate_cont13_box_rel_p1_p05_state_mild",
+            "raw_candidate_cont13_box_rel_p05_p1_state_mild",
+            "raw_candidate_cont10_box_rel_n1_z0_state_mild",
+            "raw_candidate_cont10_box_rel_n05_z0_state_mild",
+            "raw_candidate_cont10_box_rel_z0_n05_state_mild",
+            "raw_candidate_cont1_box_rel_p1_p05_state_mild",
+        ):
+            point = self._latest_point(paths.get(family, {}), frames)
+            if point is None:
+                continue
+            if float(selected_point[0]) - 90.0 <= float(point[0]) <= float(selected_point[0]) + 20.0:
+                if float(selected_point[1]) - 45.0 <= float(point[1]) <= float(selected_point[1]) + 35.0:
+                    return family, point
+        return None
+
+    @staticmethod
+    def _is_lower_right_band(selected_point: Point, point: Point) -> bool:
+        return (
+            float(selected_point[0]) + 15.0 <= float(point[0]) <= float(selected_point[0]) + 70.0
+            and float(selected_point[1]) + 25.0 <= float(point[1]) <= float(selected_point[1]) + 85.0
+            and float(point[1]) >= 325.0
+        )
 
     def _cont11_edge_lower_balanced_rescue(
         self,

@@ -1091,6 +1091,87 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["family"], "raw_candidate_cont0_center_mild_state_mild")
         self.assertEqual(result["point"], [420, 220])
 
+    def test_shadow_rescues_cont10_center_to_lower_box_band(self):
+        runtime = FakeRuntime(
+            selected_family="raw_candidate_cont10_center_mild_state_mild",
+            selected_point=(488.0, 294.0),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(488.0, 294.0, 0.8, 120.0, 118.0)],
+            anchors={
+                "raw_candidate_cont10_center_mild_state_mild": (488.0, 294.0),
+                "balanced_viterbi_center_mild_state_mild": (527.0, 359.0),
+                "raw_candidate_cont10_box_rel_p05_p1_state_mild": (517.9, 358.4),
+            },
+        )
+
+        self.assertEqual(result["family"], "balanced_viterbi_center_mild_state_mild")
+        self.assertEqual(result["point"], [527, 359])
+
+    def test_shadow_rescues_cont10_center_to_cont13_release_band(self):
+        runtime = FakeRuntime(
+            selected_family="raw_candidate_cont10_center_mild_state_mild",
+            selected_point=(490.0, 299.0),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(490.0, 299.0, 0.8, 120.0, 118.0)],
+            anchors={
+                "raw_candidate_cont10_center_mild_state_mild": (490.0, 299.0),
+                "raw_candidate_cont13_center_mild_state_mild": (551.0, 408.0),
+                "raw_candidate_cont13_box_rel_p05_z0_state_mild": (588.3, 408.0),
+            },
+        )
+
+        self.assertEqual(result["family"], "raw_candidate_cont13_center_mild_state_mild")
+        self.assertEqual(result["point"], [551, 408])
+
+    def test_shadow_rescues_cont10_center_to_left_offset_band(self):
+        runtime = FakeRuntime(
+            selected_family="raw_candidate_cont10_center_mild_state_mild",
+            selected_point=(494.0, 442.0),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(494.0, 442.0, 0.8, 120.0, 118.0)],
+            anchors={
+                "raw_candidate_cont10_center_mild_state_mild": (494.0, 442.0),
+                "raw_candidate_cont15_box_rel_p05_z0_state_mild": (460.7, 409.0),
+                "raw_candidate_cont10_box_rel_n1_z0_state_mild": (437.6, 442.0),
+            },
+        )
+
+        self.assertEqual(result["family"], "raw_candidate_cont15_box_rel_p05_z0_state_mild")
+        self.assertEqual(result["point"], [461, 409])
+
     def test_shadow_does_not_block_cont12_after_cont2_switch(self):
         class _SequenceRuntime:
             available = True
