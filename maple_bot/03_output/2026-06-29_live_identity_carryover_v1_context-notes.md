@@ -99,3 +99,15 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 그 다음 108프레임부터 balanced가 계속 남아 cont7로 넘어가지 않는 문제가 있었다. 직전 신분이 balanced이고 cont7이 balanced와 90px 이내, 아래쪽으로 55px 이상, 좌우 차이는 45px 이내로 나타나면 cont7 release로 넘긴다. 한 번 cont7로 넘긴 뒤에는 이전 raw-cont center 유지 규칙을 cont10뿐 아니라 cont7에도 허용해서 runtime이 cont12나 다른 후보를 골라도 cont7 신분을 이어가게 했다.
 
 검증 결과 `000_0615_022618`은 평균 20.89px, 최대 75.91px로 성공했다. 기존 성공 9판과 새 성공판을 합친 핵심 10판 replay는 10/10 성공했다. 전체 live GT는 `success 10/16`, 평균 116.80px이다. `tests.test_transparent_selector_shadow` 40개가 통과했다. 남은 실패는 `000_0614_124417` 67.60px, `000_0615_044401` 245.97px, `000_0614_233218` 263.62px, `000_0614_185318` 288.67px, `000_0614_204718` 304.90px, `000_0615_000258` 444.35px이다.
+
+## 2026-06-29 cont12-left-cont11 rescue와 edge hold 추가.
+
+남은 실패를 family 상한 기준으로 다시 훑었을 때 `000_0614_233218`은 live family 안에 이미 성공 family가 있었다. `raw_candidate_cont11_box_rel_p1_z0_state_mild`는 평균 33.96px로 성공권이었고, 현재 selector는 오른쪽의 `raw_candidate_cont12_box_rel_p05_z0_state_mild`에 오래 붙어 평균 263.62px로 실패했다.
+
+핵심 신호는 오른쪽 cont12와 왼쪽 cont11 cluster의 분리다. cont12 선택점이 cont11 후보보다 180px 이상 오른쪽에 있고, y 차이는 75px 이내이며, cont11 p1_z0 edge 주변에 후보 지지가 있으면 cont12를 왼쪽 cont11 후보로 되돌린다. balanced가 edge를 center보다 확실히 지지하면 edge를 선택하고, balanced가 center를 지지하면 center로 되돌린다.
+
+초기 구현은 `000_0614_114417`의 cont11 center hold를 p1_z0 edge로 덮어써 평균이 나빠졌다. 그래서 balanced가 edge를 명확히 지지할 때만 edge를 시작하도록 좁혔다. 또한 `000_0614_111417`에서는 edge가 선택됐지만 balanced가 훨씬 아래쪽에 있어서 실제 정답은 balanced 쪽이었다. 이 경우에는 edge 선택 뒤에도 lower-balanced 보호를 마지막에 한 번 더 적용해 balanced로 되돌린다.
+
+한 번 edge로 넘어간 뒤 `000_0614_233218`의 130~133프레임에서 center로 되돌아가는 문제가 있었으므로, 이전 신분이 `raw_candidate_cont11_box_rel_p1_z0_state_mild`이고 최신 edge가 시간 예측 70px 안에 있으면 edge identity hold를 유지한다. 단 lower-balanced 보호가 먼저 성립하면 balanced에 양보한다.
+
+검증 결과 `000_0614_233218`은 평균 34.52px, 최대 64.02px로 성공했다. 핵심 11판 replay는 11/11 성공했고, 전체 live GT는 `success 11/16`, 평균 102.48px이다. `tests.test_transparent_selector_shadow` 45개가 통과했다. 남은 실패는 `000_0614_124417` 67.60px, `000_0615_044401` 245.97px, `000_0614_185318` 288.67px, `000_0614_204718` 304.90px, `000_0615_000258` 444.35px이다. `000_0614_124417`은 단일 family 상한으로는 부족하고 cont10 박스 내부 offset을 시간축으로 고르는 새 신호가 필요하다.

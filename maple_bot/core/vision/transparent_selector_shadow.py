@@ -214,6 +214,18 @@ class TransparentSelectorShadow:
             cont10_bridge = self._cont10_balanced_bridge_point(family, point, paths, frames)
             if cont10_bridge is not None:
                 family, point = cont10_bridge
+        lower_balanced = self._cont11_edge_lower_balanced_rescue(family, point, paths, frames)
+        if lower_balanced is not None:
+            family, point = lower_balanced
+        cont11_edge_rescue = self._cont12_left_cont11_edge_rescue(family, point, paths, frames)
+        if cont11_edge_rescue is not None:
+            family, point = cont11_edge_rescue
+        cont11_edge_hold = self._cont11_left_edge_identity_hold(family, point, paths, frames)
+        if cont11_edge_hold is not None:
+            family, point = cont11_edge_hold
+        lower_balanced = self._cont11_edge_lower_balanced_rescue(family, point, paths, frames)
+        if lower_balanced is not None:
+            family, point = lower_balanced
         cluster_rescue = self._cont11_cluster_rescue(family, point, paths, frames)
         if cluster_rescue is not None:
             family, point = cluster_rescue
@@ -514,6 +526,111 @@ class TransparentSelectorShadow:
         if abs(float(cont7[0]) - float(balanced[0])) > 45.0:
             return None
         return cont7_family, cont7
+
+    def _cont12_left_cont11_edge_rescue(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if not _is_cont12_anchor_family(selected_family):
+            return None
+        if any(_is_cont2_switch_family(family) for family in list(self._selected_history)[-8:]):
+            return None
+        if (
+            frames
+            and self._motion_release_point(selected_family, selected_point, int(frames[-1])) is not None
+        ):
+            return None
+
+        edge_family = "raw_candidate_cont11_box_rel_p1_z0_state_mild"
+        edge = self._latest_point(paths.get(edge_family, {}), frames)
+        center = self._latest_point(
+            paths.get("raw_candidate_cont11_center_mild_state_mild", {}),
+            frames,
+        )
+        balanced = self._latest_point(
+            paths.get("balanced_viterbi_center_mild_state_mild", {}),
+            frames,
+        )
+        if edge is None or center is None:
+            return None
+        if balanced is None:
+            return None
+        edge_supported = _distance(balanced, edge) + 20.0 < _distance(balanced, center)
+        center_supported = _distance(balanced, center) <= 30.0
+        if edge_supported:
+            target_family = edge_family
+            target = edge
+        elif center_supported:
+            target_family = "raw_candidate_cont11_center_mild_state_mild"
+            target = center
+        else:
+            return None
+        if float(selected_point[0]) - float(target[0]) < 180.0:
+            return None
+        if abs(float(selected_point[1]) - float(target[1])) > 75.0:
+            return None
+        if _distance(edge, center) > 80.0:
+            return None
+
+        support = 0
+        for family, path in paths.items():
+            if not _is_cont11_family(family):
+                continue
+            point = self._latest_point(path, frames)
+            if point is not None and _distance(point, edge) <= 60.0:
+                support += 1
+        if support < 3:
+            return None
+        return target_family, target
+
+    def _cont11_edge_lower_balanced_rescue(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        edge_family = "raw_candidate_cont11_box_rel_p1_z0_state_mild"
+        if selected_family != edge_family or selected_point is None:
+            return None
+        balanced_family = "balanced_viterbi_center_mild_state_mild"
+        balanced = self._latest_point(paths.get(balanced_family, {}), frames)
+        if balanced is None:
+            return None
+        if float(balanced[1]) - float(selected_point[1]) < 65.0:
+            return None
+        if abs(float(balanced[0]) - float(selected_point[0])) > 90.0:
+            return None
+        return balanced_family, balanced
+
+    def _cont11_left_edge_identity_hold(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        edge_family = "raw_candidate_cont11_box_rel_p1_z0_state_mild"
+        if not self._selected_history or self._selected_history[-1] != edge_family:
+            return None
+        if _is_balanced_rescue_family(selected_family):
+            return None
+        if selected_point is None:
+            return None
+        edge = self._latest_point(paths.get(edge_family, {}), frames)
+        if edge is None:
+            return None
+        predicted = self._predict_next_point(list(self._selected_point_history)[-4:])
+        if _distance(edge, predicted) > 70.0:
+            return None
+        if _distance(selected_point, edge) < 40.0:
+            return None
+        return edge_family, edge
 
     def _cont10_balanced_bridge_point(
         self,
