@@ -111,3 +111,15 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 한 번 edge로 넘어간 뒤 `000_0614_233218`의 130~133프레임에서 center로 되돌아가는 문제가 있었으므로, 이전 신분이 `raw_candidate_cont11_box_rel_p1_z0_state_mild`이고 최신 edge가 시간 예측 70px 안에 있으면 edge identity hold를 유지한다. 단 lower-balanced 보호가 먼저 성립하면 balanced에 양보한다.
 
 검증 결과 `000_0614_233218`은 평균 34.52px, 최대 64.02px로 성공했다. 핵심 11판 replay는 11/11 성공했고, 전체 live GT는 `success 11/16`, 평균 102.48px이다. `tests.test_transparent_selector_shadow` 45개가 통과했다. 남은 실패는 `000_0614_124417` 67.60px, `000_0615_044401` 245.97px, `000_0614_185318` 288.67px, `000_0614_204718` 304.90px, `000_0615_000258` 444.35px이다. `000_0614_124417`은 단일 family 상한으로는 부족하고 cont10 박스 내부 offset을 시간축으로 고르는 새 신호가 필요하다.
+
+## 2026-06-29 cont12 upper-left rescue와 cont15 hold 추가.
+
+`000_0615_044401`은 selector가 왼쪽 위의 `raw_candidate_cont12_box_rel_p05_z0_state_mild`에 붙은 채 크게 실패했다. 실제 흐름은 초반에 `balanced_viterbi_center_mild_state_mild`가 정답 근처를 지나가고, 이후 balanced가 아래쪽 배경 후보로 빠질 때 `raw_candidate_cont15_center_mild_state_mild`가 정답 신분을 이어받는 구조였다.
+
+핵심 신호는 선택된 cont12가 balanced보다 크게 왼쪽 위에 고립되어 있다는 점이다. cont12 선택점보다 balanced가 오른쪽으로 140px 이상, 아래쪽으로 120px 이상 떨어져 있으면 cont12를 배경 anchor로 보고 balanced로 복구한다. 단 balanced가 cont15보다 아래쪽으로 크게 떨어져 있고 두 후보가 충분히 멀어지면, 정답 신분이 balanced에서 cont15로 release된 것으로 보고 cont15를 선택한다.
+
+한 번 cont15로 넘어간 뒤에는 balanced가 다시 아래쪽 후보로 잡히는 순간이 있어 selector가 갈아탈 위험이 있었다. 그래서 직전 선택 신분이 cont15이고, 최신 cont15가 balanced보다 55px 이상 위에 있으며 현재 선택점과도 충분히 떨어져 있으면 cont15 identity hold를 유지한다. 이는 프레임별 점수가 아니라 직전 신분을 보고 이어가는 시간축 판별기 규칙이다.
+
+초기 구현은 `000_0615_062325`의 motion release를 깨뜨렸다. `062325`에서는 cont12가 틀린 신분이 아니라 오른쪽 분리 release를 일으키는 중간 방아쇠였기 때문이다. 그래서 최근 6프레임 안에 `raw_candidate_motion_release`가 있으면 cont12 upper-left rescue는 발동하지 않게 했다.
+
+검증 결과 `000_0615_044401`은 평균 18.11px, 최대 59.75px로 성공했다. `000_0615_062325`도 평균 34.65px로 회귀 없이 성공을 유지했다. 핵심 12판 replay는 12/12 성공했고, 전체 live GT는 `success 12/16`, 평균 88.24px이다. `tests.test_transparent_selector_shadow` 48개가 통과했다. 남은 실패는 `000_0614_124417` 67.60px, `000_0614_185318` 288.67px, `000_0614_204718` 304.90px, `000_0615_000258` 444.35px이다.
