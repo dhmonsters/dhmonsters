@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
-from core.puzzle.live_recording import grab_screen_bgr
+from core.puzzle.live_recording import GameClientFrameGrabber
 from core.puzzle.roi import crop_by_roi
 
 
@@ -37,7 +37,7 @@ def run_capture_check(
 ) -> CaptureCheckResult:
     output_dir = _create_output_dir(output_root=output_root, clock=clock)
     report_path = output_dir / "capture_check.md"
-    grabber = frame_grabber or grab_screen_bgr
+    grabber = frame_grabber or GameClientFrameGrabber()
 
     try:
         frame = grabber()

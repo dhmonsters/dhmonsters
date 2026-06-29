@@ -1,10 +1,13 @@
 # 투명도형 퍼즐 라이브 화면 녹화 리허설 runtime을 검증한다.
 
 import json
+import sys
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
+import core.puzzle.live_recording as live_recording
 from core.puzzle.live_recording import LiveRecordingRuntime, _select_main_monitor
 from core.puzzle.planet_live import PlanetLiveResult, PlanetLiveSolver
 
@@ -172,6 +175,42 @@ def test_live_recording_runtime_updates_default_solver_mouse_flag(tmp_path):
 
     assert runtime.mouse_enabled is True
     assert runtime.live_solver.mouse_enabled is True
+
+
+def test_live_recording_default_capture_uses_game_client_grabber(tmp_path):
+    assert hasattr(live_recording, "GameClientFrameGrabber")
+
+    runtime = LiveRecordingRuntime(output_root=tmp_path)
+
+    assert isinstance(runtime.frame_grabber, live_recording.GameClientFrameGrabber)
+
+
+def test_game_client_grabber_captures_maple_client_rect():
+    assert hasattr(live_recording, "GameClientFrameGrabber")
+    captured = {}
+
+    class _FakeMss:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def grab(self, region):
+            captured["region"] = dict(region)
+            return np.zeros((4, 5, 4), dtype=np.uint8)
+
+    fake_solver = SimpleNamespace(
+        find_maple_hwnd=lambda: 1234,
+        get_client_rect_screen=lambda hwnd: (10, 20, 5, 4),
+    )
+    fake_mss = SimpleNamespace(mss=lambda: _FakeMss())
+
+    with mock.patch.dict(sys.modules, {"planet_live_solver": fake_solver, "mss": fake_mss}):
+        frame = live_recording.GameClientFrameGrabber()()
+
+    assert captured["region"] == {"left": 10, "top": 20, "width": 5, "height": 4}
+    assert frame.shape == (4, 5, 3)
 
 
 def test_live_recording_session_start_records_mouse_enabled_flag(tmp_path):

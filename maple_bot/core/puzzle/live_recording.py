@@ -36,7 +36,7 @@ class LiveRecordingRuntime:
         if fps <= 0:
             raise ValueError("fps must be positive")
         self.output_root = output_root
-        self.frame_grabber = frame_grabber or grab_screen_bgr
+        self.frame_grabber = frame_grabber or GameClientFrameGrabber()
         self.fps = fps
         self.sleeper = sleeper or time.sleep
         self.mouse_enabled = bool(mouse_enabled)
@@ -227,6 +227,35 @@ class LiveRecordingRuntime:
             self.latest_preview_path = preview_path
 
 
+class GameClientFrameGrabber:
+    def __init__(self) -> None:
+        self._hwnd: int | None = None
+
+    def __call__(self) -> Any:
+        for retry in range(2):
+            hwnd = self._require_hwnd()
+            try:
+                left, top, width, height = _game_client_rect_screen(hwnd)
+                break
+            except Exception:
+                self._hwnd = None
+                if retry == 0:
+                    continue
+                raise
+        else:
+            raise RuntimeError("maple game window not found")
+
+        if width <= 0 or height <= 0:
+            raise RuntimeError(f"invalid game client rect: {width}x{height}")
+        return _grab_screen_region_bgr(left=left, top=top, width=width, height=height)
+
+    def _require_hwnd(self) -> int:
+        if self._hwnd is not None:
+            return self._hwnd
+        self._hwnd = _find_game_hwnd()
+        return self._hwnd
+
+
 def grab_screen_bgr() -> Any:
     import cv2
     import numpy as np
@@ -251,6 +280,55 @@ def grab_screen_bgr() -> Any:
         raise RuntimeError(f"screen capture failed ({details})") from exc
     rgb = np.array(image)
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _grab_screen_region_bgr(*, left: int, top: int, width: int, height: int) -> Any:
+    import cv2
+    import numpy as np
+
+    capture_errors: list[str] = []
+    try:
+        import mss
+
+        with mss.mss() as sct:
+            image = sct.grab({"left": int(left), "top": int(top), "width": int(width), "height": int(height)})
+        return cv2.cvtColor(np.array(image), cv2.COLOR_BGRA2BGR)
+    except Exception as exc:
+        capture_errors.append(f"mss: {exc}")
+
+    from PIL import ImageGrab
+
+    try:
+        image = ImageGrab.grab(
+            bbox=(int(left), int(top), int(left + width), int(top + height)),
+            all_screens=True,
+        ).convert("RGB")
+    except Exception as exc:
+        capture_errors.append(f"ImageGrab: {exc}")
+        details = " | ".join(capture_errors)
+        raise RuntimeError(f"game client capture failed ({details})") from exc
+    rgb = np.array(image)
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def _find_game_hwnd() -> int:
+    try:
+        from planet_live_solver import find_maple_hwnd
+    except Exception as exc:
+        raise RuntimeError(f"maple game window finder unavailable: {exc}") from exc
+    hwnd = find_maple_hwnd()
+    if hwnd is None:
+        raise RuntimeError("maple game window not found")
+    return int(hwnd)
+
+
+def _game_client_rect_screen(hwnd: int) -> tuple[int, int, int, int]:
+    try:
+        from planet_live_solver import get_client_rect_screen
+    except Exception as exc:
+        raise RuntimeError(f"maple game client rect unavailable: {exc}") from exc
+    left, top, width, height = get_client_rect_screen(int(hwnd))
+    return int(left), int(top), int(width), int(height)
 
 
 def _cv2() -> Any:
