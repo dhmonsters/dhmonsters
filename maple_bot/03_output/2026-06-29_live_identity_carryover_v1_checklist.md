@@ -49,3 +49,6 @@
 - [x] 의미 단위 커밋.
 - [x] `000_0614_204718` cont2 track-right raw rescue로 성공 확인.
 - [x] 전체 live GT 기준 15/16 확인.
+- [x] `000_0614_185318` cont12 upper-band rescue로 성공 확인.
+- [x] `000_0614_220518` 회귀를 panel lower-band guard로 차단.
+- [x] 전체 live GT 기준 16/16 확인.

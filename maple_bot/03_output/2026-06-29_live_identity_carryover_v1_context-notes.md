@@ -150,3 +150,13 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 rescue는 GT 좌표를 보지 않고 현재 raw 후보와 panel anchor의 상대 위치만 본다. panel 오른쪽 45~180px, y -90~+60px 범위 후보를 모으고, panel 오른쪽 약 95px 지점과 y 일관성이 가장 좋은 후보를 선택한다. 후보가 없으면 짧게 panel anchor로 돌아가서 이후 raw 후보가 다시 나타날 시간을 번다.
 
 검증 결과 `000_0614_204718`은 평균 27.78px, 최대 64.70px로 성공했다. 회귀 샘플 5판은 5/5 성공했고, 전체 live GT는 `success 15/16`, 전체 평균 41.97px가 되었다. 남은 실패는 `000_0614_185318` 하나이며, 이 판은 cont12 p05_z0 계열에 멀리 붙는 별도 문제로 분리한다.
+
+## 2026-06-29 cont12 upper-band rescue 추가.
+
+`000_0614_185318`은 모든 GT 프레임에서 selector가 아래쪽 `raw_candidate_cont12_box_rel_p05_z0_state_mild`에 고정되어 평균 288.67px로 실패했다. 하지만 raw 후보 안에는 y 125px 이하의 위쪽 후보가 계속 있었고, target은 panel/cont0에서 cont17, cont14 쪽으로 넘어가며 위쪽 band 안에서 유지되었다. 그래서 선택 family가 cont12 p05_z0이고 선택점 y가 300px 이상 아래에 있을 때만 upper-band rescue를 켠다.
+
+후보 선택은 GT를 보지 않는다. 첫 rescue는 x 120~330, y 125 이하 후보 중 y 70 근처와 detector score를 같이 본다. 이후에는 직전 rescue 위치를 더 믿고, 직전 x가 210~245 근처일 때 오른쪽 위 후보가 45px 이상 분리되면 겹침 뒤 오른쪽 분리로 보고 낮은 score라도 따라간다. 이 규칙으로 `000_0614_185318`은 평균 38.21px로 성공했다.
+
+초기 구현은 `000_0614_220518`을 깨뜨렸다. 이 판은 실제 target이 아래쪽인데 위쪽에도 강한 후보가 있어서 upper-band rescue가 잘못 켜졌다. 두 판을 비교하니 `185318`은 panel y가 101~224로 위쪽이고, `220518`은 panel y가 348~360으로 아래쪽이었다. 따라서 panel anchor가 없거나 y가 230px보다 낮은 화면 아래쪽이면 upper-band rescue를 금지했다.
+
+검증 결과 `tests.test_transparent_selector_shadow` 61개가 통과했고, 전체 live GT는 `success 16/16`, 평균 26.32px가 되었다. 가장 높은 평균 오차는 `000_0614_185318`의 38.21px로 성공 기준 40px 바로 아래다. 다음 단계는 GT 통과 자체가 아니라 live 입력에서 같은 selector 경로가 유지되는지 인게임 테스트와 녹화 기반 재검증으로 넘어가는 것이다.

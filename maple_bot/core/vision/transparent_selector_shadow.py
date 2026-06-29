@@ -265,6 +265,9 @@ class TransparentSelectorShadow:
         track_right = self._track_right_raw_rescue(family, point, paths, frames, frame)
         if track_right is not None:
             family, point = track_right
+        upper_band = self._cont12_upper_band_rescue(family, point, paths, frames, frame)
+        if upper_band is not None:
+            family, point = upper_band
         consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
         merge_context = self._merge_context()
         self._selected_history.append(family)
@@ -881,6 +884,99 @@ class TransparentSelectorShadow:
             ),
         )
         return "raw_candidate_track_right_rescue", (float(candidate[0]), float(candidate[1]))
+
+    def _cont12_upper_band_rescue(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+        frame: int,
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if not _is_cont12_anchor_family(selected_family):
+            return None
+        if float(selected_point[1]) < 300.0:
+            return None
+        panel = self._latest_point(
+            paths.get("panel_default_center_mild_state_mild", {}),
+            frames,
+        )
+        if panel is None or float(panel[1]) > 230.0:
+            return None
+
+        pool = [
+            candidate
+            for candidate in self._raw_candidate_sets.get(int(frame), [])
+            if (
+                120.0 <= float(candidate[0]) <= 330.0
+                and float(candidate[1]) <= 125.0
+            )
+        ]
+        if not pool:
+            return None
+        if float(selected_point[1]) - min(float(candidate[1]) for candidate in pool) < 170.0:
+            return None
+
+        previous = self._previous_upper_band_rescue_point()
+        candidate = self._choose_upper_band_candidate(pool, previous)
+        return "raw_candidate_cont12_upper_band_rescue", (
+            float(candidate[0]),
+            float(candidate[1]),
+        )
+
+    def _previous_upper_band_rescue_point(self) -> Point | None:
+        if not self._selected_history:
+            return None
+        if self._selected_history[-1] != "raw_candidate_cont12_upper_band_rescue":
+            return None
+        if not self._selected_point_history:
+            return None
+        return self._selected_point_history[-1][1]
+
+    @staticmethod
+    def _choose_upper_band_candidate(
+        candidates: Sequence[Candidate],
+        previous: Point | None,
+    ) -> Candidate:
+        if previous is not None and 210.0 <= float(previous[0]) <= 245.0:
+            right_split = [
+                candidate
+                for candidate in candidates
+                if (
+                    float(candidate[0]) >= float(previous[0]) + 45.0
+                    and float(candidate[1]) <= 65.0
+                    and float(candidate[2]) >= 0.10
+                )
+            ]
+            if right_split:
+                return min(
+                    right_split,
+                    key=lambda candidate: (
+                        abs(float(candidate[1]) - 45.0),
+                        -float(candidate[2]),
+                        abs(float(candidate[0]) - (float(previous[0]) + 75.0)),
+                    ),
+                )
+
+        if previous is None:
+            return min(
+                candidates,
+                key=lambda candidate: (
+                    abs(float(candidate[1]) - 70.0)
+                    - 30.0 * float(candidate[2])
+                    + 0.02 * abs(float(candidate[0]) - 235.0)
+                ),
+            )
+        return min(
+            candidates,
+            key=lambda candidate: (
+                abs(float(candidate[1]) - 70.0)
+                + 0.08 * _distance((float(candidate[0]), float(candidate[1])), previous)
+                + 0.02 * abs(float(candidate[0]) - 235.0)
+            ),
+        )
 
     def _cont11_edge_lower_balanced_rescue(
         self,
