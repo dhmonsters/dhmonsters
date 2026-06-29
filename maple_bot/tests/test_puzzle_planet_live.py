@@ -64,7 +64,7 @@ class PlanetCctvPreviewTest(unittest.TestCase):
             track_pos=(30.0, 40.0),
         )
 
-        self.assertEqual(preview.shape[:2], (717, 948))
+        self.assertEqual(preview.shape[:2], (634, 695))
         self.assertTrue(np.any(preview[:, :, 1] > 200))
         self.assertTrue(np.any(preview[:, :, 2] > 200))
 

@@ -60,19 +60,19 @@ class LivePuzzleActivationDetectorTest(unittest.TestCase):
         self.assertAlmostEqual(result.detect_roi.y_ratio, DEFAULT_DETECT_ROI_RATIOS["y_ratio"])
 
     def test_default_rois_match_planet_solver_noauth_ratios(self) -> None:
-        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["x_ratio"], 0.252)
-        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["y_ratio"], 0.216)
-        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["w_ratio"], 0.748 - 0.252)
-        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["h_ratio"], 0.292 - 0.216)
-        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["x_ratio"], 0.254)
-        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["y_ratio"], 0.292)
-        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["w_ratio"], 0.748 - 0.254)
-        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["h_ratio"], 0.880 - 0.292)
-        self.assertEqual(DEFAULT_DETECT_ROI_RATIOS, DEFAULT_BOARD_ROI_RATIOS)
-        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["x_ratio"], 0.254)
-        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["y_ratio"], 0.216)
-        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["w_ratio"], 0.748 - 0.254)
-        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS["h_ratio"], 0.880 - 0.216)
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["x_ratio"], 0.320)
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["y_ratio"], 0.202)
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["w_ratio"], 0.678 - 0.320)
+        self.assertEqual(DEFAULT_POPUP_HEADER_ROI_RATIOS["h_ratio"], 0.263 - 0.202)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["x_ratio"], 0.318)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["y_ratio"], 0.188)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["w_ratio"], 0.680 - 0.318)
+        self.assertEqual(DEFAULT_BOARD_ROI_RATIOS["h_ratio"], 0.775 - 0.188)
+        self.assertEqual(DEFAULT_DETECT_ROI_RATIOS["x_ratio"], 0.320)
+        self.assertEqual(DEFAULT_DETECT_ROI_RATIOS["y_ratio"], 0.265)
+        self.assertEqual(DEFAULT_DETECT_ROI_RATIOS["w_ratio"], 0.678 - 0.320)
+        self.assertEqual(DEFAULT_DETECT_ROI_RATIOS["h_ratio"], 0.728 - 0.265)
+        self.assertEqual(DEFAULT_POPUP_PREVIEW_ROI_RATIOS, DEFAULT_BOARD_ROI_RATIOS)
 
     def test_white_shape_fallback_only_activates_when_enabled(self) -> None:
         detector = LivePuzzleActivationDetector(use_yolo=False, allow_white_fallback=True)
@@ -102,7 +102,7 @@ class WatchPreviewFrameTest(unittest.TestCase):
             preview = puzzle._build_watch_preview_frame(frame, popup_score=0.14)
 
             self.assertEqual(list(Path(tmp).rglob("*.png")), [])
-            self.assertEqual(preview.shape[:2], (717, 948))
+            self.assertEqual(preview.shape[:2], (634, 695))
 
 
 class LiveRecordingActivationFrameTest(unittest.TestCase):
