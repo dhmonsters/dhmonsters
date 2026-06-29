@@ -199,12 +199,21 @@ class TransparentSelectorShadow:
         hold = self._identity_hold_family(family, paths, frames)
         if hold is not None:
             family, point = hold
+        cont10_bridge = self._cont10_balanced_bridge_point(family, point, paths, frames)
+        if cont10_bridge is not None:
+            family, point = cont10_bridge
         balanced_hold = self._balanced_identity_hold_point(family, point, paths, frames)
         if balanced_hold is not None:
             family, point = balanced_hold
+        cont7_release = self._balanced_cont7_release_point(family, point, paths, frames)
+        if cont7_release is not None:
+            family, point = cont7_release
         raw_cont_rescue = self._raw_cont_center_rescue_point(family, point, paths, frames)
         if raw_cont_rescue is not None:
             family, point = raw_cont_rescue
+            cont10_bridge = self._cont10_balanced_bridge_point(family, point, paths, frames)
+            if cont10_bridge is not None:
+                family, point = cont10_bridge
         cluster_rescue = self._cont11_cluster_rescue(family, point, paths, frames)
         if cluster_rescue is not None:
             family, point = cluster_rescue
@@ -479,6 +488,76 @@ class TransparentSelectorShadow:
             return None
         return balanced_family, balanced
 
+    def _balanced_cont7_release_point(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if not self._selected_history:
+            return None
+        if not _is_balanced_rescue_family(self._selected_history[-1]):
+            return None
+        balanced = self._latest_point(
+            paths.get("balanced_viterbi_center_mild_state_mild", {}),
+            frames,
+        )
+        cont7_family = "raw_candidate_cont7_center_mild_state_mild"
+        cont7 = self._latest_point(paths.get(cont7_family, {}), frames)
+        if balanced is None or cont7 is None:
+            return None
+        if _distance(cont7, balanced) > 90.0:
+            return None
+        if float(cont7[1]) - float(balanced[1]) < 55.0:
+            return None
+        if abs(float(cont7[0]) - float(balanced[0])) > 45.0:
+            return None
+        return cont7_family, cont7
+
+    def _cont10_balanced_bridge_point(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if str(selected_family).lower() != "raw_candidate_cont10_center_mild_state_mild":
+            return None
+
+        balanced_family = "balanced_viterbi_center_mild_state_mild"
+        balanced = self._latest_point(paths.get(balanced_family, {}), frames)
+        if balanced is None:
+            return None
+
+        cont7_family = "raw_candidate_cont7_center_mild_state_mild"
+        cont7 = self._latest_point(paths.get(cont7_family, {}), frames)
+        if (
+            self._selected_history
+            and _is_balanced_rescue_family(self._selected_history[-1])
+            and cont7 is not None
+            and _distance(cont7, balanced) <= 90.0
+            and _distance(selected_point, cont7) >= 95.0
+        ):
+            return cont7_family, cont7
+
+        strict = self._latest_point(
+            paths.get("strict_transition_viterbi_center_mild_state_mild", {}),
+            frames,
+        )
+        if strict is None:
+            return None
+        if _distance(strict, balanced) > 12.0:
+            return None
+        bridge_distance = _distance(selected_point, balanced)
+        if bridge_distance < 95.0 or bridge_distance > 110.0:
+            return None
+        if float(balanced[0]) - float(selected_point[0]) < 10.0:
+            return None
+        return balanced_family, balanced
+
     def _raw_cont_center_rescue_point(
         self,
         selected_family: str,
@@ -499,7 +578,7 @@ class TransparentSelectorShadow:
         if self._selected_history:
             previous = self._selected_history[-1]
             previous_index = _raw_cont_center_index(previous)
-            if previous_index == 10:
+            if previous_index in {7, 10}:
                 center = self._latest_point(paths.get(previous, {}), frames)
                 if (
                     center is not None

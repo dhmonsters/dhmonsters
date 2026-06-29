@@ -29,6 +29,9 @@
 - [x] `000_0615_042024` strict-cont10 rescue 영향으로 추가 성공 확인.
 - [x] 핵심 8판 live replay 8/8 확인.
 - [x] 전체 live GT 기준점 9/16 확인.
+- [x] `000_0615_022618` cont10-balanced bridge와 cont7 release로 성공 확인.
+- [x] 핵심 10판 live replay 10/10 회귀 없음 확인.
+- [x] 전체 live GT 기준점 10/16 확인.
 - [ ] live GT 16/16 달성.
 - [x] 결과 문서 작성.
-- [ ] 의미 단위 커밋.
+- [x] 의미 단위 커밋.
