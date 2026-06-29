@@ -7,28 +7,23 @@ from core.puzzle.roi import resolve_ratio_roi
 
 # planet_solver_noauth.py의 팝업 감지 기준 ROI와 같은 상대좌표를 사용한다.
 DEFAULT_POPUP_HEADER_ROI_RATIOS = {
-    "x_ratio": 0.320,
-    "y_ratio": 0.202,
-    "w_ratio": 0.678 - 0.320,
-    "h_ratio": 0.263 - 0.202,
+    "x_ratio": 0.252,
+    "y_ratio": 0.216,
+    "w_ratio": 0.748 - 0.252,
+    "h_ratio": 0.292 - 0.216,
 }
 DEFAULT_BOARD_ROI_RATIOS = {
-    "x_ratio": 0.318,
-    "y_ratio": 0.188,
-    "w_ratio": 0.680 - 0.318,
-    "h_ratio": 0.775 - 0.188,
+    "x_ratio": 0.254,
+    "y_ratio": 0.292,
+    "w_ratio": 0.748 - 0.254,
+    "h_ratio": 0.880 - 0.292,
 }
-DEFAULT_DETECT_ROI_RATIOS = {
-    "x_ratio": 0.320,
-    "y_ratio": 0.265,
-    "w_ratio": 0.678 - 0.320,
-    "h_ratio": 0.728 - 0.265,
-}
+DEFAULT_DETECT_ROI_RATIOS = dict(DEFAULT_BOARD_ROI_RATIOS)
 DEFAULT_POPUP_PREVIEW_ROI_RATIOS = {
     "x_ratio": DEFAULT_BOARD_ROI_RATIOS["x_ratio"],
-    "y_ratio": DEFAULT_BOARD_ROI_RATIOS["y_ratio"],
+    "y_ratio": DEFAULT_POPUP_HEADER_ROI_RATIOS["y_ratio"],
     "w_ratio": DEFAULT_BOARD_ROI_RATIOS["w_ratio"],
-    "h_ratio": DEFAULT_BOARD_ROI_RATIOS["h_ratio"],
+    "h_ratio": 0.880 - 0.216,
 }
 
 
