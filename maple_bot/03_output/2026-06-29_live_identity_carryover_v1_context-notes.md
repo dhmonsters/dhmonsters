@@ -123,3 +123,13 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 초기 구현은 `000_0615_062325`의 motion release를 깨뜨렸다. `062325`에서는 cont12가 틀린 신분이 아니라 오른쪽 분리 release를 일으키는 중간 방아쇠였기 때문이다. 그래서 최근 6프레임 안에 `raw_candidate_motion_release`가 있으면 cont12 upper-left rescue는 발동하지 않게 했다.
 
 검증 결과 `000_0615_044401`은 평균 18.11px, 최대 59.75px로 성공했다. `000_0615_062325`도 평균 34.65px로 회귀 없이 성공을 유지했다. 핵심 12판 replay는 12/12 성공했고, 전체 live GT는 `success 12/16`, 평균 88.24px이다. `tests.test_transparent_selector_shadow` 48개가 통과했다. 남은 실패는 `000_0614_124417` 67.60px, `000_0614_185318` 288.67px, `000_0614_204718` 304.90px, `000_0615_000258` 444.35px이다.
+
+## 2026-06-29 cont0 upper-left cluster rescue 추가.
+
+`000_0615_000258`은 selector가 오른쪽 아래 `raw_candidate_cont0_*` 배경 후보에 붙으면서 평균 444.35px로 크게 실패했다. 하지만 같은 프레임의 live family 안에는 왼쪽 위에 balanced, cont13, cont5 후보가 동시에 모여 있었고, 그 군집이 실제 타겟을 설명했다.
+
+이번 규칙은 선택된 cont0이 오른쪽 아래에 있고, 후보 군집이 선택점보다 왼쪽으로 180px 이상, 위쪽으로 90px 이상 떨어져 있을 때만 발동한다. 먼저 화면 안쪽 정상 범위에 있는 balanced coast를 믿고, balanced가 stale이면 cont13 upper-band, 그 다음 cont5 upper-band 순서로 선택한다. panel_default는 군집에서 제외했다. 이 신호는 보조 추적점이라 오히려 오른쪽으로 끌리는 경우가 있었기 때문이다.
+
+초기 실험에서 단순 median cluster는 오른쪽 후보를 고르며 실패했다. cont5를 무조건 우선해도 59~62프레임에서 오래된 cont5 또는 화면 밖 balanced가 섞였다. 그래서 최종 조건은 “balanced는 raw 군집과 같은 upper-left band에 있고 y가 정상 범위일 때만”, “cont13 z0_p05가 너무 아래로 밀리면 z0_n05 또는 cont5로 전환”하는 식으로 좁혔다.
+
+검증 결과 `000_0615_000258`은 평균 22.33px, 최대 54.36px로 성공했다. 핵심 13판 replay는 13/13 성공했고, 전체 live GT는 `success 13/16`, 평균 61.86px이다. `tests.test_transparent_selector_shadow` 51개가 통과했다. 남은 실패는 `000_0614_124417` 67.60px, `000_0614_185318` 288.67px, `000_0614_204718` 304.90px이다.

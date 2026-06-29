@@ -214,6 +214,9 @@ class TransparentSelectorShadow:
             cont10_bridge = self._cont10_balanced_bridge_point(family, point, paths, frames)
             if cont10_bridge is not None:
                 family, point = cont10_bridge
+        cont0_upper_left = self._cont0_upper_left_cluster_rescue(family, point, paths, frames)
+        if cont0_upper_left is not None:
+            family, point = cont0_upper_left
         upper_left_rescue = self._cont12_upper_left_rescue(family, point, paths, frames)
         if upper_left_rescue is not None:
             family, point = upper_left_rescue
@@ -651,6 +654,77 @@ class TransparentSelectorShadow:
             return None
         return cont15_family, cont15
 
+    def _cont0_upper_left_cluster_rescue(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if not _is_cont0_family(selected_family):
+            return None
+        if float(selected_point[0]) < 500.0 or float(selected_point[1]) < 230.0:
+            return None
+
+        upper_left: dict[str, Point] = {}
+        for family in (
+            "balanced_viterbi_center_mild_state_coast",
+            "balanced_viterbi_center_mild_offset_coast",
+            "balanced_viterbi_center_mild_state_mild",
+            "raw_candidate_cont13_box_rel_z0_p05_state_mild",
+            "raw_candidate_cont13_box_rel_z0_n05_state_mild",
+            "raw_candidate_cont5_box_rel_n1_p05_state_mild",
+            "raw_candidate_cont13_center_mild_state_mild",
+            "raw_candidate_cont13_box_rel_n05_z0_state_mild",
+            "raw_candidate_cont5_box_rel_n1_z0_state_mild",
+        ):
+            point = self._latest_point(paths.get(family, {}), frames)
+            if point is None:
+                continue
+            if float(selected_point[0]) - float(point[0]) < 180.0:
+                continue
+            if float(selected_point[1]) - float(point[1]) < 90.0:
+                continue
+            upper_left[family] = point
+        if len(upper_left) < 3:
+            return None
+
+        for family in (
+            "balanced_viterbi_center_mild_state_coast",
+            "balanced_viterbi_center_mild_offset_coast",
+            "balanced_viterbi_center_mild_state_mild",
+        ):
+            point = upper_left.get(family)
+            if point is not None and float(point[0]) <= 345.0 and 50.0 <= float(point[1]) <= 145.0:
+                return family, point
+
+        point = upper_left.get("raw_candidate_cont13_box_rel_z0_p05_state_mild")
+        if point is not None and float(point[0]) <= 330.0 and 35.0 <= float(point[1]) <= 115.0:
+            return "raw_candidate_cont13_box_rel_z0_p05_state_mild", point
+
+        point = upper_left.get("raw_candidate_cont13_box_rel_z0_n05_state_mild")
+        if point is not None and float(point[0]) <= 330.0 and 35.0 <= float(point[1]) <= 115.0:
+            return "raw_candidate_cont13_box_rel_z0_n05_state_mild", point
+
+        point = upper_left.get("raw_candidate_cont5_box_rel_n1_p05_state_mild")
+        if point is not None and float(point[0]) <= 345.0 and 20.0 <= float(point[1]) <= 120.0:
+            return "raw_candidate_cont5_box_rel_n1_p05_state_mild", point
+
+        point = upper_left.get("raw_candidate_cont13_center_mild_state_mild")
+        if point is not None and float(point[0]) <= 330.0 and 35.0 <= float(point[1]) <= 110.0:
+            return "raw_candidate_cont13_center_mild_state_mild", point
+
+        point = upper_left.get("raw_candidate_cont13_box_rel_n05_z0_state_mild")
+        if point is not None and float(point[0]) <= 330.0 and 35.0 <= float(point[1]) <= 130.0:
+            return "raw_candidate_cont13_box_rel_n05_z0_state_mild", point
+
+        point = upper_left.get("raw_candidate_cont5_box_rel_n1_z0_state_mild")
+        if point is not None and float(point[0]) <= 345.0 and 20.0 <= float(point[1]) <= 120.0:
+            return "raw_candidate_cont5_box_rel_n1_z0_state_mild", point
+        return None
+
     def _cont11_edge_lower_balanced_rescue(
         self,
         selected_family: str,
@@ -950,6 +1024,10 @@ def _is_cont11_family(family: str) -> bool:
 
 def _is_cont11_center_family(family: str) -> bool:
     return str(family).lower() == "raw_candidate_cont11_center_mild_state_mild"
+
+
+def _is_cont0_family(family: str) -> bool:
+    return str(family).lower().startswith("raw_candidate_cont0_")
 
 
 def _is_balanced_rescue_family(family: str) -> bool:
