@@ -159,6 +159,21 @@ def test_live_recording_runtime_can_create_mouse_disabled_default_solver(tmp_pat
     assert runtime.live_solver.mouse_enabled is False
 
 
+def test_live_recording_runtime_updates_default_solver_mouse_flag(tmp_path):
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(1),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+        mouse_enabled=False,
+    )
+
+    runtime.set_mouse_enabled(True)
+
+    assert runtime.mouse_enabled is True
+    assert runtime.live_solver.mouse_enabled is True
+
+
 def test_live_recording_session_start_records_mouse_enabled_flag(tmp_path):
     class _NoopSolver:
         def analyze(self, _packet, *, solver_running: bool):

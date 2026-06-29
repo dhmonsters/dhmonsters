@@ -56,6 +56,7 @@ def create_window(args: argparse.Namespace | None = None):
     live_watch_preview: dict[str, object | None] = {"frame": None}
 
     def start_live_watch() -> WatchStartResult:
+        live_runtime.set_mouse_enabled(window.mouse_control_enabled())
         thread = live_thread["thread"]
         if live_runtime.is_recording and live_runtime.session is not None:
             return WatchStartResult(
@@ -158,6 +159,7 @@ def create_window(args: argparse.Namespace | None = None):
         capture_check_handler=run_capture_check_from_ui,
         recording_stop_handler=stop_live_recording,
         default_test_path=default_test_path if default_test_path.exists() else None,
+        mouse_control_enabled=not bool(getattr(args, "live_dry_run", False)),
     )
     _attach_puzzle_hotkeys(window)
     if args is not None and getattr(args, "replay", ""):

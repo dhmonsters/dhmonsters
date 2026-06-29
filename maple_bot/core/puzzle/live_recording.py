@@ -8,6 +8,7 @@ from typing import Any
 
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
 from core.puzzle.models import FramePacket, PuzzleSession, RoiSpec
+from core.puzzle.live_session_review import LiveSessionReviewBuilder
 from core.puzzle.planet_live import PlanetLiveResult, PlanetLiveSolver, render_planet_cctv_preview
 from core.puzzle.recorder import SessionRecorder
 from core.puzzle.recording_controller import RecordingController
@@ -48,6 +49,7 @@ class LiveRecordingRuntime:
         self.trace: TraceLogger | None = None
         self.recording: RecordingController | None = None
         self.report_path: Path | None = None
+        self.review_path: Path | None = None
         self.latest_preview_path: Path | None = None
         self.frame_count = 0
         self._finished = False
@@ -60,6 +62,11 @@ class LiveRecordingRuntime:
     @property
     def is_solver_running(self) -> bool:
         return self.recording is not None and self.recording.is_solver_running
+
+    def set_mouse_enabled(self, enabled: bool) -> None:
+        self.mouse_enabled = bool(enabled)
+        if hasattr(self.live_solver, "mouse_enabled"):
+            self.live_solver.mouse_enabled = self.mouse_enabled
 
     def start(
         self,
@@ -90,6 +97,7 @@ class LiveRecordingRuntime:
             trace_logger=trace,
         )
         self.report_path = None
+        self.review_path = None
         self.latest_preview_path = None
         self.frame_count = 0
         self._finished = False
@@ -152,6 +160,8 @@ class LiveRecordingRuntime:
             self.stop_recording(reason=reason)
         if not self._finished:
             self.trace.write_event("SESSION_END", None, {"frames": self.frame_count, "reason": reason})
+            self.review_path = self.session.output_dir / "live_session_review.md"
+            LiveSessionReviewBuilder().build(self.session.trace_path, self.review_path)
             self.report_path = ReportBuilder().build(self.session, self.session.trace_path)
             self._finished = True
         if self.report_path is None:

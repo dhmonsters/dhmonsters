@@ -68,6 +68,7 @@ class PuzzleConsoleWindow(QMainWindow):
         live_status_handler: LiveStatusHandler | None = None,
         capture_check_handler: CaptureCheckHandler | None = None,
         default_test_path: str | Path | None = None,
+        mouse_control_enabled: bool = True,
     ) -> None:
         super().__init__()
         self._replay_runner = replay_runner
@@ -79,6 +80,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._live_status_handler = live_status_handler
         self._capture_check_handler = capture_check_handler
         self._default_test_path = str(default_test_path) if default_test_path is not None else ""
+        self._initial_mouse_control_enabled = bool(mouse_control_enabled)
         self.last_report_path: Path | None = None
         self.last_session_dir: Path | None = None
         self.trace_timeline: list[str] = []
@@ -296,9 +298,13 @@ class PuzzleConsoleWindow(QMainWindow):
         self.puzzle_detect_alert_checkbox = QCheckBox("퍼즐 감지 알람")
         self.puzzle_detect_alert_checkbox.setObjectName("puzzleDetectAlertCheckbox")
         self.puzzle_detect_alert_checkbox.setChecked(True)
+        self.mouse_control_checkbox = QCheckBox("마우스 제어")
+        self.mouse_control_checkbox.setObjectName("mouseControlCheckbox")
+        self.mouse_control_checkbox.setChecked(self._initial_mouse_control_enabled)
         layout.addWidget(self.telegram_alert_checkbox)
         layout.addWidget(self.gpu_enabled_checkbox)
         layout.addWidget(self.puzzle_detect_alert_checkbox)
+        layout.addWidget(self.mouse_control_checkbox)
 
         log_title = QLabel("로그")
         log_title.setObjectName("cardTitle")
@@ -396,6 +402,9 @@ class PuzzleConsoleWindow(QMainWindow):
         for key in ("상태", "state"):
             if key in self.metric_labels:
                 self.metric_labels[key].setText(state)
+
+    def mouse_control_enabled(self) -> bool:
+        return bool(self.mouse_control_checkbox.isChecked())
 
     def apply_trace_event(self, event: dict[str, object]) -> None:
         event_type = str(event.get("type") or "")

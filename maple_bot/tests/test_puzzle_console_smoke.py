@@ -246,6 +246,7 @@ def test_puzzle_console_window_exposes_main_regions(monkeypatch):
     assert window.telegram_alert_checkbox.objectName() == "telegramAlertCheckbox"
     assert window.gpu_enabled_checkbox.objectName() == "gpuEnabledCheckbox"
     assert window.puzzle_detect_alert_checkbox.objectName() == "puzzleDetectAlertCheckbox"
+    assert window.mouse_control_checkbox.objectName() == "mouseControlCheckbox"
     assert "투명도형" in window.windowTitle()
 
 
@@ -262,6 +263,17 @@ def test_puzzle_console_window_exposes_expected_commands(monkeypatch):
     assert window.solver_stop_badge.objectName() == "solverStopBadge"
     assert window.recording_stop_badge.objectName() == "recordingStopBadge"
     assert "F3" in window.stop_recording_button.text()
+
+
+def test_puzzle_console_mouse_control_checkbox_defaults_from_constructor(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    dry_window = module.PuzzleConsoleWindow(mouse_control_enabled=False)
+    live_window = module.PuzzleConsoleWindow(mouse_control_enabled=True)
+
+    assert dry_window.mouse_control_enabled() is False
+    assert live_window.mouse_control_enabled() is True
 
 
 def test_puzzle_console_preview_keeps_pixmap_visible(monkeypatch, tmp_path):
@@ -378,6 +390,16 @@ def test_puzzle_entrypoint_builds_parser_and_window(monkeypatch):
 
     assert args.headless is False
     assert window.objectName() == "puzzleConsoleWindow"
+
+
+def test_puzzle_entrypoint_dry_run_unchecks_mouse_control(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    puzzle = importlib.import_module("puzzle")
+
+    args = puzzle.build_arg_parser().parse_args(["--live-dry-run"])
+    window = puzzle.create_window(args)
+
+    assert window.mouse_control_enabled() is False
 
 
 def test_puzzle_live_record_command_invokes_runtime(monkeypatch, tmp_path):
