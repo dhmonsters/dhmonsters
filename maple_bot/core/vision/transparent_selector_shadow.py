@@ -202,6 +202,9 @@ class TransparentSelectorShadow:
         balanced_hold = self._balanced_identity_hold_point(family, point, paths, frames)
         if balanced_hold is not None:
             family, point = balanced_hold
+        raw_cont_rescue = self._raw_cont_center_rescue_point(family, point, paths, frames)
+        if raw_cont_rescue is not None:
+            family, point = raw_cont_rescue
         cluster_rescue = self._cont11_cluster_rescue(family, point, paths, frames)
         if cluster_rescue is not None:
             family, point = cluster_rescue
@@ -476,6 +479,89 @@ class TransparentSelectorShadow:
             return None
         return balanced_family, balanced
 
+    def _raw_cont_center_rescue_point(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if selected_point is None or not frames:
+            return None
+        if (
+            _is_cont12_anchor_family(selected_family)
+            and self._motion_release_point(selected_family, selected_point, int(frames[-1])) is not None
+        ):
+            return None
+        if _is_cont11_family(selected_family):
+            return None
+
+        if self._selected_history:
+            previous = self._selected_history[-1]
+            previous_index = _raw_cont_center_index(previous)
+            if previous_index == 10:
+                center = self._latest_point(paths.get(previous, {}), frames)
+                if (
+                    center is not None
+                    and _distance(selected_point, center) >= 70.0
+                    and self._raw_cont_support(previous, center, paths, frames) >= 4
+                ):
+                    predicted = self._predict_next_point(list(self._selected_point_history)[-4:])
+                    if _distance(center, predicted) <= 90.0:
+                        return previous, center
+            if _is_cont11_family(previous):
+                return None
+
+        strict = self._latest_point(
+            paths.get("strict_transition_viterbi_center_mild_state_mild", {}),
+            frames,
+        )
+        if strict is None:
+            return None
+
+        matched: tuple[float, str, Point] | None = None
+        for family, path in paths.items():
+            index = _raw_cont_center_index(family)
+            if index != 10:
+                continue
+            center = self._latest_point(path, frames)
+            if center is None:
+                continue
+            distance = _distance(center, strict)
+            if distance > 8.0:
+                continue
+            if self._raw_cont_support(family, center, paths, frames) < 4:
+                continue
+            if matched is None or distance < matched[0]:
+                matched = (distance, family, center)
+        if matched is None:
+            return None
+        _distance_to_strict, family, center = matched
+        if str(selected_family) == family:
+            return None
+        if _distance(selected_point, center) < 95.0:
+            return None
+        return family, center
+
+    @staticmethod
+    def _raw_cont_support(
+        center_family: str,
+        center: Point,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> int:
+        prefix = _raw_cont_family_prefix(center_family)
+        if prefix is None:
+            return 0
+        support = 0
+        for family, path in paths.items():
+            if not str(family).lower().startswith(prefix):
+                continue
+            point = TransparentSelectorShadow._latest_point(path, frames)
+            if point is not None and _distance(point, center) <= 55.0:
+                support += 1
+        return support
+
     def _cont11_rescue_target_allowed(self, selected_family: str) -> bool:
         name = str(selected_family).lower()
         if name.startswith("raw_candidate_cont2_box_rel_p05_z0_state_mild_occlusion_state"):
@@ -609,6 +695,25 @@ def _is_cont11_center_family(family: str) -> bool:
 
 def _is_balanced_rescue_family(family: str) -> bool:
     return str(family).lower() == "balanced_viterbi_center_mild_state_mild"
+
+
+def _raw_cont_center_index(family: str) -> int | None:
+    name = str(family).lower()
+    prefix = "raw_candidate_cont"
+    suffix = "_center_mild_state_mild"
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        return None
+    raw_index = name[len(prefix):-len(suffix)]
+    if not raw_index.isdigit():
+        return None
+    return int(raw_index)
+
+
+def _raw_cont_family_prefix(family: str) -> str | None:
+    index = _raw_cont_center_index(family)
+    if index is None:
+        return None
+    return f"raw_candidate_cont{index}_"
 
 
 def _is_motion_release_origin(family: str) -> bool:

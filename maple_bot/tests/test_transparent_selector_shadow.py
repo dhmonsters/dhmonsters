@@ -811,6 +811,143 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["point"], [447, 418])
         self.assertEqual(result["rescue_point"], [447.0, 418.0])
 
+    def test_shadow_rescues_to_raw_cont_center_when_strict_agrees(self):
+        runtime = FakeRuntime(
+            selected_family="raw_candidate_cont0_center_mild_state_mild",
+            selected_point=(363.0, 221.0),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(217.0, 133.0, 0.8, 120.0, 118.0)],
+            anchors={
+                "raw_candidate_cont10_center_mild_state_mild": (217.0, 133.0),
+                "raw_candidate_cont10_box_projected_state_mild": (219.0, 134.0),
+                "raw_candidate_cont10_box_rel_n05_z0_state_mild": (205.0, 133.0),
+                "raw_candidate_cont10_box_rel_p05_z0_state_mild": (245.0, 133.0),
+                "strict_transition_viterbi_center_mild_state_mild": (217.0, 133.0),
+            },
+        )
+
+        self.assertEqual(result["family"], "raw_candidate_cont10_center_mild_state_mild")
+        self.assertEqual(result["point"], [217, 133])
+
+    def test_shadow_continues_raw_cont_center_when_strict_drifts(self):
+        class _SequenceRuntime:
+            available = True
+            load_error = ""
+
+            def __init__(self):
+                self.rows = [
+                    ("raw_candidate_cont0_center_mild_state_mild", (363.0, 221.0)),
+                    ("raw_candidate_cont0_center_mild_state_mild", (358.0, 209.0)),
+                    ("raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at17033_state_mild", (406.0, 108.0)),
+                ]
+                self.index = 0
+
+            def select_from_path_pool(self, clip, _paths, _frames, **_kwargs):
+                family, point = self.rows[min(self.index, len(self.rows) - 1)]
+                self.index += 1
+                row = {
+                    "clip": clip,
+                    "family": family,
+                    "point": list(point),
+                    "rescue_point": list(point),
+                    "rank_center": 0.0,
+                    "rank_rough": 0.0,
+                }
+                return {clip: row}, [row]
+
+        shadow = TransparentSelectorShadow(
+            _SequenceRuntime(),
+            clip_id="live",
+            window=6,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+        centers = [(217.0, 133.0), (208.0, 127.0), (198.0, 123.0)]
+        strict_points = [(217.0, 133.0), (208.0, 127.0), (248.0, 38.0)]
+        result = None
+        for frame in range(3):
+            center = centers[frame]
+            result = shadow.update(
+                frame,
+                candidates=[(*center, 0.8, 120.0, 118.0)],
+                anchors={
+                    "raw_candidate_cont10_center_mild_state_mild": center,
+                    "raw_candidate_cont10_box_projected_state_mild": (center[0] + 2.0, center[1]),
+                    "raw_candidate_cont10_box_rel_n05_z0_state_mild": (center[0] - 12.0, center[1]),
+                    "raw_candidate_cont10_box_rel_p05_z0_state_mild": (center[0] + 28.0, center[1]),
+                    "strict_transition_viterbi_center_mild_state_mild": strict_points[frame],
+                },
+            )
+
+        self.assertEqual(result["family"], "raw_candidate_cont10_center_mild_state_mild")
+        self.assertEqual(result["point"], [198, 123])
+
+    def test_shadow_does_not_start_raw_cont_center_over_cont11_identity(self):
+        class _SequenceRuntime:
+            available = True
+            load_error = ""
+
+            def __init__(self):
+                self.rows = [
+                    ("raw_candidate_cont11_center_mild_state_mild", (203.0, 412.0)),
+                    ("raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at17033_state_mild", (406.0, 108.0)),
+                ]
+                self.index = 0
+
+            def select_from_path_pool(self, clip, _paths, _frames, **_kwargs):
+                family, point = self.rows[min(self.index, len(self.rows) - 1)]
+                self.index += 1
+                row = {
+                    "clip": clip,
+                    "family": family,
+                    "point": list(point),
+                    "rescue_point": list(point),
+                    "rank_center": 0.0,
+                    "rank_rough": 0.0,
+                }
+                return {clip: row}, [row]
+
+        shadow = TransparentSelectorShadow(
+            _SequenceRuntime(),
+            clip_id="live",
+            window=4,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+        result = None
+        for frame in range(2):
+            result = shadow.update(
+                frame,
+                candidates=[(139.0, 340.0, 0.8, 120.0, 118.0)],
+                anchors={
+                    "raw_candidate_cont10_center_mild_state_mild": (139.0, 340.0),
+                    "raw_candidate_cont10_box_projected_state_mild": (141.0, 340.0),
+                    "raw_candidate_cont10_box_rel_n05_z0_state_mild": (127.0, 340.0),
+                    "raw_candidate_cont10_box_rel_p05_z0_state_mild": (167.0, 340.0),
+                    "raw_candidate_cont11_center_mild_state_mild": (203.0, 412.0),
+                    "raw_candidate_cont11_box_projected_state_mild": (205.0, 412.0),
+                    "raw_candidate_cont11_box_rel_n05_z0_state_mild": (191.0, 412.0),
+                    "raw_candidate_cont11_box_rel_p05_z0_state_mild": (231.0, 412.0),
+                    "strict_transition_viterbi_center_mild_state_mild": (139.0, 340.0),
+                },
+            )
+
+        self.assertEqual(result["family"], "raw_candidate_cont11_center_mild_state_mild")
+        self.assertEqual(result["point"], [203, 412])
+
     def test_shadow_releases_cont12_jump_to_motion_near_raw_candidate(self):
         class _SequenceRuntime:
             available = True

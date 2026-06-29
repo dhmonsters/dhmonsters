@@ -77,3 +77,13 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 이 규칙은 `000_0615_062325`의 motion release와 처음에 충돌했다. `062325`에서는 cont12가 최종 신분이 아니라 오른쪽 분리 release를 발동시키는 방아쇠이기 때문이다. 그래서 cont12 선택 프레임에서 motion release가 성립하면 cont11 hold가 먼저 가로채지 않고 release에 양보하도록 했다.
 
 검증 결과 `000_0614_114417`은 평균 19.22px, 최대 45.95px로 성공했다. 핵심 7판 `000_0614_111417`, `000_0614_114417`, `000_0614_121417`, `000_0614_220518`, `000_0615_062325`, `000_0615_015619`, `000_0615_035137`은 7/7 성공했다. 전체 live GT는 `success 7/16`, 평균 192.28px이다. 관련 단위 테스트는 69개 통과했다. 다음 우선 대상은 실패 중 평균 오차가 가장 낮은 `000_0615_025624`, 평균 243.00px이다.
+
+## 2026-06-29 strict-cont10 rescue 추가.
+
+`000_0615_025624`는 selector가 초반에는 `raw_candidate_cont0_center_mild_state_mild`, 후반에는 `raw_candidate_cont11_center_mild_state_mild`로 가며 크게 실패했다. 하지만 live family 안의 `raw_candidate_cont10_center_mild_state_mild`는 GT 구간 평균 20.16px으로 성공권이고, `raw_candidate_cont10_box_rel_p05_z0_state_mild`도 평균 25.62px으로 좋았다. raw center oracle은 평균 20.16px, raw box oracle은 평균 10.79px이었다.
+
+시작 신호는 strict와 cont10 center의 일치다. 55~62프레임에서 `strict_transition_viterbi_center_mild_state_mild`가 cont10 center와 거의 같은 위치를 보고 있었고, selector가 고른 cont0은 그 지점에서 멀리 떨어져 있었다. 그래서 strict와 cont10 center가 8px 이내로 일치하고, cont10 주변 box-relative support가 충분하며, selector 선택점이 멀 때 cont10 center로 복구하게 했다.
+
+처음에는 이 규칙을 모든 contN에 열었지만 기존 성공판을 크게 깨뜨렸다. 그래서 이번에 실제로 검증된 신호인 cont10에만 고정했다. 또한 `000_0614_114417`에서 cont11 identity hold 위에 cont10이 덮어쓰는 회귀가 생겨서, 현재 선택 또는 직전 신분이 cont11이면 strict-cont10 시작을 금지했다. 단, 이미 cont10으로 복구된 뒤에는 시간 예측 안에 있으면 strict가 흔들려도 cont10을 계속 유지한다.
+
+검증 결과 `000_0615_025624`는 평균 20.16px, 최대 61.06px로 성공했다. 같은 규칙으로 `000_0615_042024`도 평균 12.06px로 추가 성공했다. 핵심 8판 replay는 8/8 성공했고, 전체 live GT는 `success 9/16`, 평균 130.85px이다. 관련 단위 테스트는 72개 통과했다. 다음 우선 대상은 실패 중 평균 오차가 가장 낮은 `000_0614_124417`, 평균 67.60px이다.
