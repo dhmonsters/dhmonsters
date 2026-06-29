@@ -319,6 +319,124 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["family"], "raw_candidate_cont2_box_rel_p05_z0_state_mild")
         self.assertEqual(result["point"], [999, 999])
 
+    def test_shadow_releases_cont12_jump_to_motion_near_raw_candidate(self):
+        class _SequenceRuntime:
+            available = True
+            load_error = ""
+
+            def __init__(self):
+                self.rows = [
+                    ("raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state", (397.0, 417.0)),
+                    ("raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state", (392.0, 424.0)),
+                    ("raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state", (377.0, 424.0)),
+                    ("raw_candidate_cont12_box_rel_p05_z0_state_mild", (382.0, 230.0)),
+                ]
+                self.index = 0
+
+            def select_from_path_pool(self, clip, _paths, _frames, **_kwargs):
+                family, point = self.rows[min(self.index, len(self.rows) - 1)]
+                self.index += 1
+                row = {
+                    "clip": clip,
+                    "family": family,
+                    "point": list(point),
+                    "rescue_point": list(point),
+                    "rank_center": 0.0,
+                    "rank_rough": 0.0,
+                }
+                return {clip: row}, [row]
+
+        shadow = TransparentSelectorShadow(
+            _SequenceRuntime(),
+            clip_id="live",
+            window=8,
+            min_frames=1,
+            emit_every=1,
+            max_candidates=1,
+            include_local_box=False,
+        )
+        result = None
+        for frame in range(4):
+            candidates = [(320.0, 230.0, 0.9, 120.0, 120.0)]
+            if frame == 3:
+                candidates.extend([
+                    (342.0, 426.0, 0.7, 110.0, 100.0),
+                    (447.0, 418.0, 0.4, 110.0, 100.0),
+                ])
+            result = shadow.update(
+                frame,
+                candidates=candidates,
+                anchors={
+                    "raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state": (397.0 - frame * 10.0, 417.0 + frame * 3.0),
+                    "raw_candidate_cont12_box_rel_p05_z0_state_mild": (320.0, 230.0),
+                },
+            )
+
+        self.assertEqual(result["family"], "raw_candidate_motion_release")
+        self.assertEqual(result["point"], [447, 418])
+        self.assertEqual(result["rescue_point"], [447.0, 418.0])
+
+    def test_shadow_coasts_motion_release_when_cont12_reappears_without_near_raw_candidate(self):
+        class _SequenceRuntime:
+            available = True
+            load_error = ""
+
+            def __init__(self):
+                self.rows = [
+                    ("raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state", (397.0, 417.0)),
+                    ("raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state", (392.0, 424.0)),
+                    ("raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state", (377.0, 424.0)),
+                    ("raw_candidate_cont12_box_rel_p05_z0_state_mild", (382.0, 230.0)),
+                    ("raw_candidate_cont12_box_rel_p05_z0_state_mild", (378.0, 224.0)),
+                ]
+                self.index = 0
+
+            def select_from_path_pool(self, clip, _paths, _frames, **_kwargs):
+                family, point = self.rows[min(self.index, len(self.rows) - 1)]
+                self.index += 1
+                row = {
+                    "clip": clip,
+                    "family": family,
+                    "point": list(point),
+                    "rescue_point": list(point),
+                    "rank_center": 0.0,
+                    "rank_rough": 0.0,
+                }
+                return {clip: row}, [row]
+
+        shadow = TransparentSelectorShadow(
+            _SequenceRuntime(),
+            clip_id="live",
+            window=8,
+            min_frames=1,
+            emit_every=1,
+            max_candidates=1,
+            include_local_box=False,
+        )
+        result = None
+        for frame in range(5):
+            candidates = [(320.0, 230.0, 0.9, 120.0, 120.0)]
+            if frame == 3:
+                candidates.extend([
+                    (342.0, 426.0, 0.7, 110.0, 100.0),
+                    (447.0, 418.0, 0.4, 110.0, 100.0),
+                ])
+            if frame == 4:
+                candidates.append((482.0, 320.0, 0.8, 110.0, 100.0))
+            result = shadow.update(
+                frame,
+                candidates=candidates,
+                anchors={
+                    "raw_candidate_cont11_box_rel_p05_z0_state_mild_occlusion_state": (397.0 - frame * 10.0, 417.0 + frame * 3.0),
+                    "raw_candidate_cont12_box_rel_p05_z0_state_mild": (320.0, 230.0),
+                },
+            )
+
+        self.assertEqual(result["family"], "raw_candidate_motion_release")
+        self.assertEqual(result["point"], [464, 418])
+        self.assertAlmostEqual(result["rescue_point"][0], 463.6666666666667)
+        self.assertAlmostEqual(result["rescue_point"][1], 418.3333333333333)
+
     def test_shadow_rescue_requires_bg_split_family_and_merge_context(self):
         panel_runtime = FakeRuntime(selected_family="panel_default_center_mild_state_mild")
         split_runtime = FakeRuntime(selected_family="bg_split_viterbi_center_mild_state_mild")

@@ -1,6 +1,7 @@
 # 라이브 투명 퍼즐 family selector 그림자 기록기를 제공합니다.
 from __future__ import annotations
 
+import math
 from collections import deque
 from typing import Mapping, Sequence, Tuple
 
@@ -110,10 +111,12 @@ class TransparentSelectorShadow:
             self.clip_id = str(clip_id)
         self._frames: deque[int] = deque()
         self._candidate_sets: dict[int, list[Candidate]] = {}
+        self._raw_candidate_sets: dict[int, list[Candidate]] = {}
         self._expected_by_frame: dict[int, list[tuple[int, Sequence[float]]]] = {}
         self._paths: dict[str, dict[int, Point]] = {}
         self._meta: dict[str, dict[str, object]] = {}
         self._selected_history: deque[str] = deque(maxlen=self.window)
+        self._selected_point_history: deque[tuple[int, Point]] = deque(maxlen=self.window)
         self._updates = 0
 
     def update(
@@ -131,6 +134,7 @@ class TransparentSelectorShadow:
         normalized = [_candidate(candidate) for candidate in candidates]
         clean_candidates = [candidate for candidate in normalized if candidate is not None]
         clean_candidates.sort(key=lambda candidate: candidate[2], reverse=True)
+        self._raw_candidate_sets[frame] = list(clean_candidates)
         self._candidate_sets[frame] = clean_candidates[: self.max_candidates]
         if expected_by_frame:
             for key, expected in expected_by_frame.items():
@@ -195,9 +199,14 @@ class TransparentSelectorShadow:
         hold = self._identity_hold_family(family, paths, frames)
         if hold is not None:
             family, point = hold
+        release = self._motion_release_point(family, point, frame)
+        if release is not None:
+            family, point = release
         consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
         merge_context = self._merge_context()
         self._selected_history.append(family)
+        if point is not None:
+            self._selected_point_history.append((frame, point))
         return {
             "clip": self.clip_id,
             "frame": frame,
@@ -221,6 +230,7 @@ class TransparentSelectorShadow:
         while len(self._frames) > self.window:
             old = self._frames.popleft()
             self._candidate_sets.pop(old, None)
+            self._raw_candidate_sets.pop(old, None)
             self._expected_by_frame.pop(old, None)
             for path in self._paths.values():
                 path.pop(old, None)
@@ -361,6 +371,80 @@ class TransparentSelectorShadow:
             return None
         return previous, point
 
+    def _motion_release_point(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        frame: int,
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if not _is_cont12_anchor_family(selected_family):
+            return None
+        if not self._selected_history or not _is_motion_release_origin(self._selected_history[-1]):
+            return None
+        if len(self._selected_point_history) < 3:
+            return None
+
+        predicted = self._predict_next_point(list(self._selected_point_history)[-4:])
+        selected_error = _distance(selected_point, predicted)
+        if selected_error < 120.0:
+            return None
+
+        origin = self._selected_history[-1]
+        origin_is_motion_release = _is_motion_release_family(origin)
+        candidates = self._raw_candidate_sets.get(frame, [])
+        plausible = [
+            candidate
+            for candidate in candidates
+            if float(candidate[2]) >= 0.10
+        ]
+        if not plausible:
+            if origin_is_motion_release:
+                return "raw_candidate_motion_release", predicted
+            return None
+
+        if _is_cont11_release_family(origin):
+            last_point = self._selected_point_history[-1][1]
+            right_release = [
+                candidate
+                for candidate in plausible
+                if (
+                    float(candidate[0]) >= float(last_point[0]) + 35.0
+                    and abs(float(candidate[1]) - float(predicted[1])) <= 55.0
+                )
+            ]
+            if right_release:
+                plausible = right_release
+
+        candidate = min(plausible, key=lambda item: _distance((item[0], item[1]), predicted))
+        candidate_point = (float(candidate[0]), float(candidate[1]))
+        candidate_error = _distance(candidate_point, predicted)
+        if candidate_error > 85.0:
+            if origin_is_motion_release:
+                return "raw_candidate_motion_release", predicted
+            return None
+        if selected_error - candidate_error < 80.0:
+            return None
+        return "raw_candidate_motion_release", candidate_point
+
+    @staticmethod
+    def _predict_next_point(history: Sequence[tuple[int, Point]]) -> Point:
+        points = [item[1] for item in history]
+        if len(points) < 2:
+            return points[-1]
+        velocities = [
+            (
+                points[index][0] - points[index - 1][0],
+                points[index][1] - points[index - 1][1],
+            )
+            for index in range(1, len(points))
+        ]
+        recent = velocities[-3:]
+        dx = sum(item[0] for item in recent) / float(len(recent))
+        dy = sum(item[1] for item in recent) / float(len(recent))
+        return (points[-1][0] + dx, points[-1][1] + dy)
+
     @staticmethod
     def _median(values: Sequence[float]) -> float:
         if not values:
@@ -388,3 +472,24 @@ def _is_cont2_return_family(family: str) -> bool:
         name.startswith("raw_candidate_cont2_box_rel_p05_z0")
         or name.startswith("raw_candidate_cont2_box_switch_p1_p05_to_n05_z0")
     )
+
+
+def _is_motion_release_origin(family: str) -> bool:
+    name = str(family).lower()
+    return (
+        _is_cont11_release_family(name)
+        or _is_motion_release_family(name)
+    )
+
+
+def _is_cont11_release_family(family: str) -> bool:
+    name = str(family).lower()
+    return name.startswith("raw_candidate_cont11_box_rel_p05_z0")
+
+
+def _is_motion_release_family(family: str) -> bool:
+    return str(family).lower() == "raw_candidate_motion_release"
+
+
+def _distance(a: Point, b: Point) -> float:
+    return math.hypot(float(a[0]) - float(b[0]), float(a[1]) - float(b[1]))
