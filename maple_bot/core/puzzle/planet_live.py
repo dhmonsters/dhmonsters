@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from core.puzzle.defaults import fixed_detect_roi, fixed_popup_preview_roi
+from core.puzzle.defaults import fixed_detect_roi, fixed_popup_header_roi, fixed_popup_preview_roi
 from core.puzzle.evidence import EvidenceJudges
 from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen
 from core.puzzle.identity import IdentityTracker
@@ -230,14 +230,32 @@ def render_planet_cctv_preview(
 ) -> Any:
     frame_h, frame_w = frame.shape[:2]
     popup_roi = fixed_popup_preview_roi(frame_w=frame_w, frame_h=frame_h)
+    header_roi = _optional_header_roi(frame_w=frame_w, frame_h=frame_h)
     detect_roi = fixed_detect_roi(frame_w=frame_w, frame_h=frame_h)
     popup = crop_by_roi(frame, popup_roi)
     vis = popup.copy()
     cv2 = _cv2()
-    header_h = int(round(frame_h * 0.061))
-    cv2.rectangle(vis, (0, 0), (popup_roi.w - 1, max(0, header_h - 1)), (0, 230, 255), 2)
+    header_text_x = 4
+    header_text_y = 14
+    if header_roi is not None:
+        header_lx = header_roi.x - popup_roi.x
+        header_ly = header_roi.y - popup_roi.y
+        header_rx = header_lx + header_roi.w - 1
+        header_ry = header_ly + header_roi.h - 1
+        cv2.rectangle(vis, (header_lx, header_ly), (header_rx, header_ry), (0, 230, 255), 2)
+        header_text_x = header_lx + 4
+        header_text_y = header_ly + 14
     score_text = "HDR score --" if popup_score is None else f"HDR score={popup_score:.2f} / thr=0.50"
-    cv2.putText(vis, score_text, (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 230, 255), 1, cv2.LINE_AA)
+    cv2.putText(
+        vis,
+        score_text,
+        (header_text_x, header_text_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.4,
+        (0, 230, 255),
+        1,
+        cv2.LINE_AA,
+    )
 
     det_lx = detect_roi.x - popup_roi.x
     det_ly = detect_roi.y - popup_roi.y
@@ -266,6 +284,13 @@ def render_planet_cctv_preview(
         cv2.putText(vis, engine, (det_lx + 4, max(det_ly + 18, det_ry - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 220, 0), 1, cv2.LINE_AA)
 
     return vis
+
+
+def _optional_header_roi(*, frame_w: int, frame_h: int) -> RoiSpec | None:
+    try:
+        return fixed_popup_header_roi(frame_w=frame_w, frame_h=frame_h)
+    except ValueError:
+        return None
 
 
 def detect_pink_cursor(frame_bgr: Any) -> tuple[float, float] | None:

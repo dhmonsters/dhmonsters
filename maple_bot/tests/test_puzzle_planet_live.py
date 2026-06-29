@@ -10,6 +10,7 @@ import numpy as np
 
 from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
 from core.puzzle.models import FramePacket, IdentityDecision, RoiSpec
+from core.puzzle.defaults import fixed_detect_roi, fixed_popup_header_roi, fixed_popup_preview_roi
 from core.puzzle.planet_live import PlanetLiveSolver, PlanetMouseController, render_planet_cctv_preview
 from core.puzzle.planet_noauth import PlanetNoAuthDetector
 
@@ -67,6 +68,23 @@ class PlanetCctvPreviewTest(unittest.TestCase):
         self.assertEqual(preview.shape[:2], (634, 695))
         self.assertTrue(np.any(preview[:, :, 1] > 200))
         self.assertTrue(np.any(preview[:, :, 2] > 200))
+
+    def test_render_preview_draws_header_at_actual_hdr_roi_offset(self) -> None:
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        header_roi = fixed_popup_header_roi(frame_w=1920, frame_h=1080)
+        preview_roi = fixed_popup_preview_roi(frame_w=1920, frame_h=1080)
+        detect_roi = fixed_detect_roi(frame_w=1920, frame_h=1080)
+
+        preview = render_planet_cctv_preview(frame, popup_score=0.72)
+
+        hdr_top = header_roi.y - preview_roi.y
+        hdr_bottom = hdr_top + header_roi.h - 1
+        det_top = detect_roi.y - preview_roi.y
+        self.assertGreater(hdr_top, 0)
+        self.assertLessEqual(det_top - hdr_bottom, 4)
+        self.assertTrue(np.array_equal(preview[hdr_top, 3], np.array([0, 230, 255], dtype=np.uint8)))
+        self.assertTrue(np.array_equal(preview[hdr_bottom, 3], np.array([0, 230, 255], dtype=np.uint8)))
+        self.assertTrue(np.array_equal(preview[det_top, 3], np.array([0, 140, 255], dtype=np.uint8)))
 
 
 class PlanetNoAuthDetectorTest(unittest.TestCase):
