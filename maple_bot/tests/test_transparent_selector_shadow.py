@@ -488,6 +488,165 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["family"], "raw_candidate_cont2_box_rel_p05_z0_state_mild_occlusion_state")
         self.assertEqual(result["point"], [595, 439])
 
+    def test_shadow_rescues_cont11_to_balanced_when_strict_agrees(self):
+        runtime = FakeRuntime(
+            selected_family="raw_candidate_cont11_center_mild_state_mild",
+            selected_point=(450.0, 430.0),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(420.0, 300.0, 0.8, 100.0, 100.0)],
+            anchors={
+                "raw_candidate_cont11_center_mild_state_mild": (450.0, 430.0),
+                "balanced_viterbi_center_mild_state_mild": (420.0, 300.0),
+                "strict_transition_viterbi_center_mild_state_mild": (423.0, 304.0),
+            },
+        )
+
+        self.assertEqual(result["family"], "balanced_viterbi_center_mild_state_mild")
+        self.assertEqual(result["point"], [420, 300])
+        self.assertEqual(result["rescue_point"], [420.0, 300.0])
+
+    def test_shadow_does_not_rescue_cont11_to_balanced_when_strict_stays_with_cont11(self):
+        runtime = FakeRuntime(
+            selected_family="raw_candidate_cont11_center_mild_state_mild",
+            selected_point=(200.0, 220.0),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        result = shadow.update(
+            0,
+            candidates=[(300.0, 320.0, 0.8, 100.0, 100.0)],
+            anchors={
+                "raw_candidate_cont11_center_mild_state_mild": (200.0, 220.0),
+                "balanced_viterbi_center_mild_state_mild": (300.0, 320.0),
+                "strict_transition_viterbi_center_mild_state_mild": (202.0, 218.0),
+            },
+        )
+
+        self.assertEqual(result["family"], "raw_candidate_cont11_center_mild_state_mild")
+        self.assertEqual(result["point"], [200, 220])
+
+    def test_shadow_continues_balanced_rescue_when_motion_stays_consistent(self):
+        class _SequenceRuntime:
+            available = True
+            load_error = ""
+
+            def __init__(self):
+                self.rows = [
+                    ("raw_candidate_cont11_center_mild_state_mild", (450.0, 430.0)),
+                    ("raw_candidate_cont11_center_mild_state_mild", (440.0, 432.0)),
+                    ("raw_candidate_cont11_center_mild_state_mild", (430.0, 431.0)),
+                ]
+                self.index = 0
+
+            def select_from_path_pool(self, clip, _paths, _frames, **_kwargs):
+                family, point = self.rows[min(self.index, len(self.rows) - 1)]
+                self.index += 1
+                row = {
+                    "clip": clip,
+                    "family": family,
+                    "point": list(point),
+                    "rescue_point": list(point),
+                    "rank_center": 0.0,
+                    "rank_rough": 0.0,
+                }
+                return {clip: row}, [row]
+
+        shadow = TransparentSelectorShadow(
+            _SequenceRuntime(),
+            clip_id="live",
+            window=6,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+        result = None
+        balanced_points = [(420.0, 300.0), (435.0, 304.0), (451.0, 307.0)]
+        strict_points = [(421.0, 301.0), (510.0, 420.0), (515.0, 424.0)]
+        for frame in range(3):
+            result = shadow.update(
+                frame,
+                candidates=[(*balanced_points[frame], 0.8, 100.0, 100.0)],
+                anchors={
+                    "raw_candidate_cont11_center_mild_state_mild": (450.0 - frame * 10.0, 430.0),
+                    "balanced_viterbi_center_mild_state_mild": balanced_points[frame],
+                    "strict_transition_viterbi_center_mild_state_mild": strict_points[frame],
+                },
+            )
+
+        self.assertEqual(result["family"], "balanced_viterbi_center_mild_state_mild")
+        self.assertEqual(result["point"], [451, 307])
+        self.assertEqual(result["rescue_point"], [451.0, 307.0])
+
+    def test_shadow_keeps_balanced_identity_when_runtime_switches_to_cont0(self):
+        class _SequenceRuntime:
+            available = True
+            load_error = ""
+
+            def __init__(self):
+                self.rows = [
+                    ("raw_candidate_cont11_center_mild_state_mild", (450.0, 430.0)),
+                    ("raw_candidate_cont0_box_switch_z0_n05_to_p1_n05_at7719_state_mild", (259.0, 196.0)),
+                    ("raw_candidate_cont0_center_mild_state_mild", (124.0, 174.0)),
+                ]
+                self.index = 0
+
+            def select_from_path_pool(self, clip, _paths, _frames, **_kwargs):
+                family, point = self.rows[min(self.index, len(self.rows) - 1)]
+                self.index += 1
+                row = {
+                    "clip": clip,
+                    "family": family,
+                    "point": list(point),
+                    "rescue_point": list(point),
+                    "rank_center": 0.0,
+                    "rank_rough": 0.0,
+                }
+                return {clip: row}, [row]
+
+        shadow = TransparentSelectorShadow(
+            _SequenceRuntime(),
+            clip_id="live",
+            window=6,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+        result = None
+        balanced_points = [(423.0, 307.0), (436.0, 308.0), (448.0, 301.0)]
+        strict_points = [(423.0, 307.0), (259.0, 196.0), (239.0, 188.0)]
+        for frame in range(3):
+            result = shadow.update(
+                frame,
+                candidates=[(*balanced_points[frame], 0.8, 100.0, 100.0)],
+                anchors={
+                    "raw_candidate_cont11_center_mild_state_mild": (450.0 - frame * 10.0, 430.0),
+                    "balanced_viterbi_center_mild_state_mild": balanced_points[frame],
+                    "strict_transition_viterbi_center_mild_state_mild": strict_points[frame],
+                },
+            )
+
+        self.assertEqual(result["family"], "balanced_viterbi_center_mild_state_mild")
+        self.assertEqual(result["point"], [448, 301])
+        self.assertEqual(result["rescue_point"], [448.0, 301.0])
+
     def test_shadow_releases_cont12_jump_to_motion_near_raw_candidate(self):
         class _SequenceRuntime:
             available = True

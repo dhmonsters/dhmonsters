@@ -19,6 +19,9 @@
 - [x] `000_0615_015619` cont11 cluster rescue 규칙으로 성공 확인.
 - [x] 핵심 5판 live replay 5/5 확인.
 - [x] 전체 live GT 기준점 5/16 확인.
+- [x] `000_0615_035137` balanced rescue와 identity hold로 성공 확인.
+- [x] 핵심 6판 live replay 6/6 확인.
+- [x] 전체 live GT 기준점 6/16 확인.
 - [ ] live GT 16/16 달성.
 - [x] 결과 문서 작성.
 - [ ] 의미 단위 커밋.

@@ -57,3 +57,13 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 최종 규칙은 더 좁게 고정했다. cont2는 `raw_candidate_cont2_box_rel_p05_z0_state_mild_occlusion_state`일 때만 cont11 시작 복구를 허용한다. cont0은 직전 선택 identity가 cont11일 때만 이어받는다. 최근 `raw_candidate_motion_release`가 있으면 cont2에서 cont11 복구를 다시 시작하지 않는다. 이 제한이 `062325`의 75프레임 회귀를 막는다.
 
 검증 결과 `000_0615_015619`는 평균 34.43px로 성공했다. 핵심 5판 `000_0614_111417`, `000_0614_121417`, `000_0614_220518`, `000_0615_062325`, `000_0615_015619`는 5/5 성공이다. 전체 live GT는 `success 5/16`, 평균 200.43px이다. 관련 단위 테스트는 62개 통과했다. 다음 우선 대상은 실패 중 평균 오차가 가장 낮은 `000_0615_035137`, 평균 141.96px이다.
+
+## 2026-06-29 balanced rescue와 identity hold 추가.
+
+`000_0615_035137`은 선택된 `raw_candidate_cont11_center_mild_state_mild`가 실제 타겟보다 아래쪽으로 크게 샌 상태였고, 반대로 `balanced_viterbi_center_mild_state_mild`는 GT 근처를 따라가고 있었다. 초반에는 `strict_transition_viterbi_center_mild_state_mild`도 balanced와 거의 같은 위치를 가리켰다. 그래서 이 케이스는 후보 부족이 아니라 selector가 이미 있는 balanced 후보의 신분을 못 고르는 문제로 판단했다.
+
+규칙은 넓게 만들지 않았다. 현재 선택 family가 정확히 `raw_candidate_cont11_center_mild_state_mild`이고, 선택점과 balanced가 충분히 멀며, strict가 balanced를 같이 지지할 때만 balanced로 시작 복구한다. 이 제한을 둔 이유는 `000_0615_015619`처럼 cont11이 정답인 판에서는 strict가 cont11 쪽에 붙어 있으므로, balanced로 잘못 갈아타면 기존 성공판을 깨기 때문이다.
+
+한 번 balanced로 복구한 뒤에는 selector가 다음 프레임에서 `cont0 switch`나 `cont0 center`로 바뀌어도 바로 따라가지 않는다. balanced의 최신 위치가 직전 복구 흐름의 시간 예측과 맞고, selector가 고른 점이 balanced와 멀리 떨어져 있을 때만 balanced identity hold를 유지한다. 이건 프레임별 정답 선택기가 아니라 처음 복구한 신분을 시간축에서 이어가는 규칙이다.
+
+검증 결과 `000_0615_035137`은 평균 19.31px, 최대 63.76px로 성공했다. 핵심 6판 `000_0614_111417`, `000_0614_121417`, `000_0614_220518`, `000_0615_062325`, `000_0615_015619`, `000_0615_035137`은 6/6 성공했다. 전체 live GT는 `success 6/16`, 평균 200.72px이다. 관련 단위 테스트는 66개 통과했다. 다음 우선 대상은 실패 중 평균 오차가 가장 낮은 `000_0614_114417`, 평균 154.18px이다.

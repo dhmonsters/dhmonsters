@@ -199,9 +199,15 @@ class TransparentSelectorShadow:
         hold = self._identity_hold_family(family, paths, frames)
         if hold is not None:
             family, point = hold
+        balanced_hold = self._balanced_identity_hold_point(family, point, paths, frames)
+        if balanced_hold is not None:
+            family, point = balanced_hold
         cluster_rescue = self._cont11_cluster_rescue(family, point, paths, frames)
         if cluster_rescue is not None:
             family, point = cluster_rescue
+        balanced_rescue = self._balanced_rescue_point(family, point, paths, frames)
+        if balanced_rescue is not None:
+            family, point = balanced_rescue
         release = self._motion_release_point(family, point, frame)
         if release is not None:
             family, point = release
@@ -404,6 +410,66 @@ class TransparentSelectorShadow:
             return None
         return center_family, center
 
+    def _balanced_rescue_point(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if not _is_cont11_center_family(selected_family):
+            return None
+
+        balanced_family = "balanced_viterbi_center_mild_state_mild"
+        balanced = self._latest_point(paths.get(balanced_family, {}), frames)
+        if balanced is None:
+            return None
+        if _distance(selected_point, balanced) < 95.0:
+            return None
+
+        strict = self._latest_point(
+            paths.get("strict_transition_viterbi_center_mild_state_mild", {}),
+            frames,
+        )
+        if strict is not None and _distance(strict, balanced) <= 12.0:
+            return balanced_family, balanced
+
+        if (
+            self._selected_history
+            and _is_balanced_rescue_family(self._selected_history[-1])
+            and len(self._selected_point_history) >= 1
+        ):
+            predicted = self._predict_next_point(list(self._selected_point_history)[-4:])
+            if _distance(balanced, predicted) <= 90.0:
+                return balanced_family, balanced
+        return None
+
+    def _balanced_identity_hold_point(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if not self._selected_history:
+            return None
+        if not _is_balanced_rescue_family(self._selected_history[-1]):
+            return None
+        balanced_family = "balanced_viterbi_center_mild_state_mild"
+        balanced = self._latest_point(paths.get(balanced_family, {}), frames)
+        if balanced is None:
+            return None
+        if _is_balanced_rescue_family(selected_family):
+            return None
+        if selected_point is not None and _distance(selected_point, balanced) < 80.0:
+            return None
+        predicted = self._predict_next_point(list(self._selected_point_history)[-4:])
+        if _distance(balanced, predicted) > 90.0:
+            return None
+        return balanced_family, balanced
+
     def _cont11_rescue_target_allowed(self, selected_family: str) -> bool:
         name = str(selected_family).lower()
         if name.startswith("raw_candidate_cont2_box_rel_p05_z0_state_mild_occlusion_state"):
@@ -522,6 +588,14 @@ def _is_cont2_return_family(family: str) -> bool:
 
 def _is_cont11_family(family: str) -> bool:
     return str(family).lower().startswith("raw_candidate_cont11_")
+
+
+def _is_cont11_center_family(family: str) -> bool:
+    return str(family).lower() == "raw_candidate_cont11_center_mild_state_mild"
+
+
+def _is_balanced_rescue_family(family: str) -> bool:
+    return str(family).lower() == "balanced_viterbi_center_mild_state_mild"
 
 
 def _is_motion_release_origin(family: str) -> bool:
