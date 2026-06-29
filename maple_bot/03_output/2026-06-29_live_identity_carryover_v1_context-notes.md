@@ -143,3 +143,10 @@ box_grid가 cont12에 잠기는 구간을 풀기 위해 trusted rescue 순서를
 회귀도 있었다. `000_0615_025624`, `000_0615_042024`, `000_0615_022618`에서 p05/p1 후보가 너무 위쪽인데도 같은 lower-band로 오인했다. 124417의 진짜 lower-band는 y가 330 이상이므로 `_is_lower_right_band`에 후보 y >= 325 조건을 추가해 좁혔다. 이 가드 뒤에는 124417은 유지되고 세 회귀판은 모두 원래 성공권으로 돌아왔다.
 
 검증 결과 `000_0614_124417`은 평균 26.48px, 최대 59.09px로 성공했다. 핵심 14판 replay는 14/14 성공했고, 전체 live GT는 `success 14/16`, 평균 59.29px이다. `tests.test_transparent_selector_shadow` 54개가 통과했다. 남은 실패는 `000_0614_185318` 288.67px, `000_0614_204718` 304.90px이다.
+## 2026-06-29 cont2 track-right raw rescue 추가.
+
+`000_0614_204718`은 selector가 cont2 switch 후보에 붙은 뒤 panel anchor보다 오른쪽 아래로 크게 끌려가면서 실패했다. 같은 프레임의 raw 후보 안에는 panel anchor의 오른쪽, 비슷한 y-band에 실제 타겟 후보가 남아 있었다. 따라서 선택 family가 cont2 계열이고, 선택점이 panel anchor보다 x 250px 이상, y 120px 이상 멀리 오른쪽 아래에 있을 때만 track-right rescue를 켠다.
+
+rescue는 GT 좌표를 보지 않고 현재 raw 후보와 panel anchor의 상대 위치만 본다. panel 오른쪽 45~180px, y -90~+60px 범위 후보를 모으고, panel 오른쪽 약 95px 지점과 y 일관성이 가장 좋은 후보를 선택한다. 후보가 없으면 짧게 panel anchor로 돌아가서 이후 raw 후보가 다시 나타날 시간을 번다.
+
+검증 결과 `000_0614_204718`은 평균 27.78px, 최대 64.70px로 성공했다. 회귀 샘플 5판은 5/5 성공했고, 전체 live GT는 `success 15/16`, 전체 평균 41.97px가 되었다. 남은 실패는 `000_0614_185318` 하나이며, 이 판은 cont12 p05_z0 계열에 멀리 붙는 별도 문제로 분리한다.

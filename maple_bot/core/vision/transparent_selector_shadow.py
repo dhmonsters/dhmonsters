@@ -262,6 +262,9 @@ class TransparentSelectorShadow:
             )
             if late_cont10_box_band is not None:
                 family, point = late_cont10_box_band
+        track_right = self._track_right_raw_rescue(family, point, paths, frames, frame)
+        if track_right is not None:
+            family, point = track_right
         consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
         merge_context = self._merge_context()
         self._selected_history.append(family)
@@ -835,6 +838,50 @@ class TransparentSelectorShadow:
             and float(point[1]) >= 325.0
         )
 
+    def _track_right_raw_rescue(
+        self,
+        selected_family: str,
+        selected_point: Point | None,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+        frame: int,
+    ) -> tuple[str, Point] | None:
+        if selected_point is None:
+            return None
+        if not _is_cont2_any_family(selected_family):
+            return None
+        panel = self._latest_point(
+            paths.get("panel_default_center_mild_state_mild", {}),
+            frames,
+        )
+        if panel is None:
+            return None
+        if float(selected_point[0]) - float(panel[0]) < 250.0:
+            return None
+        if float(selected_point[1]) - float(panel[1]) < 120.0:
+            return None
+
+        candidates = self._raw_candidate_sets.get(int(frame), [])
+        pool = [
+            candidate
+            for candidate in candidates
+            if (
+                float(panel[0]) + 45.0 <= float(candidate[0]) <= float(panel[0]) + 180.0
+                and float(panel[1]) - 90.0 <= float(candidate[1]) <= float(panel[1]) + 60.0
+            )
+        ]
+        if not pool:
+            return "panel_default_center_mild_state_mild", panel
+        candidate = min(
+            pool,
+            key=lambda item: (
+                abs(float(item[0]) - (float(panel[0]) + 95.0))
+                + 0.8 * abs(float(item[1]) - float(panel[1]))
+                - 10.0 * float(item[2])
+            ),
+        )
+        return "raw_candidate_track_right_rescue", (float(candidate[0]), float(candidate[1]))
+
     def _cont11_edge_lower_balanced_rescue(
         self,
         selected_family: str,
@@ -1126,6 +1173,10 @@ def _is_cont2_return_family(family: str) -> bool:
         name.startswith("raw_candidate_cont2_box_rel_p05_z0")
         or name.startswith("raw_candidate_cont2_box_switch_p1_p05_to_n05_z0")
     )
+
+
+def _is_cont2_any_family(family: str) -> bool:
+    return str(family).lower().startswith("raw_candidate_cont2_")
 
 
 def _is_cont11_family(family: str) -> bool:
