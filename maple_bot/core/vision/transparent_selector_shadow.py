@@ -113,6 +113,7 @@ class TransparentSelectorShadow:
         self._expected_by_frame: dict[int, list[tuple[int, Sequence[float]]]] = {}
         self._paths: dict[str, dict[int, Point]] = {}
         self._meta: dict[str, dict[str, object]] = {}
+        self._selected_history: deque[str] = deque(maxlen=self.window)
         self._updates = 0
 
     def update(
@@ -191,8 +192,12 @@ class TransparentSelectorShadow:
             point = _point(selected_row.get("rescue_point"))
         if point is None:
             point = self._latest_point(paths.get(family, {}), frames)
+        hold = self._identity_hold_family(family, paths, frames)
+        if hold is not None:
+            family, point = hold
         consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
         merge_context = self._merge_context()
+        self._selected_history.append(family)
         return {
             "clip": self.clip_id,
             "frame": frame,
@@ -324,6 +329,38 @@ class TransparentSelectorShadow:
                 return family, point
         return None, None
 
+    def _identity_hold_family(
+        self,
+        selected_family: str,
+        paths: Mapping[str, Mapping[int, Point]],
+        frames: Sequence[int],
+    ) -> tuple[str, Point] | None:
+        if not _is_cont2_return_family(selected_family):
+            return None
+        if not self._selected_history:
+            return None
+        previous = self._selected_history[-1]
+        if not _is_cont12_anchor_family(previous):
+            return None
+
+        history = list(self._selected_history)
+        streak = 0
+        for family in reversed(history):
+            if not _is_cont12_anchor_family(family):
+                break
+            streak += 1
+        if streak < 3:
+            return None
+
+        before_streak = history[: len(history) - streak]
+        if not any(_is_cont2_switch_family(family) for family in before_streak[-8:]):
+            return None
+
+        point = self._latest_point(paths.get(previous, {}), frames)
+        if point is None:
+            return None
+        return previous, point
+
     @staticmethod
     def _median(values: Sequence[float]) -> float:
         if not values:
@@ -333,3 +370,21 @@ class TransparentSelectorShadow:
         if len(ordered) % 2:
             return ordered[mid]
         return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _is_cont12_anchor_family(family: str) -> bool:
+    name = str(family).lower()
+    return name.startswith("raw_candidate_cont12_box_rel_p05_z0")
+
+
+def _is_cont2_switch_family(family: str) -> bool:
+    name = str(family).lower()
+    return name.startswith("raw_candidate_cont2_box_switch_p1_p05_to_n05_z0")
+
+
+def _is_cont2_return_family(family: str) -> bool:
+    name = str(family).lower()
+    return (
+        name.startswith("raw_candidate_cont2_box_rel_p05_z0")
+        or name.startswith("raw_candidate_cont2_box_switch_p1_p05_to_n05_z0")
+    )
