@@ -30,6 +30,7 @@ class LiveRecordingRuntime:
         fps: float = 30.0,
         sleeper: Sleeper | None = None,
         live_solver: Any | None = None,
+        mouse_enabled: bool = True,
     ) -> None:
         if fps <= 0:
             raise ValueError("fps must be positive")
@@ -37,7 +38,12 @@ class LiveRecordingRuntime:
         self.frame_grabber = frame_grabber or grab_screen_bgr
         self.fps = fps
         self.sleeper = sleeper or time.sleep
-        self.live_solver = live_solver if live_solver is not None else PlanetLiveSolver()
+        self.mouse_enabled = bool(mouse_enabled)
+        self.live_solver = (
+            live_solver
+            if live_solver is not None
+            else PlanetLiveSolver(mouse_enabled=self.mouse_enabled)
+        )
         self.session: PuzzleSession | None = None
         self.trace: TraceLogger | None = None
         self.recording: RecordingController | None = None
@@ -93,6 +99,7 @@ class LiveRecordingRuntime:
             {
                 "source_kind": "live_screen",
                 "fps": self.fps,
+                "mouse_enabled": self.mouse_enabled,
                 "detect_roi": roi_to_payload(detect_roi),
                 "board_roi": roi_to_payload(board_roi),
             },

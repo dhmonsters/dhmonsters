@@ -37,6 +37,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-frames", type=int, default=5, help="replay에서 처리할 최대 frame 수")
     parser.add_argument("--live-record", action="store_true", help="GUI 없이 현재 화면 녹화를 시작한다")
     parser.add_argument("--live-max-frames", type=int, default=0, help="live-record 검증용 최대 frame 수. 0은 수동 종료")
+    parser.add_argument("--live-dry-run", action="store_true", help="live solver 판단은 돌리되 마우스 제어는 끈다")
     parser.add_argument("--live-capture-check", action="store_true", help="현재 화면 캡처 가능 여부를 점검한다")
     return parser
 
@@ -45,7 +46,10 @@ def create_window(args: argparse.Namespace | None = None):
     from ui.puzzle_console import PuzzleConsoleWindow
 
     default_test_path = default_transparent_test_replay_path()
-    live_runtime = LiveRecordingRuntime(output_root=(args.output_root or None) if args is not None else None)
+    live_runtime = LiveRecordingRuntime(
+        output_root=(args.output_root or None) if args is not None else None,
+        mouse_enabled=not bool(getattr(args, "live_dry_run", False)),
+    )
     live_detector = LivePuzzleActivationDetector()
     live_thread: dict[str, threading.Thread | None] = {"thread": None}
     live_stop: dict[str, threading.Event | None] = {"event": None}
@@ -176,6 +180,7 @@ def run_gui(argv: list[str] | None = None) -> int:
         report_path = run_live_recording(
             output_root=args.output_root or None,
             max_frames=args.live_max_frames or None,
+            mouse_enabled=not args.live_dry_run,
         )
         print(report_path)
         return 0
@@ -319,8 +324,9 @@ def run_live_recording(
     *,
     output_root: str | Path | None = None,
     max_frames: int | None = None,
+    mouse_enabled: bool = True,
 ) -> Path:
-    runtime = LiveRecordingRuntime(output_root=output_root)
+    runtime = LiveRecordingRuntime(output_root=output_root, mouse_enabled=mouse_enabled)
     try:
         return runtime.run_until_stopped(max_frames=max_frames)
     except KeyboardInterrupt:

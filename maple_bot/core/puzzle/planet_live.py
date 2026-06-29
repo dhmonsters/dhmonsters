@@ -140,12 +140,14 @@ class PlanetLiveSolver:
         evidence_judges: EvidenceJudges | None = None,
         identity_tracker: IdentityTracker | None = None,
         temporal_selector: Any | None = None,
+        mouse_enabled: bool = True,
     ) -> None:
         self.detector = detector
         self.mouse = mouse or PlanetMouseController()
         self.evidence_judges = evidence_judges or EvidenceJudges()
         self.identity_tracker = identity_tracker or IdentityTracker()
         self.temporal_selector = temporal_selector or LiveTemporalSelector()
+        self.mouse_enabled = bool(mouse_enabled)
         self._noauth_detector: Any | None = None
         self._noauth_detector_loaded = False
 
@@ -180,7 +182,7 @@ class PlanetLiveSolver:
             detect_roi=detect_roi,
             point=det_point,
             det_frame=det_frame,
-            enabled=solver_running,
+            enabled=solver_running and self.mouse_enabled,
         )
         det_candidates = _det_rows_from_candidates(candidates, detect_roi=detect_roi, board_roi=board_roi)
         preview = render_planet_cctv_preview(

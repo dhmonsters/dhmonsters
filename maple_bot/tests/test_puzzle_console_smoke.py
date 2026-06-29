@@ -385,8 +385,8 @@ def test_puzzle_live_record_command_invokes_runtime(monkeypatch, tmp_path):
     puzzle = importlib.import_module("puzzle")
     calls = []
 
-    def fake_run_live_recording(*, output_root=None, max_frames=None):
-        calls.append((output_root, max_frames))
+    def fake_run_live_recording(*, output_root=None, max_frames=None, mouse_enabled=True):
+        calls.append((output_root, max_frames, mouse_enabled))
         report_path = tmp_path / "report.md"
         report_path.write_text("# report\n", encoding="utf-8")
         return report_path
@@ -402,7 +402,33 @@ def test_puzzle_live_record_command_invokes_runtime(monkeypatch, tmp_path):
     ])
 
     assert code == 0
-    assert calls == [(str(tmp_path), 2)]
+    assert calls == [(str(tmp_path), 2, True)]
+
+
+def test_puzzle_live_dry_run_command_disables_mouse(monkeypatch, tmp_path):
+    _install_fake_qt(monkeypatch)
+    puzzle = importlib.import_module("puzzle")
+    calls = []
+
+    def fake_run_live_recording(*, output_root=None, max_frames=None, mouse_enabled=True):
+        calls.append((output_root, max_frames, mouse_enabled))
+        report_path = tmp_path / "report.md"
+        report_path.write_text("# report\n", encoding="utf-8")
+        return report_path
+
+    monkeypatch.setattr(puzzle, "run_live_recording", fake_run_live_recording)
+
+    code = puzzle.run_gui([
+        "--live-record",
+        "--live-dry-run",
+        "--output-root",
+        str(tmp_path),
+        "--live-max-frames",
+        "2",
+    ])
+
+    assert code == 0
+    assert calls == [(str(tmp_path), 2, False)]
 
 
 def test_puzzle_live_capture_check_command_returns_success(monkeypatch, tmp_path):
@@ -512,8 +538,8 @@ def test_puzzle_console_shows_fixed_roi_values(monkeypatch):
 
     assert window.detect_roi_label.objectName() == "puzzleDetectRoiLabel"
     assert window.board_roi_label.objectName() == "puzzleBoardRoiLabel"
-    assert "0.320,0.265,0.358,0.463" in window.detect_roi_label.text()
-    assert "0.318,0.188,0.362,0.587" in window.board_roi_label.text()
+    assert "0.254,0.292,0.494,0.588" in window.detect_roi_label.text()
+    assert "0.254,0.292,0.494,0.588" in window.board_roi_label.text()
 
 
 def test_puzzle_console_applies_trace_events_to_analysis_metrics(monkeypatch):

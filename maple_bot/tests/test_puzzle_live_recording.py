@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from core.puzzle.live_recording import LiveRecordingRuntime, _select_main_monitor
-from core.puzzle.planet_live import PlanetLiveResult
+from core.puzzle.planet_live import PlanetLiveResult, PlanetLiveSolver
 
 
 def _frames(count: int):
@@ -143,6 +143,43 @@ def test_live_recording_calls_planet_solver_and_records_solver_trace(tmp_path):
     assert solver_events[0]["payload"]["solver_running"] is True
     assert runtime.latest_preview_path is not None
     assert runtime.latest_preview_path.exists()
+
+
+def test_live_recording_runtime_can_create_mouse_disabled_default_solver(tmp_path):
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(1),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+        mouse_enabled=False,
+    )
+
+    assert isinstance(runtime.live_solver, PlanetLiveSolver)
+    assert runtime.mouse_enabled is False
+    assert runtime.live_solver.mouse_enabled is False
+
+
+def test_live_recording_session_start_records_mouse_enabled_flag(tmp_path):
+    class _NoopSolver:
+        def analyze(self, _packet, *, solver_running: bool):
+            return PlanetLiveResult()
+
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(1),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+        live_solver=_NoopSolver(),
+        mouse_enabled=False,
+    )
+
+    session = runtime.start()
+    runtime.stop_recording(reason="test_cleanup")
+    runtime.finish(reason="test_cleanup")
+
+    start_event = _events(session.trace_path)[0]
+    assert start_event["type"] == "SESSION_START"
+    assert start_event["payload"]["mouse_enabled"] is False
 
 
 def test_live_recording_failure_closes_recording_and_writes_report(tmp_path):
