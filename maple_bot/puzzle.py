@@ -109,7 +109,13 @@ def create_window(args: argparse.Namespace | None = None):
                     live_runtime.sleeper(frame_period_s)
                 if live_runtime.is_recording:
                     live_runtime.run_until_stopped()
-            except Exception:
+            except Exception as exc:
+                if live_runtime.trace is not None:
+                    live_runtime.trace.write_event(
+                        "PLANET_LIVE_SOLVER_FAILED",
+                        None,
+                        {"error": str(exc), "error_type": exc.__class__.__name__},
+                    )
                 if live_runtime.is_recording:
                     live_runtime.stop_recording(reason="watch_error")
                 if live_runtime.session is not None:

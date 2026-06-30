@@ -749,7 +749,11 @@ class PuzzleConsoleWindow(QMainWindow):
         if self._recording_stop_handler is None:
             self.append_log("recording stop 대기: active recording 없음")
             return False
-        stopped = bool(self._recording_stop_handler())
+        try:
+            stopped = bool(self._recording_stop_handler())
+        except Exception as exc:
+            self.append_log(f"recording stop failed: {exc.__class__.__name__}: {exc}")
+            return False
         if stopped:
             self._mark_recording_stopped()
             self.append_log("recording stop")

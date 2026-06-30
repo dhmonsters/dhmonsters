@@ -23,6 +23,19 @@ class _FakeTrace:
         self.events.append((event_type, frame_index, payload))
 
 
+class _RecorderThatChecksTraceBeforeClose:
+    def __init__(self, trace: _FakeTrace) -> None:
+        self.trace = trace
+        self.closed = 0
+
+    def write(self, packet, overlay_frame=None) -> None:
+        raise AssertionError("late write should not be used")
+
+    def close(self) -> None:
+        self.closed += 1
+        assert self.trace.events[-1][0] == "RECORDING_STOPPED"
+
+
 def test_solver_stop_keeps_recording_until_recording_stop():
     recorder = _FakeRecorder()
     trace = _FakeTrace()
@@ -58,3 +71,14 @@ def test_recording_stop_is_idempotent_and_blocks_late_writes():
 
     assert recorder.closed == 1
     assert recorder.writes == []
+
+
+def test_recording_stop_writes_trace_before_closing_recorder():
+    trace = _FakeTrace()
+    recorder = _RecorderThatChecksTraceBeforeClose(trace)
+    controller = RecordingController(recorder=recorder, trace_logger=trace)
+
+    assert controller.stop_recording(reason="manual_f3") is True
+
+    assert recorder.closed == 1
+    assert trace.events[-1] == ("RECORDING_STOPPED", None, {"reason": "manual_f3"})

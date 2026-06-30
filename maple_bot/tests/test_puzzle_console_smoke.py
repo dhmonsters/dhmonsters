@@ -322,6 +322,19 @@ def test_puzzle_console_stop_recording_button_calls_handler(monkeypatch):
     assert "recording stop" in window.event_log.toPlainText()
 
 
+def test_puzzle_console_stop_recording_logs_handler_error(monkeypatch):
+    _install_fake_qt(monkeypatch)
+    module = importlib.import_module("ui.puzzle_console")
+
+    def stop_recording():
+        raise RuntimeError("boom")
+
+    window = module.PuzzleConsoleWindow(recording_stop_handler=stop_recording)
+
+    assert window.stop_recording_input() is False
+    assert "recording stop failed: RuntimeError" in window.event_log.toPlainText()
+
+
 def test_puzzle_console_f3_calls_recording_stop_handler(monkeypatch):
     _install_fake_qt(monkeypatch)
     module = importlib.import_module("ui.puzzle_console")

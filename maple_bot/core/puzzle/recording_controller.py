@@ -28,8 +28,8 @@ class RecordingController:
         if not self.is_recording:
             return False
         self.is_recording = False
-        self.recorder.close()
         self._write_event("RECORDING_STOPPED", reason)
+        self.recorder.close()
         return True
 
     def _write_event(self, event_type: str, reason: str) -> None:

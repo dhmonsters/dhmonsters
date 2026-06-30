@@ -56,7 +56,7 @@ class PlanetMouseController:
         offset_alpha: float = 0.5,
     ) -> None:
         bridge = _NoAuthMouseBridge()
-        self.background_clicker = background_clicker or cursor_setter or bridge.click
+        self.background_clicker = background_clicker
         self.client_origin_getter = client_origin_getter or bridge.client_origin
         self.cursor_setter = cursor_setter or _default_cursor_setter
         self.cursor_detector = cursor_detector or detect_pink_cursor
@@ -86,8 +86,21 @@ class PlanetMouseController:
         origin_x, origin_y = self._client_origin()
         abs_x = origin_x + client_x
         abs_y = origin_y + client_y
+        if self.background_clicker is not None:
+            try:
+                self.background_clicker(client_x, client_y)
+            except Exception as exc:
+                return MouseMoveResult(
+                    False,
+                    (abs_x, abs_y),
+                    (client_x, client_y),
+                    (cx, cy),
+                    (0.0, 0.0),
+                    f"click_failed:{exc.__class__.__name__}",
+                )
+            return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (0.0, 0.0), "bg_click")
         try:
-            self.background_clicker(client_x, client_y)
+            self.cursor_setter(abs_x, abs_y)
         except Exception as exc:
             return MouseMoveResult(
                 False,
@@ -95,9 +108,9 @@ class PlanetMouseController:
                 (client_x, client_y),
                 (cx, cy),
                 (0.0, 0.0),
-                f"click_failed:{exc.__class__.__name__}",
+                f"fg_move_failed:{exc.__class__.__name__}",
             )
-        return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (0.0, 0.0), "bg_click")
+        return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (0.0, 0.0), "fg_move")
 
     def _client_origin(self) -> tuple[int, int]:
         try:

@@ -38,6 +38,27 @@ class PlanetMouseControllerTest(unittest.TestCase):
         self.assertEqual(result.offset, (0.0, 0.0))
         self.assertEqual(result.reason, "bg_click")
 
+    def test_move_to_det_point_defaults_to_visible_cursor_move(self) -> None:
+        moved: list[tuple[int, int]] = []
+        controller = PlanetMouseController(
+            cursor_setter=lambda x, y: moved.append((x, y)),
+            client_origin_getter=lambda: (1000, 500),
+        )
+        detect_roi = RoiSpec("detect", "window_client", 100, 200, 300, 250)
+
+        result = controller.move_to_det_point(
+            detect_roi=detect_roi,
+            point=(50.0, 60.0),
+            det_frame=None,
+            enabled=True,
+        )
+
+        self.assertTrue(result.moved)
+        self.assertEqual(moved, [(1150, 760)])
+        self.assertEqual(result.client_point, (150, 260))
+        self.assertEqual(result.abs_point, (1150, 760))
+        self.assertEqual(result.reason, "fg_move")
+
     def test_move_to_det_point_skips_when_disabled(self) -> None:
         moved: list[tuple[int, int]] = []
         controller = PlanetMouseController(cursor_setter=lambda x, y: moved.append((x, y)))
