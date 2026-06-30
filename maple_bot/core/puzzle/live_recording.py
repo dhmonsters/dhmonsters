@@ -29,7 +29,7 @@ class LiveRecordingRuntime:
         *,
         output_root: str | Path | None = None,
         frame_grabber: FrameGrabber | None = None,
-        fps: float = 20.0,
+        fps: float = 30.0,
         sleeper: Sleeper | None = None,
         live_solver: Any | None = None,
         mouse_enabled: bool = True,
@@ -52,9 +52,10 @@ class LiveRecordingRuntime:
         self.report_path: Path | None = None
         self.review_path: Path | None = None
         self.latest_preview_path: Path | None = None
+        self.latest_preview_frame: Any | None = None
         self.frame_count = 0
         self._finished = False
-        self._preview_stride = 1
+        self._preview_stride = 5
 
     @property
     def is_recording(self) -> bool:
@@ -100,6 +101,7 @@ class LiveRecordingRuntime:
         self.report_path = None
         self.review_path = None
         self.latest_preview_path = None
+        self.latest_preview_frame = None
         self.frame_count = 0
         self._finished = False
         trace.write_event(
@@ -219,10 +221,11 @@ class LiveRecordingRuntime:
     def _write_live_preview(self, packet: FramePacket, *, preview_frame: Any | None = None) -> None:
         if self.session is None:
             return
+        frame = preview_frame if preview_frame is not None else render_planet_cctv_preview(packet.source_frame)
+        self.latest_preview_frame = frame
         if packet.frame_index != 0 and packet.frame_index % self._preview_stride != 0:
             return
         preview_path = self.session.output_dir / "snapshots" / f"live_preview_{packet.frame_index:06d}.png"
-        frame = preview_frame if preview_frame is not None else render_planet_cctv_preview(packet.source_frame)
         ok = _cv2().imwrite(str(preview_path), frame)
         if ok:
             self.latest_preview_path = preview_path

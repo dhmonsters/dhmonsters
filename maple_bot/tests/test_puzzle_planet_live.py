@@ -559,6 +559,71 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(result.mouse_move.det_point, (57.5, 55.0))
         self.assertEqual(clicked, [(67, 75)])
 
+    def test_motion_coast_candidate_keeps_selector_alive_after_white_fades(self) -> None:
+        class _EmptyDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return []
+
+        class _FakeTemporalSelector:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def update(self, **kwargs):
+                self.calls.append(kwargs)
+                if not kwargs["candidates"]:
+                    return LiveTemporalDecision(point=None, source="none", reason="no_points")
+                first = kwargs["candidates"][0]
+                return LiveTemporalDecision(
+                    point=(first[0], first[1]),
+                    source="selector_shadow",
+                    reason="selected_family",
+                    family="motion_test",
+                )
+
+        temporal_selector = _FakeTemporalSelector()
+        solver = PlanetLiveSolver(
+            detector=_EmptyDetector(),
+            temporal_selector=temporal_selector,
+            mouse=PlanetMouseController(client_origin_getter=lambda: (0, 0)),
+            mouse_enabled=False,
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 120,
+            "h": 120,
+        }
+
+        def _packet(frame_index: int, shift_x: int | None) -> FramePacket:
+            frame = np.zeros((180, 180, 3), dtype=np.uint8)
+            if shift_x is not None:
+                frame[60:91, 50 + shift_x : 86 + shift_x] = 255
+            return FramePacket(
+                session_id="s",
+                frame_index=frame_index,
+                timestamp_ms=0,
+                source_frame=frame,
+                board_frame=frame[20:140, 10:130],
+                source_kind="test",
+                roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+            )
+
+        solver.analyze(_packet(0, 0), solver_running=True)
+        solver.analyze(_packet(1, 4), solver_running=True)
+        solver.analyze(_packet(2, 8), solver_running=True)
+        result = solver.analyze(_packet(3, None), solver_running=True)
+        candidate_event = next(event for event in result.trace_events if event[0] == "CANDIDATES")
+
+        self.assertEqual(candidate_event[1]["count"], 1)
+        self.assertEqual(candidate_event[1]["candidates"][0]["source"], "motion_coast")
+        self.assertEqual(candidate_event[1]["debug"]["motion_coast_count"], 1)
+        self.assertGreater(candidate_event[1]["debug"]["motion_coast_age"], 0)
+        self.assertEqual(temporal_selector.calls[-1]["candidates"][0][2], 0.55)
+        self.assertIsNotNone(result.temporal_decision.point)
+
 
 if __name__ == "__main__":
     unittest.main()

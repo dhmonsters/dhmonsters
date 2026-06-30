@@ -63,6 +63,7 @@ def create_window(args: argparse.Namespace | None = None):
                 "recording",
                 live_runtime.session.output_dir,
                 live_runtime.latest_preview_path,
+                preview_frame=live_runtime.latest_preview_frame,
             )
         if thread is not None and thread.is_alive():
             return WatchStartResult("armed", preview_frame=live_watch_preview["frame"])
@@ -145,6 +146,7 @@ def create_window(args: argparse.Namespace | None = None):
                 "recording",
                 live_runtime.session.output_dir,
                 live_runtime.latest_preview_path,
+                preview_frame=live_runtime.latest_preview_frame,
             )
         thread = live_thread.get("thread")
         if thread is not None and thread.is_alive():

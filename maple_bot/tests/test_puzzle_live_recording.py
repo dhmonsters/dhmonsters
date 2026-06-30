@@ -178,7 +178,7 @@ def test_live_recording_analyzes_before_blocking_recorder_write(monkeypatch, tmp
     assert order[:2] == ["analyze", "write"]
 
 
-def test_live_recording_writes_preview_snapshot_for_every_frame(tmp_path):
+def test_live_recording_keeps_memory_preview_and_throttles_snapshot_files(tmp_path):
     class _FakePlanetSolver:
         def analyze(self, packet, *, solver_running: bool):
             return PlanetLiveResult(preview_frame=np.full((6, 8, 3), packet.frame_index, dtype=np.uint8))
@@ -194,7 +194,9 @@ def test_live_recording_writes_preview_snapshot_for_every_frame(tmp_path):
     report_path = runtime.run_until_stopped(max_frames=7)
 
     snapshot_names = sorted(path.name for path in (report_path.parent / "snapshots").glob("live_preview_*.png"))
-    assert snapshot_names == [f"live_preview_{index:06d}.png" for index in range(7)]
+    assert snapshot_names == ["live_preview_000000.png", "live_preview_000005.png"]
+    assert runtime.latest_preview_frame is not None
+    assert int(runtime.latest_preview_frame[0, 0, 0]) == 6
 
 
 def test_live_recording_runtime_can_create_mouse_disabled_default_solver(tmp_path):

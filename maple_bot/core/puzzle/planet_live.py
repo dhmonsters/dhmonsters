@@ -192,6 +192,73 @@ class _VisibleWhiteLock:
         return _VisibleLockState(locked, current if locked else None, self._stable_frames, reason)
 
 
+@dataclass(frozen=True)
+class _MotionCoastPrediction:
+    point: tuple[float, float]
+    size: tuple[float, float]
+    age: int
+    velocity: tuple[float, float]
+
+
+class _MotionCoast:
+    def __init__(self, *, max_age_frames: int = 18, max_velocity_px: float = 35.0) -> None:
+        self.max_age_frames = int(max_age_frames)
+        self.max_velocity_px = float(max_velocity_px)
+        self._history: list[tuple[int, tuple[float, float], tuple[float, float]]] = []
+
+    def update(
+        self,
+        *,
+        frame_index: int,
+        visible_point: tuple[float, float] | None,
+        visible_size: tuple[float, float] | None,
+        frame_shape: Sequence[int] | None,
+    ) -> _MotionCoastPrediction | None:
+        if visible_point is not None:
+            self._history.append((
+                int(frame_index),
+                (float(visible_point[0]), float(visible_point[1])),
+                _clean_size(visible_size),
+            ))
+            self._history = self._history[-5:]
+            return None
+        return self._predict(int(frame_index), frame_shape=frame_shape)
+
+    def _predict(
+        self,
+        frame_index: int,
+        *,
+        frame_shape: Sequence[int] | None,
+    ) -> _MotionCoastPrediction | None:
+        if len(self._history) < 2:
+            return None
+        last_frame, last_point, last_size = self._history[-1]
+        age = frame_index - last_frame
+        if age <= 0 or age > self.max_age_frames:
+            return None
+
+        velocities = []
+        for before, after in zip(self._history, self._history[1:]):
+            dt = max(1, after[0] - before[0])
+            velocities.append((
+                (after[1][0] - before[1][0]) / dt,
+                (after[1][1] - before[1][1]) / dt,
+            ))
+        if not velocities:
+            return None
+        vx = sum(item[0] for item in velocities) / len(velocities)
+        vy = sum(item[1] for item in velocities) / len(velocities)
+        speed = hypot(vx, vy)
+        if speed > self.max_velocity_px:
+            scale = self.max_velocity_px / speed
+            vx *= scale
+            vy *= scale
+
+        point = (last_point[0] + vx * age, last_point[1] + vy * age)
+        point = _clamp_point_to_shape(point, frame_shape=frame_shape)
+        return _MotionCoastPrediction(point=point, size=last_size, age=age, velocity=(vx, vy))
+
+
 class PlanetLiveSolver:
     def __init__(
         self,
@@ -213,6 +280,7 @@ class PlanetLiveSolver:
         self._noauth_detector_loaded = False
         self._last_detect_debug: dict[str, object] = {}
         self._visible_white_lock = _VisibleWhiteLock()
+        self._motion_coast = _MotionCoast()
 
     def analyze(self, packet: FramePacket, *, solver_running: bool) -> PlanetLiveResult:
         detect_payload = packet.roi_snapshot.get("detect", {})
@@ -235,9 +303,35 @@ class PlanetLiveSolver:
             board_roi=board_roi,
         )
         white_anchor = candidates[0].center if white_anchor_rows and candidates else None
+        white_anchor_size = _candidate_size(candidates[0]) if white_anchor_rows and candidates else None
+        if white_anchor is not None:
+            motion_prediction = self._motion_coast.update(
+                frame_index=packet.frame_index,
+                visible_point=white_anchor,
+                visible_size=white_anchor_size,
+                frame_shape=_frame_shape(packet.board_frame),
+            )
+        elif not candidates:
+            motion_prediction = self._motion_coast.update(
+                frame_index=packet.frame_index,
+                visible_point=None,
+                visible_size=None,
+                frame_shape=_frame_shape(packet.board_frame),
+            )
+        else:
+            motion_prediction = None
+        motion_coast_inserted = False
+        if not candidates and motion_prediction is not None:
+            candidates.append(_motion_coast_candidate(motion_prediction, frame_index=packet.frame_index))
+            motion_coast_inserted = True
         visible_lock = self._visible_white_lock.update(white_anchor)
         self._last_detect_debug = {
             **self._last_detect_debug,
+            "candidate_count": len(candidates),
+            "motion_coast_count": 1 if motion_coast_inserted else 0,
+            "motion_coast_age": motion_prediction.age if motion_prediction is not None else 0,
+            "motion_coast_point": motion_prediction.point if motion_prediction is not None else None,
+            "motion_coast_velocity": motion_prediction.velocity if motion_prediction is not None else None,
             "visible_lock": visible_lock.locked,
             "visible_lock_stable": visible_lock.stable_frames,
             "visible_lock_reason": visible_lock.reason,
@@ -453,6 +547,48 @@ def _candidates_from_det_rows(
             )
         )
     return candidates
+
+
+def _motion_coast_candidate(prediction: _MotionCoastPrediction, *, frame_index: int) -> Candidate:
+    width, height = prediction.size
+    cx, cy = prediction.point
+    return Candidate(
+        candidate_id=f"f{frame_index}_motion_coast_0",
+        frame_index=frame_index,
+        bbox=(cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0),
+        center=(cx, cy),
+        score=0.55,
+        source="motion_coast",
+        class_name="motion_coast",
+    )
+
+
+def _candidate_size(candidate: Candidate) -> tuple[float, float]:
+    return (
+        max(1.0, float(candidate.bbox[2] - candidate.bbox[0])),
+        max(1.0, float(candidate.bbox[3] - candidate.bbox[1])),
+    )
+
+
+def _clean_size(size: tuple[float, float] | None) -> tuple[float, float]:
+    if size is None:
+        return (42.0, 42.0)
+    return (max(8.0, float(size[0])), max(8.0, float(size[1])))
+
+
+def _clamp_point_to_shape(
+    point: tuple[float, float],
+    *,
+    frame_shape: Sequence[int] | None,
+) -> tuple[float, float]:
+    if frame_shape is None or len(frame_shape) < 2:
+        return (float(point[0]), float(point[1]))
+    height = max(1, int(frame_shape[0]))
+    width = max(1, int(frame_shape[1]))
+    return (
+        max(0.0, min(float(width - 1), float(point[0]))),
+        max(0.0, min(float(height - 1), float(point[1]))),
+    )
 
 
 def _detect_white_anchor_rows(det_frame: Any) -> list[dict[str, float | str]]:
