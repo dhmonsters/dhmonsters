@@ -161,6 +161,36 @@ class PlanetNoAuthDetectorTest(unittest.TestCase):
         self.assertEqual(m1_calls, [])
         self.assertEqual(detector.load_source, "shape_yolo")
 
+    def test_detect_all_retries_shape_yolo_after_live_solver_prepares_runtime(self) -> None:
+        class _FakeShapeYolo:
+            calls = 0
+
+            def __init__(self) -> None:
+                type(self).calls += 1
+                self.enabled = type(self).calls >= 2
+
+            def detect_all(self, _frame, score_thr=0.2):
+                if not self.enabled:
+                    return []
+                return [(70, 80, 0.44, 18, 20)]
+
+        class _FakeM1:
+            def detect(self, _board, _imgsz, _score):
+                return []
+
+        shape_module = types.ModuleType("core.shape_yolo")
+        shape_module.ShapeYolo = _FakeShapeYolo
+        live_solver = types.ModuleType("planet_live_solver")
+        live_solver.load_models = lambda use_gpu=False: (_FakeM1(), object())
+
+        with patch.dict(sys.modules, {"core.shape_yolo": shape_module, "planet_live_solver": live_solver}):
+            detector = PlanetNoAuthDetector(shape_score=0.10)
+            rows = detector.detect_all(np.zeros((120, 200, 3), dtype=np.uint8))
+
+        self.assertEqual(rows, [(70, 80, 0.44, 18, 20)])
+        self.assertEqual(_FakeShapeYolo.calls, 2)
+        self.assertEqual(detector.load_source, "shape_yolo")
+
     def test_detect_all_inpaints_pink_cursor_before_shape_yolo(self) -> None:
         shape_frames = []
 

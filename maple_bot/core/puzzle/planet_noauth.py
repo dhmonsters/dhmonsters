@@ -27,7 +27,9 @@ class PlanetNoAuthDetector:
         self.cursor_inpaint = bool(cursor_inpaint)
         self._m1: Any | None = None
         self._shape_detector: Any | None = shape_detector
+        self._shape_detector_injected = shape_detector is not None
         self._shape_load_attempted = shape_detector is not None
+        self._shape_runtime_retry_attempted = False
         self._load_attempted = False
         self._load_failed = False
         self.load_source = ""
@@ -47,6 +49,11 @@ class PlanetNoAuthDetector:
             self.last_error = ""
             return shape_rows
         m1 = self._load_m1()
+        retry_shape_rows = self._retry_shape_rows_after_runtime_prepare(detect_frame)
+        if retry_shape_rows:
+            self.load_source = "shape_yolo"
+            self.last_error = ""
+            return retry_shape_rows
         if m1 is None:
             return []
         try:
@@ -67,8 +74,22 @@ class PlanetNoAuthDetector:
             return []
         return _shape_rows_to_rows(rows)
 
-    def _load_shape_detector(self) -> Any | None:
-        if self._shape_load_attempted:
+    def _retry_shape_rows_after_runtime_prepare(self, board_bgr: Any) -> list[tuple[int, int, float, int, int]]:
+        if self._shape_detector_injected or self._shape_runtime_retry_attempted:
+            return []
+        self._shape_runtime_retry_attempted = True
+        detector = self._load_shape_detector(force_reload=True)
+        if detector is None or not bool(getattr(detector, "enabled", True)):
+            return []
+        try:
+            rows = detector.detect_all(board_bgr, score_thr=self.shape_score)
+        except Exception as exc:
+            self.last_error = f"shape_yolo: {exc.__class__.__name__}: {exc}"
+            return []
+        return _shape_rows_to_rows(rows)
+
+    def _load_shape_detector(self, *, force_reload: bool = False) -> Any | None:
+        if self._shape_load_attempted and not force_reload:
             return self._shape_detector
         self._shape_load_attempted = True
         try:
