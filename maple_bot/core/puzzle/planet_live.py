@@ -80,9 +80,11 @@ class PlanetMouseController:
 
         cx = max(0.0, min(float(detect_roi.w - 1), float(point[0])))
         cy = max(0.0, min(float(detect_roi.h - 1), float(point[1])))
-        _ = det_frame
-        client_x = detect_roi.x + int(cx)
-        client_y = detect_roi.y + int(cy)
+        self._learn_cursor_offset(cx, cy, det_frame)
+        move_cx = max(0.0, min(float(detect_roi.w - 1), cx + self.offset_x))
+        move_cy = max(0.0, min(float(detect_roi.h - 1), cy + self.offset_y))
+        client_x = detect_roi.x + int(move_cx)
+        client_y = detect_roi.y + int(move_cy)
         origin_x, origin_y = self._client_origin()
         abs_x = origin_x + client_x
         abs_y = origin_y + client_y
@@ -95,10 +97,10 @@ class PlanetMouseController:
                     (abs_x, abs_y),
                     (client_x, client_y),
                     (cx, cy),
-                    (0.0, 0.0),
+                    (self.offset_x, self.offset_y),
                     f"click_failed:{exc.__class__.__name__}",
                 )
-            return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (0.0, 0.0), "bg_click")
+            return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (self.offset_x, self.offset_y), "bg_click")
         try:
             self.cursor_setter(abs_x, abs_y)
         except Exception as exc:
@@ -107,10 +109,10 @@ class PlanetMouseController:
                 (abs_x, abs_y),
                 (client_x, client_y),
                 (cx, cy),
-                (0.0, 0.0),
+                (self.offset_x, self.offset_y),
                 f"fg_move_failed:{exc.__class__.__name__}",
             )
-        return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (0.0, 0.0), "fg_move")
+        return MouseMoveResult(True, (abs_x, abs_y), (client_x, client_y), (cx, cy), (self.offset_x, self.offset_y), "fg_move")
 
     def _client_origin(self) -> tuple[int, int]:
         try:
@@ -118,6 +120,17 @@ class PlanetMouseController:
             return int(origin_x), int(origin_y)
         except Exception:
             return (0, 0)
+
+    def _learn_cursor_offset(self, cx: float, cy: float, det_frame: Any | None) -> None:
+        if det_frame is None:
+            return
+        cursor = self.cursor_detector(det_frame)
+        if cursor is None:
+            return
+        self.offset_x += (cx - float(cursor[0])) * self.offset_alpha
+        self.offset_y += (cy - float(cursor[1])) * self.offset_alpha
+        self.offset_x = max(-self.offset_limit, min(self.offset_limit, self.offset_x))
+        self.offset_y = max(-self.offset_limit, min(self.offset_limit, self.offset_y))
 
 
 class _NoAuthMouseBridge:

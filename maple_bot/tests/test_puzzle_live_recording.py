@@ -148,6 +148,36 @@ def test_live_recording_calls_planet_solver_and_records_solver_trace(tmp_path):
     assert runtime.latest_preview_path.exists()
 
 
+def test_live_recording_analyzes_before_blocking_recorder_write(monkeypatch, tmp_path):
+    order = []
+
+    class _FakeRecorder:
+        def write(self, _packet, overlay_frame=None):
+            order.append("write")
+
+        def close(self):
+            order.append("close")
+
+    class _FakePlanetSolver:
+        def analyze(self, packet, *, solver_running: bool):
+            order.append("analyze")
+            return PlanetLiveResult(preview_frame=np.full((6, 8, 3), packet.frame_index, dtype=np.uint8))
+
+    monkeypatch.setattr(live_recording, "SessionRecorder", lambda *_args, **_kwargs: _FakeRecorder())
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(1),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+        live_solver=_FakePlanetSolver(),
+    )
+
+    runtime.start()
+    runtime.stop_recording(reason="test_cleanup")
+
+    assert order[:2] == ["analyze", "write"]
+
+
 def test_live_recording_writes_preview_snapshot_for_every_frame(tmp_path):
     class _FakePlanetSolver:
         def analyze(self, packet, *, solver_running: bool):

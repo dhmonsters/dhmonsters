@@ -11,7 +11,7 @@ from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen
 from core.puzzle.models import FramePacket, PuzzleSession, RoiSpec
 from core.puzzle.live_session_review import LiveSessionReviewBuilder
 from core.puzzle.planet_live import PlanetLiveResult, PlanetLiveSolver, render_planet_cctv_preview
-from core.puzzle.recorder import SessionRecorder
+from core.puzzle.recorder import AsyncSessionRecorder, SessionRecorder
 from core.puzzle.recording_controller import RecordingController
 from core.puzzle.report import ReportBuilder
 from core.puzzle.roi import crop_by_roi
@@ -29,7 +29,7 @@ class LiveRecordingRuntime:
         *,
         output_root: str | Path | None = None,
         frame_grabber: FrameGrabber | None = None,
-        fps: float = 30.0,
+        fps: float = 20.0,
         sleeper: Sleeper | None = None,
         live_solver: Any | None = None,
         mouse_enabled: bool = True,
@@ -94,7 +94,7 @@ class LiveRecordingRuntime:
         self.session = session
         self.trace = trace
         self.recording = RecordingController(
-            recorder=SessionRecorder(session, fps=self.fps, trace_logger=trace),
+            recorder=_live_recorder(session, fps=self.fps, trace_logger=trace),
             trace_logger=trace,
         )
         self.report_path = None
@@ -189,8 +189,8 @@ class LiveRecordingRuntime:
             },
             source_path=f"live_screen#frame={frame_index}",
         )
-        self.recording.write(packet, overlay_frame=frame)
         live_result = self._analyze_live_frame(packet)
+        self.recording.write(packet, overlay_frame=frame)
         self._write_live_preview(packet, preview_frame=live_result.preview_frame if live_result else None)
         self.trace.write_event(
             "FRAME_RECORDED",
@@ -338,3 +338,8 @@ def _select_main_monitor(monitors: list[dict[str, int]]) -> dict[str, int]:
     if physical_monitors:
         return physical_monitors[0]
     raise RuntimeError("no monitor available")
+
+
+def _live_recorder(session: PuzzleSession, *, fps: float, trace_logger: TraceLogger) -> Any:
+    recorder = SessionRecorder(session, fps=fps, trace_logger=trace_logger)
+    return AsyncSessionRecorder(recorder)

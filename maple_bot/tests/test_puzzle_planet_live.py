@@ -59,6 +59,30 @@ class PlanetMouseControllerTest(unittest.TestCase):
         self.assertEqual(result.abs_point, (1150, 760))
         self.assertEqual(result.reason, "fg_move")
 
+    def test_move_to_det_point_learns_visible_cursor_offset(self) -> None:
+        moved: list[tuple[int, int]] = []
+        controller = PlanetMouseController(
+            cursor_setter=lambda x, y: moved.append((x, y)),
+            cursor_detector=lambda _frame: (70.0, 80.0),
+            client_origin_getter=lambda: (1000, 500),
+            offset_alpha=0.5,
+        )
+        detect_roi = RoiSpec("detect", "window_client", 100, 200, 300, 250)
+
+        result = controller.move_to_det_point(
+            detect_roi=detect_roi,
+            point=(50.0, 60.0),
+            det_frame=np.zeros((250, 300, 3), dtype=np.uint8),
+            enabled=True,
+        )
+
+        self.assertTrue(result.moved)
+        self.assertEqual(moved, [(1140, 750)])
+        self.assertEqual(result.client_point, (140, 250))
+        self.assertEqual(result.abs_point, (1140, 750))
+        self.assertEqual(result.offset, (-10.0, -10.0))
+        self.assertEqual(result.reason, "fg_move")
+
     def test_move_to_det_point_skips_when_disabled(self) -> None:
         moved: list[tuple[int, int]] = []
         controller = PlanetMouseController(cursor_setter=lambda x, y: moved.append((x, y)))

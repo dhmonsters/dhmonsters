@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from core.puzzle.models import FramePacket, PuzzleSession, RoiSpec
-from core.puzzle.recorder import SessionRecorder
+from core.puzzle.recorder import SessionRecorder, _open_writer
 from core.puzzle.trace import TraceLogger
 
 
@@ -70,6 +70,34 @@ def test_session_recorder_defaults_to_lossless_ffv1(tmp_path):
         assert recorder.fourcc == "FFV1"
     finally:
         recorder.close()
+
+
+def test_open_writer_pads_odd_dimensions_for_ffv1(monkeypatch, tmp_path):
+    opened_sizes = []
+
+    class _FakeWriter:
+        def isOpened(self):
+            return True
+
+        def write(self, _frame):
+            pass
+
+        def release(self):
+            pass
+
+    class _FakeCv2:
+        def VideoWriter_fourcc(self, *_chars):
+            return 1234
+
+        def VideoWriter(self, _path, _fourcc, _fps, size):
+            opened_sizes.append(size)
+            return _FakeWriter()
+
+    monkeypatch.setattr("core.puzzle.recorder._cv2", lambda: _FakeCv2())
+
+    _open_writer(tmp_path / "odd.mkv", (3, 5, 3), 10.0, "FFV1")
+
+    assert opened_sizes == [(6, 4)]
 
 
 def test_session_recorder_logs_roi_invalid_when_frame_size_changes(tmp_path):

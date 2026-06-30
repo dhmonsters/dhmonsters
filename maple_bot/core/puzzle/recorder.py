@@ -1,6 +1,8 @@
 # 투명도형 퍼즐 세션의 원본, 보드, 오버레이 영상을 저장한다.
 from __future__ import annotations
 
+import queue
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -101,19 +103,114 @@ class SessionRecorder:
         )
 
 
+class AsyncSessionRecorder:
+    def __init__(self, recorder: SessionRecorder, *, max_queue: int = 180) -> None:
+        self.recorder = recorder
+        self._queue: queue.Queue[tuple[FramePacket, Any] | None] = queue.Queue(maxsize=max_queue)
+        self._error: BaseException | None = None
+        self._closed = False
+        self._thread = threading.Thread(target=self._run, name="PuzzleSessionRecorder", daemon=True)
+        self._thread.start()
+
+    def write(self, packet: FramePacket, overlay_frame: Any | None = None) -> None:
+        self._raise_if_failed()
+        if self._closed:
+            return
+        overlay = overlay_frame if overlay_frame is not None else packet.source_frame
+        self._queue.put((_copy_packet_frames(packet), _copy_frame(overlay)))
+
+    def snapshot(self, name: str, frame: Any, frame_index: int = 0) -> Path:
+        return self.recorder.snapshot(name, frame, frame_index=frame_index)
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._queue.put(None)
+            self._thread.join(timeout=10.0)
+        self._raise_if_failed()
+
+    def _run(self) -> None:
+        try:
+            while True:
+                item = self._queue.get()
+                try:
+                    if item is None:
+                        return
+                    packet, overlay = item
+                    self.recorder.write(packet, overlay_frame=overlay)
+                except BaseException as exc:
+                    self._error = exc
+                    return
+                finally:
+                    self._queue.task_done()
+        finally:
+            self.recorder.close()
+
+    def _raise_if_failed(self) -> None:
+        if self._error is not None:
+            raise RuntimeError(f"async recorder failed: {self._error}") from self._error
+
+
 def _open_writer(path: Path, shape: tuple[int, ...], fps: float, fourcc: str) -> Any:
     if len(shape) < 2:
         raise ValueError("frame shape must include height and width")
     height, width = int(shape[0]), int(shape[1])
+    encoded_width, encoded_height = _encoded_video_size(width, height, fourcc)
     writer = _cv2().VideoWriter(
         str(path),
         _cv2().VideoWriter_fourcc(*fourcc),
         fps,
-        (width, height),
+        (encoded_width, encoded_height),
     )
     if not writer.isOpened():
         raise ValueError(f"cannot open video writer: {path}")
-    return writer
+    return _VideoWriterAdapter(writer, encoded_width=encoded_width, encoded_height=encoded_height)
+
+
+class _VideoWriterAdapter:
+    def __init__(self, writer: Any, *, encoded_width: int, encoded_height: int) -> None:
+        self.writer = writer
+        self.encoded_width = encoded_width
+        self.encoded_height = encoded_height
+
+    def write(self, frame: Any) -> None:
+        self.writer.write(_pad_frame_to_size(frame, self.encoded_width, self.encoded_height))
+
+    def release(self) -> None:
+        self.writer.release()
+
+
+def _encoded_video_size(width: int, height: int, fourcc: str) -> tuple[int, int]:
+    if fourcc.upper() == "FFV1":
+        width += width % 2
+        height += height % 2
+    return width, height
+
+
+def _pad_frame_to_size(frame: Any, width: int, height: int) -> Any:
+    frame_h, frame_w = frame.shape[:2]
+    pad_right = max(0, width - int(frame_w))
+    pad_bottom = max(0, height - int(frame_h))
+    if pad_right == 0 and pad_bottom == 0:
+        return frame
+    return _cv2().copyMakeBorder(frame, 0, pad_bottom, 0, pad_right, _cv2().BORDER_REPLICATE)
+
+
+def _copy_packet_frames(packet: FramePacket) -> FramePacket:
+    return FramePacket(
+        session_id=packet.session_id,
+        frame_index=packet.frame_index,
+        timestamp_ms=packet.timestamp_ms,
+        source_frame=_copy_frame(packet.source_frame),
+        board_frame=_copy_frame(packet.board_frame),
+        source_kind=packet.source_kind,
+        roi_snapshot=packet.roi_snapshot,
+        source_path=packet.source_path,
+    )
+
+
+def _copy_frame(frame: Any) -> Any:
+    return frame.copy() if hasattr(frame, "copy") else frame
 
 
 def _safe_snapshot_name(name: str) -> str:
