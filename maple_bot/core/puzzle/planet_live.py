@@ -155,23 +155,33 @@ class PlanetLiveSolver:
         detect_roi = _roi_from_payload(detect_payload, fallback_name="detect")
         board_roi = _roi_from_payload(board_payload, fallback_name="board")
         det_frame = crop_by_roi(packet.source_frame, detect_roi)
-        raw_rows = self._detect_rows(det_frame)
+        raw_rows = list(self._detect_rows(det_frame))
+        white_anchor_rows = _detect_white_anchor_rows(det_frame)
+        candidate_rows = [*white_anchor_rows, *raw_rows]
+        self._last_detect_debug = {
+            **self._last_detect_debug,
+            "white_anchor_count": len(white_anchor_rows),
+            "candidate_count": len(candidate_rows),
+        }
         candidates = _candidates_from_det_rows(
-            raw_rows,
+            candidate_rows,
             frame_index=packet.frame_index,
             detect_roi=detect_roi,
             board_roi=board_roi,
         )
+        white_anchor = candidates[0].center if white_anchor_rows and candidates else None
         evidence = self.evidence_judges.score(candidates, packet)
         decision = self.identity_tracker.update(
             frame_index=packet.frame_index,
             candidates=candidates,
             evidence=evidence,
+            white_anchor=white_anchor,
         )
         temporal_decision = self.temporal_selector.update(
             frame_index=packet.frame_index,
             candidates=_candidate_rows_from_candidates(candidates),
             primary_point=decision.point,
+            white_anchor=white_anchor,
             frame_shape=_frame_shape(packet.board_frame),
         )
         target_point = temporal_decision.point if temporal_decision.point is not None else decision.point
@@ -362,11 +372,58 @@ def _candidates_from_det_rows(
                 bbox=(cx - width / 2.0, cy - height / 2.0, cx + width / 2.0, cy + height / 2.0),
                 center=(cx, cy),
                 score=parsed["score"],
-                source="raw",
+                source=str(parsed.get("source", "raw")),
                 class_name=parsed["class_name"],
             )
         )
     return candidates
+
+
+def _detect_white_anchor_rows(det_frame: Any) -> list[dict[str, float | str]]:
+    arr = np.asarray(det_frame)
+    if arr.size == 0:
+        return []
+    try:
+        cv2 = _cv2()
+        if arr.ndim >= 3:
+            hsv = cv2.cvtColor(arr[:, :, :3], cv2.COLOR_BGR2HSV)
+            mask = ((hsv[:, :, 2] >= 230) & (hsv[:, :, 1] <= 80)).astype(np.uint8)
+        else:
+            mask = (arr >= 230).astype(np.uint8)
+        if int(mask.sum()) < 300:
+            return []
+        component_count, _labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
+    except Exception:
+        return []
+
+    best: tuple[float, dict[str, float | str]] | None = None
+    for label in range(1, component_count):
+        x, y, width, height, area = [float(value) for value in stats[label]]
+        if area < 300.0 or width < 16.0 or height < 16.0:
+            continue
+        if width > 140.0 or height > 140.0:
+            continue
+        aspect = width / max(height, 1.0)
+        if aspect < 0.35 or aspect > 2.8:
+            continue
+        fill_ratio = area / max(width * height, 1.0)
+        if fill_ratio < 0.28:
+            continue
+        cx, cy = [float(value) for value in centroids[label]]
+        score = min(0.99, 0.82 + area / 9000.0)
+        row = {
+            "cx": cx,
+            "cy": cy,
+            "score": score,
+            "w": width,
+            "h": height,
+            "source": "white_anchor",
+            "class_name": "white_anchor",
+        }
+        rank = area * fill_ratio
+        if best is None or rank > best[0]:
+            best = (rank, row)
+    return [best[1]] if best is not None else []
 
 
 def _parse_row(row: Any) -> dict[str, float | str]:
@@ -378,6 +435,7 @@ def _parse_row(row: Any) -> dict[str, float | str]:
             "w": float(row["w"]),
             "h": float(row["h"]),
             "class_name": str(row.get("class_name", "")),
+            "source": str(row.get("source", "raw")),
         }
     return {
         "cx": float(row[0]),
@@ -386,6 +444,7 @@ def _parse_row(row: Any) -> dict[str, float | str]:
         "w": float(row[3]) if len(row) > 3 else 20.0,
         "h": float(row[4]) if len(row) > 4 else 20.0,
         "class_name": str(row[5]) if len(row) > 5 else "",
+        "source": "raw",
     }
 
 

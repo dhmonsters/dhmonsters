@@ -54,7 +54,7 @@ class LiveRecordingRuntime:
         self.latest_preview_path: Path | None = None
         self.frame_count = 0
         self._finished = False
-        self._preview_stride = max(1, int(round(self.fps / 5.0)))
+        self._preview_stride = 1
 
     @property
     def is_recording(self) -> bool:

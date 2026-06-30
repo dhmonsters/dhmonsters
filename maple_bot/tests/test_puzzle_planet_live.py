@@ -395,6 +395,68 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(candidate_event[1]["debug"]["detector_enabled"], False)
         self.assertIn("No module named 'mss'", candidate_event[1]["debug"]["detector_error"])
 
+    def test_analyze_adds_white_anchor_candidate_when_detector_returns_zero(self) -> None:
+        clicked: list[tuple[int, int]] = []
+
+        class _EmptyDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return []
+
+        class _FakeTemporalSelector:
+            def __init__(self) -> None:
+                self.calls = []
+
+            def update(self, **kwargs):
+                self.calls.append(kwargs)
+                first = kwargs["candidates"][0]
+                return LiveTemporalDecision(
+                    point=(first[0], first[1]),
+                    source="white_anchor",
+                    reason="visible_start",
+                    family="white_anchor",
+                )
+
+        temporal_selector = _FakeTemporalSelector()
+        solver = PlanetLiveSolver(
+            detector=_EmptyDetector(),
+            temporal_selector=temporal_selector,
+            mouse=PlanetMouseController(
+                background_clicker=lambda x, y: clicked.append((x, y)),
+                client_origin_getter=lambda: (0, 0),
+            ),
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 120,
+            "h": 120,
+        }
+        frame = np.zeros((180, 180, 3), dtype=np.uint8)
+        frame[60:90, 50:85] = 255
+        packet = FramePacket(
+            session_id="s",
+            frame_index=0,
+            timestamp_ms=0,
+            source_frame=frame,
+            board_frame=frame[20:140, 10:130],
+            source_kind="test",
+            roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+        )
+
+        result = solver.analyze(packet, solver_running=True)
+        candidate_event = next(event for event in result.trace_events if event[0] == "CANDIDATES")
+
+        self.assertEqual(candidate_event[1]["count"], 1)
+        self.assertEqual(candidate_event[1]["candidates"][0]["source"], "white_anchor")
+        self.assertEqual(candidate_event[1]["debug"]["raw_count"], 0)
+        self.assertEqual(candidate_event[1]["debug"]["white_anchor_count"], 1)
+        self.assertAlmostEqual(temporal_selector.calls[0]["candidates"][0][0], 57.5)
+        self.assertAlmostEqual(temporal_selector.calls[0]["candidates"][0][1], 55.0)
+        self.assertEqual(clicked, [(67, 75)])
+
 
 if __name__ == "__main__":
     unittest.main()

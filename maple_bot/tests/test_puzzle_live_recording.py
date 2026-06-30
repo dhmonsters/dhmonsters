@@ -148,6 +148,25 @@ def test_live_recording_calls_planet_solver_and_records_solver_trace(tmp_path):
     assert runtime.latest_preview_path.exists()
 
 
+def test_live_recording_writes_preview_snapshot_for_every_frame(tmp_path):
+    class _FakePlanetSolver:
+        def analyze(self, packet, *, solver_running: bool):
+            return PlanetLiveResult(preview_frame=np.full((6, 8, 3), packet.frame_index, dtype=np.uint8))
+
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(7),
+        fps=30.0,
+        sleeper=lambda _seconds: None,
+        live_solver=_FakePlanetSolver(),
+    )
+
+    report_path = runtime.run_until_stopped(max_frames=7)
+
+    snapshot_names = sorted(path.name for path in (report_path.parent / "snapshots").glob("live_preview_*.png"))
+    assert snapshot_names == [f"live_preview_{index:06d}.png" for index in range(7)]
+
+
 def test_live_recording_runtime_can_create_mouse_disabled_default_solver(tmp_path):
     runtime = LiveRecordingRuntime(
         output_root=tmp_path,

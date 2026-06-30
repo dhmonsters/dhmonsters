@@ -1217,11 +1217,13 @@ def _trace_log_message(
             return f"{frame_prefix} YOLO candidates {count}{_candidate_debug_suffix(payload)}"
         first = candidates[0]
         candidate_id = str(first.get("candidate_id") or "-")
+        source = str(first.get("source") or "-")
         center = _candidate_center(first)
         center_text = _compact_point(center) if center is not None else "-"
         return (
             f"{frame_prefix} YOLO candidates {count} "
-            f"first={candidate_id} center={center_text} score={_format_score(first.get('score'))}"
+            f"first={candidate_id} center={center_text} score={_format_score(first.get('score'))} "
+            f"source={source}{_candidate_debug_suffix(payload)}"
         )
     if event_type == "TEMPORAL_SELECTOR":
         point = payload.get("point")
@@ -1256,11 +1258,20 @@ def _candidate_debug_suffix(payload: dict[object, object]) -> str:
     detector = debug.get("detector")
     enabled = debug.get("detector_enabled")
     error = debug.get("detector_error")
+    raw_count = debug.get("raw_count")
+    white_count = debug.get("white_anchor_count")
+    candidate_count = debug.get("candidate_count")
     parts: list[str] = []
     if detector:
         parts.append(f"detector={detector}")
     if isinstance(enabled, bool):
         parts.append(f"enabled={enabled}")
+    if isinstance(raw_count, int):
+        parts.append(f"raw={raw_count}")
+    if isinstance(white_count, int):
+        parts.append(f"white={white_count}")
+    if isinstance(candidate_count, int):
+        parts.append(f"merged={candidate_count}")
     if error:
         parts.append(f"error={error}")
     return "" if not parts else " " + " ".join(parts)
