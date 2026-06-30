@@ -1235,6 +1235,14 @@ def _trace_log_message(
         family = str(payload.get("family") or "-")
         reason = str(payload.get("reason") or "-")
         return f"{frame_prefix} TEMP target {point_text} family={family} reason={reason}"
+    if event_type == "TARGET_SELECTION":
+        point = payload.get("point")
+        point_text = _compact_point(point) if isinstance(point, list) else "-"
+        source = str(payload.get("source") or "-")
+        reason = str(payload.get("reason") or "-")
+        distance = payload.get("distance")
+        distance_text = _format_score(distance) if isinstance(distance, (int, float)) else "-"
+        return f"{frame_prefix} TARGET source={source} point={point_text} dist={distance_text} reason={reason}"
     if event_type == "MOUSE_MOVE":
         moved = bool(payload.get("moved"))
         client_point = payload.get("client_point")
@@ -1311,6 +1319,13 @@ def _trace_log_signature(event_type: str, payload: dict[object, object]) -> obje
             "TEMPORAL_SELECTOR",
             _point_signature(payload.get("point")),
             str(payload.get("family") or "-"),
+            str(payload.get("reason") or "-"),
+        )
+    if event_type == "TARGET_SELECTION":
+        return (
+            "TARGET_SELECTION",
+            _point_signature(payload.get("point")),
+            str(payload.get("source") or "-"),
             str(payload.get("reason") or "-"),
         )
     if event_type == "MOUSE_MOVE":

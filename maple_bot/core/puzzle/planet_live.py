@@ -22,6 +22,9 @@ CursorDetector = Callable[[Any], tuple[float, float] | None]
 BackgroundClicker = Callable[[int, int], None]
 ClientOriginGetter = Callable[[], tuple[int, int]]
 
+IDENTITY_TEMPORAL_DIVERGENCE_LIMIT = 28.0
+IDENTITY_TEMPORAL_MIN_CONFIDENCE = 0.65
+
 
 @dataclass(frozen=True)
 class MouseMoveResult:
@@ -72,6 +75,7 @@ class PlanetMouseController:
         point: tuple[float, float] | None,
         det_frame: Any | None,
         enabled: bool,
+        learn_offset: bool = True,
     ) -> MouseMoveResult:
         if point is None:
             return MouseMoveResult(False, None, None, None, (0.0, 0.0), "no_target")
@@ -80,7 +84,8 @@ class PlanetMouseController:
 
         cx = max(0.0, min(float(detect_roi.w - 1), float(point[0])))
         cy = max(0.0, min(float(detect_roi.h - 1), float(point[1])))
-        self._learn_cursor_offset(cx, cy, det_frame)
+        if learn_offset:
+            self._learn_cursor_offset(cx, cy, det_frame)
         move_cx = max(0.0, min(float(detect_roi.w - 1), cx + self.offset_x))
         move_cy = max(0.0, min(float(detect_roi.h - 1), cy + self.offset_y))
         client_x = detect_roi.x + int(move_cx)
@@ -354,13 +359,24 @@ class PlanetLiveSolver:
         if visible_lock.locked and visible_lock.point is not None:
             target_point = visible_lock.point
         else:
-            target_point = temporal_decision.point if temporal_decision.point is not None else decision.point
+            target_point = _choose_live_target_point(
+                decision=decision,
+                temporal_decision=temporal_decision,
+                visible_lock=visible_lock,
+            )
+        target_selection = _target_selection_payload(
+            decision=decision,
+            temporal_decision=temporal_decision,
+            visible_lock=visible_lock,
+            target_point=target_point,
+        )
         det_point = _board_point_to_det_point(target_point, detect_roi=detect_roi, board_roi=board_roi)
         mouse_move = self.mouse.move_to_det_point(
             detect_roi=detect_roi,
             point=det_point,
             det_frame=det_frame,
             enabled=solver_running and self.mouse_enabled,
+            learn_offset=white_anchor is not None,
         )
         det_candidates = _det_rows_from_candidates(candidates, detect_roi=detect_roi, board_roi=board_roi)
         preview = render_planet_cctv_preview(
@@ -378,6 +394,7 @@ class PlanetLiveSolver:
                 temporal_decision,
                 mouse_move,
                 detect_debug=self._last_detect_debug,
+                target_selection=target_selection,
             ),
             candidates=candidates,
             evidence=evidence,
@@ -696,6 +713,70 @@ def _board_point_to_det_point(
     return (float(point[0]) - (detect_roi.x - board_roi.x), float(point[1]) - (detect_roi.y - board_roi.y))
 
 
+def _choose_live_target_point(
+    *,
+    decision: IdentityDecision,
+    temporal_decision: LiveTemporalDecision,
+    visible_lock: Any,
+) -> tuple[float, float] | None:
+    if visible_lock.locked and visible_lock.point is not None:
+        return visible_lock.point
+    if temporal_decision.point is None:
+        return decision.point
+    if _should_prefer_identity_target(decision, temporal_decision):
+        return decision.point
+    return temporal_decision.point
+
+
+def _should_prefer_identity_target(decision: IdentityDecision, temporal_decision: LiveTemporalDecision) -> bool:
+    if decision.point is None or temporal_decision.point is None:
+        return False
+    if decision.state != "TRACK_CONFIDENT":
+        return False
+    if decision.confidence < IDENTITY_TEMPORAL_MIN_CONFIDENCE:
+        return False
+    distance = hypot(decision.point[0] - temporal_decision.point[0], decision.point[1] - temporal_decision.point[1])
+    return distance > IDENTITY_TEMPORAL_DIVERGENCE_LIMIT
+
+
+def _target_selection_payload(
+    *,
+    decision: IdentityDecision,
+    temporal_decision: LiveTemporalDecision,
+    visible_lock: Any,
+    target_point: tuple[float, float] | None,
+) -> dict[str, object]:
+    distance = _point_distance(decision.point, temporal_decision.point)
+    if visible_lock.locked and visible_lock.point is not None:
+        source = "visible_lock"
+        reason = str(getattr(visible_lock, "reason", "") or "visible_lock")
+    elif temporal_decision.point is None:
+        source = "identity"
+        reason = "temporal_missing"
+    elif _should_prefer_identity_target(decision, temporal_decision):
+        source = "identity"
+        reason = "identity_temporal_divergence"
+    else:
+        source = "temporal"
+        reason = str(temporal_decision.reason or "temporal")
+    return {
+        "point": target_point,
+        "source": source,
+        "reason": reason,
+        "distance": distance,
+        "identity_point": decision.point,
+        "identity_confidence": decision.confidence,
+        "temporal_point": temporal_decision.point,
+        "temporal_family": temporal_decision.family,
+    }
+
+
+def _point_distance(a: tuple[float, float] | None, b: tuple[float, float] | None) -> float | None:
+    if a is None or b is None:
+        return None
+    return hypot(float(a[0]) - float(b[0]), float(a[1]) - float(b[1]))
+
+
 def _trace_events(
     candidates: Sequence[Candidate],
     evidence: dict[str, CandidateEvidence],
@@ -704,6 +785,7 @@ def _trace_events(
     mouse_move: MouseMoveResult,
     *,
     detect_debug: dict[str, object] | None = None,
+    target_selection: dict[str, object] | None = None,
 ) -> list[tuple[str, dict[str, object]]]:
     return [
         (
@@ -723,6 +805,7 @@ def _trace_events(
         ),
         ("IDENTITY_STATE", _identity_payload(decision)),
         ("TEMPORAL_SELECTOR", _temporal_payload(temporal_decision)),
+        ("TARGET_SELECTION", target_selection or {}),
         (
             "MOUSE_MOVE",
             {

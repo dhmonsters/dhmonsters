@@ -83,6 +83,36 @@ class PlanetMouseControllerTest(unittest.TestCase):
         self.assertEqual(result.offset, (-10.0, -10.0))
         self.assertEqual(result.reason, "fg_move")
 
+    def test_move_to_det_point_can_freeze_visible_cursor_offset(self) -> None:
+        moved: list[tuple[int, int]] = []
+        controller = PlanetMouseController(
+            cursor_setter=lambda x, y: moved.append((x, y)),
+            cursor_detector=lambda _frame: (80.0, 80.0),
+            client_origin_getter=lambda: (0, 0),
+            offset_alpha=1.0,
+        )
+        detect_roi = RoiSpec("detect", "window_client", 0, 0, 300, 250)
+        frame = np.zeros((250, 300, 3), dtype=np.uint8)
+
+        learned = controller.move_to_det_point(
+            detect_roi=detect_roi,
+            point=(50.0, 50.0),
+            det_frame=frame,
+            enabled=True,
+            learn_offset=True,
+        )
+        frozen = controller.move_to_det_point(
+            detect_roi=detect_roi,
+            point=(100.0, 100.0),
+            det_frame=frame,
+            enabled=True,
+            learn_offset=False,
+        )
+
+        self.assertEqual(learned.offset, (-30.0, -30.0))
+        self.assertEqual(frozen.offset, (-30.0, -30.0))
+        self.assertEqual(moved, [(20, 20), (70, 70)])
+
     def test_move_to_det_point_skips_when_disabled(self) -> None:
         moved: list[tuple[int, int]] = []
         controller = PlanetMouseController(cursor_setter=lambda x, y: moved.append((x, y)))
@@ -436,6 +466,69 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(result.mouse_move.det_point, (60.0, 70.0))
         self.assertEqual(result.temporal_decision.family, "good_family")
         self.assertEqual(temporal_selector.calls[0]["primary_point"], (999.0, 999.0))
+
+    def test_analyze_prefers_confident_identity_when_selector_jumps_far(self) -> None:
+        clicked: list[tuple[int, int]] = []
+
+        class _FakeDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return [(100.0, 100.0, 0.8, 20.0, 20.0)]
+
+        class _FakeIdentityTracker:
+            def update(self, **_kwargs):
+                return IdentityDecision(
+                    "TRACK_CONFIDENT",
+                    (100.0, 100.0),
+                    "identity",
+                    0.8,
+                    "candidate_continuity",
+                    0,
+                    {},
+                )
+
+        class _FakeTemporalSelector:
+            def update(self, **_kwargs):
+                return LiveTemporalDecision(
+                    point=(180.0, 100.0),
+                    source="selector_shadow",
+                    reason="selected_family",
+                    family="jump_family",
+                )
+
+        solver = PlanetLiveSolver(
+            detector=_FakeDetector(),
+            identity_tracker=_FakeIdentityTracker(),
+            temporal_selector=_FakeTemporalSelector(),
+            mouse=PlanetMouseController(
+                background_clicker=lambda x, y: clicked.append((x, y)),
+                client_origin_getter=lambda: (0, 0),
+            ),
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 240,
+            "h": 200,
+        }
+        frame = np.zeros((260, 260, 3), dtype=np.uint8)
+        packet = FramePacket(
+            session_id="s",
+            frame_index=56,
+            timestamp_ms=0,
+            source_frame=frame,
+            board_frame=frame[20:220, 10:250],
+            source_kind="test",
+            roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+        )
+
+        result = solver.analyze(packet, solver_running=True)
+
+        self.assertEqual(clicked, [(110, 120)])
+        self.assertEqual(result.mouse_move.det_point, (100.0, 100.0))
+        self.assertEqual(result.temporal_decision.family, "jump_family")
 
     def test_analyze_dry_run_keeps_temporal_decision_without_mouse_click(self) -> None:
         clicked: list[tuple[int, int]] = []
