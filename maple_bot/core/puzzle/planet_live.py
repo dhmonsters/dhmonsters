@@ -376,7 +376,7 @@ class PlanetLiveSolver:
             point=det_point,
             det_frame=det_frame,
             enabled=solver_running and self.mouse_enabled,
-            learn_offset=white_anchor is not None,
+            learn_offset=visible_lock.locked and white_anchor is not None,
         )
         det_candidates = _det_rows_from_candidates(candidates, detect_roi=detect_roi, board_roi=board_roi)
         preview = render_planet_cctv_preview(

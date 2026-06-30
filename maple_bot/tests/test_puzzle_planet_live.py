@@ -11,7 +11,7 @@ import numpy as np
 from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
 from core.puzzle.models import FramePacket, IdentityDecision, RoiSpec
 from core.puzzle.defaults import fixed_detect_roi, fixed_popup_header_roi, fixed_popup_preview_roi
-from core.puzzle.planet_live import PlanetLiveSolver, PlanetMouseController, render_planet_cctv_preview
+from core.puzzle.planet_live import MouseMoveResult, PlanetLiveSolver, PlanetMouseController, render_planet_cctv_preview
 from core.puzzle.planet_noauth import PlanetNoAuthDetector
 
 
@@ -797,6 +797,79 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(candidate_event[1]["debug"]["visible_lock_stable"], 2)
         self.assertEqual(result.mouse_move.det_point, (57.5, 55.0))
         self.assertEqual(clicked, [(67, 75)])
+
+    def test_analyze_learns_offset_only_after_visible_lock_is_stable(self) -> None:
+        mouse_calls: list[dict[str, object]] = []
+
+        class _EmptyDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return []
+
+        class _PrimaryTemporalSelector:
+            def update(self, **kwargs):
+                anchor = kwargs.get("white_anchor")
+                return LiveTemporalDecision(
+                    point=anchor,
+                    source="primary",
+                    reason="white_anchor",
+                    family=None,
+                )
+
+        class _RecordingMouse:
+            def move_to_det_point(self, **kwargs):
+                mouse_calls.append(kwargs)
+                return MouseMoveResult(
+                    bool(kwargs.get("enabled")),
+                    None,
+                    None,
+                    kwargs.get("point"),
+                    (0.0, 0.0),
+                    "recorded",
+                )
+
+        solver = PlanetLiveSolver(
+            detector=_EmptyDetector(),
+            temporal_selector=_PrimaryTemporalSelector(),
+            mouse=_RecordingMouse(),
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 120,
+            "h": 120,
+        }
+
+        def _packet(frame_index: int) -> FramePacket:
+            frame = np.zeros((180, 180, 3), dtype=np.uint8)
+            frame[60:91, 50:86] = 255
+            return FramePacket(
+                session_id="s",
+                frame_index=frame_index,
+                timestamp_ms=0,
+                source_frame=frame,
+                board_frame=frame[20:140, 10:130],
+                source_kind="test",
+                roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+            )
+
+        white_anchor_row = {
+            "cx": 57.5,
+            "cy": 55.0,
+            "score": 0.99,
+            "w": 36.0,
+            "h": 31.0,
+            "source": "white_anchor",
+            "class_name": "white_anchor",
+        }
+        with patch("core.puzzle.planet_live._detect_white_anchor_rows", return_value=[white_anchor_row]):
+            solver.analyze(_packet(0), solver_running=True)
+            solver.analyze(_packet(1), solver_running=True)
+
+        self.assertEqual(mouse_calls[0]["learn_offset"], False)
+        self.assertEqual(mouse_calls[1]["learn_offset"], True)
 
     def test_motion_coast_candidate_keeps_selector_alive_after_white_fades(self) -> None:
         class _EmptyDetector:
