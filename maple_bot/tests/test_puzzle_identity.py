@@ -247,6 +247,94 @@ def test_continuity_can_beat_low_yolo_fragment_during_split():
     assert decision.point == (597.0, 120.0)
 
 
+def test_overlap_evidence_can_beat_near_yolo_continuity():
+    tracker = IdentityTracker(jump_distance=80.0, merge_threshold=0.95)
+    tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(100.0, 100.0))
+    previous = _candidate("previous", (110.0, 100.0), score=0.9)
+    tracker.update(frame_index=2, candidates=[previous], evidence=_evidence(previous))
+    near_background = _candidate("near_background", (121.0, 100.0), score=0.9)
+    release_target = _candidate("release_target", (170.0, 100.0), score=0.42)
+    evidence = _evidence_many(
+        (
+            near_background,
+            CandidateEvidence(
+                candidate_id=near_background.candidate_id,
+                bg_score=0.9,
+                phase_similarity=0.9,
+                texture_bg_score=0.9,
+                merge_likelihood=0.45,
+            ),
+        ),
+        (
+            release_target,
+            CandidateEvidence(
+                candidate_id=release_target.candidate_id,
+                motion_divergence=0.55,
+                rigid_violation=0.55,
+                bg_score=0.2,
+                phase_similarity=0.2,
+                texture_bg_score=0.2,
+                merge_likelihood=0.35,
+            ),
+        ),
+    )
+
+    decision = tracker.update(
+        frame_index=3,
+        candidates=[near_background, release_target],
+        evidence=evidence,
+    )
+
+    assert decision.state == "TRACK_CONFIDENT"
+    assert decision.candidate_id == "release_target"
+    assert decision.point == (170.0, 100.0)
+
+
+def test_overlap_evidence_does_not_promote_low_yolo_noise_over_local_track():
+    tracker = IdentityTracker(jump_distance=80.0, merge_threshold=0.95)
+    tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(180.0, 100.0))
+    previous = _candidate("previous", (180.0, 100.0), score=0.9)
+    tracker.update(frame_index=2, candidates=[previous], evidence=_evidence(previous))
+    local_track = _candidate("local_track", (185.0, 100.0), score=0.59)
+    low_yolo_noise = _candidate("low_yolo_noise", (220.0, 100.0), score=0.16)
+    evidence = _evidence_many(
+        (
+            local_track,
+            CandidateEvidence(
+                candidate_id=local_track.candidate_id,
+                motion_divergence=0.47,
+                rigid_violation=0.47,
+                bg_score=0.53,
+                phase_similarity=0.53,
+                texture_bg_score=0.96,
+                merge_likelihood=0.37,
+            ),
+        ),
+        (
+            low_yolo_noise,
+            CandidateEvidence(
+                candidate_id=low_yolo_noise.candidate_id,
+                motion_divergence=1.0,
+                rigid_violation=1.0,
+                bg_score=0.34,
+                phase_similarity=0.0,
+                texture_bg_score=0.98,
+                merge_likelihood=0.38,
+            ),
+        ),
+    )
+
+    decision = tracker.update(
+        frame_index=3,
+        candidates=[local_track, low_yolo_noise],
+        evidence=evidence,
+    )
+
+    assert decision.state == "TRACK_CONFIDENT"
+    assert decision.candidate_id == "local_track"
+    assert decision.point == (185.0, 100.0)
+
+
 def test_hold_reacquires_candidate_near_last_identity_position():
     tracker = IdentityTracker(jump_distance=60.0, reacquire_distance=45.0, merge_threshold=0.6)
     tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(100.0, 100.0))

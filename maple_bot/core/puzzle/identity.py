@@ -11,6 +11,13 @@ YOLO_FULL_SCORE = 0.4
 LOW_YOLO_COST_WEIGHT = 30.0
 LOW_YOLO_CONFIDENCE_WEIGHT = 0.25
 MERGE_COST_WEIGHT = 8.0
+OVERLAP_PRESSURE_THRESHOLD = 0.25
+OVERLAP_EVIDENCE_RADIUS = 90.0
+OVERLAP_DISTANCE_CAP = 18.0
+OVERLAP_DISTANCE_DISCOUNT = 0.5
+OVERLAP_EVIDENCE_BOOST = 65.0
+OVERLAP_SUPPORT_SCORE_FLOOR = 0.25
+OVERLAP_SUPPORT_SCALE_FLOOR = 0.35
 
 
 class IdentityTracker:
@@ -247,11 +254,36 @@ def _candidate_cost(
     color_weight: float = 1.0,
     overlap_switch_penalty: float = 0.0,
 ) -> float:
+    overlap_pressure = _overlap_pressure(evidence)
+    local_overlap_pressure = overlap_pressure if distance <= OVERLAP_EVIDENCE_RADIUS else 0.0
     target_support = evidence.motion_divergence + evidence.rigid_violation + evidence.color_residual * color_weight
+    if local_overlap_pressure >= OVERLAP_PRESSURE_THRESHOLD:
+        target_support *= _overlap_support_scale(candidate.score)
     background_cost = evidence.bg_score + evidence.texture_bg_score + evidence.phase_similarity
+    evidence_weight = 10.0 + local_overlap_pressure * OVERLAP_EVIDENCE_BOOST
+    distance_cost = distance
+    if local_overlap_pressure >= OVERLAP_PRESSURE_THRESHOLD and target_support > background_cost:
+        distance_cost = min(distance, OVERLAP_DISTANCE_CAP) * (1.0 - local_overlap_pressure * OVERLAP_DISTANCE_DISCOUNT)
     low_yolo_cost = max(0.0, YOLO_FULL_SCORE - candidate.score) * LOW_YOLO_COST_WEIGHT
     merge_cost = evidence.merge_likelihood * (MERGE_COST_WEIGHT + overlap_switch_penalty)
-    return distance + low_yolo_cost - target_support * 10.0 + background_cost * 10.0 + merge_cost
+    return distance_cost + low_yolo_cost - target_support * evidence_weight + background_cost * evidence_weight + merge_cost
+
+
+def _overlap_pressure(evidence: CandidateEvidence) -> float:
+    background_pressure = (evidence.bg_score + evidence.phase_similarity) / 2.0
+    target_motion_pressure = (evidence.motion_divergence + evidence.rigid_violation) / 2.0
+    pressure = max(evidence.merge_likelihood * 2.0, background_pressure, target_motion_pressure)
+    return max(0.0, min(1.0, pressure))
+
+
+def _overlap_support_scale(score: float) -> float:
+    if score >= YOLO_FULL_SCORE:
+        return 1.0
+    if score <= OVERLAP_SUPPORT_SCORE_FLOOR:
+        return OVERLAP_SUPPORT_SCALE_FLOOR
+    span = YOLO_FULL_SCORE - OVERLAP_SUPPORT_SCORE_FLOOR
+    ratio = (score - OVERLAP_SUPPORT_SCORE_FLOOR) / span
+    return OVERLAP_SUPPORT_SCALE_FLOOR + ratio * (1.0 - OVERLAP_SUPPORT_SCALE_FLOOR)
 
 
 def _confidence(
