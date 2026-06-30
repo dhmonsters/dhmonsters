@@ -435,7 +435,7 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
             "h": 120,
         }
         frame = np.zeros((180, 180, 3), dtype=np.uint8)
-        frame[60:90, 50:85] = 255
+        frame[60:91, 50:86] = 255
         packet = FramePacket(
             session_id="s",
             frame_index=0,
@@ -455,6 +455,63 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(candidate_event[1]["debug"]["white_anchor_count"], 1)
         self.assertAlmostEqual(temporal_selector.calls[0]["candidates"][0][0], 57.5)
         self.assertAlmostEqual(temporal_selector.calls[0]["candidates"][0][1], 55.0)
+        self.assertEqual(clicked, [(67, 75)])
+
+    def test_visible_lock_overrides_selector_after_stable_white_anchor(self) -> None:
+        clicked: list[tuple[int, int]] = []
+
+        class _EmptyDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return []
+
+        class _WrongTemporalSelector:
+            def update(self, **_kwargs):
+                return LiveTemporalDecision(
+                    point=(100.0, 100.0),
+                    source="selector_shadow",
+                    reason="wrong_selector_point",
+                    family="wrong_family",
+                )
+
+        solver = PlanetLiveSolver(
+            detector=_EmptyDetector(),
+            temporal_selector=_WrongTemporalSelector(),
+            mouse=PlanetMouseController(
+                background_clicker=lambda x, y: clicked.append((x, y)),
+                client_origin_getter=lambda: (0, 0),
+            ),
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 120,
+            "h": 120,
+        }
+
+        def _packet(frame_index: int) -> FramePacket:
+            frame = np.zeros((180, 180, 3), dtype=np.uint8)
+            frame[60:91, 50:86] = 255
+            return FramePacket(
+                session_id="s",
+                frame_index=frame_index,
+                timestamp_ms=0,
+                source_frame=frame,
+                board_frame=frame[20:140, 10:130],
+                source_kind="test",
+                roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+            )
+
+        solver.analyze(_packet(0), solver_running=True)
+        clicked.clear()
+        result = solver.analyze(_packet(1), solver_running=True)
+        candidate_event = next(event for event in result.trace_events if event[0] == "CANDIDATES")
+
+        self.assertTrue(candidate_event[1]["debug"]["visible_lock"])
+        self.assertEqual(candidate_event[1]["debug"]["visible_lock_stable"], 2)
+        self.assertEqual(result.mouse_move.det_point, (57.5, 55.0))
         self.assertEqual(clicked, [(67, 75)])
 
 

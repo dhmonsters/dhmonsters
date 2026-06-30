@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from math import hypot
 from typing import Any
 
 import numpy as np
@@ -128,6 +129,43 @@ class _NoAuthMouseBridge:
         return self._hwnd
 
 
+@dataclass(frozen=True)
+class _VisibleLockState:
+    locked: bool
+    point: tuple[float, float] | None
+    stable_frames: int
+    reason: str
+
+
+class _VisibleWhiteLock:
+    def __init__(self, *, stable_frames: int = 2, max_jump_px: float = 45.0) -> None:
+        self.required_stable_frames = max(1, int(stable_frames))
+        self.max_jump_px = float(max_jump_px)
+        self._last_point: tuple[float, float] | None = None
+        self._stable_frames = 0
+
+    def update(self, point: tuple[float, float] | None) -> _VisibleLockState:
+        if point is None:
+            self._last_point = None
+            self._stable_frames = 0
+            return _VisibleLockState(False, None, 0, "no_white_anchor")
+
+        current = (float(point[0]), float(point[1]))
+        if self._last_point is None:
+            self._stable_frames = 1
+            reason = "white_anchor_seen"
+        elif hypot(current[0] - self._last_point[0], current[1] - self._last_point[1]) <= self.max_jump_px:
+            self._stable_frames += 1
+            reason = "white_anchor_stable"
+        else:
+            self._stable_frames = 1
+            reason = "white_anchor_jump_reset"
+        self._last_point = current
+
+        locked = self._stable_frames >= self.required_stable_frames
+        return _VisibleLockState(locked, current if locked else None, self._stable_frames, reason)
+
+
 class PlanetLiveSolver:
     def __init__(
         self,
@@ -148,6 +186,7 @@ class PlanetLiveSolver:
         self._noauth_detector: Any | None = None
         self._noauth_detector_loaded = False
         self._last_detect_debug: dict[str, object] = {}
+        self._visible_white_lock = _VisibleWhiteLock()
 
     def analyze(self, packet: FramePacket, *, solver_running: bool) -> PlanetLiveResult:
         detect_payload = packet.roi_snapshot.get("detect", {})
@@ -170,6 +209,14 @@ class PlanetLiveSolver:
             board_roi=board_roi,
         )
         white_anchor = candidates[0].center if white_anchor_rows and candidates else None
+        visible_lock = self._visible_white_lock.update(white_anchor)
+        self._last_detect_debug = {
+            **self._last_detect_debug,
+            "visible_lock": visible_lock.locked,
+            "visible_lock_stable": visible_lock.stable_frames,
+            "visible_lock_reason": visible_lock.reason,
+            "visible_lock_point": visible_lock.point,
+        }
         evidence = self.evidence_judges.score(candidates, packet)
         decision = self.identity_tracker.update(
             frame_index=packet.frame_index,
@@ -184,7 +231,10 @@ class PlanetLiveSolver:
             white_anchor=white_anchor,
             frame_shape=_frame_shape(packet.board_frame),
         )
-        target_point = temporal_decision.point if temporal_decision.point is not None else decision.point
+        if visible_lock.locked and visible_lock.point is not None:
+            target_point = visible_lock.point
+        else:
+            target_point = temporal_decision.point if temporal_decision.point is not None else decision.point
         det_point = _board_point_to_det_point(target_point, detect_roi=detect_roi, board_roi=board_roi)
         mouse_move = self.mouse.move_to_det_point(
             detect_roi=detect_roi,

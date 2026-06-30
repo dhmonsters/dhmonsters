@@ -1261,6 +1261,8 @@ def _candidate_debug_suffix(payload: dict[object, object]) -> str:
     raw_count = debug.get("raw_count")
     white_count = debug.get("white_anchor_count")
     candidate_count = debug.get("candidate_count")
+    visible_lock = debug.get("visible_lock")
+    visible_stable = debug.get("visible_lock_stable")
     parts: list[str] = []
     if detector:
         parts.append(f"detector={detector}")
@@ -1272,6 +1274,10 @@ def _candidate_debug_suffix(payload: dict[object, object]) -> str:
         parts.append(f"white={white_count}")
     if isinstance(candidate_count, int):
         parts.append(f"merged={candidate_count}")
+    if isinstance(visible_lock, bool):
+        parts.append(f"vlock={visible_lock}")
+    if isinstance(visible_stable, int):
+        parts.append(f"stable={visible_stable}")
     if error:
         parts.append(f"error={error}")
     return "" if not parts else " " + " ".join(parts)
