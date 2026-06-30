@@ -126,6 +126,32 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
             self.assertTrue(window.cctv_frame_label.pixmap().path.startswith("bytes:"))
             self.assertIn("recording start", window.event_log.toPlainText())
 
+    def test_live_status_poll_does_not_repeat_recording_start_for_same_session(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+
+        with TemporaryDirectory() as tmp:
+            session_dir = Path(tmp) / "session"
+            session_dir.mkdir()
+            status = types.SimpleNamespace(
+                status="recording",
+                session_dir=session_dir,
+                preview_path=None,
+            )
+            window = module.PuzzleConsoleWindow(live_status_handler=lambda: status)
+
+            window._poll_live_status()
+            window.apply_trace_event(
+                {
+                    "type": "IDENTITY_STATE",
+                    "session_id": "20260630_010000_001",
+                    "frame_index": 0,
+                    "payload": {"state": "LOST", "confidence": 0.0, "reason": "no_identity"},
+                }
+            )
+            window._poll_live_status()
+
+            self.assertEqual(window.event_log.toPlainText().count("recording start"), 1)
+
     def test_live_status_poll_updates_armed_preview_before_recording(self) -> None:
         module = importlib.import_module("ui.puzzle_console")
 
@@ -288,6 +314,31 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
 
         self.assertEqual(alarms, [])
         self.assertIn("ALARM disabled", window.event_log.toPlainText())
+
+    def test_candidate_log_shows_detector_error_when_no_candidates(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        window = module.PuzzleConsoleWindow()
+
+        window.apply_trace_event(
+            {
+                "type": "CANDIDATES",
+                "frame_index": 0,
+                "payload": {
+                    "count": 0,
+                    "candidates": [],
+                    "debug": {
+                        "detector": "PlanetNoAuthDetector",
+                        "detector_enabled": False,
+                        "detector_error": "ModuleNotFoundError: No module named 'mss'",
+                    },
+                },
+            }
+        )
+
+        self.assertIn(
+            "f0 YOLO candidates 0 detector=PlanetNoAuthDetector enabled=False error=ModuleNotFoundError: No module named 'mss'",
+            window.event_log.toPlainText(),
+        )
 
     def test_live_status_poll_tails_trace_events_into_log(self) -> None:
         module = importlib.import_module("ui.puzzle_console")

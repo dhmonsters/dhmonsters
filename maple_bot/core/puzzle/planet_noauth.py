@@ -14,6 +14,8 @@ class PlanetNoAuthDetector:
         self._m1: Any | None = None
         self._load_attempted = False
         self._load_failed = False
+        self.load_source = ""
+        self.last_error = ""
 
     @property
     def enabled(self) -> bool:
@@ -27,7 +29,8 @@ class PlanetNoAuthDetector:
             return []
         try:
             boxes = m1.detect(board_bgr, self.imgsz, self.score)
-        except Exception:
+        except Exception as exc:
+            self.last_error = f"{exc.__class__.__name__}: {exc}"
             return []
         return _m1_boxes_to_rows(boxes)
 
@@ -35,14 +38,34 @@ class PlanetNoAuthDetector:
         if self._load_attempted:
             return self._m1
         self._load_attempted = True
-        try:
-            from planet_live_solver import load_models
-
-            self._m1, _m2 = load_models(use_gpu=self.use_gpu)
-        except Exception:
-            self._load_failed = True
-            self._m1 = None
+        errors: list[str] = []
+        for source, loader in (
+            ("planet_live_solver", _load_from_planet_live_solver),
+            ("planet_yolo_verify", _load_from_planet_yolo_verify),
+        ):
+            try:
+                self._m1, _m2 = loader(use_gpu=self.use_gpu)
+                self.load_source = source
+                self.last_error = ""
+                return self._m1
+            except Exception as exc:
+                errors.append(f"{source}: {exc.__class__.__name__}: {exc}")
+        self._load_failed = True
+        self._m1 = None
+        self.last_error = " | ".join(errors)
         return self._m1
+
+
+def _load_from_planet_live_solver(*, use_gpu: bool) -> tuple[Any, Any]:
+    from planet_live_solver import load_models
+
+    return load_models(use_gpu=use_gpu)
+
+
+def _load_from_planet_yolo_verify(*, use_gpu: bool) -> tuple[Any, Any]:
+    from planet_yolo_verify import load_models
+
+    return load_models(use_gpu=use_gpu)
 
 
 def _m1_boxes_to_rows(boxes: Any) -> list[tuple[int, int, float, int, int]]:

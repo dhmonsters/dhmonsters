@@ -106,6 +106,47 @@ class PlanetNoAuthDetectorTest(unittest.TestCase):
         self.assertEqual(calls, [((120, 200), 192, 0.2)])
         self.assertEqual(rows, [(30, 50, 0.8100000023841858, 40, 60)])
 
+    def test_detect_all_falls_back_to_yolo_verify_when_live_solver_import_fails(self) -> None:
+        calls = []
+
+        class _FakeM1:
+            def detect(self, board, imgsz, score):
+                calls.append((board.shape[:2], imgsz, score))
+                return np.array([[11, 21, 51, 81, 0.75, 0]], dtype=np.float32)
+
+        live_solver = types.ModuleType("planet_live_solver")
+
+        def fail_load_models(use_gpu=False):
+            raise ModuleNotFoundError("No module named 'mss'")
+
+        live_solver.load_models = fail_load_models
+        yolo_verify = types.ModuleType("planet_yolo_verify")
+        yolo_verify.load_models = lambda use_gpu=False: (_FakeM1(), object())
+
+        with patch.dict(sys.modules, {"planet_live_solver": live_solver, "planet_yolo_verify": yolo_verify}):
+            detector = PlanetNoAuthDetector()
+            rows = detector.detect_all(np.zeros((120, 200, 3), dtype=np.uint8))
+
+        self.assertEqual(calls, [((120, 200), 192, 0.2)])
+        self.assertFalse(detector._load_failed)
+        self.assertEqual(detector.load_source, "planet_yolo_verify")
+        self.assertEqual(rows, [(31, 51, 0.75, 40, 60)])
+
+    def test_detect_all_records_load_error_when_all_model_loaders_fail(self) -> None:
+        live_solver = types.ModuleType("planet_live_solver")
+        live_solver.load_models = lambda use_gpu=False: (_ for _ in ()).throw(RuntimeError("live failed"))
+        yolo_verify = types.ModuleType("planet_yolo_verify")
+        yolo_verify.load_models = lambda use_gpu=False: (_ for _ in ()).throw(RuntimeError("verify failed"))
+
+        with patch.dict(sys.modules, {"planet_live_solver": live_solver, "planet_yolo_verify": yolo_verify}):
+            detector = PlanetNoAuthDetector()
+            rows = detector.detect_all(np.zeros((120, 200, 3), dtype=np.uint8))
+
+        self.assertEqual(rows, [])
+        self.assertTrue(detector._load_failed)
+        self.assertIn("live failed", detector.last_error)
+        self.assertIn("verify failed", detector.last_error)
+
 
 class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
     def test_planet_live_solver_default_path_uses_scoreboard_backed_selector(self) -> None:
@@ -314,6 +355,45 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertFalse(result.mouse_move.moved)
         self.assertEqual(result.mouse_move.reason, "disabled")
         self.assertEqual(result.temporal_decision.family, "good_family")
+
+    def test_analyze_records_detector_debug_when_detector_disabled(self) -> None:
+        class _DisabledDetector:
+            enabled = False
+            load_source = ""
+            last_error = "planet_live_solver: ModuleNotFoundError: No module named 'mss'"
+
+        solver = PlanetLiveSolver(
+            detector=_DisabledDetector(),
+            mouse=PlanetMouseController(
+                background_clicker=lambda _x, _y: None,
+                client_origin_getter=lambda: (0, 0),
+            ),
+            mouse_enabled=False,
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 120,
+            "h": 120,
+        }
+        frame = np.zeros((180, 180, 3), dtype=np.uint8)
+        packet = FramePacket(
+            session_id="s",
+            frame_index=7,
+            timestamp_ms=0,
+            source_frame=frame,
+            board_frame=frame[20:140, 10:130],
+            source_kind="test",
+            roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+        )
+
+        result = solver.analyze(packet, solver_running=True)
+        candidate_event = next(event for event in result.trace_events if event[0] == "CANDIDATES")
+
+        self.assertEqual(candidate_event[1]["count"], 0)
+        self.assertEqual(candidate_event[1]["debug"]["detector_enabled"], False)
+        self.assertIn("No module named 'mss'", candidate_event[1]["debug"]["detector_error"])
 
 
 if __name__ == "__main__":

@@ -818,7 +818,7 @@ class PuzzleConsoleWindow(QMainWindow):
             elif preview_path is not None:
                 self._load_cctv_frame_preview(str(preview_path))
             return
-        is_new_recording = self.last_session_dir != session_dir or self.state_label.text() != "RECORDING"
+        is_new_recording = self.last_session_dir != session_dir
         if is_new_recording:
             self.last_session_dir = session_dir
             self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
@@ -1214,7 +1214,7 @@ def _trace_log_message(
         count = _candidate_count(payload)
         candidates = _candidate_list(payload)
         if not candidates:
-            return f"{frame_prefix} YOLO candidates {count}"
+            return f"{frame_prefix} YOLO candidates {count}{_candidate_debug_suffix(payload)}"
         first = candidates[0]
         candidate_id = str(first.get("candidate_id") or "-")
         center = _candidate_center(first)
@@ -1247,6 +1247,23 @@ def _trace_log_message(
     if event_type == "PLANET_LIVE_SOLVER_FAILED":
         return f"{frame_prefix} SOLVER failed error={payload.get('error') or '-'}"
     return None
+
+
+def _candidate_debug_suffix(payload: dict[object, object]) -> str:
+    debug = payload.get("debug")
+    if not isinstance(debug, dict):
+        return ""
+    detector = debug.get("detector")
+    enabled = debug.get("detector_enabled")
+    error = debug.get("detector_error")
+    parts: list[str] = []
+    if detector:
+        parts.append(f"detector={detector}")
+    if isinstance(enabled, bool):
+        parts.append(f"enabled={enabled}")
+    if error:
+        parts.append(f"error={error}")
+    return "" if not parts else " " + " ".join(parts)
 
 
 def _trace_log_signature(event_type: str, payload: dict[object, object]) -> object:

@@ -147,6 +147,7 @@ class PlanetLiveSolver:
         self.mouse_enabled = bool(mouse_enabled)
         self._noauth_detector: Any | None = None
         self._noauth_detector_loaded = False
+        self._last_detect_debug: dict[str, object] = {}
 
     def analyze(self, packet: FramePacket, *, solver_running: bool) -> PlanetLiveResult:
         detect_payload = packet.roi_snapshot.get("detect", {})
@@ -190,7 +191,14 @@ class PlanetLiveSolver:
         )
         return PlanetLiveResult(
             preview_frame=preview,
-            trace_events=_trace_events(candidates, evidence, decision, temporal_decision, mouse_move),
+            trace_events=_trace_events(
+                candidates,
+                evidence,
+                decision,
+                temporal_decision,
+                mouse_move,
+                detect_debug=self._last_detect_debug,
+            ),
             candidates=candidates,
             evidence=evidence,
             decision=decision,
@@ -200,12 +208,31 @@ class PlanetLiveSolver:
 
     def _detect_rows(self, det_frame: Any) -> Sequence[Any]:
         detector = self.detector or self._load_noauth_detector()
-        if detector is None or not getattr(detector, "enabled", True):
+        if detector is None:
+            self._last_detect_debug = {
+                "source": "planet_live",
+                "detector": "none",
+                "detector_enabled": False,
+                "detector_error": "detector_not_loaded",
+                "raw_count": 0,
+            }
+            return []
+        detector_enabled = bool(getattr(detector, "enabled", True))
+        if not detector_enabled:
+            self._last_detect_debug = _detector_debug(detector, enabled=False, raw_count=0)
             return []
         try:
-            return list(detector.detect_all(det_frame))
-        except Exception:
+            rows = list(detector.detect_all(det_frame))
+        except Exception as exc:
+            self._last_detect_debug = _detector_debug(
+                detector,
+                enabled=detector_enabled,
+                raw_count=0,
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
             return []
+        self._last_detect_debug = _detector_debug(detector, enabled=detector_enabled, raw_count=len(rows))
+        return rows
 
     def _load_noauth_detector(self) -> Any | None:
         if self._noauth_detector_loaded:
@@ -404,6 +431,8 @@ def _trace_events(
     decision: IdentityDecision,
     temporal_decision: LiveTemporalDecision,
     mouse_move: MouseMoveResult,
+    *,
+    detect_debug: dict[str, object] | None = None,
 ) -> list[tuple[str, dict[str, object]]]:
     return [
         (
@@ -411,7 +440,7 @@ def _trace_events(
             {
                 "count": len(candidates),
                 "candidates": [_candidate_payload(candidate) for candidate in candidates],
-                "debug": {"source": "planet_live"},
+                "debug": {"source": "planet_live", **(detect_debug or {})},
             },
         ),
         (
@@ -445,6 +474,24 @@ def _candidate_payload(candidate: Candidate) -> dict[str, object]:
         "score": candidate.score,
         "source": candidate.source,
         "class_name": candidate.class_name,
+    }
+
+
+def _detector_debug(
+    detector: Any,
+    *,
+    enabled: bool,
+    raw_count: int,
+    error: str | None = None,
+) -> dict[str, object]:
+    detector_error = error if error is not None else str(getattr(detector, "last_error", "") or "")
+    return {
+        "source": "planet_live",
+        "detector": detector.__class__.__name__,
+        "detector_enabled": bool(enabled),
+        "detector_load_source": str(getattr(detector, "load_source", "") or ""),
+        "detector_error": detector_error,
+        "raw_count": int(raw_count),
     }
 
 
