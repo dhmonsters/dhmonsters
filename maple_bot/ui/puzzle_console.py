@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ WatchStartHandler = Callable[[], object]
 SolverStopHandler = Callable[[], bool]
 LiveStatusHandler = Callable[[], object]
 CaptureCheckHandler = Callable[[], str | Path | None]
+AlarmHandler = Callable[[], None]
 TRACE_TIMELINE_LIMIT = 5
 BADGE_BASE_STYLE = (
     "padding:6px 10px; border-radius:4px; background:#2a2f36; "
@@ -67,6 +69,7 @@ class PuzzleConsoleWindow(QMainWindow):
         solver_stop_handler: SolverStopHandler | None = None,
         live_status_handler: LiveStatusHandler | None = None,
         capture_check_handler: CaptureCheckHandler | None = None,
+        alarm_handler: AlarmHandler | None = None,
         default_test_path: str | Path | None = None,
         mouse_control_enabled: bool = True,
     ) -> None:
@@ -79,6 +82,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._solver_stop_handler = solver_stop_handler
         self._live_status_handler = live_status_handler
         self._capture_check_handler = capture_check_handler
+        self._alarm_handler = alarm_handler or _play_puzzle_detect_alarm
         self._default_test_path = str(default_test_path) if default_test_path is not None else ""
         self._initial_mouse_control_enabled = bool(mouse_control_enabled)
         self.last_report_path: Path | None = None
@@ -94,6 +98,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self.selected_frame_index: int | None = None
         self._live_trace_offsets: dict[str, int] = {}
         self._trace_log_signatures: dict[str, object] = {}
+        self._puzzle_alarm_session_keys: set[str] = set()
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
         self.resize(1280, 820)
@@ -424,6 +429,8 @@ class PuzzleConsoleWindow(QMainWindow):
         trace_message = self._trace_log_message(event_type, frame_index, payload)
         if trace_message:
             self.append_log(trace_message)
+        if event_type == "PUZZLE_ACTIVATED":
+            self._apply_puzzle_activation_alarm(session_id, payload)
 
         if event_type == "FRAME_REPLAYED":
             self._apply_frame_replayed(frame_index, payload)
@@ -692,6 +699,26 @@ class PuzzleConsoleWindow(QMainWindow):
             self._trace_log_signatures[key] = signature
             return True
         return frame_index % 15 == 0
+
+    def _apply_puzzle_activation_alarm(
+        self,
+        session_id: object,
+        payload: dict[object, object],
+    ) -> None:
+        key = _puzzle_alarm_key(session_id, self.last_session_dir, payload)
+        if not self.puzzle_detect_alert_checkbox.isChecked():
+            self.append_log(f"ALARM disabled: {key}")
+            return
+        if key in self._puzzle_alarm_session_keys:
+            self.append_log(f"ALARM duplicate skipped: {key}")
+            return
+        self._puzzle_alarm_session_keys.add(key)
+        try:
+            self._alarm_handler()
+        except Exception as exc:
+            self.append_log(f"ALARM failed: {exc}")
+            return
+        self.append_log(f"ALARM sound played: {key}")
 
     def run_replay_input(self, input_kind: str) -> None:
         selected = self._path_picker(input_kind)
@@ -1277,3 +1304,26 @@ def _format_score(value: object) -> str:
     if isinstance(value, (int, float)):
         return f"{float(value):.2f}"
     return "--"
+
+
+def _puzzle_alarm_key(session_id: object, session_dir: Path | None, payload: dict[object, object]) -> str:
+    if isinstance(session_id, str) and session_id:
+        return session_id
+    if session_dir is not None:
+        return str(session_dir)
+    reason = str(payload.get("reason") or "puzzle")
+    score = _format_score(payload.get("score"))
+    return f"{reason}:{score}"
+
+
+def _play_puzzle_detect_alarm() -> None:
+    def worker() -> None:
+        try:
+            import winsound
+
+            for _ in range(2):
+                winsound.Beep(1000, 200)
+        except Exception:
+            return
+
+    threading.Thread(target=worker, daemon=True).start()

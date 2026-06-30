@@ -251,6 +251,44 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
         self.assertIn("f0 TEMP target 60,70 family=good_family reason=selected_family", text)
         self.assertIn("f0 MOUSE moved client=70,90 reason=bg_click", text)
 
+    def test_puzzle_activation_plays_checked_alarm_once_per_session(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        alarms: list[str] = []
+        window = module.PuzzleConsoleWindow(alarm_handler=lambda: alarms.append("beep"))
+
+        event = {
+            "type": "PUZZLE_ACTIVATED",
+            "session_id": "20260630_010000_001",
+            "frame_index": None,
+            "payload": {"reason": "popup_board", "score": 0.91},
+        }
+        window.apply_trace_event(event)
+        window.apply_trace_event(event)
+        window.apply_trace_event({**event, "session_id": "20260630_010001_001"})
+
+        self.assertEqual(alarms, ["beep", "beep"])
+        text = window.event_log.toPlainText()
+        self.assertIn("ALARM sound played: 20260630_010000_001", text)
+        self.assertIn("ALARM duplicate skipped: 20260630_010000_001", text)
+
+    def test_puzzle_activation_alarm_respects_checkbox(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        alarms: list[str] = []
+        window = module.PuzzleConsoleWindow(alarm_handler=lambda: alarms.append("beep"))
+        window.puzzle_detect_alert_checkbox.setChecked(False)
+
+        window.apply_trace_event(
+            {
+                "type": "PUZZLE_ACTIVATED",
+                "session_id": "20260630_010000_001",
+                "frame_index": None,
+                "payload": {"reason": "popup_board", "score": 0.91},
+            }
+        )
+
+        self.assertEqual(alarms, [])
+        self.assertIn("ALARM disabled", window.event_log.toPlainText())
+
     def test_live_status_poll_tails_trace_events_into_log(self) -> None:
         module = importlib.import_module("ui.puzzle_console")
 
