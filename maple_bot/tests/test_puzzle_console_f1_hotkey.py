@@ -199,6 +199,90 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
             self.assertIsNone(window.last_session_dir)
             self.assertNotEqual(window.cctv_frame_label.pixmap().path, first_pixmap_path)
 
+    def test_apply_trace_event_appends_clear_solver_status_logs(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        window = module.PuzzleConsoleWindow()
+
+        window.apply_trace_event(
+            {
+                "type": "PUZZLE_ACTIVATED",
+                "frame_index": None,
+                "payload": {"reason": "popup_board", "score": 0.92},
+            }
+        )
+        window.apply_trace_event(
+            {
+                "type": "CANDIDATES",
+                "frame_index": 0,
+                "payload": {
+                    "count": 2,
+                    "candidates": [
+                        {"candidate_id": "c0_a", "center": [30.0, 40.0], "score": 0.81},
+                    ],
+                },
+            }
+        )
+        window.apply_trace_event(
+            {
+                "type": "TEMPORAL_SELECTOR",
+                "frame_index": 0,
+                "payload": {
+                    "point": [60.0, 70.0],
+                    "family": "good_family",
+                    "reason": "selected_family",
+                },
+            }
+        )
+        window.apply_trace_event(
+            {
+                "type": "MOUSE_MOVE",
+                "frame_index": 0,
+                "payload": {
+                    "moved": True,
+                    "client_point": [70, 90],
+                    "reason": "bg_click",
+                },
+            }
+        )
+
+        text = window.event_log.toPlainText()
+        self.assertIn("PUZZLE DETECTED reason=popup_board score=0.92", text)
+        self.assertIn("f0 YOLO candidates 2 first=c0_a center=30,40 score=0.81", text)
+        self.assertIn("f0 TEMP target 60,70 family=good_family reason=selected_family", text)
+        self.assertIn("f0 MOUSE moved client=70,90 reason=bg_click", text)
+
+    def test_live_status_poll_tails_trace_events_into_log(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+
+        with TemporaryDirectory() as tmp:
+            session_dir = Path(tmp) / "session"
+            session_dir.mkdir()
+            trace_path = session_dir / "trace.jsonl"
+            trace_path.write_text(
+                '{"type":"CANDIDATES","frame_index":0,"payload":{"count":1,'
+                '"candidates":[{"candidate_id":"c0_a","center":[11,22],"score":0.7}]}}\n',
+                encoding="utf-8",
+            )
+            status = types.SimpleNamespace(
+                status="recording",
+                session_dir=session_dir,
+                preview_path=None,
+            )
+            window = module.PuzzleConsoleWindow(live_status_handler=lambda: status)
+
+            window._poll_live_status()
+            trace_path.write_text(
+                trace_path.read_text(encoding="utf-8")
+                + '{"type":"MOUSE_MOVE","frame_index":0,"payload":{"moved":true,'
+                '"client_point":[33,44],"reason":"bg_click"}}\n',
+                encoding="utf-8",
+            )
+            window._poll_live_status()
+
+            text = window.event_log.toPlainText()
+            self.assertIn("f0 YOLO candidates 1 first=c0_a center=11,22 score=0.70", text)
+            self.assertIn("f0 MOUSE moved client=33,44 reason=bg_click", text)
+
     def test_global_f1_f2_and_f3_hotkeys_are_registered(self) -> None:
         fake_hotkey_module = types.ModuleType("core.hotkey_manager")
         registered: list[tuple[str, str, object]] = []

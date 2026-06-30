@@ -92,6 +92,8 @@ class PuzzleConsoleWindow(QMainWindow):
         self.current_cctv_source_path: str | None = None
         self.current_cctv_file_signature: tuple[int, int] | None = None
         self.selected_frame_index: int | None = None
+        self._live_trace_offsets: dict[str, int] = {}
+        self._trace_log_signatures: dict[str, object] = {}
         self.setObjectName("puzzleConsoleWindow")
         self.setWindowTitle("투명도형 퍼즐 분석 콘솔")
         self.resize(1280, 820)
@@ -419,6 +421,9 @@ class PuzzleConsoleWindow(QMainWindow):
         if isinstance(frame_index, int):
             self.timeline_status.setText(f"frame {frame_index}")
         self._append_trace_timeline(event_type, frame_index, payload)
+        trace_message = self._trace_log_message(event_type, frame_index, payload)
+        if trace_message:
+            self.append_log(trace_message)
 
         if event_type == "FRAME_REPLAYED":
             self._apply_frame_replayed(frame_index, payload)
@@ -663,6 +668,31 @@ class PuzzleConsoleWindow(QMainWindow):
     def append_log(self, message: str) -> None:
         self.event_log.append(f"[ui] {message}")
 
+    def _trace_log_message(
+        self,
+        event_type: str,
+        frame_index: object,
+        payload: dict[object, object],
+    ) -> str | None:
+        message = _trace_log_message(event_type, frame_index, payload)
+        if message is None:
+            return None
+        signature = _trace_log_signature(event_type, payload)
+        if not self._should_emit_trace_log(event_type, frame_index, signature):
+            return None
+        return message
+
+    def _should_emit_trace_log(self, event_type: str, frame_index: object, signature: object) -> bool:
+        if event_type in {"PUZZLE_ACTIVATED", "PLANET_LIVE_SOLVER_FAILED", "SOLVER_STOPPED", "RECORDING_STOPPED"}:
+            return True
+        if not isinstance(frame_index, int):
+            return True
+        key = event_type
+        if self._trace_log_signatures.get(key) != signature:
+            self._trace_log_signatures[key] = signature
+            return True
+        return frame_index % 15 == 0
+
     def run_replay_input(self, input_kind: str) -> None:
         selected = self._path_picker(input_kind)
         if not selected:
@@ -719,6 +749,7 @@ class PuzzleConsoleWindow(QMainWindow):
             self.set_identity_state("RECORDING")
             self._mark_solver_on()
             self.append_log(f"recording start: {self.last_session_dir}")
+            self._poll_live_trace_events(self.last_session_dir)
             if preview_frame is not None:
                 self._load_cctv_frame_preview_data(preview_frame)
             elif preview_path is not None:
@@ -767,10 +798,45 @@ class PuzzleConsoleWindow(QMainWindow):
             self.set_identity_state("RECORDING")
             self._mark_solver_on()
             self.append_log(f"recording start: {self.last_session_dir}")
+        self._poll_live_trace_events(session_dir)
         if preview_frame is not None:
             self._load_cctv_frame_preview_data(preview_frame)
         elif preview_path is not None:
             self._load_cctv_frame_preview(str(preview_path))
+
+    def _poll_live_trace_events(self, session_dir: Path) -> int:
+        trace_path = session_dir / "trace.jsonl"
+        if not trace_path.exists() or not trace_path.is_file():
+            return 0
+        key = str(trace_path)
+        try:
+            size = trace_path.stat().st_size
+        except OSError:
+            return 0
+        offset = self._live_trace_offsets.get(key, 0)
+        if size < offset:
+            offset = 0
+
+        applied = 0
+        try:
+            with trace_path.open("r", encoding="utf-8") as fp:
+                fp.seek(offset)
+                for line in fp:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        self.append_log(f"live trace 줄 무시: {exc}")
+                        continue
+                    if isinstance(event, dict):
+                        self.apply_trace_event(event)
+                        applied += 1
+                self._live_trace_offsets[key] = fp.tell()
+        except OSError as exc:
+            self.append_log(f"live trace 읽기 실패: {exc}")
+            return applied
+        return applied
 
     def capture_check_input(self) -> bool:
         if self._capture_check_handler is None:
@@ -1106,3 +1172,108 @@ def _timeline_item(
         family = str(payload.get("family") or "SELECTOR_SHADOW")
         return f"{prefix} {family}"
     return None
+
+
+def _trace_log_message(
+    event_type: str,
+    frame_index: object,
+    payload: dict[object, object],
+) -> str | None:
+    frame_prefix = f"f{frame_index}" if isinstance(frame_index, int) else ""
+    if event_type == "PUZZLE_ACTIVATED":
+        reason = str(payload.get("reason") or "-")
+        return f"PUZZLE DETECTED reason={reason} score={_format_score(payload.get('score'))}"
+    if event_type == "CANDIDATES":
+        count = _candidate_count(payload)
+        candidates = _candidate_list(payload)
+        if not candidates:
+            return f"{frame_prefix} YOLO candidates {count}"
+        first = candidates[0]
+        candidate_id = str(first.get("candidate_id") or "-")
+        center = _candidate_center(first)
+        center_text = _compact_point(center) if center is not None else "-"
+        return (
+            f"{frame_prefix} YOLO candidates {count} "
+            f"first={candidate_id} center={center_text} score={_format_score(first.get('score'))}"
+        )
+    if event_type == "TEMPORAL_SELECTOR":
+        point = payload.get("point")
+        point_text = _compact_point(point) if isinstance(point, list) else "-"
+        family = str(payload.get("family") or "-")
+        reason = str(payload.get("reason") or "-")
+        return f"{frame_prefix} TEMP target {point_text} family={family} reason={reason}"
+    if event_type == "MOUSE_MOVE":
+        moved = bool(payload.get("moved"))
+        client_point = payload.get("client_point")
+        client_text = _compact_point(client_point) if isinstance(client_point, list) else "-"
+        reason = str(payload.get("reason") or "-")
+        status = "moved" if moved else "not_moved"
+        return f"{frame_prefix} MOUSE {status} client={client_text} reason={reason}"
+    if event_type == "IDENTITY_STATE":
+        state = str(payload.get("state") or "-")
+        candidate_id = str(payload.get("candidate_id") or "-")
+        reason = str(payload.get("reason") or "-")
+        return (
+            f"{frame_prefix} IDENTITY {state} conf={_format_score(payload.get('confidence'))} "
+            f"candidate={candidate_id} reason={reason}"
+        )
+    if event_type == "PLANET_LIVE_SOLVER_FAILED":
+        return f"{frame_prefix} SOLVER failed error={payload.get('error') or '-'}"
+    return None
+
+
+def _trace_log_signature(event_type: str, payload: dict[object, object]) -> object:
+    if event_type == "CANDIDATES":
+        candidates = _candidate_list(payload)
+        first_id = str(candidates[0].get("candidate_id") or "-") if candidates else "-"
+        return ("CANDIDATES", _candidate_count(payload), first_id)
+    if event_type == "TEMPORAL_SELECTOR":
+        return (
+            "TEMPORAL_SELECTOR",
+            _point_signature(payload.get("point")),
+            str(payload.get("family") or "-"),
+            str(payload.get("reason") or "-"),
+        )
+    if event_type == "MOUSE_MOVE":
+        return (
+            "MOUSE_MOVE",
+            bool(payload.get("moved")),
+            _point_signature(payload.get("client_point")),
+            str(payload.get("reason") or "-"),
+        )
+    if event_type == "IDENTITY_STATE":
+        return (
+            "IDENTITY_STATE",
+            str(payload.get("state") or "-"),
+            str(payload.get("candidate_id") or "-"),
+            str(payload.get("reason") or "-"),
+        )
+    return (event_type, repr(payload))
+
+
+def _candidate_center(candidate: dict[object, object]) -> list[object] | None:
+    center = candidate.get("center")
+    if isinstance(center, list):
+        return center
+    point = candidate.get("point")
+    if isinstance(point, list):
+        return point
+    bbox = candidate.get("bbox")
+    if not isinstance(bbox, list) or len(bbox) < 4:
+        return None
+    x1, y1, x2, y2 = bbox[:4]
+    if all(isinstance(value, (int, float)) for value in (x1, y1, x2, y2)):
+        return [(float(x1) + float(x2)) / 2.0, (float(y1) + float(y2)) / 2.0]
+    return None
+
+
+def _point_signature(point: object) -> tuple[object, ...] | None:
+    if not isinstance(point, list):
+        return None
+    return tuple(round(float(value), 2) if isinstance(value, (int, float)) else value for value in point[:2])
+
+
+def _format_score(value: object) -> str:
+    if isinstance(value, (int, float)):
+        return f"{float(value):.2f}"
+    return "--"
