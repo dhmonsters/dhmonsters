@@ -133,6 +133,55 @@ class PlanetCctvPreviewTest(unittest.TestCase):
 
 
 class PlanetNoAuthDetectorTest(unittest.TestCase):
+    def test_detect_all_prefers_shape_yolo_weak_candidates(self) -> None:
+        shape_calls = []
+        m1_calls = []
+
+        class _FakeShapeYolo:
+            enabled = True
+
+            def detect_all(self, frame, score_thr=0.2):
+                shape_calls.append((frame.shape[:2], score_thr))
+                return [(20, 30, 0.18, 40, 50)]
+
+        class _FakeM1:
+            def detect(self, board, imgsz, score):
+                m1_calls.append((board.shape[:2], imgsz, score))
+                return np.array([[1, 2, 3, 4, 0.99, 0]], dtype=np.float32)
+
+        fake_module = types.ModuleType("planet_live_solver")
+        fake_module.load_models = lambda use_gpu=False: (_FakeM1(), object())
+
+        with patch.dict(sys.modules, {"planet_live_solver": fake_module}):
+            detector = PlanetNoAuthDetector(shape_detector=_FakeShapeYolo(), shape_score=0.10)
+            rows = detector.detect_all(np.zeros((120, 200, 3), dtype=np.uint8))
+
+        self.assertEqual(rows, [(20, 30, 0.18, 40, 50)])
+        self.assertEqual(shape_calls, [((120, 200), 0.10)])
+        self.assertEqual(m1_calls, [])
+        self.assertEqual(detector.load_source, "shape_yolo")
+
+    def test_detect_all_inpaints_pink_cursor_before_shape_yolo(self) -> None:
+        shape_frames = []
+
+        class _FakeShapeYolo:
+            enabled = True
+
+            def detect_all(self, frame, score_thr=0.2):
+                shape_frames.append(frame.copy())
+                return [(55, 65, 0.24, 30, 32)]
+
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        frame[55:66, 75:86] = np.array([255, 0, 255], dtype=np.uint8)
+        detector = PlanetNoAuthDetector(shape_detector=_FakeShapeYolo(), shape_score=0.10)
+
+        rows = detector.detect_all(frame)
+
+        self.assertEqual(rows, [(55, 65, 0.24, 30, 32)])
+        self.assertEqual(len(shape_frames), 1)
+        self.assertFalse(np.array_equal(shape_frames[0][60, 80], frame[60, 80]))
+        self.assertLess(int(shape_frames[0][60, 80].max()), 80)
+
     def test_detect_all_uses_planet_solver_m1_signature(self) -> None:
         calls = []
 
