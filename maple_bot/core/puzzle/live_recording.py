@@ -55,7 +55,6 @@ class LiveRecordingRuntime:
         self.latest_preview_frame: Any | None = None
         self.frame_count = 0
         self._finished = False
-        self._preview_stride = 5
 
     @property
     def is_recording(self) -> bool:
@@ -223,8 +222,6 @@ class LiveRecordingRuntime:
             return
         frame = preview_frame if preview_frame is not None else render_planet_cctv_preview(packet.source_frame)
         self.latest_preview_frame = frame
-        if packet.frame_index != 0 and packet.frame_index % self._preview_stride != 0:
-            return
         preview_path = self.session.output_dir / "snapshots" / f"live_preview_{packet.frame_index:06d}.png"
         ok = _cv2().imwrite(str(preview_path), frame)
         if ok:
