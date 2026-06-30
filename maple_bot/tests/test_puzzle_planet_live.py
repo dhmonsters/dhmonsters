@@ -530,6 +530,130 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(result.mouse_move.det_point, (100.0, 100.0))
         self.assertEqual(result.temporal_decision.family, "jump_family")
 
+    def test_analyze_rejects_far_selector_even_when_identity_confidence_is_low(self) -> None:
+        clicked: list[tuple[int, int]] = []
+
+        class _FakeDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return [(100.0, 100.0, 0.2, 20.0, 20.0)]
+
+        class _FakeIdentityTracker:
+            def update(self, **_kwargs):
+                return IdentityDecision(
+                    "TRACK_CONFIDENT",
+                    (100.0, 100.0),
+                    "identity",
+                    0.45,
+                    "candidate_continuity",
+                    0,
+                    {},
+                )
+
+        class _FakeTemporalSelector:
+            def update(self, **_kwargs):
+                return LiveTemporalDecision(
+                    point=(520.0, 180.0),
+                    source="selector_shadow",
+                    reason="selected_family",
+                    family="far_jump_family",
+                )
+
+        solver = PlanetLiveSolver(
+            detector=_FakeDetector(),
+            identity_tracker=_FakeIdentityTracker(),
+            temporal_selector=_FakeTemporalSelector(),
+            mouse=PlanetMouseController(
+                background_clicker=lambda x, y: clicked.append((x, y)),
+                client_origin_getter=lambda: (0, 0),
+            ),
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 620,
+            "h": 260,
+        }
+        frame = np.zeros((320, 700, 3), dtype=np.uint8)
+        packet = FramePacket(
+            session_id="s",
+            frame_index=55,
+            timestamp_ms=0,
+            source_frame=frame,
+            board_frame=frame[20:280, 10:630],
+            source_kind="test",
+            roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+        )
+
+        result = solver.analyze(packet, solver_running=True)
+
+        self.assertEqual(clicked, [(110, 120)])
+        self.assertEqual(result.mouse_move.det_point, (100.0, 100.0))
+
+    def test_analyze_keeps_hold_identity_when_selector_jumps_far(self) -> None:
+        clicked: list[tuple[int, int]] = []
+
+        class _FakeDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return [(100.0, 100.0, 0.2, 20.0, 20.0)]
+
+        class _FakeIdentityTracker:
+            def update(self, **_kwargs):
+                return IdentityDecision(
+                    "IDENTITY_HOLD",
+                    (100.0, 100.0),
+                    "identity",
+                    0.25,
+                    "hold_ambiguous_candidate",
+                    3,
+                    {},
+                )
+
+        class _FakeTemporalSelector:
+            def update(self, **_kwargs):
+                return LiveTemporalDecision(
+                    point=(520.0, 180.0),
+                    source="selector_shadow",
+                    reason="selected_family",
+                    family="far_jump_family",
+                )
+
+        solver = PlanetLiveSolver(
+            detector=_FakeDetector(),
+            identity_tracker=_FakeIdentityTracker(),
+            temporal_selector=_FakeTemporalSelector(),
+            mouse=PlanetMouseController(
+                background_clicker=lambda x, y: clicked.append((x, y)),
+                client_origin_getter=lambda: (0, 0),
+            ),
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 620,
+            "h": 260,
+        }
+        frame = np.zeros((320, 700, 3), dtype=np.uint8)
+        packet = FramePacket(
+            session_id="s",
+            frame_index=56,
+            timestamp_ms=0,
+            source_frame=frame,
+            board_frame=frame[20:280, 10:630],
+            source_kind="test",
+            roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+        )
+
+        result = solver.analyze(packet, solver_running=True)
+
+        self.assertEqual(clicked, [(110, 120)])
+        self.assertEqual(result.mouse_move.det_point, (100.0, 100.0))
+
     def test_analyze_dry_run_keeps_temporal_decision_without_mouse_click(self) -> None:
         clicked: list[tuple[int, int]] = []
 

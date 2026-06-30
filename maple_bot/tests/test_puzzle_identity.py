@@ -216,3 +216,52 @@ def test_overlap_candidate_gets_extra_switch_penalty():
     assert decision.state == "TRACK_CONFIDENT"
     assert decision.candidate_id == "target"
     assert decision.point == (61.0, 50.0)
+
+
+def test_continuity_can_beat_low_yolo_fragment_during_split():
+    tracker = IdentityTracker()
+    tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(562.0, 119.0))
+    previous = _candidate("previous", (571.0, 118.0), score=0.74)
+    tracker.update(frame_index=2, candidates=[previous], evidence=_evidence(previous, merge_likelihood=0.24))
+    low_score_fragment = _candidate("low_score_fragment", (570.0, 103.0), score=0.106)
+    release_candidate = _candidate("release_candidate", (597.0, 120.0), score=0.717)
+    evidence = _evidence_many(
+        (
+            low_score_fragment,
+            CandidateEvidence(candidate_id=low_score_fragment.candidate_id, merge_likelihood=0.265),
+        ),
+        (
+            release_candidate,
+            CandidateEvidence(candidate_id=release_candidate.candidate_id, merge_likelihood=0.44),
+        ),
+    )
+
+    decision = tracker.update(
+        frame_index=3,
+        candidates=[low_score_fragment, release_candidate],
+        evidence=evidence,
+    )
+
+    assert decision.state == "TRACK_CONFIDENT"
+    assert decision.candidate_id == "release_candidate"
+    assert decision.point == (597.0, 120.0)
+
+
+def test_hold_reacquires_candidate_near_last_identity_position():
+    tracker = IdentityTracker(jump_distance=60.0, reacquire_distance=45.0, merge_threshold=0.6)
+    tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(100.0, 100.0))
+    previous = _candidate("previous", (150.0, 100.0), score=0.8)
+    tracker.update(frame_index=2, candidates=[previous], evidence=_evidence(previous))
+    merged = _candidate("merged", (200.0, 100.0), score=0.8)
+    tracker.update(frame_index=3, candidates=[merged], evidence=_evidence(merged, merge_likelihood=0.9))
+    release = _candidate("release", (160.0, 140.0), score=0.72)
+
+    decision = tracker.update(
+        frame_index=4,
+        candidates=[release],
+        evidence=_evidence(release, merge_likelihood=0.2),
+    )
+
+    assert decision.state == "REACQUIRE"
+    assert decision.candidate_id == "release"
+    assert decision.point == (160.0, 140.0)

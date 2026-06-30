@@ -24,6 +24,14 @@ ClientOriginGetter = Callable[[], tuple[int, int]]
 
 IDENTITY_TEMPORAL_DIVERGENCE_LIMIT = 28.0
 IDENTITY_TEMPORAL_MIN_CONFIDENCE = 0.65
+IDENTITY_TEMPORAL_HARD_DIVERGENCE_LIMIT = 120.0
+IDENTITY_TEMPORAL_HOLD_MIN_CONFIDENCE = 0.25
+IDENTITY_TEMPORAL_ALIVE_STATES = frozenset({
+    "TRACK_CONFIDENT",
+    "REACQUIRE",
+    "OCCLUSION_SUSPECTED",
+    "IDENTITY_HOLD",
+})
 
 
 @dataclass(frozen=True)
@@ -731,11 +739,17 @@ def _choose_live_target_point(
 def _should_prefer_identity_target(decision: IdentityDecision, temporal_decision: LiveTemporalDecision) -> bool:
     if decision.point is None or temporal_decision.point is None:
         return False
+    distance = hypot(decision.point[0] - temporal_decision.point[0], decision.point[1] - temporal_decision.point[1])
+    if (
+        decision.state in IDENTITY_TEMPORAL_ALIVE_STATES
+        and decision.confidence >= IDENTITY_TEMPORAL_HOLD_MIN_CONFIDENCE
+        and distance > IDENTITY_TEMPORAL_HARD_DIVERGENCE_LIMIT
+    ):
+        return True
     if decision.state != "TRACK_CONFIDENT":
         return False
     if decision.confidence < IDENTITY_TEMPORAL_MIN_CONFIDENCE:
         return False
-    distance = hypot(decision.point[0] - temporal_decision.point[0], decision.point[1] - temporal_decision.point[1])
     return distance > IDENTITY_TEMPORAL_DIVERGENCE_LIMIT
 
 
