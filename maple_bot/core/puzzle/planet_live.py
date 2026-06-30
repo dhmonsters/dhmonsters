@@ -756,7 +756,7 @@ def _detector_debug(
     error: str | None = None,
 ) -> dict[str, object]:
     detector_error = error if error is not None else str(getattr(detector, "last_error", "") or "")
-    return {
+    debug: dict[str, object] = {
         "source": "planet_live",
         "detector": detector.__class__.__name__,
         "detector_enabled": bool(enabled),
@@ -764,6 +764,15 @@ def _detector_debug(
         "detector_error": detector_error,
         "raw_count": int(raw_count),
     }
+    m1_score_used = getattr(detector, "m1_score_used", None)
+    if m1_score_used is not None:
+        debug["m1_score_used"] = float(m1_score_used)
+    m1_attempts = getattr(detector, "m1_attempts", None)
+    if m1_attempts is not None:
+        debug["m1_attempts"] = [float(score) for score in m1_attempts]
+    if hasattr(detector, "max_rows"):
+        debug["detector_max_rows"] = int(getattr(detector, "max_rows"))
+    return debug
 
 
 def _evidence_payload(evidence: CandidateEvidence) -> dict[str, object]:

@@ -340,6 +340,34 @@ class PuzzleConsoleF1HotkeyTest(unittest.TestCase):
             window.event_log.toPlainText(),
         )
 
+    def test_candidate_log_shows_m1_retry_debug(self) -> None:
+        module = importlib.import_module("ui.puzzle_console")
+        window = module.PuzzleConsoleWindow()
+
+        window.apply_trace_event(
+            {
+                "type": "CANDIDATES",
+                "frame_index": 0,
+                "payload": {
+                    "count": 1,
+                    "candidates": [{"candidate_id": "c0_a", "center": [11, 22], "score": 0.09}],
+                    "debug": {
+                        "detector": "PlanetNoAuthDetector",
+                        "detector_enabled": True,
+                        "raw_count": 1,
+                        "m1_score_used": 0.08,
+                        "m1_attempts": [0.2, 0.08],
+                        "detector_max_rows": 24,
+                    },
+                },
+            }
+        )
+
+        text = window.event_log.toPlainText()
+        self.assertIn("m1=0.08", text)
+        self.assertIn("attempts=0.20/0.08", text)
+        self.assertIn("max_rows=24", text)
+
     def test_live_status_poll_tails_trace_events_into_log(self) -> None:
         module = importlib.import_module("ui.puzzle_console")
 

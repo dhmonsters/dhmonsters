@@ -1265,6 +1265,9 @@ def _candidate_debug_suffix(payload: dict[object, object]) -> str:
     raw_count = debug.get("raw_count")
     white_count = debug.get("white_anchor_count")
     candidate_count = debug.get("candidate_count")
+    m1_score_used = debug.get("m1_score_used")
+    m1_attempts = debug.get("m1_attempts")
+    detector_max_rows = debug.get("detector_max_rows")
     visible_lock = debug.get("visible_lock")
     visible_stable = debug.get("visible_lock_stable")
     parts: list[str] = []
@@ -1278,6 +1281,14 @@ def _candidate_debug_suffix(payload: dict[object, object]) -> str:
         parts.append(f"white={white_count}")
     if isinstance(candidate_count, int):
         parts.append(f"merged={candidate_count}")
+    if isinstance(m1_score_used, (int, float)):
+        parts.append(f"m1={_format_score(m1_score_used)}")
+    if isinstance(m1_attempts, list):
+        attempts = [_format_score(item) for item in m1_attempts if isinstance(item, (int, float))]
+        if attempts:
+            parts.append(f"attempts={'/'.join(attempts)}")
+    if isinstance(detector_max_rows, int):
+        parts.append(f"max_rows={detector_max_rows}")
     if isinstance(visible_lock, bool):
         parts.append(f"vlock={visible_lock}")
     if isinstance(visible_stable, int):
@@ -1291,7 +1302,10 @@ def _trace_log_signature(event_type: str, payload: dict[object, object]) -> obje
     if event_type == "CANDIDATES":
         candidates = _candidate_list(payload)
         first_id = str(candidates[0].get("candidate_id") or "-") if candidates else "-"
-        return ("CANDIDATES", _candidate_count(payload), first_id)
+        debug = payload.get("debug")
+        m1_score = debug.get("m1_score_used") if isinstance(debug, dict) else None
+        attempts = debug.get("m1_attempts") if isinstance(debug, dict) else None
+        return ("CANDIDATES", _candidate_count(payload), first_id, m1_score, tuple(attempts) if isinstance(attempts, list) else None)
     if event_type == "TEMPORAL_SELECTOR":
         return (
             "TEMPORAL_SELECTOR",

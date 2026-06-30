@@ -230,6 +230,28 @@ class PlanetNoAuthDetectorTest(unittest.TestCase):
         self.assertEqual(calls, [((120, 200), 192, 0.2)])
         self.assertEqual(rows, [(30, 50, 0.8100000023841858, 40, 60)])
 
+    def test_detect_all_retries_m1_with_weak_score_when_primary_is_empty(self) -> None:
+        calls = []
+
+        class _FakeM1:
+            def detect(self, board, imgsz, score):
+                calls.append((board.shape[:2], imgsz, score))
+                if score > 0.1:
+                    return np.zeros((0, 6), dtype=np.float32)
+                return np.array([[10, 20, 50, 80, 0.09, 0]], dtype=np.float32)
+
+        fake_module = types.ModuleType("planet_live_solver")
+        fake_module.load_models = lambda use_gpu=False: (_FakeM1(), object())
+
+        with patch.dict(sys.modules, {"planet_live_solver": fake_module}):
+            detector = PlanetNoAuthDetector(weak_scores=(0.08,))
+            rows = detector.detect_all(np.zeros((120, 200, 3), dtype=np.uint8))
+
+        self.assertEqual(calls, [((120, 200), 192, 0.2), ((120, 200), 192, 0.08)])
+        self.assertEqual(rows, [(30, 50, 0.09000000357627869, 40, 60)])
+        self.assertEqual(detector.m1_score_used, 0.08)
+        self.assertEqual(detector.m1_attempts, [0.2, 0.08])
+
     def test_detect_all_falls_back_to_yolo_verify_when_live_solver_import_fails(self) -> None:
         calls = []
 
@@ -518,6 +540,51 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(candidate_event[1]["count"], 0)
         self.assertEqual(candidate_event[1]["debug"]["detector_enabled"], False)
         self.assertIn("No module named 'mss'", candidate_event[1]["debug"]["detector_error"])
+
+    def test_analyze_records_m1_retry_debug(self) -> None:
+        class _RetryDetector:
+            enabled = True
+            load_source = "planet_live_solver"
+            last_error = ""
+            m1_score_used = 0.08
+            m1_attempts = [0.2, 0.08]
+            max_rows = 24
+
+            def detect_all(self, _frame):
+                return [(10.0, 20.0, 0.09, 12.0, 14.0)]
+
+        solver = PlanetLiveSolver(
+            detector=_RetryDetector(),
+            mouse=PlanetMouseController(
+                background_clicker=lambda _x, _y: None,
+                client_origin_getter=lambda: (0, 0),
+            ),
+            mouse_enabled=False,
+        )
+        roi = {
+            "name": "detect",
+            "x": 10,
+            "y": 20,
+            "w": 120,
+            "h": 120,
+        }
+        frame = np.zeros((180, 180, 3), dtype=np.uint8)
+        packet = FramePacket(
+            session_id="s",
+            frame_index=7,
+            timestamp_ms=0,
+            source_frame=frame,
+            board_frame=frame[20:140, 10:130],
+            source_kind="test",
+            roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+        )
+
+        result = solver.analyze(packet, solver_running=True)
+        candidate_event = next(event for event in result.trace_events if event[0] == "CANDIDATES")
+
+        self.assertEqual(candidate_event[1]["debug"]["m1_score_used"], 0.08)
+        self.assertEqual(candidate_event[1]["debug"]["m1_attempts"], [0.2, 0.08])
+        self.assertEqual(candidate_event[1]["debug"]["detector_max_rows"], 24)
 
     def test_analyze_adds_white_anchor_candidate_when_detector_returns_zero(self) -> None:
         clicked: list[tuple[int, int]] = []
