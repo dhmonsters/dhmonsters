@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 
 from core.puzzle.defaults import fixed_detect_roi, fixed_popup_header_roi, fixed_popup_preview_roi
-from core.puzzle.evidence import EvidenceJudges
+from core.puzzle.evidence import EvidenceJudges, LiveEvidenceJudges
 from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen
 from core.puzzle.identity import IdentityTracker
 from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
@@ -285,7 +285,7 @@ class PlanetLiveSolver:
     ) -> None:
         self.detector = detector
         self.mouse = mouse or PlanetMouseController()
-        self.evidence_judges = evidence_judges or EvidenceJudges()
+        self.evidence_judges = evidence_judges or LiveEvidenceJudges()
         self.identity_tracker = identity_tracker or IdentityTracker()
         self.temporal_selector = temporal_selector or LiveTemporalSelector()
         self.mouse_enabled = bool(mouse_enabled)

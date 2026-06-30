@@ -9,6 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
+from core.puzzle.evidence import LiveEvidenceJudges
 from core.puzzle.models import FramePacket, IdentityDecision, RoiSpec
 from core.puzzle.defaults import fixed_detect_roi, fixed_popup_header_roi, fixed_popup_preview_roi
 from core.puzzle.planet_live import MouseMoveResult, PlanetLiveSolver, PlanetMouseController, render_planet_cctv_preview
@@ -333,6 +334,11 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertTrue(selector.runtime.use_judge_scoreboard)
         self.assertIs(selector.selector_shadow.runtime, selector.runtime)
         self.assertEqual(selector.selector_shadow.emit_every, 1)
+
+    def test_planet_live_solver_uses_live_evidence_judges_by_default(self) -> None:
+        solver = PlanetLiveSolver()
+
+        self.assertIsInstance(solver.evidence_judges, LiveEvidenceJudges)
 
     def test_live_temporal_selector_defaults_to_fast_family_pool(self) -> None:
         selector = LiveTemporalSelector()

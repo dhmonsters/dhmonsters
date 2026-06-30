@@ -1,7 +1,7 @@
 # 투명도형 퍼즐 후보 판단 근거 계산기가 baseline, 병합, 색상 보조 신호를 만든다는 점을 검증한다.
 import numpy as np
 
-from core.puzzle.evidence import EvidenceJudges
+from core.puzzle.evidence import EvidenceJudges, LiveEvidenceJudges
 from core.puzzle.models import Candidate, FramePacket
 
 
@@ -94,3 +94,30 @@ def test_extension_hooks_fill_only_their_named_evidence_fields():
     assert evidence.phase_similarity == 0.0
     assert evidence.texture_bg_score == 0.0
     assert evidence.notes == ("hook:bg_score", "hook:rigid_violation")
+
+
+def test_live_evidence_judges_populate_motion_background_and_texture_scores():
+    frame = np.full((80, 90, 3), 120, dtype=np.uint8)
+    judges = LiveEvidenceJudges()
+
+    judges.score(
+        [
+            _candidate("bg_prev", (20.0, 20.0), size=(12.0, 12.0)),
+            _candidate("target_prev", (45.0, 20.0), size=(12.0, 12.0)),
+        ],
+        _packet(frame),
+    )
+
+    evidence = judges.score(
+        [
+            _candidate("bg_now", (20.0, 20.0), size=(12.0, 12.0)),
+            _candidate("target_now", (70.0, 20.0), size=(12.0, 12.0)),
+        ],
+        _packet(frame),
+    )
+
+    assert evidence["bg_now"].bg_score > 0.0
+    assert evidence["bg_now"].phase_similarity > 0.0
+    assert evidence["bg_now"].texture_bg_score > 0.0
+    assert evidence["target_now"].motion_divergence > evidence["bg_now"].motion_divergence
+    assert evidence["target_now"].rigid_violation > evidence["bg_now"].rigid_violation

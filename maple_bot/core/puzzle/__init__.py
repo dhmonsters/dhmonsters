@@ -12,7 +12,7 @@ from core.puzzle.defaults import (
     fixed_popup_preview_roi,
     fixed_puzzle_rois,
 )
-from core.puzzle.evidence import EvidenceJudges
+from core.puzzle.evidence import EvidenceJudges, LiveEvidenceJudges
 from core.puzzle.frame_source import (
     ImageSequenceFrameSource,
     JsonlReplayFrameSource,
@@ -54,6 +54,7 @@ __all__ = [
     "IdentityTracker",
     "JsonlReplayFrameSource",
     "LiveRecordingRuntime",
+    "LiveEvidenceJudges",
     "PuzzleSession",
     "PuzzleNotifier",
     "ReportBuilder",
