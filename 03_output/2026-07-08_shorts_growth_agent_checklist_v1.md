@@ -1,7 +1,7 @@
 # Shorts Growth Agent Checklist
 
 - [x] Task 1: Backend Scaffold And Health Check.
-- [ ] Task 2: Database Models And Repositories.
+- [x] Task 2: Database Models And Repositories.
 - [ ] Task 3: YouTube Trend Adapter And Trend Scoring.
 - [ ] Task 4: Script Harness And Scene Planner.
 - [ ] Task 5: TTS Adapter And Subtitle Sync.

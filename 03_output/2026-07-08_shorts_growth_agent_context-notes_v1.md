@@ -11,3 +11,6 @@
 - Task 1은 하위 에이전트가 구현했고 별도 리뷰어가 승인했다.
 - 작업자 환경에서 `python` 명령을 찾지 못해 최초 검증이 막혔으나, 컨트롤러가 번들 Python으로 `.venv`를 만들고 `.\.venv\Scripts\python.exe -m pytest tests/test_health.py -q`를 실행해 `1 passed in 0.35s`를 확인했다.
 - 최신 Starlette 테스트 클라이언트 경고는 외부 의존성 경고 하나만 대상으로 하는 pytest 필터로 정리했다.
+- Task 2는 데이터 모델, 저장소, 스키마, 모델 테스트까지 구현했고 별도 리뷰어가 승인했다.
+- `datetime.utcnow` 경고는 Python 3.12에서 반복 재현되어 `_utc_now()` 함수로 대체했고, `-W error::DeprecationWarning` 기준에서도 `3 passed in 0.43s`를 확인했다.
+- Task 1+2 합산 테스트는 `.\.venv\Scripts\python.exe -m pytest tests/test_health.py tests/test_models.py -q` 기준 `4 passed in 0.67s`로 통과했다.
