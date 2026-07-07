@@ -7,7 +7,7 @@
 - [x] Task 5: TTS Adapter And Subtitle Sync.
 - [x] Task 6: Source Recommendation And Scene Assets.
 - [x] Task 7: Render Manifest And FFmpeg Command Builder.
-- [ ] Task 8: Performance Snapshot Analysis.
+- [x] Task 8: Performance Snapshot Analysis.
 - [ ] Task 9: Project API Integration.
 - [ ] Task 10: Frontend Scaffold And Top-Step Layout.
 - [ ] Task 11: Frontend Project Store And Step Pages.

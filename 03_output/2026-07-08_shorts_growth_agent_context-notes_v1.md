@@ -31,3 +31,7 @@
 - 리뷰에서 렌더 API 미리보기 직접 테스트가 부족하다는 지적이 있어 `preview_render_command()` 테스트를 추가했다.
 - Windows 경로 구분자 문제는 `RenderManifest`의 `Path` 계약을 유지하고, `FfmpegCommandBuilder`에서 `Path.as_posix()`로 명령 토큰을 생성하는 방식으로 해결했다.
 - Task 7 최종 검증은 `tests/test_render_manifest.py` 기준 `3 passed in 0.35s`, Task 1-7 합산은 `15 passed in 0.76s`로 통과했다.
+- Task 8은 시간별 성과 스냅샷 기반 원인 후보 분석, 수동 성과 분석 API, 성과 라우터 등록, API 통합 테스트를 구현했고 재리뷰에서 승인됐다.
+- 최초 리뷰에서 최신 스냅샷 하나만 보고 판단하는 문제가 발견되어, 충분히 노출된 여러 스냅샷의 지속 패턴을 보도록 수정했다.
+- `test_latest_low_ctr_without_time_series_pattern_needs_more_data`를 추가해 최신 CTR만 낮은 경우에는 `insufficient_signal`이 나오도록 고정했다.
+- Task 8 최종 검증은 `tests/test_performance_analysis.py` 기준 `4 passed in 0.41s`, Task 1-8 합산은 `19 passed in 0.75s`로 통과했다.

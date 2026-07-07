@@ -1,0 +1,3 @@
+# 성능 스냅샷 저장/조회에 대한 저장소 자리표시자이다.
+class PerformanceRepository:
+    ...
