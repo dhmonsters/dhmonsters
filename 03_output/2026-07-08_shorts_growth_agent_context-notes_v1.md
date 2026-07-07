@@ -14,3 +14,6 @@
 - Task 2는 데이터 모델, 저장소, 스키마, 모델 테스트까지 구현했고 별도 리뷰어가 승인했다.
 - `datetime.utcnow` 경고는 Python 3.12에서 반복 재현되어 `_utc_now()` 함수로 대체했고, `-W error::DeprecationWarning` 기준에서도 `3 passed in 0.43s`를 확인했다.
 - Task 1+2 합산 테스트는 `.\.venv\Scripts\python.exe -m pytest tests/test_health.py tests/test_models.py -q` 기준 `4 passed in 0.67s`로 통과했다.
+- Task 3는 YouTube 인기 영상 신호 타입, 교체 가능한 YouTube 어댑터, 상승 속도 기반 트렌드 점수화, `/api/trends` 라우트를 구현했고 별도 리뷰어가 승인했다.
+- Task 3 최종 검증은 `.\.venv\Scripts\python.exe -m pytest tests/test_trend_scoring.py -q` 기준 `2 passed in 0.07s`, Task 1-3 합산은 `6 passed in 0.73s`로 통과했다.
+- `/api/trends` 직접 API 테스트는 리뷰어가 Minor 보강으로 언급했다. 계획상 API 통합 단계인 Task 9에서 다시 다룬다.
