@@ -24,3 +24,6 @@
 - Task 5는 교체 가능한 TTS 어댑터 인터페이스, silent WAV placeholder, 자막 cue 균등 분배 서비스를 구현했고 별도 리뷰어가 승인했다.
 - `api/projects.py`는 Task 9 API 통합을 위한 라우터 placeholder만 남겼고, 아직 `main.py`에는 연결하지 않았다.
 - Task 5 최종 검증은 `tests/test_subtitle_sync.py` 기준 `1 passed in 0.01s`, Task 1-5 합산은 `10 passed in 0.67s`로 통과했다.
+- Task 6는 AI 이미지 어댑터, 밈 어댑터, 장면별 소스 추천 서비스를 구현했고 별도 리뷰어가 승인했다.
+- `clip_candidate`는 항상 `requires_user_review=True`로 반환해 사용자가 구간과 사용 가능 여부를 확인하도록 유지한다.
+- Task 6 최종 검증은 `tests/test_source_recommender.py` 기준 `2 passed in 0.01s`, Task 1-6 합산은 `12 passed in 0.73s`로 통과했다.
