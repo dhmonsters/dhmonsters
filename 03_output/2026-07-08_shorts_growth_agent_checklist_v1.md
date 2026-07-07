@@ -3,7 +3,7 @@
 - [x] Task 1: Backend Scaffold And Health Check.
 - [x] Task 2: Database Models And Repositories.
 - [x] Task 3: YouTube Trend Adapter And Trend Scoring.
-- [ ] Task 4: Script Harness And Scene Planner.
+- [x] Task 4: Script Harness And Scene Planner.
 - [ ] Task 5: TTS Adapter And Subtitle Sync.
 - [ ] Task 6: Source Recommendation And Scene Assets.
 - [ ] Task 7: Render Manifest And FFmpeg Command Builder.

@@ -5,4 +5,5 @@ Branch: `codex/shorts-growth-agent-mvp`.
 
 Task 1: complete (commits 6b1a08c..e644800, review clean).
 Task 2: complete (commits e644800..fe767a1, review clean).
-Task 3: complete (commits fe767a1..PENDING, review clean).
+Task 3: complete (commits fe767a1..874fd53, review clean).
+Task 4: complete (commits 874fd53..PENDING, review clean after fixes).
