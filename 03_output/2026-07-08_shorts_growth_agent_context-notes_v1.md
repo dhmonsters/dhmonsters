@@ -21,3 +21,6 @@
 - 최초 리뷰에서 금칙어가 일부 사용자 노출 필드에 남는 문제가 발견되어, `title_candidate`, `subtitle`, `voice_text`, `image_prompt` 전체에 금칙어 제거를 적용했다.
 - `main.py` 하네스 라우터 연결은 Task 4 원 계획 범위를 벗어난 것으로 판단되어 제거했다. 하네스 API 연결은 나중 API 통합 단계에서 다시 다룬다.
 - Task 4 최종 검증은 `tests/test_script_planner.py` 기준 `3 passed in 0.01s`, Task 1-4 합산은 `9 passed in 0.70s`로 통과했다.
+- Task 5는 교체 가능한 TTS 어댑터 인터페이스, silent WAV placeholder, 자막 cue 균등 분배 서비스를 구현했고 별도 리뷰어가 승인했다.
+- `api/projects.py`는 Task 9 API 통합을 위한 라우터 placeholder만 남겼고, 아직 `main.py`에는 연결하지 않았다.
+- Task 5 최종 검증은 `tests/test_subtitle_sync.py` 기준 `1 passed in 0.01s`, Task 1-5 합산은 `10 passed in 0.67s`로 통과했다.
