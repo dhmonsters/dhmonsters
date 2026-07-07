@@ -1,4 +1,84 @@
-# 프로젝트 관련 API 라우터를 위한 플레이스홀더입니다.
-from fastapi import APIRouter
+# 프로젝트 API 라우터를 구성해 프로젝트 생성/조회/기획 생성 요청을 처리합니다.
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.orm import Session
+
+from shorts_agent.db import init_db, make_engine, make_session_factory
+from shorts_agent.repositories.project_repository import ProjectRepository
+from shorts_agent.schemas import ProjectCreate, ProjectRead
+from shorts_agent.services.script_planner import HarnessConfig, ScriptPlanner
+
 
 router = APIRouter()
+
+
+def _prepare_sqlite_url(database_url: str) -> str:
+    if not database_url.startswith("sqlite:///"):
+        return database_url
+    db_path = Path(database_url.removeprefix("sqlite:///"))
+    if str(db_path) == ":memory:":
+        return f"sqlite:///file:shorts_growth_{uuid4().hex}?mode=memory&cache=shared&uri=true"
+    if db_path.parent:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    return database_url
+
+
+def _get_session_factory(request: Request):
+    if not hasattr(request.app.state, "SessionFactory"):
+        database_url = _prepare_sqlite_url(request.app.state.database_url)
+        engine = make_engine(database_url=database_url)
+        init_db(engine)
+        request.app.state.SessionFactory = make_session_factory(engine)
+    return request.app.state.SessionFactory
+
+
+def get_session(request: Request):
+    SessionFactory = _get_session_factory(request)
+    with SessionFactory() as session:
+        yield session
+
+
+@router.post("/projects", status_code=status.HTTP_201_CREATED)
+def create_project(payload: ProjectCreate, session: Session = Depends(get_session)):
+    project = ProjectRepository(session).create_project(
+        title=payload.title,
+        category=payload.category,
+        selected_keyword=payload.selected_keyword,
+    )
+    return ProjectRead.model_validate(project).model_dump()
+
+
+@router.get("/projects/{project_id}")
+def get_project(project_id: int, session: Session = Depends(get_session)):
+    project = ProjectRepository(session).get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return ProjectRead.model_validate(project).model_dump()
+
+
+@router.post("/projects/{project_id}/generate-plan")
+def generate_plan(project_id: int, session: Session = Depends(get_session)):
+    project = ProjectRepository(session).get_project(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    harness = HarnessConfig(
+        name="뉴스+이슈",
+        tone="명료",
+        hook_strength="강함",
+        target_seconds=45,
+        forbidden_terms=["광고", "100%", "부적절"],
+    )
+    plan = ScriptPlanner().generate(
+        keyword=project.selected_keyword or project.title,
+        category=project.category,
+        harness=harness,
+    )
+    return {
+        "keyword": plan.keyword,
+        "category": plan.category,
+        "title_candidate": plan.title_candidate,
+        "scenes": [scene.__dict__ for scene in plan.scenes],
+    }

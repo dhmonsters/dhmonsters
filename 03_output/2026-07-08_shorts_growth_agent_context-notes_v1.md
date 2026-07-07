@@ -35,3 +35,8 @@
 - 최초 리뷰에서 최신 스냅샷 하나만 보고 판단하는 문제가 발견되어, 충분히 노출된 여러 스냅샷의 지속 패턴을 보도록 수정했다.
 - `test_latest_low_ctr_without_time_series_pattern_needs_more_data`를 추가해 최신 CTR만 낮은 경우에는 `insufficient_signal`이 나오도록 고정했다.
 - Task 8 최종 검증은 `tests/test_performance_analysis.py` 기준 `4 passed in 0.41s`, Task 1-8 합산은 `19 passed in 0.75s`로 통과했다.
+- Task 9는 프로젝트 생성, 프로젝트 조회, 대본 계획 생성 API를 실제 FastAPI 앱에 연결했고 재리뷰에서 승인됐다.
+- `create_app(database_url=...)`는 DB URL만 보관하고, 프로젝트 API가 처음 호출될 때 DB 엔진과 테이블을 지연 초기화한다.
+- 최초 리뷰에서 `app = create_app()` import 시 기본 DB 파일이 생성되는 부작용이 발견되어, `test_create_app_does_not_create_sqlite_file_until_project_route`로 고정했다.
+- 지연 초기화는 첫 프로젝트 요청 동시성 경쟁까지는 아직 다루지 않는다. 단일 TestClient 흐름에서는 같은 DB를 공유하는 것을 확인했다.
+- Task 9 최종 검증은 `tests/test_api_projects.py` 기준 `4 passed in 0.84s`, Task 1-9 합산은 `23 passed in 0.91s`로 통과했다.
