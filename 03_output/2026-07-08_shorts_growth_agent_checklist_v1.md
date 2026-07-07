@@ -6,7 +6,7 @@
 - [x] Task 4: Script Harness And Scene Planner.
 - [x] Task 5: TTS Adapter And Subtitle Sync.
 - [x] Task 6: Source Recommendation And Scene Assets.
-- [ ] Task 7: Render Manifest And FFmpeg Command Builder.
+- [x] Task 7: Render Manifest And FFmpeg Command Builder.
 - [ ] Task 8: Performance Snapshot Analysis.
 - [ ] Task 9: Project API Integration.
 - [ ] Task 10: Frontend Scaffold And Top-Step Layout.

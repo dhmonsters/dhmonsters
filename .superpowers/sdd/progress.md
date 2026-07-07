@@ -8,4 +8,5 @@ Task 2: complete (commits e644800..fe767a1, review clean).
 Task 3: complete (commits fe767a1..874fd53, review clean).
 Task 4: complete (commits 874fd53..3aa801c, review clean after fixes).
 Task 5: complete (commits 3aa801c..567853a, review clean).
-Task 6: complete (commits 567853a..PENDING, review clean).
+Task 6: complete (commits 567853a..5fa5aa5, review clean).
+Task 7: complete (commits 5fa5aa5..PENDING, review clean after fixes).

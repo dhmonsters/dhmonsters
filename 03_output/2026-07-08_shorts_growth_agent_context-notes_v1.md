@@ -27,3 +27,7 @@
 - Task 6는 AI 이미지 어댑터, 밈 어댑터, 장면별 소스 추천 서비스를 구현했고 별도 리뷰어가 승인했다.
 - `clip_candidate`는 항상 `requires_user_review=True`로 반환해 사용자가 구간과 사용 가능 여부를 확인하도록 유지한다.
 - Task 6 최종 검증은 `tests/test_source_recommender.py` 기준 `2 passed in 0.01s`, Task 1-6 합산은 `12 passed in 0.73s`로 통과했다.
+- Task 7은 9:16 렌더 매니페스트, FFmpeg 명령 빌더, 렌더 명령 미리보기 라우터를 구현했고 재리뷰에서 승인됐다.
+- 리뷰에서 렌더 API 미리보기 직접 테스트가 부족하다는 지적이 있어 `preview_render_command()` 테스트를 추가했다.
+- Windows 경로 구분자 문제는 `RenderManifest`의 `Path` 계약을 유지하고, `FfmpegCommandBuilder`에서 `Path.as_posix()`로 명령 토큰을 생성하는 방식으로 해결했다.
+- Task 7 최종 검증은 `tests/test_render_manifest.py` 기준 `3 passed in 0.35s`, Task 1-7 합산은 `15 passed in 0.76s`로 통과했다.
