@@ -46,3 +46,8 @@
 - Vitest/Vite가 상위 `C:\Users\PC` 경로를 스캔하며 권한 오류를 내서, 검증은 `subst X:`로 프론트 폴더를 임시 드라이브에 매핑해 실행했다.
 - Task 10 최종 검증은 `TopStepNav.test.tsx` 기준 `2 passed`, `npm.cmd run build` 기준 성공으로 통과했다.
 - npm audit은 `5 vulnerabilities`를 보고했다. breaking change 가능성이 있어 자동 수정하지 않았다.
+- Task 11은 프론트 API client, 프로젝트 상태 reducer, 단계별 기본 페이지, App의 현재 단계 렌더링을 구현했고 별도 리뷰어가 승인했다.
+- App은 3영역 작업 shell을 유지하며 왼쪽 도구 영역에 현재 단계 페이지를 표시한다.
+- 단계 페이지의 `aria-label`은 `키워드 단계`, `대본 단계`, `음성 자막 단계`, `편집 단계`, `출력 단계`로 맞췄다.
+- Task 11 최종 검증은 `projectStore.test.ts` 기준 `3 tests passed`, 프론트 합산은 `5 tests passed`, 백엔드 합산은 `23 passed`로 통과했다.
+- API client의 실제 fetch 응답 형태 테스트는 아직 없으며, 추후 E2E 또는 client 단위 테스트에서 다룬다.

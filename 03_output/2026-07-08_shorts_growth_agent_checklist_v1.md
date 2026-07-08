@@ -10,6 +10,6 @@
 - [x] Task 8: Performance Snapshot Analysis.
 - [x] Task 9: Project API Integration.
 - [x] Task 10: Frontend Scaffold And Top-Step Layout.
-- [ ] Task 11: Frontend Project Store And Step Pages.
+- [x] Task 11: Frontend Project Store And Step Pages.
 - [ ] Task 12: Preview Canvas, Timeline, And Growth Panel.
 - [ ] Task 13: End-To-End MVP Smoke Test.
