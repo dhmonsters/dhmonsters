@@ -40,3 +40,9 @@
 - 최초 리뷰에서 `app = create_app()` import 시 기본 DB 파일이 생성되는 부작용이 발견되어, `test_create_app_does_not_create_sqlite_file_until_project_route`로 고정했다.
 - 지연 초기화는 첫 프로젝트 요청 동시성 경쟁까지는 아직 다루지 않는다. 단일 TestClient 흐름에서는 같은 DB를 공유하는 것을 확인했다.
 - Task 9 최종 검증은 `tests/test_api_projects.py` 기준 `4 passed in 0.84s`, Task 1-9 합산은 `23 passed in 0.91s`로 통과했다.
+- Task 10은 Vite/React/TypeScript 프론트 골격, 상단 단계 표시 UI, 3영역 작업 shell을 구현했고 별도 리뷰어가 승인했다.
+- PowerShell에서는 `npm.ps1` 실행 정책 때문에 `npm.cmd`를 사용한다.
+- 기본 npm 캐시 경로 권한 문제는 프론트 폴더 내부 `.npm-cache`로 우회했다.
+- Vitest/Vite가 상위 `C:\Users\PC` 경로를 스캔하며 권한 오류를 내서, 검증은 `subst X:`로 프론트 폴더를 임시 드라이브에 매핑해 실행했다.
+- Task 10 최종 검증은 `TopStepNav.test.tsx` 기준 `2 passed`, `npm.cmd run build` 기준 성공으로 통과했다.
+- npm audit은 `5 vulnerabilities`를 보고했다. breaking change 가능성이 있어 자동 수정하지 않았다.
