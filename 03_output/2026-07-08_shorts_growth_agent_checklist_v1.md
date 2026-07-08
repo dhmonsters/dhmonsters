@@ -12,4 +12,4 @@
 - [x] Task 10: Frontend Scaffold And Top-Step Layout.
 - [x] Task 11: Frontend Project Store And Step Pages.
 - [x] Task 12: Preview Canvas, Timeline, And Growth Panel.
-- [ ] Task 13: End-To-End MVP Smoke Test.
+- [x] Task 13: End-To-End MVP Smoke Test.

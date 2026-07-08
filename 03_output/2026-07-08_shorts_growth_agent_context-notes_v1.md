@@ -55,3 +55,7 @@
 - 첫 리뷰에서 한국어 문자열 깨짐이 지적됐지만, 컨트롤러가 엄격 UTF-8 decode와 `Select-String -Encoding UTF8`로 파일과 diff의 한국어 문구가 정상임을 확인했다.
 - 사용자-facing 문구는 `장면`, `AI 보조와 성장 메모리`, `성장 메모리`, `다음 제안`, `시간별 성과 분석` 기준으로 맞췄다.
 - Task 12 최종 검증은 `editorComponents.test.tsx` 기준 `4 tests passed`, 프론트 합산은 `9 tests passed`, 프론트 빌드는 성공, 백엔드 합산은 `23 passed`로 통과했다.
+- Task 13은 MVP 전체 파이프라인 스모크 테스트와 README 개발 명령을 추가했고 별도 리뷰어가 승인했다.
+- 스모크 테스트는 대본 생성, 자막 싱크, 소스 추천, FFmpeg 명령 생성, 시간별 성과 분석을 한 흐름으로 검증한다.
+- README는 실제 `pyproject.toml` 구성에 맞춰 `.\.venv\Scripts\python.exe -m pip install -e ".[dev]"`를 안내한다.
+- 최종 검증은 백엔드 `24 passed`, 프론트 `9 tests passed`, 프론트 빌드 성공으로 통과했다.
