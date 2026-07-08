@@ -15,4 +15,4 @@ Task 9: complete (commits 9459bc6..c319dbf, review clean after fixes).
 Task 10: complete (commits c319dbf..9ace07b, review clean).
 Task 11: complete (commits 9ace07b..0cbdf0b, review clean).
 Task 12: complete (commits 0cbdf0b..4448e8c, review clean after false-positive encoding check).
-Task 13: complete (commit pending, review clean).
+Task 13: complete (commits 4448e8c..4b1b489, review clean).
