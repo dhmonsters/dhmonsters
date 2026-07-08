@@ -51,3 +51,7 @@
 - 단계 페이지의 `aria-label`은 `키워드 단계`, `대본 단계`, `음성 자막 단계`, `편집 단계`, `출력 단계`로 맞췄다.
 - Task 11 최종 검증은 `projectStore.test.ts` 기준 `3 tests passed`, 프론트 합산은 `5 tests passed`, 백엔드 합산은 `23 passed`로 통과했다.
 - API client의 실제 fetch 응답 형태 테스트는 아직 없으며, 추후 E2E 또는 client 단위 테스트에서 다룬다.
+- Task 12는 9:16 쇼츠 미리보기, 장면 타임라인, 성장 메모리 패널, 시간별 성과 분석 리포트 화면을 구현했고 재리뷰에서 승인됐다.
+- 첫 리뷰에서 한국어 문자열 깨짐이 지적됐지만, 컨트롤러가 엄격 UTF-8 decode와 `Select-String -Encoding UTF8`로 파일과 diff의 한국어 문구가 정상임을 확인했다.
+- 사용자-facing 문구는 `장면`, `AI 보조와 성장 메모리`, `성장 메모리`, `다음 제안`, `시간별 성과 분석` 기준으로 맞췄다.
+- Task 12 최종 검증은 `editorComponents.test.tsx` 기준 `4 tests passed`, 프론트 합산은 `9 tests passed`, 프론트 빌드는 성공, 백엔드 합산은 `23 passed`로 통과했다.

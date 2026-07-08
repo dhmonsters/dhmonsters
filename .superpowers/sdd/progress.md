@@ -13,4 +13,5 @@ Task 7: complete (commits 5fa5aa5..bd7dc9e, review clean after fixes).
 Task 8: complete (commits bd7dc9e..9459bc6, review clean after fixes).
 Task 9: complete (commits 9459bc6..c319dbf, review clean after fixes).
 Task 10: complete (commits c319dbf..9ace07b, review clean).
-Task 11: complete (commit pending, review clean).
+Task 11: complete (commits 9ace07b..0cbdf0b, review clean).
+Task 12: complete (commit pending, review clean after false-positive encoding check).

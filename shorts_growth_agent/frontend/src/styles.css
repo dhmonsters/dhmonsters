@@ -68,8 +68,79 @@ button {
 
 .preview-stage {
   display: grid;
-  place-items: center;
+  gap: 10px;
   min-width: 0;
+  padding: 12px;
+}
+
+.shorts-canvas {
+  display: grid;
+  place-items: center;
+}
+
+.phone-frame {
+  width: min(360px, 100%);
+  aspect-ratio: 9 / 16;
+  border: 2px solid #d9dfeb;
+  border-radius: 20px;
+  background: #f3f6fb;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+  color: #17202f;
+}
+
+.scene-source {
+  color: #526071;
+  font-size: 12px;
+}
+
+.scene-subtitle {
+  font-size: 22px;
+  line-height: 1.4;
+}
+
+.scene-motion {
+  color: #526071;
+  font-size: 12px;
+  margin: 0;
+}
+
+.timeline {
+  display: grid;
+  gap: 6px;
+}
+
+.timeline-item {
+  justify-self: stretch;
+  padding: 8px 10px;
+  border: 1px solid #d9dfeb;
+  border-radius: 8px;
+  background: #ffffff;
+  cursor: pointer;
+  min-height: 34px;
+  text-align: left;
+}
+
+.timeline-item[aria-current="true"] {
+  border-color: #2557d6;
+  background: #eef3ff;
+}
+
+.growth-panel h2 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+}
+
+.growth-panel ul {
+  margin: 0 0 12px 0;
+  padding-left: 18px;
+}
+
+.growth-panel li {
+  margin-bottom: 4px;
 }
 
 @media (max-width: 860px) {
