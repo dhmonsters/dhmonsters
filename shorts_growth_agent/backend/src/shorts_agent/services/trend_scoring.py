@@ -11,9 +11,12 @@ class TrendScore:
     video_id: str
     title: str
     category_id: str
+    channel_title: str
+    view_count: int
     views_per_hour: float
     score: float
     keyword_candidates: list[str]
+    thumbnail_url: str = ""
 
 
 class TrendScoringService:
@@ -30,9 +33,12 @@ class TrendScoringService:
             video_id=signal.video_id,
             title=signal.title,
             category_id=signal.category_id,
+            channel_title=signal.channel_title,
+            view_count=signal.view_count,
             views_per_hour=views_per_hour,
             score=score,
             keyword_candidates=self._keywords(signal.title),
+            thumbnail_url=signal.thumbnail_url,
         )
 
     def _keywords(self, title: str) -> list[str]:

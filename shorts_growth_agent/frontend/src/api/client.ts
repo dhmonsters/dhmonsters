@@ -1,5 +1,34 @@
 // 백엔드 API 호출을 담당하는 클라이언트 유틸입니다.
+import type { TrendCandidate } from "../types";
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
+
+export type TrendSearchParams = {
+  region?: string;
+  category_id?: string;
+  keyword?: string;
+};
+
+export type TrendSearchResponse = {
+  region: string;
+  category_id: string | null;
+  keyword: string | null;
+  source: "youtube" | "sample" | "sample_fallback";
+  items: TrendCandidate[];
+};
+
+export async function fetchTrendCandidates(
+  params: TrendSearchParams,
+): Promise<TrendSearchResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set("region", params.region ?? "KR");
+  if (params.category_id) searchParams.set("category_id", params.category_id);
+  if (params.keyword) searchParams.set("keyword", params.keyword);
+
+  const response = await fetch(`${API_BASE}/trends?${searchParams.toString()}`);
+  if (!response.ok) throw new Error("트렌드 후보를 불러오지 못했습니다.");
+  return response.json();
+}
 
 export async function createProject(payload: {
   title: string;

@@ -51,7 +51,7 @@ button {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(320px, 1fr) minmax(200px, 280px);
+  grid-template-columns: minmax(300px, 420px) minmax(320px, 1fr) minmax(220px, 300px);
   gap: 12px;
   margin-top: 12px;
   min-height: calc(100vh - 84px);
@@ -71,6 +71,174 @@ button {
   gap: 10px;
   min-width: 0;
   padding: 12px;
+}
+
+.step-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.step-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.step-heading h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #17694a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.section-customizer {
+  border: 1px solid #d9dfeb;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fafcff;
+}
+
+.section-customizer summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  color: #394557;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #c9d2e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17202f;
+  font: inherit;
+  font-weight: 500;
+}
+
+.field input,
+.field select {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.field textarea {
+  resize: vertical;
+  padding: 10px;
+  line-height: 1.45;
+}
+
+.trend-search {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.primary-button {
+  background: #2557d6;
+  color: #ffffff;
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.secondary-button {
+  justify-self: start;
+  border-color: #2d7a5f;
+  background: #eefaf5;
+  color: #17694a;
+  padding: 0 12px;
+}
+
+.source-badge,
+.selected-trend,
+.empty-text {
+  margin: 0;
+  color: #526071;
+  font-size: 13px;
+}
+
+.error-text {
+  margin: 0;
+  color: #b42318;
+  font-size: 13px;
+}
+
+.trend-list,
+.script-scenes {
+  display: grid;
+  gap: 10px;
+}
+
+.trend-card,
+.script-scene {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d9dfeb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.trend-card h2 {
+  margin: 2px 0 6px 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.trend-meta,
+.trend-score {
+  margin: 0;
+  color: #526071;
+  font-size: 12px;
+}
+
+.keyword-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.keyword-row span {
+  border-radius: 999px;
+  background: #f1f3f7;
+  color: #394557;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.script-scene strong {
+  color: #17694a;
+}
+
+.script-scene p {
+  margin: 0;
+  line-height: 1.45;
 }
 
 .shorts-canvas {

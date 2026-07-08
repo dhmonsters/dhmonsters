@@ -1,6 +1,7 @@
 // 3개 영역 편집 화면을 조합해 기본 뷰를 구성합니다.
 import { useReducer, useState } from "react";
 
+import { createProject, generatePlan } from "./api/client";
 import { EditorStep } from "./pages/EditorStep";
 import { ExportStep } from "./pages/ExportStep";
 import { GrowthAssistantPanel } from "./components/GrowthAssistantPanel";
@@ -11,18 +12,23 @@ import { Timeline } from "./components/Timeline";
 import { TopStepNav } from "./components/TopStepNav";
 import { VoiceSubtitleStep } from "./pages/VoiceSubtitleStep";
 import { createInitialProjectState, reduceProjectState } from "./state/projectStore";
-import type { StepId } from "./types";
+import type { StepId, TrendCandidate, TrendCategory } from "./types";
 import "./styles.css";
 
 export function App() {
   const [state, dispatch] = useReducer(reduceProjectState, createInitialProjectState());
   const [selectedSceneIndex, setSelectedSceneIndex] = useState(1);
 
-  const scenes = [
-    { index: 1, subtitle: "오프닝", source_type: "ai_image", motion_type: "zoom-in" },
-    { index: 2, subtitle: "하이라이트", source_type: "ai_image", motion_type: "fade-in" },
-    { index: 3, subtitle: "콜투액션", source_type: "ai_image", motion_type: "pan-right" },
-  ];
+  const scenes =
+    state.scriptPlan?.scenes.map((scene, index) => ({
+      ...scene,
+      source_type: index === 1 ? "trend_clip_review" : "ai_image",
+      motion_type: index === 0 ? "zoom-in" : index === 1 ? "shake" : "pan-right",
+    })) ?? [
+      { index: 1, subtitle: "오프닝", source_type: "ai_image", motion_type: "zoom-in" },
+      { index: 2, subtitle: "하이라이트", source_type: "ai_image", motion_type: "fade-in" },
+      { index: 3, subtitle: "콜투액션", source_type: "ai_image", motion_type: "pan-right" },
+    ];
 
   const selectedScene = scenes.find((scene) => scene.index === selectedSceneIndex) ?? null;
   const selectedSceneExists = scenes.some((scene) => scene.index === selectedSceneIndex);
@@ -35,12 +41,58 @@ export function App() {
     setSelectedSceneIndex(index);
   };
 
+  const handleCustomizationChange = (section: StepId, value: string) => {
+    dispatch({ type: "customizationChanged", section, value });
+  };
+
+  const handleTrendPicked = async (trend: TrendCandidate, category: TrendCategory) => {
+    dispatch({ type: "trendSelected", trend });
+    const keyword = trend.keyword_candidates[0] ?? trend.title;
+    const project = await createProject({
+      title: trend.title,
+      category: category.label,
+      selected_keyword: keyword,
+    });
+    dispatch({ type: "projectCreated", project });
+    const plan = await generatePlan(project.id);
+    dispatch({ type: "planGenerated", plan });
+    setSelectedSceneIndex(1);
+  };
+
   const contentByStep: Record<StepId, JSX.Element> = {
-    keyword: <KeywordStep />,
-    script: <ScriptStep />,
-    voice: <VoiceSubtitleStep />,
-    editor: <EditorStep />,
-    export: <ExportStep />,
+    keyword: (
+      <KeywordStep
+        customization={state.customization.keyword}
+        onCustomizationChange={(value) => handleCustomizationChange("keyword", value)}
+        onTrendPicked={handleTrendPicked}
+        selectedTrend={state.selectedTrend}
+      />
+    ),
+    script: (
+      <ScriptStep
+        customization={state.customization.script}
+        onCustomizationChange={(value) => handleCustomizationChange("script", value)}
+        scriptPlan={state.scriptPlan}
+      />
+    ),
+    voice: (
+      <VoiceSubtitleStep
+        customization={state.customization.voice}
+        onCustomizationChange={(value) => handleCustomizationChange("voice", value)}
+      />
+    ),
+    editor: (
+      <EditorStep
+        customization={state.customization.editor}
+        onCustomizationChange={(value) => handleCustomizationChange("editor", value)}
+      />
+    ),
+    export: (
+      <ExportStep
+        customization={state.customization.export}
+        onCustomizationChange={(value) => handleCustomizationChange("export", value)}
+      />
+    ),
   };
 
   return (

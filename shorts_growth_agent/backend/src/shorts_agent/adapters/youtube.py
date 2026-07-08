@@ -14,6 +14,7 @@ class YouTubeVideoSignal:
     published_at: datetime
     view_count: int
     like_count: int
+    thumbnail_url: str = ""
 
 
 class YouTubeAdapter:
@@ -52,4 +53,5 @@ class YouTubeAdapter:
             published_at=published_at,
             view_count=int(stats.get("viewCount", 0)),
             like_count=int(stats.get("likeCount", 0)),
+            thumbnail_url=snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
         )

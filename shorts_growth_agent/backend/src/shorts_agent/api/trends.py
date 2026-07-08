@@ -1,10 +1,13 @@
 # 트렌드 조회 API를 통해 인기 영상 분석 결과를 반환한다.
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
+import httpx
 
 from shorts_agent.adapters.youtube import YouTubeAdapter
 from shorts_agent.config import get_settings
+from shorts_agent.services.sample_trends import get_sample_trend_signals
 from shorts_agent.services.trend_scoring import TrendScoringService
 
 router = APIRouter()
@@ -21,8 +24,33 @@ def get_trends(
     keyword: str | None = None,
     adapter: YouTubeAdapter = Depends(get_youtube_adapter),
 ):
-    signals = adapter.fetch_popular(region_code=region, category_id=category_id)
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    source = "youtube"
+    if settings.youtube_api_key:
+        try:
+            signals = adapter.fetch_popular(region_code=region, category_id=category_id)
+        except httpx.HTTPError:
+            source = "sample_fallback"
+            signals = get_sample_trend_signals(now)
+    else:
+        source = "sample"
+        signals = get_sample_trend_signals(now)
+    if category_id:
+        signals = [signal for signal in signals if signal.category_id == category_id]
     if keyword:
-        signals = [signal for signal in signals if keyword.lower() in signal.title.lower()]
-    ranked = TrendScoringService().rank(signals, datetime.now(timezone.utc))
-    return {"items": [item.__dict__ for item in ranked]}
+        keyword_lower = keyword.lower()
+        signals = [
+            signal
+            for signal in signals
+            if keyword_lower in signal.title.lower()
+            or keyword_lower in signal.channel_title.lower()
+        ]
+    ranked = TrendScoringService().rank(signals, now)
+    return {
+        "region": region,
+        "category_id": category_id,
+        "keyword": keyword,
+        "source": source,
+        "items": [asdict(item) for item in ranked],
+    }
