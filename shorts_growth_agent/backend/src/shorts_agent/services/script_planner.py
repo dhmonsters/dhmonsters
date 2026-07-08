@@ -9,6 +9,7 @@ class HarnessConfig:
     hook_strength: str
     target_seconds: int
     forbidden_terms: list[str]
+    custom_prompt: str = ""
 
 
 @dataclass(frozen=True)
@@ -32,18 +33,37 @@ class ScriptPlan:
 
 
 class ScriptPlanner:
-    def generate(self, keyword: str, category: str, harness: HarnessConfig) -> ScriptPlan:
+    def generate(
+        self,
+        keyword: str,
+        category: str,
+        harness: HarnessConfig,
+        primary_angle: str = "",
+        script_seed: str = "",
+    ) -> ScriptPlan:
         scene_count = 5 if harness.target_seconds <= 45 else 7
         duration_ms = int(harness.target_seconds * 1000 / scene_count)
-        cleaned_keyword = self._remove_forbidden(keyword, harness.forbidden_terms)
+        seed = script_seed or keyword
+        cleaned_keyword = self._remove_forbidden(seed, harness.forbidden_terms)
         cleaned_category = self._remove_forbidden(category, harness.forbidden_terms)
+        cleaned_angle = self._remove_forbidden(primary_angle, harness.forbidden_terms)
+        opening = (
+            f"{cleaned_angle}: {cleaned_keyword}, 지금 봐야 할 포인트입니다."
+            if cleaned_angle
+            else f"지금 {cleaned_keyword}, 왜 갑자기 뜨는 걸까요?"
+        )
         templates = [
-            f"지금 {cleaned_keyword}, 왜 갑자기 뜨는 걸까요?",
+            opening,
             f"핵심은 세 가지입니다.",
             f"첫째, 사람들이 반응한 포인트가 분명합니다.",
             f"둘째, {cleaned_category} 흐름과 바로 연결됩니다.",
             f"마지막으로 지금 확인해야 할 부분입니다.",
         ]
+        if harness.custom_prompt:
+            templates[0] = self._remove_forbidden(
+                f"{harness.custom_prompt}: {cleaned_keyword}",
+                harness.forbidden_terms,
+            )
         scenes = []
         for index, subtitle in enumerate(templates[:scene_count], start=1):
             cleaned = self._remove_forbidden(subtitle, harness.forbidden_terms)

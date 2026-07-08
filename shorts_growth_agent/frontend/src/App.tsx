@@ -1,7 +1,7 @@
 // 3개 영역 편집 화면을 조합해 기본 뷰를 구성합니다.
 import { useReducer, useState } from "react";
 
-import { createProject, generatePlan } from "./api/client";
+import { analyzeTrendCandidate, createProject, generatePlan } from "./api/client";
 import { EditorStep } from "./pages/EditorStep";
 import { ExportStep } from "./pages/ExportStep";
 import { GrowthAssistantPanel } from "./components/GrowthAssistantPanel";
@@ -45,8 +45,26 @@ export function App() {
     dispatch({ type: "customizationChanged", section, value });
   };
 
+  const handleTrendInspect = async (trend: TrendCandidate) => {
+    dispatch({ type: "trendSelected", trend });
+    const analysis = await analyzeTrendCandidate(trend);
+    dispatch({ type: "trendAnalyzed", analysis });
+  };
+
   const handleTrendPicked = async (trend: TrendCandidate, category: TrendCategory) => {
     dispatch({ type: "trendSelected", trend });
+    const analysis =
+      state.trendAnalysis?.video_id === trend.video_id
+        ? state.trendAnalysis
+        : await analyzeTrendCandidate(trend);
+    dispatch({ type: "trendAnalyzed", analysis });
+    const planHarness = {
+      ...state.harness,
+      tone: analysis.recommended_harness.tone,
+      hook_strength: analysis.recommended_harness.hook_strength,
+      target_seconds: analysis.recommended_harness.target_seconds,
+      forbidden_terms: analysis.recommended_harness.forbidden_terms,
+    };
     const keyword = trend.keyword_candidates[0] ?? trend.title;
     const project = await createProject({
       title: trend.title,
@@ -54,7 +72,13 @@ export function App() {
       selected_keyword: keyword,
     });
     dispatch({ type: "projectCreated", project });
-    const plan = await generatePlan(project.id);
+    const plan = await generatePlan(project.id, {
+      harness: planHarness,
+      trend_analysis: {
+        primary_angle: analysis.production_angles[0],
+        script_seed: analysis.script_seed,
+      },
+    });
     dispatch({ type: "planGenerated", plan });
     setSelectedSceneIndex(1);
   };
@@ -64,15 +88,24 @@ export function App() {
       <KeywordStep
         customization={state.customization.keyword}
         onCustomizationChange={(value) => handleCustomizationChange("keyword", value)}
+        onTrendInspect={handleTrendInspect}
         onTrendPicked={handleTrendPicked}
         selectedTrend={state.selectedTrend}
+        trendAnalysis={state.trendAnalysis}
       />
     ),
     script: (
       <ScriptStep
         customization={state.customization.script}
         onCustomizationChange={(value) => handleCustomizationChange("script", value)}
+        harness={state.harness}
+        onHarnessChange={(harness) => dispatch({ type: "harnessChanged", harness })}
         scriptPlan={state.scriptPlan}
+        onSceneSubtitleChange={(index, subtitle) =>
+          dispatch({ type: "sceneSubtitleChanged", index, subtitle })
+        }
+        onSceneRegenerate={(index) => dispatch({ type: "sceneRegenerated", index })}
+        onSceneMove={(index, direction) => dispatch({ type: "sceneMoved", index, direction })}
       />
     ),
     voice: (

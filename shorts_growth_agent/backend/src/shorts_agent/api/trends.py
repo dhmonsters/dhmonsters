@@ -7,7 +7,9 @@ import httpx
 
 from shorts_agent.adapters.youtube import YouTubeAdapter
 from shorts_agent.config import get_settings
+from shorts_agent.schemas import TrendCandidatePayload
 from shorts_agent.services.sample_trends import get_sample_trend_signals
+from shorts_agent.services.trend_analysis import TrendAnalysisService, TrendCandidateInput
 from shorts_agent.services.trend_scoring import TrendScoringService
 
 router = APIRouter()
@@ -54,3 +56,21 @@ def get_trends(
         "source": source,
         "items": [asdict(item) for item in ranked],
     }
+
+
+@router.post("/trends/analyze")
+def analyze_trend(payload: TrendCandidatePayload):
+    analysis = TrendAnalysisService().analyze(
+        TrendCandidateInput(
+            video_id=payload.video_id,
+            title=payload.title,
+            category_id=payload.category_id,
+            channel_title=payload.channel_title,
+            view_count=payload.view_count,
+            views_per_hour=payload.views_per_hour,
+            score=payload.score,
+            keyword_candidates=payload.keyword_candidates,
+            thumbnail_url=payload.thumbnail_url,
+        )
+    )
+    return asdict(analysis)

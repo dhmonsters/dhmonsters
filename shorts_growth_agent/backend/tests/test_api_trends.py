@@ -47,3 +47,30 @@ def test_trends_api_allows_local_frontend_preflight():
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
+def test_analyze_trend_candidate_returns_production_angles():
+    client = TestClient(create_app(database_url="sqlite:///:memory:"))
+
+    response = client.post(
+        "/api/trends/analyze",
+        json={
+            "video_id": "sample-game-001",
+            "title": "신작 게임 업데이트 보상 정리와 반응",
+            "category_id": "20",
+            "channel_title": "게임 이슈 연구소",
+            "view_count": 320000,
+            "views_per_hour": 106000,
+            "score": 106500,
+            "keyword_candidates": ["게임", "업데이트", "보상"],
+            "thumbnail_url": "",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["video_id"] == "sample-game-001"
+    assert len(body["production_angles"]) == 3
+    assert body["risk_level"] in {"낮음", "주의", "높음"}
+    assert body["recommended_harness"]["hook_strength"] == "강함"
+    assert "게임" in body["script_seed"]

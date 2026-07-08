@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from shorts_agent.db import init_db, make_engine, make_session_factory
 from shorts_agent.repositories.project_repository import ProjectRepository
-from shorts_agent.schemas import ProjectCreate, ProjectRead
+from shorts_agent.schemas import GeneratePlanRequest, ProjectCreate, ProjectRead
 from shorts_agent.services.script_planner import HarnessConfig, ScriptPlanner
 
 
@@ -59,26 +59,43 @@ def get_project(project_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/projects/{project_id}/generate-plan")
-def generate_plan(project_id: int, session: Session = Depends(get_session)):
+def generate_plan(
+    project_id: int,
+    payload: GeneratePlanRequest | None = None,
+    session: Session = Depends(get_session),
+):
     project = ProjectRepository(session).get_project(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
+    request_harness = payload.harness if payload else None
     harness = HarnessConfig(
-        name="뉴스+이슈",
-        tone="명료",
-        hook_strength="강함",
-        target_seconds=45,
-        forbidden_terms=["광고", "100%", "부적절"],
+        name=request_harness.name if request_harness else "뉴스+이슈",
+        tone=request_harness.tone if request_harness else "명료",
+        hook_strength=request_harness.hook_strength if request_harness else "강함",
+        target_seconds=request_harness.target_seconds if request_harness else 45,
+        forbidden_terms=request_harness.forbidden_terms if request_harness else ["광고", "100%", "부적절"],
+        custom_prompt=request_harness.custom_prompt if request_harness else "",
     )
+    trend_analysis = payload.trend_analysis if payload else None
     plan = ScriptPlanner().generate(
         keyword=project.selected_keyword or project.title,
         category=project.category,
         harness=harness,
+        primary_angle=trend_analysis.primary_angle if trend_analysis else "",
+        script_seed=trend_analysis.script_seed if trend_analysis else "",
     )
     return {
         "keyword": plan.keyword,
         "category": plan.category,
         "title_candidate": plan.title_candidate,
+        "harness": {
+            "name": harness.name,
+            "tone": harness.tone,
+            "hook_strength": harness.hook_strength,
+            "target_seconds": harness.target_seconds,
+            "forbidden_terms": harness.forbidden_terms,
+            "custom_prompt": harness.custom_prompt,
+        },
         "scenes": [scene.__dict__ for scene in plan.scenes],
     }

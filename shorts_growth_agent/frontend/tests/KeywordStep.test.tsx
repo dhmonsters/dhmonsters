@@ -38,8 +38,10 @@ describe("KeywordStep", () => {
       <KeywordStep
         customization="한국 게임 쇼츠 중심"
         onCustomizationChange={vi.fn()}
+        onTrendInspect={vi.fn()}
         onTrendPicked={vi.fn()}
         selectedTrend={null}
+        trendAnalysis={null}
       />
     );
 
@@ -79,8 +81,10 @@ describe("KeywordStep", () => {
       <KeywordStep
         customization="뉴스형 쇼츠"
         onCustomizationChange={vi.fn()}
+        onTrendInspect={vi.fn()}
         onTrendPicked={onTrendPicked}
         selectedTrend={null}
+        trendAnalysis={null}
       />
     );
 
@@ -91,5 +95,65 @@ describe("KeywordStep", () => {
       expect.objectContaining({ video_id: "sample-news-001" }),
       expect.objectContaining({ id: "25", label: "뉴스" })
     );
+  });
+
+  it("passes candidate to detail analysis and shows analysis panel", async () => {
+    const user = userEvent.setup();
+    const onTrendInspect = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          source: "sample",
+          items: [
+            {
+              video_id: "sample-game-001",
+              title: "신작 게임 업데이트 보상 정리와 반응",
+              category_id: "20",
+              channel_title: "게임 이슈 연구소",
+              view_count: 320000,
+              views_per_hour: 100000,
+              score: 100020,
+              keyword_candidates: ["게임", "업데이트"],
+              thumbnail_url: "",
+            },
+          ],
+        }),
+      })
+    );
+
+    render(
+      <KeywordStep
+        customization="게임형 쇼츠"
+        onCustomizationChange={vi.fn()}
+        onTrendInspect={onTrendInspect}
+        onTrendPicked={vi.fn()}
+        selectedTrend={null}
+        trendAnalysis={{
+          video_id: "sample-game-001",
+          title: "신작 게임 업데이트 보상 정리와 반응",
+          summary: "게임 쇼츠 소재로 분석했습니다.",
+          production_angles: ["보상 비교", "반응 정리", "체크리스트"],
+          risk_level: "주의",
+          risk_notes: ["직접 확인한 소스만 사용"],
+          script_seed: "게임 업데이트 보상",
+          recommended_harness: {
+            tone: "명료",
+            hook_strength: "강함",
+            target_seconds: 30,
+            forbidden_terms: ["100%"],
+          },
+        }}
+      />
+    );
+
+    await user.click(await screen.findByRole("button", { name: "상세 분석" }));
+
+    expect(onTrendInspect).toHaveBeenCalledWith(
+      expect.objectContaining({ video_id: "sample-game-001" })
+    );
+    expect(screen.getByText("후보 상세 분석")).toBeTruthy();
+    expect(screen.getByText("보상 비교")).toBeTruthy();
   });
 });

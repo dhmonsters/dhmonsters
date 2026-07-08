@@ -18,4 +18,24 @@ export type TrendCategory = {
   label: string;
 };
 
+export type HarnessSettings = {
+  name: string;
+  tone: string;
+  hook_strength: string;
+  target_seconds: number;
+  forbidden_terms: string[];
+  custom_prompt: string;
+};
+
+export type TrendAnalysis = {
+  video_id: string;
+  title: string;
+  summary: string;
+  production_angles: string[];
+  risk_level: "낮음" | "주의" | "높음";
+  risk_notes: string[];
+  script_seed: string;
+  recommended_harness: Omit<HarnessSettings, "name" | "custom_prompt">;
+};
+
 export type SectionCustomization = Record<StepId, string>;

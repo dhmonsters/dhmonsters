@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 
 import { fetchTrendCandidates } from "../api/client";
 import { SectionCustomizer } from "../components/SectionCustomizer";
-import type { TrendCandidate, TrendCategory } from "../types";
+import type { TrendAnalysis, TrendCandidate, TrendCategory } from "../types";
 
 export const TREND_CATEGORIES: TrendCategory[] = [
   { id: "", label: "전체" },
@@ -20,13 +20,17 @@ export function getTrendCategory(categoryId: string): TrendCategory {
 export function KeywordStep({
   customization,
   onCustomizationChange,
+  onTrendInspect,
   onTrendPicked,
   selectedTrend,
+  trendAnalysis,
 }: {
   customization: string;
   onCustomizationChange: (value: string) => void;
+  onTrendInspect: (trend: TrendCandidate) => Promise<void> | void;
   onTrendPicked: (trend: TrendCandidate, category: TrendCategory) => Promise<void> | void;
   selectedTrend: TrendCandidate | null;
+  trendAnalysis: TrendAnalysis | null;
 }) {
   const [categoryId, setCategoryId] = useState("20");
   const [keyword, setKeyword] = useState("");
@@ -128,19 +132,63 @@ export function KeywordStep({
                   ))}
                 </div>
               </div>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void onTrendPicked(item, category)}
-              >
-                이 후보로 대본 만들기
-              </button>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void onTrendInspect(item)}
+                >
+                  상세 분석
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void onTrendPicked(item, category)}
+                >
+                  이 후보로 대본 만들기
+                </button>
+              </div>
             </article>
           );
         })}
       </div>
 
       {selectedTrend && <p className="selected-trend">선택됨: {selectedTrend.title}</p>}
+      {trendAnalysis && (
+        <aside className="analysis-panel" aria-label="후보 상세 분석">
+          <div className="step-heading">
+            <p className="eyebrow">후보 상세 분석</p>
+            <h2>{trendAnalysis.title}</h2>
+          </div>
+          <p>{trendAnalysis.summary}</p>
+          <dl className="analysis-grid">
+            <div>
+              <dt>주의도</dt>
+              <dd>{trendAnalysis.risk_level}</dd>
+            </div>
+            <div>
+              <dt>대본 씨앗</dt>
+              <dd>{trendAnalysis.script_seed}</dd>
+            </div>
+            <div>
+              <dt>추천 길이</dt>
+              <dd>{trendAnalysis.recommended_harness.target_seconds}초</dd>
+            </div>
+          </dl>
+          <h3>제작 각도</h3>
+          <ul>
+            {trendAnalysis.production_angles.map((angle) => (
+              <li key={angle}>{angle}</li>
+            ))}
+          </ul>
+          <h3>주의 메모</h3>
+          <ul>
+            {trendAnalysis.risk_notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </aside>
+      )}
     </section>
   );
 }

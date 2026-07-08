@@ -217,13 +217,63 @@ button {
 }
 
 .trend-card,
-.script-scene {
+.script-scene,
+.analysis-panel,
+.harness-panel {
   display: grid;
   gap: 10px;
   border: 1px solid #d9dfeb;
   border-radius: 8px;
   padding: 12px;
   background: #ffffff;
+}
+
+.analysis-panel,
+.harness-panel {
+  background: #fbfcff;
+}
+
+.analysis-panel h2,
+.analysis-panel h3 {
+  margin: 0;
+}
+
+.analysis-panel p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.analysis-panel ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.analysis-grid div {
+  border: 1px solid #d9dfeb;
+  border-radius: 6px;
+  padding: 8px;
+  background: #ffffff;
+}
+
+.analysis-grid dt {
+  color: #526071;
+  font-size: 12px;
+}
+
+.analysis-grid dd {
+  margin: 4px 0 0 0;
+  font-weight: 700;
+}
+
+.harness-panel {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .trend-card h2 {
@@ -260,6 +310,17 @@ button {
 .script-scene p {
   margin: 0;
   line-height: 1.45;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scene-asset-note {
+  color: #526071;
+  font-size: 12px;
 }
 
 .shorts-canvas {
