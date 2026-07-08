@@ -51,10 +51,25 @@ button {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(300px, 420px) minmax(320px, 1fr) minmax(220px, 300px);
+  grid-template-columns: minmax(320px, 960px);
+  justify-content: center;
   gap: 12px;
   margin-top: 12px;
   min-height: calc(100vh - 84px);
+}
+
+.workspace-editor {
+  grid-template-columns: minmax(280px, 380px) minmax(360px, 1fr);
+  justify-content: stretch;
+}
+
+.workspace-export {
+  grid-template-columns: minmax(360px, 760px) minmax(220px, 300px);
+  justify-content: center;
+}
+
+.workspace-primary {
+  min-width: 0;
 }
 
 .workspace-panel,
@@ -71,6 +86,7 @@ button {
   gap: 10px;
   min-width: 0;
   padding: 12px;
+  align-content: start;
 }
 
 .step-panel {
@@ -144,8 +160,13 @@ button {
 
 .trend-search {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(180px, 240px) minmax(220px, 1fr) auto;
+  align-items: end;
   gap: 10px;
+}
+
+.workspace-keyword .trend-list {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
 .primary-button,
@@ -317,6 +338,10 @@ button {
   }
 
   .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-search {
     grid-template-columns: 1fr;
   }
 }

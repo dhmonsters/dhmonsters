@@ -94,26 +94,35 @@ export function App() {
       />
     ),
   };
+  const showPreview = state.currentStep === "editor";
+  const showAssistant = state.currentStep === "export";
 
   return (
     <main className="app-shell">
       <TopStepNav currentStep={state.currentStep} onStepChange={handleStepChange} />
-      <section className="workspace" aria-label="쇼츠 편집 작업공간">
-        <aside className="workspace-panel">{contentByStep[state.currentStep]}</aside>
-        <section className="preview-stage">
-          <ShortsCanvas scene={selectedSceneExists ? selectedScene : null} />
-          <Timeline
-            scenes={scenes}
-            selectedSceneIndex={selectedSceneIndex}
-            onSelectScene={handleSceneSelect}
-          />
-        </section>
-        <aside className="workspace-panel">
-          <GrowthAssistantPanel
-            notes={["클릭률 향상을 위해 첫 3초 훅 메시지 강화", "자막 길이를 20자 이내로 간결히 정리"]}
-            recommendations={["첫 화면에서 핵심 결과 제시", "콜투액션을 끝 부분에 배치"]}
-          />
-        </aside>
+      <section
+        className={`workspace workspace-${state.currentStep}`}
+        aria-label="쇼츠 제작 작업공간"
+      >
+        <aside className="workspace-panel workspace-primary">{contentByStep[state.currentStep]}</aside>
+        {showPreview && (
+          <section className="preview-stage">
+            <ShortsCanvas scene={selectedSceneExists ? selectedScene : null} />
+            <Timeline
+              scenes={scenes}
+              selectedSceneIndex={selectedSceneIndex}
+              onSelectScene={handleSceneSelect}
+            />
+          </section>
+        )}
+        {showAssistant && (
+          <aside className="workspace-panel">
+            <GrowthAssistantPanel
+              notes={["클릭률 향상을 위해 첫 3초 훅 메시지 강화", "자막 길이를 20자 이내로 간결히 정리"]}
+              recommendations={["첫 화면에서 핵심 결과 제시", "콜투액션을 끝 부분에 배치"]}
+            />
+          </aside>
+        )}
       </section>
     </main>
   );
