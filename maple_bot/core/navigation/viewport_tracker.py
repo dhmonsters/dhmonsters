@@ -65,6 +65,7 @@ class ViewportTracker:
         self._previous: np.ndarray | None = None
         self._velocity = WorldPoint(0.0, 0.0)
         self._viewport_size = (0.0, 0.0)
+        self._has_confirmed = False
 
     @staticmethod
     def _limited_correction(
@@ -92,10 +93,11 @@ class ViewportTracker:
         if confidence >= self._confirm_threshold:
             origin = (
                 matched
-                if self._previous is None
+                if not self._has_confirmed
                 else self._limited_correction(previous_origin, matched)
             )
             state = "confirmed"
+            self._has_confirmed = True
         else:
             dx, dy, response = shift
             if response >= self._phase_threshold:

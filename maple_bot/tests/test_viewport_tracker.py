@@ -60,3 +60,22 @@ def test_confirmed_recovery_limits_origin_correction():
 
     assert result.origin == WorldPoint(12, 0)
     assert result.state == "confirmed"
+
+
+def test_first_confirmed_match_is_not_limited_after_initial_failure():
+    matches = iter([
+        (WorldPoint(0, 0), 0.10, (0.0, 0.0, 0.0)),
+        (WorldPoint(100, 40), 0.92, (0.0, 0.0, 1.0)),
+    ])
+    tracker = ViewportTracker(
+        np.zeros((300, 600), dtype=np.uint8),
+        Calibration(1.0, 0.0, 0.0),
+        match_fn=lambda *_: next(matches),
+    )
+    frame = np.zeros((50, 100, 3), dtype=np.uint8)
+
+    assert tracker.update(frame, WorldPoint(0, 0)).state == "estimated"
+    result = tracker.update(frame, WorldPoint(0, 0))
+
+    assert result.origin == WorldPoint(100, 40)
+    assert result.state == "confirmed"
