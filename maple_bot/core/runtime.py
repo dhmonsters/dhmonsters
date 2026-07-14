@@ -25,6 +25,9 @@ from core.humanize.intent import Intent
 from core.minigame.registry import SolverRegistry
 from core.minigame.self_transparent_engine import SelfTransparentEngine
 from core.minigame.sidecar import InMemoryChannel, SidecarChannel
+from core.navigation.viewport_tracker import ViewportTracker
+from core.navigation.world_runner import ActionExecutor, WorldRouteRunner
+from core.sensing.world_position_scanner import WorldPositionScanner
 
 
 @dataclass
@@ -209,6 +212,37 @@ class BotRuntime:
             on_segment_exit=self._on_route_segment_exit,
             log_fn=lambda m: self.log(m, "이동"),
         )
+        self._world_scanner = None
+        self._world_runner = None
+        self._world_thread = None
+        if config.world_map is not None:
+            import cv2
+
+            world_image = cv2.imread(config.world_map.image_path, cv2.IMREAD_GRAYSCALE)
+            if world_image is not None and config.world_map.calibration is not None:
+                tracker = ViewportTracker(
+                    world_image,
+                    config.world_map.calibration,
+                )
+                self._world_scanner = WorldPositionScanner(
+                    capture_fn=self._capture,
+                    region_fn=lambda: self._resolve_region(config.minimap_region),
+                    local_position_fn=lambda: self.orchestrator.state.get_position(),
+                    tracker=tracker,
+                )
+                world_blocks = BlockRunner(
+                    humanizer=self.humanizer,
+                    pos_fn=lambda: self.world_position() or (0, 0),
+                    jump_key=config.jump_key or "alt",
+                    jump_while_move=config.jump_while_move,
+                    stop_fn=lambda: not self._route_can_run(),
+                    log_fn=lambda m: self.log(m, "전역이동"),
+                )
+                self._world_runner = WorldRouteRunner(
+                    config.world_map,
+                    world_blocks,
+                    ActionExecutor(self.humanizer),
+                )
         # 설정된 캐릭터색(char_r/g/b)을 느슨한 HSV로 감지에 반영(미니맵 노란점 인식률↑)
         if config.char_rgb:
             from core.sensing.char_scanner import hsv_range_from_rgb
@@ -295,11 +329,72 @@ class BotRuntime:
         for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner, self.user_scanner):
             if sc is not None:
                 sc.start(self.event_queue)
+        if self._world_scanner is not None:
+            self._world_scanner.start()
 
     def stop_scanners(self) -> None:
         for sc in (self.char_scanner, self.antimob_scanner, self.lie_scanner, self.user_scanner):
             if sc is not None:
                 sc.stop()
+        if self._world_scanner is not None:
+            self._world_scanner.stop()
+
+    def world_position(self):
+        return self._world_scanner.position() if self._world_scanner else None
+
+    def world_tracking_state(self):
+        return self._world_scanner.state() if self._world_scanner else "unavailable"
+
+    def world_viewport(self):
+        return self._world_scanner.viewport() if self._world_scanner else None
+
+    def _start_world_job(self, fn) -> bool:
+        import threading
+
+        if self._world_runner is None:
+            return False
+        if self._world_thread and self._world_thread.is_alive():
+            return False
+        self._world_thread = threading.Thread(
+            target=fn,
+            daemon=True,
+            name="WorldNavigation",
+        )
+        self._world_thread.start()
+        return True
+
+    def start_world_route(self, route_id: str) -> bool:
+        if self._world_runner is None or self._cfg.world_map is None:
+            return False
+        route = self._cfg.world_map.routes.get(route_id)
+        if route is None:
+            return False
+
+        def run():
+            while self._route_can_run():
+                if not self._world_runner.run_node_path(route.node_ids):
+                    return
+                if not route.loop:
+                    return
+
+        return self._start_world_job(run)
+
+    def navigate_world_to(self, node_id: str) -> bool:
+        if self._world_runner is None or self._cfg.world_map is None:
+            return False
+        if node_id not in self._cfg.world_map.nodes:
+            return False
+        position = self.world_position()
+        if position is None:
+            return False
+        px, py = position
+        start = min(
+            self._cfg.world_map.nodes.values(),
+            key=lambda node: (node.x - px) ** 2 + (node.y - py) ** 2,
+        )
+        return self._start_world_job(
+            lambda: self._world_runner.navigate_to(start.id, node_id)
+        )
 
     # ── 루트 실행 활성 조건 ───────────────────────────────────────────
     def set_running(self, flag: bool) -> None:

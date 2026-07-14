@@ -277,3 +277,17 @@ def test_runtime_builds_recovery_graph_and_injects():
     g = rt.block_runner._graph
     assert g is not None and "1층" in g and "2층" in g
     assert any(e["to"] == "2층" for e in g["1층"])   # 사다리 간선
+
+
+def test_world_navigation_is_absent_when_world_map_disabled():
+    from core.runtime import BotRuntime
+
+    runtime = object.__new__(BotRuntime)
+    runtime._world_scanner = None
+    runtime._world_runner = None
+
+    assert runtime.world_position() is None
+    assert runtime.world_tracking_state() == "unavailable"
+    assert runtime.world_viewport() is None
+    assert runtime.start_world_route("missing") is False
+    assert runtime.navigate_world_to("missing") is False
