@@ -16,6 +16,7 @@ class FakeConfig:
             "attack": {},
         }
         self.saved = 0
+        self.loaded = 0
 
     def get(self, *keys, default=None):
         node = self.data
@@ -37,6 +38,9 @@ class FakeConfig:
 
     def save(self):
         self.saved += 1
+
+    def load(self):
+        self.loaded += 1
 
 
 def test_editor_saves_action_node():
@@ -66,3 +70,37 @@ def test_editor_saves_image_trigger_settings():
     assert trigger["template_path"] == "templates/target.png"
     assert trigger["action"]["repeat"] == 2
     assert config.saved == 1
+
+
+def test_editor_collects_two_pairs_and_applies_calibration():
+    app = QApplication.instance() or QApplication([])
+    config = FakeConfig()
+    editor = WorldMapEditor(config)
+
+    editor._on_world_point(100, 50)
+    editor._on_local_point(10, 5)
+    editor._on_world_point(500, 250)
+    editor._on_local_point(210, 105)
+    calibration = editor.apply_calibration()
+
+    assert calibration.scale == 2.0
+    assert config.get("world_map", "calibration")["offset"] == [80.0, 40.0]
+    assert config.saved == 1
+    assert config.loaded == 1
+
+
+def test_editor_ui_preserves_all_image_action_timings():
+    app = QApplication.instance() or QApplication([])
+    config = FakeConfig()
+    editor = WorldMapEditor(config)
+    editor._template_path.setText("target.png")
+    editor._hold_sec.setValue(0.7)
+    editor._repeat_interval.setValue(0.4)
+    editor._wait_after.setValue(1.2)
+
+    editor._save_trigger_from_ui()
+
+    action = config.get("attack", "image_trigger")["action"]
+    assert action["hold_sec"] == 0.7
+    assert action["repeat_interval_sec"] == 0.4
+    assert action["wait_after_sec"] == 1.2

@@ -71,6 +71,16 @@ class WorldMapCanvas(QWidget):
         if not self._pixmap.isNull():
             painter.drawPixmap(self.rect(), self._pixmap)
         node_by_id = {node.get("id"): node for node in self._nodes}
+        painter.setPen(QPen(QColor("#f39c12"), 2, Qt.PenStyle.DashLine))
+        painter.setBrush(QColor(243, 156, 18, 45))
+        for zone in self._zones:
+            left = zone.get("left_x", zone.get("x", 0))
+            right = zone.get("right_x", left + zone.get("width", 0))
+            top = zone.get("y_min", zone.get("y", 0))
+            bottom = zone.get("y_max", top + zone.get("height", 0))
+            p1 = self._point(left, top)
+            p2 = self._point(right, bottom)
+            painter.drawRect(int(p1.x()), int(p1.y()), int(p2.x() - p1.x()), int(p2.y() - p1.y()))
         painter.setPen(QPen(QColor("#66c2a5"), 2))
         for edge in self._edges:
             left = node_by_id.get(edge.get("from_id"))
