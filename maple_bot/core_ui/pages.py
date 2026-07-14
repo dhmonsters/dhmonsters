@@ -255,10 +255,19 @@ def build_pages(config) -> list[QWidget]:
     block_editor = BlockEditor(c, ("floor_hunt", "route"))
     # 미니맵 편집 캔버스(RouteCanvas) + 블록타입 툴바. 캡처/모니터 폭 실패 시 캔버스 생략
     nav_extras = []
+    world_capture = None
     try:
         from core.screen_reader import ScreenReader as _WorldScreenReader
+        world_capture = _WorldScreenReader().capture
+    except Exception:
+        pass
+    try:
         from core_ui.world_map_editor import WorldMapEditor
-        nav_extras.append(WorldMapEditor(c, screen_capture=_WorldScreenReader().capture))
+        if not c.get("world_map", "enabled", default=False):
+            guide = _QLabel("전역 지도를 등록하고 2점 보정을 완료하면 큰 지도 이동이 활성화됩니다.")
+            guide.setObjectName("subtle")
+            nav_extras.append(guide)
+        nav_extras.append(WorldMapEditor(c, screen_capture=world_capture))
     except Exception:
         pass
     try:

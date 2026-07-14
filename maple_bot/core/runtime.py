@@ -432,17 +432,18 @@ class BotRuntime:
 
     def _check_image_trigger(self):
         spec = getattr(self._cfg, "image_trigger_spec", None)
-        if self._image_trigger is None or spec is None:
-            return None
-        hunt_region = self._resolve_region(self._cfg.hunt_area_region)
-        if not hunt_region:
+        image_trigger = getattr(self, "_image_trigger", None)
+        if image_trigger is None or spec is None:
             return None
         try:
+            hunt_region = self._resolve_region(self._cfg.hunt_area_region)
+            if not hunt_region:
+                return None
             frame = self._capture(hunt_region)
             if frame is None or not getattr(frame, "size", 0):
                 return None
             height, width = frame.shape[:2]
-            return self._image_trigger.check(
+            return image_trigger.check(
                 frame,
                 (0, 0, width, height),
                 spec,

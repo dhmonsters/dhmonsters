@@ -124,3 +124,33 @@ def test_runtime_image_trigger_uses_captured_hunt_area_only():
     runtime._check_image_trigger()
 
     assert calls == [((15, 30, 3), (0, 0, 30, 15), runtime._cfg.image_trigger_spec)]
+
+
+def test_runtime_image_trigger_isolates_region_resolution_error():
+    from types import SimpleNamespace
+    from core.runtime import BotRuntime
+
+    logs = []
+    runtime = object.__new__(BotRuntime)
+    runtime._cfg = SimpleNamespace(image_trigger_spec=object(), hunt_area_region={})
+    runtime._image_trigger = object()
+    runtime._resolve_region = lambda region: (_ for _ in ()).throw(ValueError("bad region"))
+    runtime.log = lambda *args: logs.append(args)
+
+    assert runtime._check_image_trigger() is None
+    assert "bad region" in logs[0][0]
+
+
+def test_world_editor_survives_capture_initialization_failure(monkeypatch):
+    from core.screen_reader import ScreenReader
+
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(
+        ScreenReader,
+        "__init__",
+        lambda self: (_ for _ in ()).throw(RuntimeError("capture unavailable")),
+    )
+
+    pages = build_pages(FakeConfig())
+
+    assert pages[1].findChild(WorldMapEditor, "worldMapEditor") is not None
