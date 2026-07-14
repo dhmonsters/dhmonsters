@@ -126,3 +126,107 @@ class WorldMapModel:
     nodes: dict[str, NavNode] = field(default_factory=dict)
     edges: tuple[NavEdge, ...] = ()
     routes: dict[str, NavRoute] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WorldMapModel":
+        world = data.get("world_map", data)
+        navigation = data.get("navigation", {})
+        calibration_data = world.get("calibration")
+        calibration = None
+        if calibration_data:
+            offset = calibration_data.get("offset", [0.0, 0.0])
+            calibration = Calibration(
+                float(calibration_data["scale"]),
+                float(offset[0]),
+                float(offset[1]),
+            )
+        nodes = {}
+        for item in navigation.get("nodes", []):
+            action_data = item.get("action")
+            action = ActionSpec(**action_data) if action_data else None
+            node = NavNode(
+                id=item["id"],
+                kind=item["kind"],
+                x=float(item["x"]),
+                y=float(item["y"]),
+                arrival_radius=float(item.get("arrival_radius", 4.0)),
+                label=item.get("label", ""),
+                action=action,
+            )
+            nodes[node.id] = node
+        edges = tuple(NavEdge(**item) for item in navigation.get("edges", []))
+        routes = {}
+        for item in navigation.get("routes", []):
+            route = NavRoute(
+                id=item["id"],
+                name=item["name"],
+                node_ids=tuple(item.get("node_ids", [])),
+                loop=bool(item.get("loop", True)),
+            )
+            routes[route.id] = route
+        return cls(
+            enabled=bool(world.get("enabled", False)),
+            image_path=world.get("image_path", ""),
+            image_width=int(world.get("image_width", 0)),
+            image_height=int(world.get("image_height", 0)),
+            calibration=calibration,
+            nodes=nodes,
+            edges=edges,
+            routes=routes,
+        )
+
+    def to_dict(self) -> dict:
+        calibration = None
+        if self.calibration is not None:
+            calibration = {
+                "scale": self.calibration.scale,
+                "offset": [self.calibration.offset_x, self.calibration.offset_y],
+            }
+        nodes = []
+        for node in self.nodes.values():
+            action = None
+            if node.action is not None:
+                action = {
+                    "key": node.action.key,
+                    "hold_sec": node.action.hold_sec,
+                    "repeat": node.action.repeat,
+                    "repeat_interval_sec": node.action.repeat_interval_sec,
+                    "wait_after_sec": node.action.wait_after_sec,
+                }
+            nodes.append({
+                "id": node.id,
+                "kind": node.kind,
+                "x": node.x,
+                "y": node.y,
+                "arrival_radius": node.arrival_radius,
+                "label": node.label,
+                "action": action,
+            })
+        edges = [{
+            "id": edge.id,
+            "from_id": edge.from_id,
+            "to_id": edge.to_id,
+            "bidirectional": edge.bidirectional,
+            "traversal": edge.traversal,
+            "ladder": edge.ladder,
+        } for edge in self.edges]
+        routes = [{
+            "id": route.id,
+            "name": route.name,
+            "node_ids": list(route.node_ids),
+            "loop": route.loop,
+        } for route in self.routes.values()]
+        return {
+            "world_map": {
+                "enabled": self.enabled,
+                "image_path": self.image_path,
+                "image_width": self.image_width,
+                "image_height": self.image_height,
+                "calibration": calibration,
+            },
+            "navigation": {
+                "nodes": nodes,
+                "edges": edges,
+                "routes": routes,
+            },
+        }

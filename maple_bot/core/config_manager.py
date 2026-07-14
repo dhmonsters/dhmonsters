@@ -71,6 +71,17 @@ DEFAULT_CONFIG = {
         "start": "f1",
         "stop":  "f2",
     },
+    "world_map": {
+        "enabled": False,
+        "image_path": "",
+        "image_width": 0,
+        "image_height": 0,
+        "calibration": None,
+        "tracking_policy": "continue_estimated",
+        "migration_completed": False,
+        "legacy_backup_path": "",
+    },
+    "navigation": {"nodes": [], "edges": [], "routes": []},
     "attack": {
         "key":               "ctrl",
         "monster_template":  "",
@@ -100,6 +111,21 @@ DEFAULT_CONFIG = {
         "density_stay":        3,     # 이 마리수 이상이면 멈춰 사냥(밀집)
         "density_leave":       1,     # 이 마리수 이하로 줄면 이동(희소)
         "density_max_dwell_sec": 8.0, # 한 자리 최대 체류(밀집이어도 초과 시 강제 이동)
+        "hunt_area": {"x": 0, "y": 0, "w": 0, "h": 0},
+        "image_trigger": {
+            "enabled": False,
+            "template_path": "",
+            "threshold": 0.8,
+            "check_interval_sec": 0.1,
+            "cooldown_sec": 2.0,
+            "action": {
+                "key": "space",
+                "hold_sec": 0.1,
+                "repeat": 1,
+                "repeat_interval_sec": 0.0,
+                "wait_after_sec": 0.0,
+            },
+        },
     },
     "hunt_mode": "key",   # "key" | "image" | "coordinate"
     "hunt_grounds": {

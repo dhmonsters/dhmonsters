@@ -6,6 +6,8 @@ from core.navigation.block import Block
 from core.navigation.floor_judge import Floor
 from core.acting.combat import PotionRule
 from core.acting.buff import Buff
+from core.navigation.image_trigger import ImageTriggerSpec
+from core.navigation.world_map import ActionSpec, WorldMapModel
 
 
 def _potion_rule(cfg: dict) -> PotionRule:
@@ -64,6 +66,30 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
             "left": int(ha.get("x", 0)), "top": int(ha.get("y", 0)),
             "width": int(ha.get("w", 0)), "height": int(ha.get("h", 0)),
         }
+
+    world_map = None
+    world_data = d.get("world_map", {})
+    if (world_data.get("enabled") and world_data.get("image_path")
+            and world_data.get("calibration")):
+        world_map = WorldMapModel.from_dict(d)
+
+    image_trigger_spec = None
+    trigger_data = attack.get("image_trigger", {})
+    if trigger_data.get("enabled") and trigger_data.get("template_path"):
+        action_data = trigger_data.get("action", {})
+        image_trigger_spec = ImageTriggerSpec(
+            template_path=str(trigger_data["template_path"]),
+            threshold=float(trigger_data.get("threshold", 0.8)),
+            check_interval_sec=float(trigger_data.get("check_interval_sec", 0.1)),
+            cooldown_sec=float(trigger_data.get("cooldown_sec", 2.0)),
+            action=ActionSpec(
+                key=str(action_data.get("key", "space")),
+                hold_sec=float(action_data.get("hold_sec", 0.1)),
+                repeat=int(action_data.get("repeat", 1)),
+                repeat_interval_sec=float(action_data.get("repeat_interval_sec", 0.0)),
+                wait_after_sec=float(action_data.get("wait_after_sec", 0.0)),
+            ),
+        )
 
     # 몬스터 템플릿 수집 (단일 monster_template + monster_folder 내 png들 = B 다중방식)
     import os, glob as _glob
@@ -136,6 +162,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         user_detect_enabled=bool(user.get("enabled", False)),
         auto_reply_messages=list(user.get("messages", [])),
         hunt_area_region=hunt_area_region,
+        world_map=world_map,
+        image_trigger_spec=image_trigger_spec,
         hunt_mode=d.get("hunt_mode", "key"),
         name_template=attack.get("name_template", ""),
         monster_templates=monster_tpls,
