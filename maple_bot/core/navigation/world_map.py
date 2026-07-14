@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 # 큰 지도 절대좌표와 보정·이동 노드 데이터를 정의하는 순수 모델
 import math
 from dataclasses import dataclass, field
@@ -87,6 +86,10 @@ class NavNode:
             raise ValueError("node kind는 waypoint 또는 action이어야 합니다")
         if self.kind == "action" and self.action is None:
             raise ValueError("action 노드에는 action 설정이 필요합니다")
+
+
+        if self.kind != "action" and self.action is not None:
+            raise ValueError("action 설정은 action 노드에만 사용할 수 있습니다")
 
 
 @dataclass(frozen=True)

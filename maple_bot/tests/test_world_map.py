@@ -44,3 +44,9 @@ def test_action_and_edge_validation():
     assert edge.traversal == "walk"
     with pytest.raises(ValueError, match="repeat"):
         ActionSpec("up", 0.2, 0, 0.0, 1.0)
+
+
+def test_waypoint_rejects_action_spec():
+    action = ActionSpec("up", 0.2, 1, 0.0, 1.0)
+    with pytest.raises(ValueError, match="action 노드"):
+        NavNode("n1", "waypoint", 20, 30, action=action)
