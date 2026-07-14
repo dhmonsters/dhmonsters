@@ -26,6 +26,7 @@ from core.minigame.registry import SolverRegistry
 from core.minigame.self_transparent_engine import SelfTransparentEngine
 from core.minigame.sidecar import InMemoryChannel, SidecarChannel
 from core.navigation.viewport_tracker import ViewportTracker
+from core.navigation.world_map import WorldMapModel
 from core.navigation.world_runner import ActionExecutor, WorldRouteRunner
 from core.sensing.world_position_scanner import WorldPositionScanner
 

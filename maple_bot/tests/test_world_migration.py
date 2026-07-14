@@ -64,6 +64,7 @@ def test_world_map_model_round_trip():
         image_path="maps/test.png",
         image_width=1000,
         image_height=500,
+        tracking_policy="strict_confirmed",
         calibration=Calibration(2.0, 10.0, 20.0),
         nodes={
             "a": NavNode("a", "waypoint", 10, 20),
