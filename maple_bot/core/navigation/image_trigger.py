@@ -1,5 +1,5 @@
-# 캐릭터 기준 사냥 영역에서 템플릿을 찾고 쿨다운에 따라 액션을 실행하는 트리거
 from __future__ import annotations
+# 캐릭터 기준 사냥 영역에서 템플릿을 찾고 쿨다운에 따라 액션을 실행하는 트리거
 
 import time
 from dataclasses import dataclass
