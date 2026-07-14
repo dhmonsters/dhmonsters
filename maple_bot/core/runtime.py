@@ -87,7 +87,7 @@ class RuntimeConfig:
     auto_reply_messages: list = field(default_factory=list)
     # 사냥 영역 (B training: 이 영역 안에서만 몬스터/닉네임 감지)
     hunt_area_region: dict | None = None
-    world_map: object = None
+    world_map: "WorldMapModel | None" = None
     image_trigger_spec: object = None
     # 좌표 기준 — relative면 영역을 게임창 이동량(현재원점-앵커)만큼 보정(창 따라감)
     coord_mode: str = "absolute"

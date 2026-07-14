@@ -310,6 +310,29 @@ class ConfigManager:
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 saved = json.load(f)
+            world = saved.get("world_map", {})
+            calibration_data = world.get("calibration")
+            if calibration_data and not world.get("migration_completed"):
+                from datetime import datetime
+                from core.navigation.world_map import Calibration, WorldPoint
+                from core.navigation.world_migration import backup_config, migrate_legacy_data
+
+                offset = calibration_data.get("offset", [0.0, 0.0])
+                calibration = Calibration(
+                    float(calibration_data["scale"]),
+                    float(offset[0]),
+                    float(offset[1]),
+                )
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_path = backup_config(CONFIG_PATH, timestamp)
+                saved = migrate_legacy_data(
+                    saved,
+                    calibration,
+                    WorldPoint(calibration.offset_x, calibration.offset_y),
+                )
+                saved["world_map"]["legacy_backup_path"] = str(backup_path)
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(saved, f, ensure_ascii=False, indent=2)
             # 저장된 값을 기본값 위에 덮어씌움 — 새 기본값 키는 자동으로 추가됨
             _deep_merge(self._data, saved)
 

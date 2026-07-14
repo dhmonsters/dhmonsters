@@ -122,6 +122,7 @@ class WorldMapModel:
     image_path: str = ""
     image_width: int = 0
     image_height: int = 0
+    tracking_policy: str = "continue_estimated"
     calibration: Calibration | None = None
     nodes: dict[str, NavNode] = field(default_factory=dict)
     edges: tuple[NavEdge, ...] = ()
@@ -169,6 +170,7 @@ class WorldMapModel:
             image_path=world.get("image_path", ""),
             image_width=int(world.get("image_width", 0)),
             image_height=int(world.get("image_height", 0)),
+            tracking_policy=world.get("tracking_policy", "continue_estimated"),
             calibration=calibration,
             nodes=nodes,
             edges=edges,
@@ -222,6 +224,7 @@ class WorldMapModel:
                 "image_path": self.image_path,
                 "image_width": self.image_width,
                 "image_height": self.image_height,
+                "tracking_policy": self.tracking_policy,
                 "calibration": calibration,
             },
             "navigation": {

@@ -76,3 +76,31 @@ def test_world_map_model_round_trip():
     restored = WorldMapModel.from_dict(model.to_dict())
 
     assert restored == model
+
+
+def test_config_manager_backs_up_and_migrates_once(tmp_path, monkeypatch):
+    from core import config_manager as module
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps({
+        "floor_hunt": {"route": [{"type": "move", "pos_x": 10, "pos_y": 20}]},
+        "world_map": {
+            "enabled": True,
+            "image_path": "map.png",
+            "calibration": {"scale": 2.0, "offset": [100.0, 40.0]},
+            "migration_completed": False,
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr(module, "CONFIG_PATH", str(config_path))
+
+    first = module.ConfigManager()
+    migrated = json.loads(config_path.read_text(encoding="utf-8"))
+    backup_path = migrated["world_map"]["legacy_backup_path"]
+
+    assert first.get("floor_hunt", "route")[0]["pos_x"] == 120
+    assert migrated["world_map"]["migration_completed"] is True
+    assert backup_path
+    assert (tmp_path / backup_path.split("\\")[-1].split("/")[-1]).exists()
+
+    module.ConfigManager()
+    assert json.loads(config_path.read_text(encoding="utf-8")) == migrated
