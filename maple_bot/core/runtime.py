@@ -26,6 +26,7 @@ from core.minigame.registry import SolverRegistry
 from core.minigame.self_transparent_engine import SelfTransparentEngine
 from core.minigame.sidecar import InMemoryChannel, SidecarChannel
 from core.navigation.viewport_tracker import ViewportTracker
+from core.navigation.image_trigger import ImageTrigger
 from core.navigation.world_map import WorldMapModel
 from core.navigation.world_runner import ActionExecutor, WorldRouteRunner
 from core.sensing.world_position_scanner import WorldPositionScanner
@@ -247,6 +248,11 @@ class BotRuntime:
                     world_blocks,
                     ActionExecutor(self.humanizer),
                 )
+        self._image_trigger = (
+            ImageTrigger(ActionExecutor(self.humanizer))
+            if config.image_trigger_spec is not None
+            else None
+        )
         # 설정된 캐릭터색(char_r/g/b)을 느슨한 HSV로 감지에 반영(미니맵 노란점 인식률↑)
         if config.char_rgb:
             from core.sensing.char_scanner import hsv_range_from_rgb
@@ -424,12 +430,35 @@ class BotRuntime:
         return (self._bot_running and self.orchestrator.mode == "hunting"
                 and self._world_navigation_active)
 
+    def _check_image_trigger(self):
+        spec = getattr(self._cfg, "image_trigger_spec", None)
+        if self._image_trigger is None or spec is None:
+            return None
+        hunt_region = self._resolve_region(self._cfg.hunt_area_region)
+        if not hunt_region:
+            return None
+        try:
+            frame = self._capture(hunt_region)
+            if frame is None or not getattr(frame, "size", 0):
+                return None
+            height, width = frame.shape[:2]
+            return self._image_trigger.check(
+                frame,
+                (0, 0, width, height),
+                spec,
+            )
+        except Exception as exc:
+            self.log(f"이미지 트리거 오류: {exc}", "감지")
+            return None
+
     # ── 틱 ────────────────────────────────────────────────────────────
     def hunting_tick(self, now: float | None = None) -> None:
         """정상 사냥 1틱: 구역 좌우 왕복 순찰 + 공격 + 버프."""
         now = now if now is not None else time.time()
         if self.orchestrator.mode != "hunting":
             return
+
+        self._check_image_trigger()
 
         # HP/MP 물약 — 매 사냥 틱 확인(임계 미만이면 Combat이 키 입력). 어느 분기든 먼저 실행.
         self._check_potions(now)

@@ -256,6 +256,12 @@ def build_pages(config) -> list[QWidget]:
     # 미니맵 편집 캔버스(RouteCanvas) + 블록타입 툴바. 캡처/모니터 폭 실패 시 캔버스 생략
     nav_extras = []
     try:
+        from core.screen_reader import ScreenReader as _WorldScreenReader
+        from core_ui.world_map_editor import WorldMapEditor
+        nav_extras.append(WorldMapEditor(c, screen_capture=_WorldScreenReader().capture))
+    except Exception:
+        pass
+    try:
         import mss as _mss
         from PyQt6.QtWidgets import QWidget as _QWidget, QHBoxLayout as _QHBox, \
             QPushButton as _QBtn, QButtonGroup as _QBtnGroup

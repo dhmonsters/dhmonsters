@@ -46,6 +46,23 @@ def build_runtime():
     return rt, rc, cm
 
 
+def bind_world_editor(shell, runtime):
+    """전역 지도 편집기의 실행 신호와 런타임 상태 공급자를 연결한다."""
+    from core_ui.world_map_editor import WorldMapEditor
+
+    editor = shell.findChild(WorldMapEditor, "worldMapEditor")
+    if editor is None:
+        return None
+    editor.destination_requested.connect(runtime.navigate_world_to)
+    editor.route_start_requested.connect(runtime.start_world_route)
+    editor.set_runtime_state_provider(
+        position_fn=runtime.world_position,
+        tracking_state_fn=runtime.world_tracking_state,
+        viewport_fn=runtime.world_viewport,
+    )
+    return editor
+
+
 class BotController:
     """UI 시작/정지 버튼 ↔ BotRuntime 메인루프 연결."""
 
@@ -118,6 +135,7 @@ def main():
 
     rt, rc, cm = build_runtime()
     shell = MainShell(config=cm)     # 실제 설정 페이지 바인딩
+    bind_world_editor(shell, rt)
     shell.append_log(f"설정 로드: 미니맵 {rc.minimap_region}, 층 {len(rc.floors)}개, 버프 {len(rc.buffs)}개")
 
     controller = BotController(rt, log_fn=shell.append_log)
