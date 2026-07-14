@@ -14,7 +14,7 @@
 
 | 프로그램 | 형태 | 포팅 |
 |---|---|---|
-| **A** (DHMONSTERS, 우리 `core/`) | 파이썬 소스 | ✅ 유일하게 소스 포팅 가능 (이 감사의 기준) |
+| **A** (Claude, 우리 `core/`) | 파이썬 소스 | ✅ 유일하게 소스 포팅 가능 (이 감사의 기준) |
 | **B** (Planet) | 앱 전체 `__mypyc.cp313-win_amd64.pyd`(mypyc 네이티브) + Themida + 메모리 기반 | ❌ 디컴파일 불가 + 메모리(헌법 위반) |
 | **C** (MapleHunter) | 핵심 `core/hunting.pyd`·`memory_reader_external.pyd` 등 컴파일 .pyd + 메모리 기반 | ❌ 알고리즘 디컴파일 불가 |
 

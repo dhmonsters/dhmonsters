@@ -30,7 +30,7 @@ class MainShell(QMainWindow):
     def __init__(self, config=None):
         super().__init__()
         self._config = config
-        self.setWindowTitle("DHMONSTERS")
+        self.setWindowTitle("Claude")
         self.resize(1180, 760)
         self.setMinimumSize(1024, 640)
         self.setStyleSheet(build_qss())
@@ -74,7 +74,7 @@ class MainShell(QMainWindow):
         h.setContentsMargins(SPACING["md"], SPACING["xs"], SPACING["md"], SPACING["xs"])
         h.setSpacing(SPACING["xxs"])
 
-        logo = QLabel("● DHMONSTERS"); logo.setObjectName("logo")
+        logo = QLabel("● Claude"); logo.setObjectName("logo")
         h.addWidget(logo)
         h.addSpacing(SPACING["sm"])
 

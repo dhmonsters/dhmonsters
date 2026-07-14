@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# MapleBot v0.1 PyInstaller 빌드 스펙
+# Claude 통합 프로그램 PyInstaller 빌드 스펙
 
 import os
 from PyInstaller.utils.hooks import collect_all
@@ -12,11 +12,17 @@ if os.path.exists("templates"):
     extra_datas.append(("templates", "templates"))
 if os.path.exists("monsters"):
     extra_datas.append(("monsters", "monsters"))
+if os.path.exists("models"):
+    extra_datas.append(("models", "models"))
+if os.path.exists("assets"):
+    extra_datas.append(("assets", "assets"))
+if os.path.exists("config.json"):
+    extra_datas.append(("config.json", "."))
 if os.path.exists("version.txt"):
     extra_datas.append(("version.txt", "."))
 
 a = Analysis(
-    ["main.py"],
+    ["run_integrated.py"],
     pathex=[],
     binaries=qt_binaries,
     datas=extra_datas,
@@ -43,7 +49,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="dhmonsters",
+    name="Claude",
     debug=False,
     strip=False,
     upx=False,
@@ -58,5 +64,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="dhmonsters",
+    name="Claude",
 )

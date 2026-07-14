@@ -1,8 +1,8 @@
-#define AppName "DHMONSTERS"
-#define AppVersion "1.1.6"
-#define AppPublisher "dhmonsters"
-#define AppExeName "dhmonsters.exe"
-#define SourceDir "C:\Users\PC\Desktop\02_work\05_AI\.claude\worktrees\xenodochial-cray-ed5ae0\maple_bot\dist\dhmonsters"
+#define AppName "Claude"
+#define AppVersion "2.1.5"
+#define AppPublisher "Claude"
+#define AppExeName "Claude.exe"
+#define SourceDir "C:\Users\PC\Desktop\02_work\05_AI\maple_bot\03_output\Claude_v2.1.5_portable\Claude"
 
 [Setup]
 AppId={{B3F2A1C4-9E87-4D56-A321-7C8E5F0B2D94}
@@ -12,8 +12,8 @@ AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
-OutputDir=C:\Users\PC\Desktop
-OutputBaseFilename=DHMONSTERS_Setup_v{#AppVersion}
+OutputDir=C:\Users\PC\Desktop\02_work\05_AI\maple_bot\03_output
+OutputBaseFilename=Claude_Setup_v{#AppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -31,7 +31,7 @@ Name: "desktopicon"; Description: "바탕화면에 바로 가기 만들기"; Gro
 
 [Files]
 ; MapleBot.exe 및 _internal 폴더 (config.json, license.dat 제외)
-Source: "{#SourceDir}\dhmonsters.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\Claude.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\version.txt"; DestDir: "{app}"; Flags: ignoreversion
 ; config.json — 없을 때만 복사 (기존 설정 보존)
@@ -49,7 +49,7 @@ Filename: "powershell.exe"; \
   Flags: runhidden waituntilterminated; \
   StatusMsg: "보안 프로그램 예외 설정 중..."
 ; 설치 완료 후 실행 여부 선택
-Filename: "{app}\{#AppExeName}"; Description: "DHMONSTERS 실행"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "Claude 실행"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 제거 시 Defender 제외 해제

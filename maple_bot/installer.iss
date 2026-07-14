@@ -1,11 +1,11 @@
 ; MapleBot Inno Setup 설치 스크립트
 ; ISCC.exe installer.iss 로 빌드
 
-#define AppName    "DHMONSTERS"
+#define AppName    "Claude"
 #define AppVersion "2.1.5"
-#define AppExe     "dhmonsters.exe"
-#define AppPublisher "dhmonsters"
-#define SourceDir  "dist\dhmonsters"
+#define AppExe     "Claude.exe"
+#define AppPublisher "Claude"
+#define SourceDir  "03_output\Claude_v2.1.5_portable\Claude"
 
 [Setup]
 AppId={{B3F2A1C4-7E5D-4F8A-9B2C-3D6E8F1A2B5C}
@@ -16,8 +16,8 @@ AppSupportURL=https://github.com/dhmonsters/dhmonsters
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
-OutputDir=installer_output
-OutputBaseFilename=DHMONSTERS_v{#AppVersion}_Setup
+OutputDir=03_output
+OutputBaseFilename=Claude_v{#AppVersion}_Setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
