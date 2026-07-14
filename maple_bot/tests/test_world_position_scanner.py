@@ -48,3 +48,18 @@ def test_scan_once_without_local_position_keeps_unavailable():
     assert scanner.scan_once() is None
     assert scanner.position() is None
     assert scanner.state() == "unavailable"
+
+
+def test_local_position_loss_downgrades_confirmed_to_estimated():
+    positions = iter([(10, 5), None])
+    scanner = WorldPositionScanner(
+        capture_fn=lambda region: np.zeros((20, 40, 3), dtype=np.uint8),
+        region_fn=lambda: {},
+        local_position_fn=lambda: next(positions),
+        tracker=FakeTracker(),
+    )
+
+    assert scanner.scan_once() == (110, 45)
+    assert scanner.scan_once() is None
+    assert scanner.position() == (110, 45)
+    assert scanner.state() == "estimated"

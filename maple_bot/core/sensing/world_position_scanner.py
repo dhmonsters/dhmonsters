@@ -28,6 +28,8 @@ class WorldPositionScanner:
     def scan_once(self):
         local = self._local()
         if local is None:
+            if self._position is not None:
+                self._state = "estimated"
             return None
         frame = self._capture(self._region())
         local_point = WorldPoint(*local)

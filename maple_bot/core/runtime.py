@@ -216,6 +216,9 @@ class BotRuntime:
         self._world_scanner = None
         self._world_runner = None
         self._world_thread = None
+        import threading
+        self._world_lock = threading.Lock()
+        self._world_navigation_active = False
         if config.world_map is not None:
             import cv2
 
@@ -236,7 +239,7 @@ class BotRuntime:
                     pos_fn=lambda: self.world_position() or (0, 0),
                     jump_key=config.jump_key or "alt",
                     jump_while_move=config.jump_while_move,
-                    stop_fn=lambda: not self._route_can_run(),
+                    stop_fn=lambda: not self._world_can_run(),
                     log_fn=lambda m: self.log(m, "전역이동"),
                 )
                 self._world_runner = WorldRouteRunner(
@@ -354,14 +357,24 @@ class BotRuntime:
 
         if self._world_runner is None:
             return False
-        if self._world_thread and self._world_thread.is_alive():
-            return False
-        self._world_thread = threading.Thread(
-            target=fn,
-            daemon=True,
-            name="WorldNavigation",
-        )
-        self._world_thread.start()
+        with self._world_lock:
+            if self._world_thread and self._world_thread.is_alive():
+                return False
+            self._world_navigation_active = True
+
+            def guarded():
+                try:
+                    fn()
+                finally:
+                    with self._world_lock:
+                        self._world_navigation_active = False
+
+            self._world_thread = threading.Thread(
+                target=guarded,
+                daemon=True,
+                name="WorldNavigation",
+            )
+            self._world_thread.start()
         return True
 
     def start_world_route(self, route_id: str) -> bool:
@@ -372,7 +385,7 @@ class BotRuntime:
             return False
 
         def run():
-            while self._route_can_run():
+            while self._world_can_run():
                 if not self._world_runner.run_node_path(route.node_ids):
                     return
                 if not route.loop:
@@ -404,7 +417,12 @@ class BotRuntime:
 
     def _route_can_run(self) -> bool:
         """봇이 켜져 있고 사냥 모드일 때만 루트 실행(안전모드·정지 시 즉시 이탈)."""
-        return self._bot_running and self.orchestrator.mode == "hunting"
+        return (self._bot_running and self.orchestrator.mode == "hunting"
+                and not self._world_navigation_active)
+
+    def _world_can_run(self) -> bool:
+        return (self._bot_running and self.orchestrator.mode == "hunting"
+                and self._world_navigation_active)
 
     # ── 틱 ────────────────────────────────────────────────────────────
     def hunting_tick(self, now: float | None = None) -> None:

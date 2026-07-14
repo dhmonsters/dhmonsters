@@ -291,3 +291,23 @@ def test_world_navigation_is_absent_when_world_map_disabled():
     assert runtime.world_viewport() is None
     assert runtime.start_world_route("missing") is False
     assert runtime.navigate_world_to("missing") is False
+
+
+def test_world_job_rejects_second_request_and_pauses_legacy_route():
+    import threading
+    from core.runtime import BotRuntime
+
+    runtime = object.__new__(BotRuntime)
+    runtime._world_runner = object()
+    runtime._world_thread = None
+    runtime._world_lock = threading.Lock()
+    runtime._world_navigation_active = False
+    runtime._bot_running = True
+    runtime.orchestrator = type("O", (), {"mode": "hunting"})()
+    release = threading.Event()
+
+    assert runtime._start_world_job(lambda: release.wait(1.0)) is True
+    assert runtime._route_can_run() is False
+    assert runtime._start_world_job(lambda: None) is False
+    release.set()
+    runtime._world_thread.join(timeout=1.0)
