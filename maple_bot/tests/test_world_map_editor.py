@@ -3,7 +3,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QImage
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 from core_ui.world_map_editor import WorldMapEditor
 
@@ -104,3 +105,58 @@ def test_editor_ui_preserves_all_image_action_timings():
     assert action["hold_sec"] == 0.7
     assert action["repeat_interval_sec"] == 0.4
     assert action["wait_after_sec"] == 1.2
+
+
+def test_editor_sets_world_map_image_from_user_file(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    config = FakeConfig()
+    image_path = tmp_path / "world-map.png"
+    QImage(640, 360, QImage.Format.Format_RGB32).save(str(image_path))
+    editor = WorldMapEditor(config)
+
+    editor.set_world_map_image(str(image_path))
+
+    world = config.get("world_map")
+    assert world["enabled"] is True
+    assert world["image_path"] == str(image_path)
+    assert world["image_width"] == 640
+    assert world["image_height"] == 360
+    assert editor.findChild(QPushButton, "worldMapImageButton") is not None
+
+
+def test_editor_canvas_tools_create_waypoint_and_action_node():
+    app = QApplication.instance() or QApplication([])
+    config = FakeConfig()
+    editor = WorldMapEditor(config)
+
+    editor.set_edit_tool("waypoint")
+    editor._on_world_point(100, 80)
+    editor.set_edit_tool("action")
+    editor._action_key.setText("up")
+    editor._on_world_point(180, 80)
+
+    nodes = config.get("navigation", "nodes")
+    assert [node["kind"] for node in nodes] == ["waypoint", "action"]
+    assert nodes[1]["action"]["key"] == "up"
+
+
+def test_editor_connect_tool_creates_edge_between_clicked_nodes():
+    app = QApplication.instance() or QApplication([])
+    config = FakeConfig()
+    config.data["navigation"]["nodes"] = [
+        {"id": "node-001", "kind": "waypoint", "x": 10.0, "y": 20.0},
+        {"id": "node-002", "kind": "waypoint", "x": 90.0, "y": 20.0},
+    ]
+    editor = WorldMapEditor(config)
+
+    editor.set_edit_tool("connect")
+    editor._on_world_point(10, 20)
+    editor._on_world_point(90, 20)
+
+    edges = config.get("navigation", "edges")
+    assert edges == [{
+        "id": "edge-001",
+        "from_id": "node-001",
+        "to_id": "node-002",
+        "traversal": "walk",
+    }]

@@ -4,6 +4,7 @@ from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -30,6 +31,8 @@ class WorldMapEditor(QWidget):
         self._capture = screen_capture
         self._world_points = []
         self._local_points = []
+        self._edit_tool = "calibration"
+        self._connect_from_id = None
         self._position_fn = lambda: None
         self._tracking_state_fn = lambda: "unavailable"
         self._viewport_fn = lambda: None
@@ -49,6 +52,21 @@ class WorldMapEditor(QWidget):
         root.addWidget(self._canvas, 3)
 
         side = QVBoxLayout()
+        choose_map = QPushButton("큰 지도 이미지 선택")
+        choose_map.setObjectName("worldMapImageButton")
+        choose_map.clicked.connect(self._choose_world_map_image)
+        side.addWidget(choose_map)
+        tool_row = QHBoxLayout()
+        for label, tool in (
+            ("보정점", "calibration"),
+            ("이동점", "waypoint"),
+            ("액션점", "action"),
+            ("연결", "connect"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(lambda checked=False, name=tool: self.set_edit_tool(name))
+            tool_row.addWidget(button)
+        side.addLayout(tool_row)
         side.addWidget(QLabel("전역 지도 편집"))
         self._calibration_status = QLabel("보정 순서 · 큰 지도 점 → 같은 미니맵 점을 2회 선택")
         side.addWidget(self._calibration_status)
@@ -122,11 +140,86 @@ class WorldMapEditor(QWidget):
             self._routes.addItem(route.get("name", route.get("id")))
             self._routes.item(self._routes.count() - 1).setData(0x0100, route.get("id"))
 
+    def _choose_world_map_image(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "큰 지도 이미지 선택", "", "이미지 (*.png *.jpg *.jpeg *.bmp)"
+        )
+        if path:
+            self.set_world_map_image(path)
+
+    def set_world_map_image(self, path):
+        pixmap = QPixmap(str(path))
+        if pixmap.isNull():
+            raise ValueError("큰 지도 이미지를 읽을 수 없습니다.")
+        self._cfg.set("world_map", "enabled", value=True)
+        self._cfg.set("world_map", "image_path", value=str(path))
+        self._cfg.set("world_map", "image_width", value=pixmap.width())
+        self._cfg.set("world_map", "image_height", value=pixmap.height())
+        self._cfg.save()
+        self.reload()
+
+    def set_edit_tool(self, tool):
+        if tool not in {"calibration", "waypoint", "action", "connect"}:
+            raise ValueError(f"지원하지 않는 지도 편집 도구입니다. {tool}")
+        self._edit_tool = tool
+        self._connect_from_id = None
+        self._canvas.set_tool(tool)
+
+    @staticmethod
+    def _next_id(prefix, items):
+        used = {item.get("id") for item in items}
+        index = 1
+        while f"{prefix}-{index:03d}" in used:
+            index += 1
+        return f"{prefix}-{index:03d}"
+
+    def add_waypoint_node(self, x, y):
+        nodes = list(self._cfg.get("navigation", "nodes", default=[]) or [])
+        nodes.append({
+            "id": self._next_id("node", nodes),
+            "kind": "waypoint",
+            "x": float(x),
+            "y": float(y),
+            "arrival_radius": 4.0,
+            "label": "이동점",
+        })
+        self._cfg.set("navigation", "nodes", value=nodes)
+        self._cfg.save()
+        self.reload()
+
+    def _nearest_node_id(self, x, y):
+        nodes = self._cfg.get("navigation", "nodes", default=[]) or []
+        if not nodes:
+            return None
+        node = min(nodes, key=lambda item: (item["x"] - x) ** 2 + (item["y"] - y) ** 2)
+        return node.get("id")
+
+    def _connect_node_at(self, x, y):
+        node_id = self._nearest_node_id(x, y)
+        if node_id is None:
+            return
+        if self._connect_from_id is None:
+            self._connect_from_id = node_id
+            return
+        if node_id == self._connect_from_id:
+            return
+        edges = list(self._cfg.get("navigation", "edges", default=[]) or [])
+        edges.append({
+            "id": self._next_id("edge", edges),
+            "from_id": self._connect_from_id,
+            "to_id": node_id,
+            "traversal": "walk",
+        })
+        self._connect_from_id = None
+        self._cfg.set("navigation", "edges", value=edges)
+        self._cfg.save()
+        self.reload()
+
     def add_action_node(self, x, y, label, key, hold_sec, repeat,
                         repeat_interval_sec, wait_after_sec):
         nodes = list(self._cfg.get("navigation", "nodes", default=[]) or [])
         nodes.append({
-            "id": f"node-{len(nodes) + 1:03d}",
+            "id": self._next_id("node", nodes),
             "kind": "action",
             "x": float(x),
             "y": float(y),
@@ -188,6 +281,19 @@ class WorldMapEditor(QWidget):
         return calibration
 
     def _on_world_point(self, x, y):
+        tool = self._edit_tool
+        if tool == "waypoint":
+            self.add_waypoint_node(x, y)
+            return
+        if tool == "action":
+            self.add_action_node(
+                x, y, "액션", self._action_key.text(), self._hold_sec.value(),
+                self._repeat.value(), self._repeat_interval.value(), self._wait_after.value(),
+            )
+            return
+        if tool == "connect":
+            self._connect_node_at(x, y)
+            return
         if len(self._world_points) > len(self._local_points):
             self._calibration_status.setText("먼저 대응하는 미니맵 점을 선택하세요")
             return
