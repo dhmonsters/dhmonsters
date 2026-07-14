@@ -398,3 +398,14 @@ def test_run_block_recovery_noop_without_judge():
     char = MovingChar(start_x=20); char.target = 30
     runner = BlockRunner(humanizer=h, pos_fn=char.pos)   # judge 없음
     assert runner.run_block(Block(type="move", target_x=30), max_steps=50) is True
+
+
+def test_custom_arrival_tolerance():
+    h = FakeHumanizer()
+    runner = BlockRunner(humanizer=h, pos_fn=lambda: (96, 10))
+
+    assert runner.run_block(
+        Block(type="move", target_x=100),
+        max_steps=1,
+        arrival_tolerance=5,
+    ) is True

@@ -134,7 +134,8 @@ class BlockRunner:
             self._log_once(f"⤴ 층 이탈 감지(현재 {cur.name}≠목표 {want}, y={y}) → 사다리로 복귀")
             self._do_ladder(Block.from_dict(path[0]), max_steps)
 
-    def run_block(self, block: Block, max_steps: int = 200) -> bool:
+    def run_block(self, block: Block, max_steps: int = 200,
+                  arrival_tolerance: float | None = None) -> bool:
         if self._on_seg_enter is not None:
             self._on_seg_enter(block)
         self._log_once(f"▶ {self._desc(block)}")
@@ -148,13 +149,14 @@ class BlockRunner:
                         # 통과: 구간을 한 방향으로 1회만 지나감(end_x까지)
                         return self._exec_move(
                             Block(type="move", target_x=block.end_x, move_type=block.move_type),
-                            max_steps)
+                            max_steps, arrival_tolerance=arrival_tolerance)
                     infinite = (block.mode == "infinite")
                     sweeps = max(1, block.sweeps)
                     return self.run_sweep(block.start_x, block.end_x, sweeps,
                                           block.move_type, max_steps=max_steps,
                                           infinite=infinite, margin=block.rand_margin)
-                return self._exec_move(block, max_steps)
+                return self._exec_move(
+                    block, max_steps, arrival_tolerance=arrival_tolerance)
             if block.type == "ladder":
                 return self._do_ladder(block, max_steps)
             if block.type == "jump":
@@ -207,7 +209,8 @@ class BlockRunner:
 
     # ── 이동 ──────────────────────────────────────────────────────────
     def _exec_move(self, block: Block, max_steps: int,
-                   allow_jump_hold: bool = True) -> bool:
+                   allow_jump_hold: bool = True,
+                   arrival_tolerance: float | None = None) -> bool:
         """target_x 까지 walk/teleport 로 접근. TOLERANCE 이내 도달 시 True.
 
         '진척 기반' 끼임 판정: 목표까지 거리가 한 번이라도 줄면 리셋. MOVE_STUCK_POLLS회
@@ -236,7 +239,8 @@ class BlockRunner:
                 return False
             x, _y = self._pos()
             dist = block.target_x - x
-            if abs(dist) <= TOLERANCE:
+            tolerance = TOLERANCE if arrival_tolerance is None else arrival_tolerance
+            if abs(dist) <= tolerance:
                 _stop_move_keys()   # 도착 시 이동키 떼기 → 목표 지나침(overshoot) 방지·정지
                 return True   # 도착 (폐루프 종료)
 
