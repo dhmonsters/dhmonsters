@@ -8,7 +8,7 @@
 #define SourceDir  "03_output\Claude_v2.1.5_portable\Claude"
 
 [Setup]
-AppId={{B3F2A1C4-7E5D-4F8A-9B2C-3D6E8F1A2B5C}
+AppId={{7C8A5E21-4B6D-49F3-A2C1-9E7D5B4A603F}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisherURL=https://github.com/dhmonsters/dhmonsters
@@ -16,8 +16,9 @@ AppSupportURL=https://github.com/dhmonsters/dhmonsters
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
+UsePreviousAppDir=no
 OutputDir=03_output
-OutputBaseFilename=Claude_v{#AppVersion}_Setup
+OutputBaseFilename=Claude_v{#AppVersion}_Setup_v2
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
