@@ -2,7 +2,7 @@
 #define AppVersion "2.1.5"
 #define AppPublisher "Claude"
 #define AppExeName "Claude.exe"
-#define SourceDir "C:\Users\PC\Desktop\02_work\05_AI\maple_bot\03_output\Claude_v2.1.5_portable\Claude"
+#define SourceDir "C:\Users\PC\Desktop\02_work\05_AI\maple_bot\03_output\Claude_v2.1.5_portable_2point_fix\Claude"
 
 [Setup]
 AppId={{7C8A5E21-4B6D-49F3-A2C1-9E7D5B4A603F}
@@ -13,7 +13,7 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 OutputDir=C:\Users\PC\Desktop\02_work\05_AI\maple_bot\03_output
-OutputBaseFilename=Claude_Setup_v{#AppVersion}_v2
+OutputBaseFilename=Claude_Setup_v{#AppVersion}_v3
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

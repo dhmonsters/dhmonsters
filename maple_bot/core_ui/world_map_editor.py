@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -76,7 +77,7 @@ class WorldMapEditor(QWidget):
         self._local_preview.mousePressEvent = self._local_preview_clicked
         side.addWidget(self._local_preview)
         apply_calibration = QPushButton("2점 보정 적용")
-        apply_calibration.clicked.connect(self.apply_calibration)
+        apply_calibration.clicked.connect(self._apply_calibration_from_ui)
         side.addWidget(apply_calibration)
         self._nodes = QListWidget()
         self._routes = QListWidget()
@@ -278,6 +279,16 @@ class WorldMapEditor(QWidget):
         self._cfg.save()
         if hasattr(self._cfg, "load"):
             self._cfg.load()
+        return calibration
+
+    def _apply_calibration_from_ui(self):
+        try:
+            calibration = self.apply_calibration()
+        except ValueError as exc:
+            self._calibration_status.setText(str(exc))
+            QMessageBox.warning(self, "보정 실패", str(exc))
+            return None
+        self._calibration_status.setText("2점 보정이 적용되었습니다")
         return calibration
 
     def _on_world_point(self, x, y):

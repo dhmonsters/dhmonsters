@@ -4,7 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtGui import QImage
-from PyQt6.QtWidgets import QApplication, QPushButton
+from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from core_ui.world_map_editor import WorldMapEditor
 
@@ -88,6 +88,25 @@ def test_editor_collects_two_pairs_and_applies_calibration():
     assert config.get("world_map", "calibration")["offset"] == [80.0, 40.0]
     assert config.saved == 1
     assert config.loaded == 1
+
+
+def test_editor_ui_calibration_failure_shows_warning_without_raising(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    config = FakeConfig()
+    editor = WorldMapEditor(config)
+    warnings = []
+
+    def fake_warning(parent, title, message):
+        warnings.append((parent, title, message))
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, "warning", fake_warning)
+
+    editor._apply_calibration_from_ui()
+
+    assert warnings
+    assert warnings[0][0] is editor
+    assert config.saved == 0
 
 
 def test_editor_ui_preserves_all_image_action_timings():

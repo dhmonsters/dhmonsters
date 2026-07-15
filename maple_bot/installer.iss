@@ -5,7 +5,7 @@
 #define AppVersion "2.1.5"
 #define AppExe     "Claude.exe"
 #define AppPublisher "Claude"
-#define SourceDir  "03_output\Claude_v2.1.5_portable\Claude"
+#define SourceDir  "03_output\Claude_v2.1.5_portable_2point_fix\Claude"
 
 [Setup]
 AppId={{7C8A5E21-4B6D-49F3-A2C1-9E7D5B4A603F}
@@ -18,7 +18,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UsePreviousAppDir=no
 OutputDir=03_output
-OutputBaseFilename=Claude_v{#AppVersion}_Setup_v2
+OutputBaseFilename=Claude_v{#AppVersion}_Setup_v3
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
