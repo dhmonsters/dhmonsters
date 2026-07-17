@@ -1,0 +1,4105 @@
+{
+  "core.detector": {
+    "toc_type": 0,
+    "compressed_size": 7865,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "core\\detector.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "pathlib",
+        "Path",
+        "typing",
+        "List",
+        "Optional",
+        "Tuple",
+        "cv2",
+        "ncnn",
+        "numpy",
+        "np",
+        "REG_MAX",
+        "IMGSZ",
+        "_softmax",
+        "HyungYolo",
+        "M1Ensemble",
+        "load_m2",
+        "load_m1_ensemble",
+        "load_m1_specialists",
+        "load_default",
+        "__name__",
+        "time",
+        "print",
+        "m2",
+        "zeros",
+        "uint8",
+        "dummy",
+        "random",
+        "randint",
+        "rnd",
+        "t",
+        "detect",
+        "b1",
+        "len",
+        "max",
+        "b2",
+        "m1",
+        "b3",
+        "b4"
+      ],
+      "constants": [
+        "형 v9 ncnn YOLO 추론.\n\nv9 분석 결과 (정통 형 방식):\n  - M1 (1 클래스 detector, 4-bin ensemble): 박스 위치 찾기 전용\n  - M2 (4 클래스 classifier/detector): 도형 종류 식별 (원/사각/삼각/별)\n\n흐름:\n  1. M2로 흰 마커 도형 분류 → target_cls (캡차 첫 프레임만)\n  2. 이후 매 프레임 = M1 ensemble 박스 + M2 박스별 재분류 → target_cls 일치만 추적\n\nCPU 기본 (형 권장):\n  - Vulkan GPU = fp16 자동 양자화 정확도 ↓ + 게임 GPU 경합\n  - CPU = 안정 + nano 모델 충분히 빠름\n",
+        0,
+        [
+          "annotations"
+        ],
+        [
+          "Path"
+        ],
+        [
+          "List",
+          "Optional",
+          "Tuple"
+        ],
+        null,
+        16,
+        320,
+        "HyungYolo",
+        "M1Ensemble",
+        false,
+        "__main__",
+        "=== M2 (4 클래스) self-test ===",
+        [
+          "use_gpu"
+        ],
+        [
+          400,
+          500,
+          3
+        ],
+        [
+          "dtype"
+        ],
+        255,
+        "  dummy: ",
+        " boxes, max score=",
+        4,
+        ".3f",
+        " (",
+        1000,
+        ".0f",
+        "ms)",
+        "  random: ",
+        "\n=== M1 Ensemble (1 클래스 x 4-bin) self-test ===",
+        [
+          -1
+        ],
+        [
+          null,
+          false
+        ],
+        [
+          "assets_dir",
+          "Optional[Path]",
+          "use_gpu",
+          "bool",
+          "return",
+          "HyungYolo"
+        ],
+        [
+          "assets_dir",
+          "Optional[Path]",
+          "use_gpu",
+          "bool",
+          "return",
+          "M1Ensemble"
+        ],
+        [
+          "assets_dir",
+          "Optional[Path]",
+          "use_gpu",
+          "bool",
+          "return",
+          "List[HyungYolo]"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "_softmax",
+          "qualname": "_softmax",
+          "filename": "core\\detector.py",
+          "first_line": 29,
+          "argcount": 2,
+          "varnames": [
+            "x",
+            "axis",
+            "e"
+          ],
+          "names": [
+            "max",
+            "np",
+            "exp",
+            "sum"
+          ],
+          "constants": [
+            null,
+            true,
+            [
+              "axis",
+              "keepdims"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "HyungYolo",
+          "qualname": "HyungYolo",
+          "filename": "core\\detector.py",
+          "first_line": 35,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__doc__",
+            "__init__",
+            "_letterbox",
+            "_decode",
+            "staticmethod",
+            "_nms",
+            "IMGSZ",
+            "detect",
+            "classify_crop",
+            "__static_attributes__"
+          ],
+          "constants": [
+            "HyungYolo",
+            35,
+            "단일 ncnn YOLO 추론. num_cls = 1 (M1) 또는 4 (M2).",
+            0.2,
+            0.45,
+            [
+              "net",
+              "num_cls",
+              "out_ch"
+            ],
+            null,
+            [
+              false,
+              4,
+              true
+            ],
+            [
+              "param_path",
+              "Path",
+              "bin_path",
+              "Path",
+              "num_cls",
+              "int",
+              "use_gpu",
+              "bool",
+              "num_threads",
+              "int",
+              "fp32_only",
+              "bool"
+            ],
+            [
+              "img",
+              "np.ndarray",
+              "size",
+              "int"
+            ],
+            [
+              "arr",
+              "np.ndarray",
+              "stride",
+              "int",
+              "score_thr",
+              "float",
+              "return",
+              "np.ndarray"
+            ],
+            [
+              "boxes",
+              "np.ndarray",
+              "iou_thr",
+              "float",
+              "return",
+              "np.ndarray"
+            ],
+            [
+              "image_bgr",
+              "np.ndarray",
+              "imgsz",
+              "int",
+              "score_thr",
+              "float",
+              "iou_thr",
+              "float",
+              "return",
+              "np.ndarray"
+            ],
+            [
+              0.0
+            ],
+            [
+              "image_bgr",
+              "np.ndarray",
+              "score_thr",
+              "float",
+              "return",
+              "Optional[int]"
+            ]
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "__init__",
+              "qualname": "HyungYolo.__init__",
+              "filename": "core\\detector.py",
+              "first_line": 38,
+              "argcount": 7,
+              "varnames": [
+                "self",
+                "param_path",
+                "bin_path",
+                "num_cls",
+                "use_gpu",
+                "num_threads",
+                "fp32_only"
+              ],
+              "names": [
+                "int",
+                "num_cls",
+                "REG_MAX",
+                "out_ch",
+                "ncnn",
+                "Net",
+                "net",
+                "bool",
+                "opt",
+                "use_vulkan_compute",
+                "num_threads",
+                "use_fp16_packed",
+                "use_fp16_storage",
+                "use_fp16_arithmetic",
+                "use_bf16_storage",
+                "load_param",
+                "str",
+                "RuntimeError",
+                "load_model"
+              ],
+              "constants": [
+                null,
+                4,
+                false,
+                0,
+                "ncnn param load fail: ",
+                "ncnn bin load fail: "
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_letterbox",
+              "qualname": "HyungYolo._letterbox",
+              "filename": "core\\detector.py",
+              "first_line": 56,
+              "argcount": 3,
+              "varnames": [
+                "self",
+                "img",
+                "size",
+                "h",
+                "w",
+                "r",
+                "nh",
+                "nw",
+                "resized",
+                "px",
+                "py",
+                "canvas"
+              ],
+              "names": [
+                "shape",
+                "min",
+                "int",
+                "round",
+                "cv2",
+                "resize",
+                "INTER_LINEAR",
+                "np",
+                "full",
+                "uint8"
+              ],
+              "constants": [
+                null,
+                2,
+                3,
+                114,
+                [
+                  "dtype"
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_decode",
+              "qualname": "HyungYolo._decode",
+              "filename": "core\\detector.py",
+              "first_line": 67,
+              "argcount": 4,
+              "varnames": [
+                "self",
+                "arr",
+                "stride",
+                "score_thr",
+                "h",
+                "w",
+                "c",
+                "cls_scores",
+                "score",
+                "cls_id",
+                "mask",
+                "box",
+                "prob",
+                "bins",
+                "e",
+                "gy",
+                "gx",
+                "cx",
+                "cy"
+              ],
+              "names": [
+                "shape",
+                "out_ch",
+                "np",
+                "zeros",
+                "float32",
+                "num_cls",
+                "max",
+                "argmax",
+                "astype",
+                "zeros_like",
+                "any",
+                "reshape",
+                "REG_MAX",
+                "_softmax",
+                "arange",
+                "sum",
+                "mgrid",
+                "stack"
+              ],
+              "constants": [
+                null,
+                [
+                  0,
+                  6
+                ],
+                "Ellipsis",
+                64,
+                -1,
+                [
+                  "axis"
+                ],
+                1,
+                4,
+                [
+                  "dtype"
+                ],
+                0,
+                0.5,
+                [
+                  "Ellipsis",
+                  0
+                ],
+                [
+                  "Ellipsis",
+                  1
+                ],
+                [
+                  "Ellipsis",
+                  2
+                ],
+                [
+                  "Ellipsis",
+                  3
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_nms",
+              "qualname": "HyungYolo._nms",
+              "filename": "core\\detector.py",
+              "first_line": 96,
+              "argcount": 2,
+              "varnames": [
+                "boxes",
+                "iou_thr",
+                "order",
+                "keep",
+                "b",
+                "r",
+                "xx1",
+                "yy1",
+                "xx2",
+                "yy2",
+                "iw",
+                "ih",
+                "inter",
+                "a1",
+                "a2",
+                "iou"
+              ],
+              "names": [
+                "len",
+                "argsort",
+                "append",
+                "np",
+                "maximum",
+                "minimum",
+                "clip",
+                "array",
+                "float32"
+              ],
+              "constants": [
+                null,
+                0,
+                4,
+                -1,
+                1,
+                2,
+                3,
+                1e-09
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "detect",
+              "qualname": "HyungYolo.detect",
+              "filename": "core\\detector.py",
+              "first_line": 118,
+              "argcount": 5,
+              "varnames": [
+                "self",
+                "image_bgr",
+                "imgsz",
+                "score_thr",
+                "iou_thr",
+                "canvas",
+                "scale",
+                "px",
+                "py",
+                "mat_in",
+                "ex",
+                "all_b",
+                "name",
+                "ret",
+                "mat",
+                "arr",
+                "stride",
+                "boxes"
+              ],
+              "names": [
+                "_letterbox",
+                "np",
+                "ascontiguousarray",
+                "ncnn",
+                "Mat",
+                "from_pixels",
+                "PixelType",
+                "PIXEL_BGR2RGB",
+                "substract_mean_normalize",
+                "net",
+                "create_extractor",
+                "input",
+                "extract",
+                "array",
+                "ndim",
+                "shape",
+                "out_ch",
+                "transpose",
+                "append",
+                "_decode",
+                "concatenate",
+                "zeros",
+                "float32",
+                "_nms",
+                "len"
+              ],
+              "constants": [
+                "전체 box 반환 (shape (N, 6) = [x1, y1, x2, y2, score, cls_id]).",
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.00392156862745098,
+                  0.00392156862745098,
+                  0.00392156862745098
+                ],
+                "in0",
+                [
+                  "out0",
+                  "out1",
+                  "out2"
+                ],
+                0,
+                3,
+                [
+                  1,
+                  2,
+                  0
+                ],
+                [
+                  "axis"
+                ],
+                [
+                  0,
+                  6
+                ],
+                null,
+                2,
+                1
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "classify_crop",
+              "qualname": "HyungYolo.classify_crop",
+              "filename": "core\\detector.py",
+              "first_line": 146,
+              "argcount": 3,
+              "varnames": [
+                "self",
+                "image_bgr",
+                "score_thr",
+                "boxes",
+                "best"
+              ],
+              "names": [
+                "num_cls",
+                "detect",
+                "len",
+                "argmax",
+                "int"
+              ],
+              "constants": [
+                "이미지 전체 분류 — max score 박스의 cls_id 반환 (M2 전용).\n\nscore_thr=0 = score 무관 무조건 최댓값 cls 반환.\n",
+                2,
+                null,
+                [
+                  "score_thr"
+                ],
+                4,
+                5
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "M1Ensemble",
+          "qualname": "M1Ensemble",
+          "filename": "core\\detector.py",
+          "first_line": 160,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__doc__",
+            "__init__",
+            "detect",
+            "__static_attributes__"
+          ],
+          "constants": [
+            "M1Ensemble",
+            160,
+            "M1 4-bin ensemble — 박스 detection 정확도 ↑ (형 v9 정통 방식).",
+            [
+              "nets"
+            ],
+            null,
+            [
+              false,
+              4
+            ],
+            [
+              "param_path",
+              "Path",
+              "bin_paths",
+              "List[Path]",
+              "use_gpu",
+              "bool",
+              "num_threads",
+              "int"
+            ],
+            [
+              0.2,
+              0.45
+            ],
+            [
+              "image_bgr",
+              "np.ndarray",
+              "score_thr",
+              "float",
+              "iou_thr",
+              "float",
+              "return",
+              "np.ndarray"
+            ]
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "__init__",
+              "qualname": "M1Ensemble.__init__",
+              "filename": "core\\detector.py",
+              "first_line": 163,
+              "argcount": 5,
+              "varnames": [
+                "self",
+                "param_path",
+                "bin_paths",
+                "use_gpu",
+                "num_threads",
+                "bp"
+              ],
+              "names": [
+                "HyungYolo",
+                "nets"
+              ],
+              "constants": [
+                null,
+                1,
+                [
+                  "num_cls",
+                  "use_gpu",
+                  "num_threads"
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "detect",
+              "qualname": "M1Ensemble.detect",
+              "filename": "core\\detector.py",
+              "first_line": 171,
+              "argcount": 4,
+              "varnames": [
+                "self",
+                "image_bgr",
+                "score_thr",
+                "iou_thr",
+                "all_boxes",
+                "net",
+                "boxes",
+                "merged"
+              ],
+              "names": [
+                "nets",
+                "detect",
+                "len",
+                "append",
+                "np",
+                "zeros",
+                "float32",
+                "concatenate",
+                "HyungYolo",
+                "_nms"
+              ],
+              "constants": [
+                "4개 .bin 결과 통합 NMS — shape (N, 6) (cls_id는 모두 0).",
+                [
+                  "score_thr",
+                  "iou_thr"
+                ],
+                [
+                  0,
+                  6
+                ],
+                0,
+                [
+                  "axis"
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "load_m2",
+          "qualname": "load_m2",
+          "filename": "core\\detector.py",
+          "first_line": 185,
+          "argcount": 2,
+          "varnames": [
+            "assets_dir",
+            "use_gpu"
+          ],
+          "names": [
+            "Path",
+            "__file__",
+            "resolve",
+            "parents",
+            "HyungYolo"
+          ],
+          "constants": [
+            "M2 4 클래스 classifier/detector.",
+            1,
+            "assets",
+            "hyung_m2.param",
+            "hyung_m2.bin",
+            4,
+            [
+              "num_cls",
+              "use_gpu"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "load_m1_ensemble",
+          "qualname": "load_m1_ensemble",
+          "filename": "core\\detector.py",
+          "first_line": 196,
+          "argcount": 2,
+          "varnames": [
+            "assets_dir",
+            "use_gpu",
+            "c"
+          ],
+          "names": [
+            "Path",
+            "__file__",
+            "resolve",
+            "parents",
+            "M1Ensemble"
+          ],
+          "constants": [
+            "M1 4-bin ensemble — 박스 detection 전용 (1 클래스).",
+            1,
+            "assets",
+            "hyung_m1.param",
+            [
+              "a",
+              "b",
+              "c",
+              "d"
+            ],
+            "hyung_m1_",
+            ".bin",
+            [
+              "use_gpu"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "load_m1_specialists",
+          "qualname": "load_m1_specialists",
+          "filename": "core\\detector.py",
+          "first_line": 208,
+          "argcount": 2,
+          "varnames": [
+            "assets_dir",
+            "use_gpu",
+            "c"
+          ],
+          "names": [
+            "Path",
+            "__file__",
+            "resolve",
+            "parents",
+            "HyungYolo"
+          ],
+          "constants": [
+            "M1 4 전문가 — cls 0/1/2/3 별 1 클래스 detector.\n형 v9 정통: M2가 cls 분류 → M1[cls]가 그 cls 전용 detection.\n",
+            1,
+            "assets",
+            [
+              "a",
+              "b",
+              "c",
+              "d"
+            ],
+            "hyung_m1.param",
+            "hyung_m1_",
+            ".bin",
+            [
+              "num_cls",
+              "use_gpu"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "load_default",
+          "qualname": "load_default",
+          "filename": "core\\detector.py",
+          "first_line": 225,
+          "argcount": 2,
+          "varnames": [
+            "assets_dir",
+            "use_gpu"
+          ],
+          "names": [
+            "load_m2"
+          ],
+          "constants": [
+            "하위 호환 — M2 단일 반환.",
+            [
+              "use_gpu"
+            ]
+          ],
+          "instructions": [
+            {
+              "offset": 0,
+              "op": "CALL",
+              "arg": ""
+            },
+            {
+              "offset": 8,
+              "op": "CACHE",
+              "arg": ""
+            },
+            {
+              "offset": 10,
+              "op": "CACHE",
+              "arg": ""
+            },
+            {
+              "offset": 12,
+              "op": "LOAD_FAST_CHECK",
+              "arg": "use_gpu"
+            },
+            {
+              "offset": 14,
+              "op": "LOAD_DEREF",
+              "arg": "use_gpu"
+            },
+            {
+              "offset": 16,
+              "op": "CONTAINS_OP",
+              "arg": "not in"
+            }
+          ],
+          "children": []
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "core.macro": {
+    "toc_type": 0,
+    "compressed_size": 7166,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "core\\macro.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "io",
+        "threading",
+        "time",
+        "winsound",
+        "pathlib",
+        "Path",
+        "typing",
+        "Callable",
+        "List",
+        "Optional",
+        "cv2",
+        "numpy",
+        "np",
+        "requests",
+        "core.detector",
+        "HyungYolo",
+        "load_m1_specialists",
+        "load_m2",
+        "core.mouse_ctrl",
+        "fg_move",
+        "core.screen_capture",
+        "capture_roi",
+        "set_target_hwnd",
+        "diagnose_capture",
+        "core.secure_loader",
+        "fetch_secure_code",
+        "inject_into_macro",
+        "SecureCodeError",
+        "utils.window_finder",
+        "find_maple_window",
+        "get_client_rect_screen",
+        "__file__",
+        "resolve",
+        "parents",
+        "ASSETS",
+        "Macro",
+        "__name__",
+        "print",
+        "m",
+        "start",
+        "sleep",
+        "KeyboardInterrupt",
+        "stop"
+      ],
+      "constants": [
+        "매크로 메인 dispatcher — 핵심 로직은 서버 동적 로딩.\n\n흐름:\n  1. 라이센스 인증 → session_token\n  2. 서버에서 매크로 핵심 코드 다운로드 (secure_loader)\n  3. exec → Macro에 _track_once, _match_xz, _on_trigger_start, 상수 주입\n  4. _run() main loop = 주입된 method 호출\n\n서버 다운 시 = 매크로 시작 실패.\n",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        [
+          "Path"
+        ],
+        [
+          "Callable",
+          "List",
+          "Optional"
+        ],
+        [
+          "HyungYolo",
+          "load_m1_specialists",
+          "load_m2"
+        ],
+        [
+          "fg_move"
+        ],
+        [
+          "capture_roi",
+          "set_target_hwnd",
+          "diagnose_capture"
+        ],
+        [
+          "fetch_secure_code",
+          "inject_into_macro",
+          "SecureCodeError"
+        ],
+        [
+          "find_maple_window",
+          "get_client_rect_screen"
+        ],
+        1,
+        "assets",
+        "Macro",
+        "__main__",
+        false,
+        [
+          "on_log",
+          "use_gpu"
+        ],
+        "매크로 시작 — Ctrl+C 중지",
+        "중지"
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "Macro",
+          "qualname": "Macro",
+          "filename": "core\\macro.py",
+          "first_line": 34,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__doc__",
+            "__init__",
+            "_load_xz",
+            "start",
+            "stop",
+            "update_alert_settings",
+            "staticmethod",
+            "send_telegram_photo",
+            "_play_alert_sound",
+            "_run",
+            "__static_attributes__"
+          ],
+          "constants": [
+            "Macro",
+            34,
+            "투명도형찾기 자동 추적 — 핵심 로직은 서버 동적 로딩.\n\n상수/좌표/threshold/cascade 로직 = 서버 secure_code.py에서 inject.\nexe에 핵심 코드 0%. 디컴파일해도 좌표/임계값 안 보임.\n",
+            false,
+            "",
+            null,
+            [
+              "telegram_enabled",
+              "telegram_token",
+              "telegram_chat_id",
+              "sound_enabled"
+            ],
+            [
+              "CAPCHA_END_MISS_COUNT",
+              "TRACK_INTERVAL",
+              "TRIGGER_BOTTOM",
+              "TRIGGER_INTERVAL",
+              "TRIGGER_LEFT",
+              "TRIGGER_RIGHT",
+              "TRIGGER_TOP",
+              "_capcha_count",
+              "_is_capcha_active",
+              "_last_marker_pos",
+              "_miss_count",
+              "_stop",
+              "_target_cls",
+              "_thread",
+              "_xz_tpls",
+              "client_origin",
+              "hwid",
+              "m1_specialists",
+              "m2",
+              "maple_hwnd",
+              "on_capcha",
+              "on_capture_fail",
+              "on_log",
+              "session_token",
+              "sound_enabled",
+              "telegram_chat_id",
+              "telegram_enabled",
+              "telegram_token",
+              "use_gpu"
+            ],
+            [
+              "on_log",
+              "Callable[[str], None]",
+              "on_capcha",
+              "Callable[[int, int], None]",
+              "use_gpu",
+              "bool",
+              "hwid",
+              "str",
+              "session_token",
+              "str",
+              "on_capture_fail",
+              "Callable[[dict], None]"
+            ],
+            [
+              "telegram_enabled",
+              "bool",
+              "telegram_token",
+              "str",
+              "telegram_chat_id",
+              "str",
+              "sound_enabled",
+              "bool",
+              "return",
+              "None"
+            ],
+            [
+              ""
+            ],
+            [
+              "token",
+              "str",
+              "chat_id",
+              "str",
+              "img_bgr",
+              "np.ndarray",
+              "caption",
+              "str",
+              "return",
+              "tuple"
+            ]
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "<lambda>",
+              "qualname": "Macro.<lambda>",
+              "filename": "core\\macro.py",
+              "first_line": 41,
+              "argcount": 1,
+              "varnames": [
+                "s"
+              ],
+              "names": [],
+              "constants": [
+                null
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "CALL",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "<lambda>",
+              "qualname": "Macro.<lambda>",
+              "filename": "core\\macro.py",
+              "first_line": 42,
+              "argcount": 2,
+              "varnames": [
+                "t",
+                "n"
+              ],
+              "names": [],
+              "constants": [
+                null
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "CALL",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "<lambda>",
+              "qualname": "Macro.<lambda>",
+              "filename": "core\\macro.py",
+              "first_line": 44,
+              "argcount": 1,
+              "varnames": [
+                "d"
+              ],
+              "names": [],
+              "constants": [
+                null
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "CALL",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "__init__",
+              "qualname": "Macro.__init__",
+              "filename": "core\\macro.py",
+              "first_line": 41,
+              "argcount": 7,
+              "varnames": [
+                "self",
+                "on_log",
+                "on_capcha",
+                "use_gpu",
+                "hwid",
+                "session_token",
+                "on_capture_fail"
+              ],
+              "names": [
+                "on_log",
+                "on_capcha",
+                "on_capture_fail",
+                "use_gpu",
+                "hwid",
+                "session_token",
+                "telegram_enabled",
+                "telegram_token",
+                "telegram_chat_id",
+                "sound_enabled",
+                "m2",
+                "m1_specialists",
+                "_target_cls",
+                "_last_marker_pos",
+                "maple_hwnd",
+                "client_origin",
+                "threading",
+                "Event",
+                "_stop",
+                "_thread",
+                "_xz_tpls",
+                "_is_capcha_active",
+                "_miss_count",
+                "_capcha_count",
+                "TRIGGER_LEFT",
+                "TRIGGER_TOP",
+                "TRIGGER_RIGHT",
+                "TRIGGER_BOTTOM",
+                "TRIGGER_INTERVAL",
+                "TRACK_INTERVAL",
+                "CAPCHA_END_MISS_COUNT"
+              ],
+              "constants": [
+                null,
+                false,
+                "",
+                0,
+                [
+                  0,
+                  0
+                ],
+                0.2,
+                0.05,
+                3
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_load_xz",
+              "qualname": "Macro._load_xz",
+              "filename": "core\\macro.py",
+              "first_line": 80,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "name",
+                "p",
+                "raw",
+                "tpl"
+              ],
+              "names": [
+                "ASSETS",
+                "exists",
+                "np",
+                "fromfile",
+                "str",
+                "uint8",
+                "cv2",
+                "imdecode",
+                "IMREAD_COLOR",
+                "_xz_tpls",
+                "append",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                [
+                  "xz.bmp",
+                  "xz1.bmp",
+                  "xz2.bmp",
+                  "xz3.bmp",
+                  "xz4.bmp"
+                ],
+                [
+                  "dtype"
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "start",
+              "qualname": "Macro.start",
+              "filename": "core\\macro.py",
+              "first_line": 92,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "tried_gpu",
+                "e",
+                "e2",
+                "code",
+                "diag"
+              ],
+              "names": [
+                "_thread",
+                "is_alive",
+                "_stop",
+                "set",
+                "join",
+                "m2",
+                "m1_specialists",
+                "use_gpu",
+                "load_m2",
+                "load_m1_specialists",
+                "Exception",
+                "on_log",
+                "type",
+                "__name__",
+                "_xz_tpls",
+                "_load_xz",
+                "fetch_secure_code",
+                "hwid",
+                "session_token",
+                "inject_into_macro",
+                "capture_roi",
+                "fg_move",
+                "SecureCodeError",
+                "find_maple_window",
+                "maple_hwnd",
+                "set_target_hwnd",
+                "client_origin",
+                "diagnose_capture",
+                "on_capture_fail",
+                "_is_capcha_active",
+                "_miss_count",
+                "clear",
+                "threading",
+                "Thread",
+                "_run",
+                "start"
+              ],
+              "constants": [
+                null,
+                2.0,
+                [
+                  "timeout"
+                ],
+                [
+                  "use_gpu"
+                ],
+                "⚠ GPU 사용 실패 → CPU 자동 전환 (",
+                ")",
+                false,
+                "❌ 모델 로드 실패: ",
+                "❌ 서버 코드 다운로드 실패: ",
+                "❌ 코드 inject 실패: ",
+                ": ",
+                0,
+                [
+                  0,
+                  0
+                ],
+                "any_ok",
+                "❌ 화면 캡쳐 실패 — 투명도형 인식이 안 될 수 있습니다.\n   • 게임을 '창 모드'로 바꿔보세요 (전체화면이면 캡쳐가 검게 잡힘)\n   • 그래픽 드라이버 최신화 / 원격데스크톱 해제\n   [진단: ",
+                "detail",
+                "]",
+                "mss_ok",
+                "pw_ok",
+                "⚠ 기본 캡쳐(mss) 실패 → PrintWindow 폴백으로 동작합니다.",
+                true,
+                "Macro",
+                [
+                  "target",
+                  "daemon",
+                  "name"
+                ],
+                "▶ 시작됨"
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "stop",
+              "qualname": "Macro.stop",
+              "filename": "core\\macro.py",
+              "first_line": 162,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_stop",
+                "set",
+                "_thread",
+                "is_alive",
+                "join",
+                "_is_capcha_active",
+                "on_log"
+              ],
+              "constants": [
+                null,
+                2.0,
+                [
+                  "timeout"
+                ],
+                false,
+                "⏸ 중지됨"
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "update_alert_settings",
+              "qualname": "Macro.update_alert_settings",
+              "filename": "core\\macro.py",
+              "first_line": 169,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "telegram_enabled",
+                "telegram_token",
+                "telegram_chat_id",
+                "sound_enabled"
+              ],
+              "names": [
+                "telegram_enabled",
+                "strip",
+                "telegram_token",
+                "telegram_chat_id",
+                "sound_enabled"
+              ],
+              "constants": [
+                "toss_wrapper에서 알람 설정 update.",
+                null
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "send_telegram_photo",
+              "qualname": "Macro.send_telegram_photo",
+              "filename": "core\\macro.py",
+              "first_line": 183,
+              "argcount": 4,
+              "varnames": [
+                "token",
+                "chat_id",
+                "img_bgr",
+                "caption",
+                "ok",
+                "buf",
+                "url",
+                "resp",
+                "e"
+              ],
+              "names": [
+                "strip",
+                "cv2",
+                "imencode",
+                "requests",
+                "post",
+                "io",
+                "BytesIO",
+                "tobytes",
+                "status_code",
+                "text",
+                "Exception",
+                "type",
+                "__name__"
+              ],
+              "constants": [
+                "텔레그램 봇으로 이미지 전송. (ok: bool, error: str) 반환.",
+                "",
+                [
+                  false,
+                  "토큰 또는 chat_id 비어있음"
+                ],
+                ".png",
+                [
+                  false,
+                  "이미지 인코딩 실패"
+                ],
+                "https://api.telegram.org/bot",
+                "/sendPhoto",
+                [
+                  "chat_id",
+                  "caption"
+                ],
+                "photo",
+                "capture.png",
+                "image/png",
+                15,
+                [
+                  "data",
+                  "files",
+                  "timeout"
+                ],
+                200,
+                [
+                  true,
+                  ""
+                ],
+                false,
+                "HTTP ",
+                ": ",
+                null,
+                100
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_play_alert_sound",
+              "qualname": "Macro._play_alert_sound",
+              "filename": "core\\macro.py",
+              "first_line": 208,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "winsound",
+                "MessageBeep",
+                "MB_ICONEXCLAMATION",
+                "Exception"
+              ],
+              "constants": [
+                null
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_run",
+              "qualname": "Macro._run",
+              "filename": "core\\macro.py",
+              "first_line": 214,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "last_trigger_check",
+                "prev_active",
+                "now",
+                "ox",
+                "oy",
+                "tw",
+                "th",
+                "screen",
+                "matched"
+              ],
+              "names": [
+                "_stop",
+                "is_set",
+                "time",
+                "TRIGGER_INTERVAL",
+                "client_origin",
+                "TRIGGER_RIGHT",
+                "TRIGGER_LEFT",
+                "TRIGGER_BOTTOM",
+                "TRIGGER_TOP",
+                "capture_roi",
+                "_match_xz",
+                "_is_capcha_active",
+                "_miss_count",
+                "_capcha_count",
+                "_target_cls",
+                "_last_marker_pos",
+                "_on_trigger_start",
+                "on_capcha",
+                "Exception",
+                "CAPCHA_END_MISS_COUNT",
+                "_track_once",
+                "TRACK_INTERVAL",
+                "sleep"
+              ],
+              "constants": [
+                null,
+                0,
+                false,
+                true,
+                1,
+                0.1
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "core.mouse_ctrl": {
+    "toc_type": 0,
+    "compressed_size": 1633,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "core\\mouse_ctrl.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "ctypes",
+        "win32api",
+        "win32con",
+        "win32gui",
+        "WM_MOUSEMOVE",
+        "WM_LBUTTONDOWN",
+        "WM_LBUTTONUP",
+        "WM_MBUTTONDOWN",
+        "WM_MBUTTONUP",
+        "MK_LBUTTON",
+        "_make_lparam",
+        "bg_move",
+        "bg_left_click",
+        "bg_move_and_click",
+        "MOUSEEVENTF_LEFTDOWN",
+        "MOUSEEVENTF_LEFTUP",
+        "fg_move",
+        "fg_left_click",
+        "fg_move_and_click"
+      ],
+      "constants": [
+        "마우스 컨트롤 — 두 가지 모드.\n\n1. PostMessage 백그라운드 (메이플창에 직접 메시지 전송, 시스템 마우스 영향 X)\n   - 형 dm.dll vip \"windows3\" 모드와 동일 효과\n   - 사용자가 동시에 다른 작업 가능\n2. SetCursorPos 전경 (시스템 마우스 직접 이동)\n   - 메이플창 포커스 필요 시 사용\n",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        512,
+        513,
+        514,
+        519,
+        520,
+        1,
+        2,
+        4,
+        [
+          "x",
+          "int",
+          "y",
+          "int",
+          "return",
+          "int"
+        ],
+        [
+          "hwnd",
+          "int",
+          "x",
+          "int",
+          "y",
+          "int"
+        ],
+        [
+          "x",
+          "int",
+          "y",
+          "int"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "_make_lparam",
+          "qualname": "_make_lparam",
+          "filename": "core\\mouse_ctrl.py",
+          "first_line": 26,
+          "argcount": 2,
+          "varnames": [
+            "x",
+            "y"
+          ],
+          "names": [
+            "int"
+          ],
+          "constants": [
+            "LPARAM 인코딩 (low 16 = x, high 16 = y).",
+            65535,
+            16
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "bg_move",
+          "qualname": "bg_move",
+          "filename": "core\\mouse_ctrl.py",
+          "first_line": 32,
+          "argcount": 3,
+          "varnames": [
+            "hwnd",
+            "x",
+            "y"
+          ],
+          "names": [
+            "win32api",
+            "PostMessage",
+            "WM_MOUSEMOVE",
+            "_make_lparam"
+          ],
+          "constants": [
+            "메이플창 클라이언트 좌표에 마우스 메시지만 전송. 시스템 마우스 X.",
+            0,
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "bg_left_click",
+          "qualname": "bg_left_click",
+          "filename": "core\\mouse_ctrl.py",
+          "first_line": 37,
+          "argcount": 3,
+          "varnames": [
+            "hwnd",
+            "x",
+            "y",
+            "lp"
+          ],
+          "names": [
+            "_make_lparam",
+            "win32api",
+            "PostMessage",
+            "WM_LBUTTONDOWN",
+            "MK_LBUTTON",
+            "WM_LBUTTONUP"
+          ],
+          "constants": [
+            "백그라운드 좌클릭.",
+            0,
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "bg_move_and_click",
+          "qualname": "bg_move_and_click",
+          "filename": "core\\mouse_ctrl.py",
+          "first_line": 44,
+          "argcount": 3,
+          "varnames": [
+            "hwnd",
+            "x",
+            "y"
+          ],
+          "names": [
+            "bg_move",
+            "bg_left_click"
+          ],
+          "constants": [
+            "메이플창 좌표에 이동 + 클릭 (백그라운드).",
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "fg_move",
+          "qualname": "fg_move",
+          "filename": "core\\mouse_ctrl.py",
+          "first_line": 55,
+          "argcount": 2,
+          "varnames": [
+            "x",
+            "y"
+          ],
+          "names": [
+            "ctypes",
+            "windll",
+            "user32",
+            "SetCursorPos",
+            "int"
+          ],
+          "constants": [
+            "화면 좌표 (절대) 시스템 마우스 이동.",
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "fg_left_click",
+          "qualname": "fg_left_click",
+          "filename": "core\\mouse_ctrl.py",
+          "first_line": 60,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "ctypes",
+            "windll",
+            "user32",
+            "mouse_event",
+            "MOUSEEVENTF_LEFTDOWN",
+            "MOUSEEVENTF_LEFTUP"
+          ],
+          "constants": [
+            null,
+            0
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "fg_move_and_click",
+          "qualname": "fg_move_and_click",
+          "filename": "core\\mouse_ctrl.py",
+          "first_line": 65,
+          "argcount": 2,
+          "varnames": [
+            "x",
+            "y"
+          ],
+          "names": [
+            "fg_move",
+            "fg_left_click"
+          ],
+          "constants": [
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "core.screen_capture": {
+    "toc_type": 0,
+    "compressed_size": 6486,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "core\\screen_capture.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "ctypes",
+        "wintypes",
+        "typing",
+        "Optional",
+        "Tuple",
+        "cv2",
+        "mss",
+        "numpy",
+        "np",
+        "_sct_local",
+        "_target_hwnd",
+        "__annotations__",
+        "set_target_hwnd",
+        "_sct",
+        "_looks_blank",
+        "_PW_RENDERFULLCONTENT",
+        "_printwindow_window_bgr",
+        "_printwindow_roi",
+        "capture_roi",
+        "capture_full_screen",
+        "screen_size",
+        "diagnose_capture"
+      ],
+      "constants": [
+        "화면 캡쳐 — mss(DXGI) 우선 + PrintWindow(BitBlt) 폴백.\n\nROI 캡쳐 (캡차 박스) + 화면 전체 캡쳐 (xz 트리거 매칭) 지원.\n\n★ 폴백 이유: 일부 PC(하이브리드 GPU 노트북, 일부 드라이버, 전체화면 게임 등)에서\n  mss(DXGI Desktop Duplication)가 게임 화면을 검게 잡아 트리거가 아예 안 됨.\n  이 경우 게임 창을 PrintWindow(PW_RENDERFULLCONTENT)로 직접 떠서 우회.\n  추론(ncnn)은 CPU지만 화면 캡쳐는 그래픽 드라이버를 타므로 이 폴백이 근본 해결책.\n",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        [
+          "wintypes"
+        ],
+        [
+          "Optional",
+          "Tuple"
+        ],
+        "int",
+        "_target_hwnd",
+        2,
+        [
+          "hwnd",
+          "int",
+          "return",
+          "None"
+        ],
+        [
+          "img",
+          "Optional[np.ndarray]",
+          "return",
+          "bool"
+        ],
+        [
+          "hwnd",
+          "int"
+        ],
+        [
+          "left",
+          "int",
+          "top",
+          "int",
+          "width",
+          "int",
+          "height",
+          "int",
+          "return",
+          "Optional[np.ndarray]"
+        ],
+        [
+          "left",
+          "int",
+          "top",
+          "int",
+          "width",
+          "int",
+          "height",
+          "int",
+          "return",
+          "np.ndarray"
+        ],
+        [
+          "return",
+          "np.ndarray"
+        ],
+        [
+          "return",
+          "Tuple[int, int]"
+        ],
+        [
+          0
+        ],
+        [
+          "hwnd",
+          "int",
+          "return",
+          "dict"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "set_target_hwnd",
+          "qualname": "set_target_hwnd",
+          "filename": "core\\screen_capture.py",
+          "first_line": 26,
+          "argcount": 1,
+          "varnames": [
+            "hwnd"
+          ],
+          "names": [
+            "int",
+            "_target_hwnd"
+          ],
+          "constants": [
+            "mss 캡쳐 실패(검은화면) 시 PrintWindow 폴백에 쓸 게임 창 핸들 등록.",
+            0,
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_sct",
+          "qualname": "_sct",
+          "filename": "core\\screen_capture.py",
+          "first_line": 32,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "_sct_local",
+            "mss"
+          ],
+          "constants": [
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_looks_blank",
+          "qualname": "_looks_blank",
+          "filename": "core\\screen_capture.py",
+          "first_line": 39,
+          "argcount": 1,
+          "varnames": [
+            "img"
+          ],
+          "names": [
+            "size",
+            "int",
+            "max"
+          ],
+          "constants": [
+            "캡쳐가 사실상 검정/빈 화면인지 (mss DXGI 실패 신호).",
+            0,
+            true,
+            10
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_printwindow_window_bgr",
+          "qualname": "_printwindow_window_bgr",
+          "filename": "core\\screen_capture.py",
+          "first_line": 51,
+          "argcount": 1,
+          "varnames": [
+            "hwnd",
+            "user32",
+            "gdi32",
+            "cvp",
+            "rect",
+            "w",
+            "h",
+            "hwnd_dc",
+            "mem_dc",
+            "bmp",
+            "old",
+            "ok",
+            "BITMAPINFOHEADER",
+            "bmi",
+            "buf",
+            "got",
+            "arr"
+          ],
+          "names": [
+            "ctypes",
+            "windll",
+            "user32",
+            "gdi32",
+            "c_void_p",
+            "GetWindowDC",
+            "restype",
+            "CreateCompatibleDC",
+            "CreateCompatibleBitmap",
+            "SelectObject",
+            "argtypes",
+            "DeleteObject",
+            "DeleteDC",
+            "wintypes",
+            "HWND",
+            "ReleaseDC",
+            "UINT",
+            "GetDIBits",
+            "PrintWindow",
+            "RECT",
+            "GetWindowRect",
+            "byref",
+            "right",
+            "left",
+            "bottom",
+            "top",
+            "_PW_RENDERFULLCONTENT",
+            "Structure",
+            "sizeof",
+            "biSize",
+            "biWidth",
+            "biHeight",
+            "biPlanes",
+            "biBitCount",
+            "biCompression",
+            "c_char",
+            "np",
+            "frombuffer",
+            "uint8",
+            "reshape",
+            "copy"
+          ],
+          "constants": [
+            "게임 창 전체를 PrintWindow로 캡쳐 → (BGR ndarray, win_left, win_top).\n\n실패 시 (None, 0, 0). DXGI(mss)가 검게 잡는 환경에서도 창 내용을 직접 떠옴.\n",
+            [
+              null,
+              0,
+              0
+            ],
+            0,
+            "BITMAPINFOHEADER",
+            1,
+            32,
+            4,
+            [
+              "dtype"
+            ],
+            null,
+            3
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "BITMAPINFOHEADER",
+              "qualname": "_printwindow_window_bgr.<locals>.BITMAPINFOHEADER",
+              "filename": "core\\screen_capture.py",
+              "first_line": 97,
+              "argcount": 0,
+              "varnames": [],
+              "names": [
+                "__name__",
+                "__module__",
+                "__qualname__",
+                "__firstlineno__",
+                "wintypes",
+                "DWORD",
+                "LONG",
+                "WORD",
+                "_fields_",
+                "__static_attributes__"
+              ],
+              "constants": [
+                "_printwindow_window_bgr.<locals>.BITMAPINFOHEADER",
+                97,
+                "biSize",
+                "biWidth",
+                "biHeight",
+                "biPlanes",
+                "biBitCount",
+                "biCompression",
+                "biSizeImage",
+                "biXPelsPerMeter",
+                "biYPelsPerMeter",
+                "biClrUsed",
+                "biClrImportant",
+                [],
+                null
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_printwindow_roi",
+          "qualname": "_printwindow_roi",
+          "filename": "core\\screen_capture.py",
+          "first_line": 127,
+          "argcount": 4,
+          "varnames": [
+            "left",
+            "top",
+            "width",
+            "height",
+            "win_img",
+            "wl",
+            "wt",
+            "H",
+            "W",
+            "x0",
+            "y0",
+            "x1",
+            "y1",
+            "cx0",
+            "cy0",
+            "cx1",
+            "cy1",
+            "crop",
+            "canvas"
+          ],
+          "names": [
+            "_printwindow_window_bgr",
+            "_target_hwnd",
+            "shape",
+            "int",
+            "max",
+            "min",
+            "np",
+            "zeros",
+            "uint8"
+          ],
+          "constants": [
+            "모니터 절대좌표 영역을 PrintWindow 창 이미지에서 잘라서 반환.",
+            null,
+            2,
+            0,
+            1,
+            3,
+            [
+              "dtype"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "capture_roi",
+          "qualname": "capture_roi",
+          "filename": "core\\screen_capture.py",
+          "first_line": 152,
+          "argcount": 4,
+          "varnames": [
+            "left",
+            "top",
+            "width",
+            "height",
+            "region",
+            "img",
+            "shot",
+            "fb"
+          ],
+          "names": [
+            "int",
+            "_sct",
+            "grab",
+            "cv2",
+            "cvtColor",
+            "np",
+            "array",
+            "uint8",
+            "COLOR_BGRA2BGR",
+            "Exception",
+            "_looks_blank",
+            "_printwindow_roi",
+            "zeros"
+          ],
+          "constants": [
+            "주어진 영역 BGR 캡쳐. mss 검은화면이면 PrintWindow 폴백.",
+            [
+              "left",
+              "top",
+              "width",
+              "height"
+            ],
+            null,
+            [
+              "dtype"
+            ],
+            3
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "capture_full_screen",
+          "qualname": "capture_full_screen",
+          "filename": "core\\screen_capture.py",
+          "first_line": 173,
+          "argcount": 0,
+          "varnames": [
+            "region",
+            "shot",
+            "img"
+          ],
+          "names": [
+            "_sct",
+            "monitors",
+            "grab",
+            "np",
+            "array",
+            "uint8",
+            "cv2",
+            "cvtColor",
+            "COLOR_BGRA2BGR"
+          ],
+          "constants": [
+            "primary monitor 전체 BGR 캡쳐.",
+            1,
+            [
+              "dtype"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "screen_size",
+          "qualname": "screen_size",
+          "filename": "core\\screen_capture.py",
+          "first_line": 181,
+          "argcount": 0,
+          "varnames": [
+            "mon"
+          ],
+          "names": [
+            "_sct",
+            "monitors"
+          ],
+          "constants": [
+            null,
+            1,
+            "width",
+            "height"
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "diagnose_capture",
+          "qualname": "diagnose_capture",
+          "filename": "core\\screen_capture.py",
+          "first_line": 186,
+          "argcount": 1,
+          "varnames": [
+            "hwnd",
+            "target",
+            "mss_ok",
+            "mss_detail",
+            "user32",
+            "rect",
+            "left",
+            "top",
+            "w",
+            "h",
+            "shot",
+            "img",
+            "e",
+            "pw_ok",
+            "pw_detail",
+            "win_img",
+            "_"
+          ],
+          "names": [
+            "int",
+            "_target_hwnd",
+            "ctypes",
+            "windll",
+            "user32",
+            "wintypes",
+            "RECT",
+            "GetWindowRect",
+            "HWND",
+            "byref",
+            "left",
+            "top",
+            "min",
+            "max",
+            "right",
+            "bottom",
+            "_sct",
+            "grab",
+            "cv2",
+            "cvtColor",
+            "np",
+            "array",
+            "uint8",
+            "COLOR_BGRA2BGR",
+            "_looks_blank",
+            "Exception",
+            "type",
+            "__name__",
+            "_printwindow_window_bgr"
+          ],
+          "constants": [
+            "시작 시 화면 캡쳐 자가진단.\n\nmss(DXGI)와 PrintWindow 각각 시도해서 어느 쪽이 유효 프레임을 잡는지 판정.\n둘 다 실패면 트리거(xz 매칭)가 아예 안 되므로 호출부가 경고창을 띄울 수 있다.\n\nReturns:\n    {\"mss_ok\": bool, \"pw_ok\": bool, \"any_ok\": bool, \"detail\": str}\n",
+            0,
+            false,
+            "",
+            800,
+            1,
+            600,
+            [
+              0,
+              0,
+              800,
+              600
+            ],
+            [
+              "left",
+              "top",
+              "width",
+              "height"
+            ],
+            [
+              "dtype"
+            ],
+            null,
+            "max=",
+            "none",
+            ": ",
+            "게임창 핸들 없음",
+            "mss(",
+            ") / printwindow(",
+            ")",
+            [
+              "mss_ok",
+              "pw_ok",
+              "any_ok",
+              "detail"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "core.secure_loader": {
+    "toc_type": 0,
+    "compressed_size": 3796,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "core\\secure_loader.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "hashlib",
+        "types",
+        "typing",
+        "Optional",
+        "requests",
+        "cryptography.hazmat.primitives.ciphers.aead",
+        "AESGCM",
+        "utils.auth_client",
+        "BASE_URL",
+        "PRODUCT",
+        "Exception",
+        "SecureCodeError",
+        "fetch_secure_code",
+        "_is_debugger_attached",
+        "inject_into_macro"
+      ],
+      "constants": [
+        "서버에서 매크로 핵심 로직 다운로드 + exec.\n\n흐름:\n  1. 라이센스 인증 후 받은 session_token + HWID로 getMacroCode 호출\n  2. 서버 = 인증 검증 + secure_code.py 본문 반환\n  3. 클라이언트 = exec() → namespace에 함수 정의\n  4. Macro 인스턴스에 method 주입\n\n서버 다운 시 = 매크로 시작 실패 (사용자 결정).\n",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        [
+          "Optional"
+        ],
+        [
+          "AESGCM"
+        ],
+        [
+          "BASE_URL",
+          "PRODUCT"
+        ],
+        "SecureCodeError",
+        [
+          15
+        ],
+        [
+          "hwid",
+          "str",
+          "session_token",
+          "str",
+          "timeout",
+          "int",
+          "return",
+          "str"
+        ],
+        [
+          "return",
+          "bool"
+        ],
+        [
+          "code",
+          "str",
+          "return",
+          "None"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "SecureCodeError",
+          "qualname": "SecureCodeError",
+          "filename": "core\\secure_loader.py",
+          "first_line": 23,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__static_attributes__"
+          ],
+          "constants": [
+            "SecureCodeError",
+            23,
+            [],
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "fetch_secure_code",
+          "qualname": "fetch_secure_code",
+          "filename": "core\\secure_loader.py",
+          "first_line": 27,
+          "argcount": 3,
+          "varnames": [
+            "hwid",
+            "session_token",
+            "timeout",
+            "url",
+            "headers",
+            "resp",
+            "e",
+            "err",
+            "payload",
+            "nonce",
+            "auth_tag",
+            "ciphertext",
+            "ct_with_tag",
+            "key",
+            "plaintext",
+            "code"
+          ],
+          "names": [
+            "SecureCodeError",
+            "BASE_URL",
+            "PRODUCT",
+            "requests",
+            "get",
+            "Exception",
+            "status_code",
+            "json",
+            "text",
+            "content",
+            "len",
+            "hashlib",
+            "sha256",
+            "encode",
+            "digest",
+            "AESGCM",
+            "decrypt",
+            "decode",
+            "type",
+            "__name__"
+          ],
+          "constants": [
+            "서버에서 핵심 매크로 코드 다운로드 + AES-256-GCM 복호화.\n\n응답 = nonce(12) + auth_tag(16) + ciphertext.\nkey = SHA-256(session_token). 인증된 사용자만 복호화 가능.\n",
+            "hwid/session_token 누락",
+            "/getMacroCode?hwid=",
+            "&product=",
+            "Authorization",
+            "Bearer ",
+            [
+              "headers",
+              "timeout"
+            ],
+            "네트워크 오류: ",
+            null,
+            200,
+            "error",
+            "",
+            100,
+            "서버 거부 (",
+            "): ",
+            28,
+            "서버 응답 형식 무효",
+            12,
+            "utf-8",
+            "복호화 실패: ",
+            ": ",
+            "def _track_once",
+            "서버 응답 무효 (복호화 후)"
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_is_debugger_attached",
+          "qualname": "_is_debugger_attached",
+          "filename": "core\\secure_loader.py",
+          "first_line": 70,
+          "argcount": 0,
+          "varnames": [
+            "ctypes",
+            "kernel32",
+            "debugger_present"
+          ],
+          "names": [
+            "ctypes",
+            "windll",
+            "kernel32",
+            "IsDebuggerPresent",
+            "c_int",
+            "CheckRemoteDebuggerPresent",
+            "GetCurrentProcess",
+            "byref",
+            "bool",
+            "value",
+            "Exception"
+          ],
+          "constants": [
+            "시작 시 1회 anti-debug. 디버거 부착되어 있으면 True.",
+            0,
+            null,
+            true,
+            false
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "inject_into_macro",
+          "qualname": "inject_into_macro",
+          "filename": "core\\secure_loader.py",
+          "first_line": 86,
+          "argcount": 4,
+          "varnames": [
+            "macro_instance",
+            "code",
+            "capture_roi_fn",
+            "fg_move_fn",
+            "ns",
+            "e",
+            "expected_hwid",
+            "name",
+            "fn",
+            "params",
+            "k",
+            "v"
+          ],
+          "names": [
+            "_is_debugger_attached",
+            "SecureCodeError",
+            "exec",
+            "compile",
+            "Exception",
+            "type",
+            "__name__",
+            "get",
+            "hwid",
+            "_canary",
+            "_issued_at",
+            "callable",
+            "setattr",
+            "types",
+            "MethodType",
+            "_capture_roi",
+            "_fg_move",
+            "items"
+          ],
+          "constants": [
+            "exec → Macro 인스턴스에 method + 상수 주입.\n\n워터마크 검증: 서버가 prepend한 __EXPECTED_HWID 가 현재 HWID와 일치해야.\nanti-debug: 디버거 부착 = 추출 시도 → 시작 거부.\n",
+            "디버거 감지 — 매크로 시작 거부",
+            "__name__",
+            "macro_secure",
+            "<macro_secure>",
+            "exec",
+            "코드 실행 실패: ",
+            ": ",
+            null,
+            "__EXPECTED_HWID",
+            "",
+            "코드 무결성 검증 실패 — 워터마크 없음",
+            "코드 무결성 검증 실패 — HWID 불일치 (다른 PC 코드)",
+            "__CANARY",
+            "__ISSUED_AT",
+            [
+              "_match_xz",
+              "_track_once",
+              "_on_trigger_start"
+            ],
+            "필수 함수 누락: ",
+            "get_runtime_params"
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "utils.auth_client": {
+    "toc_type": 0,
+    "compressed_size": 5738,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "utils\\auth_client.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "hashlib",
+        "os",
+        "sys",
+        "threading",
+        "urllib.parse",
+        "urlencode",
+        "requests",
+        "utils.build_salt",
+        "BUILD_SALT",
+        "_",
+        "ImportError",
+        "BASE_URL",
+        "PRODUCT",
+        "CLIENT_VERSION",
+        "_numeric_version",
+        "HEARTBEAT_INTERVAL_SEC",
+        "MAX_HEARTBEAT_FAILURES",
+        "_cached_exe_hash",
+        "__annotations__",
+        "get_exe_hash",
+        "check_auth",
+        "start_heartbeat",
+        "_license_path",
+        "load_license_key",
+        "save_license_key",
+        "clear_license_key",
+        "get_update_info"
+      ],
+      "constants": [
+        "Firebase 인증 클라이언트 — pj_fst와 동일 엔드포인트 호출.\n\nproduct=\"fst\"로 통합. pj_fst 라이센스 가진 사람이 이 앱도 쓸 수 있음.\nLicense 키는 %APPDATA%/Tushape/license.dat 에 저장 (pj_fst와 별도 폴더 — 충돌 방지).\n",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        [
+          "urlencode"
+        ],
+        [
+          "BUILD_SALT"
+        ],
+        "https://us-central1-lona-22892.cloudfunctions.net",
+        "tushape_dm",
+        "1.0.5-tushape_dm",
+        180,
+        6,
+        "str | None",
+        "_cached_exe_hash",
+        [
+          "v",
+          "str",
+          "return",
+          "str"
+        ],
+        [
+          "return",
+          "str"
+        ],
+        [
+          null,
+          true
+        ],
+        [
+          "hwid",
+          "str",
+          "license_key",
+          "str | None",
+          "renew",
+          "bool",
+          "return",
+          "tuple[bool, str, str, int, str, str]"
+        ],
+        [
+          "hwid",
+          "str",
+          "session_token",
+          "str",
+          "return",
+          "threading.Event"
+        ],
+        [
+          "return",
+          "str | None"
+        ],
+        [
+          "key",
+          "str",
+          "return",
+          "None"
+        ],
+        [
+          "return",
+          "None"
+        ],
+        [
+          null
+        ],
+        [
+          "current",
+          "str | None",
+          "return",
+          "dict | None"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "_numeric_version",
+          "qualname": "_numeric_version",
+          "filename": "utils\\auth_client.py",
+          "first_line": 36,
+          "argcount": 1,
+          "varnames": [
+            "v",
+            "_re",
+            "s",
+            "m"
+          ],
+          "names": [
+            "re",
+            "str",
+            "split",
+            "strip",
+            "match",
+            "group"
+          ],
+          "constants": [
+            "서버 checkUpdate의 semver 비교용 — 'x.y.z'만 남김.\nCLIENT_VERSION이 '1.0.4-tushape_dm' 형태라 '-tushape_dm'을 떼지 않으면\n서버가 Number('4-tushape_dm')=NaN으로 비교가 깨진다.\n",
+            0,
+            null,
+            "",
+            "-",
+            "^v?(\\d+(?:\\.\\d+)*)",
+            1,
+            "0.0.0"
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "get_exe_hash",
+          "qualname": "get_exe_hash",
+          "filename": "utils\\auth_client.py",
+          "first_line": 55,
+          "argcount": 0,
+          "varnames": [
+            "exe_path",
+            "h",
+            "chunk"
+          ],
+          "names": [
+            "_cached_exe_hash",
+            "getattr",
+            "sys",
+            "executable",
+            "hashlib",
+            "sha256",
+            "open",
+            "iter",
+            "update",
+            "hexdigest",
+            "Exception"
+          ],
+          "constants": [
+            "현재 실행 중인 exe의 SHA-256 해시. 개발 모드면 빈 문자열.",
+            null,
+            "frozen",
+            false,
+            "",
+            "rb",
+            {
+              "bytes_length": 0,
+              "hex_prefix": ""
+            }
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "<lambda>",
+              "qualname": "get_exe_hash.<locals>.<lambda>",
+              "filename": "utils\\auth_client.py",
+              "first_line": 67,
+              "argcount": 0,
+              "varnames": [],
+              "names": [
+                "read"
+              ],
+              "constants": [
+                null,
+                65536
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "check_auth",
+          "qualname": "check_auth",
+          "filename": "utils\\auth_client.py",
+          "first_line": 75,
+          "argcount": 3,
+          "varnames": [
+            "hwid",
+            "license_key",
+            "renew",
+            "params",
+            "url",
+            "response",
+            "data",
+            "e"
+          ],
+          "names": [
+            "PRODUCT",
+            "CLIENT_VERSION",
+            "get_exe_hash",
+            "BASE_URL",
+            "urlencode",
+            "requests",
+            "get",
+            "status_code",
+            "json",
+            "bool",
+            "int",
+            "Exception"
+          ],
+          "constants": [
+            "Firebase Functions check_auth 호출.\n\nReturns:\n    (authorized, message, expire_date, remaining_days, session_token, reason_code)\n",
+            "1",
+            "0",
+            [
+              "hwid",
+              "renew",
+              "product",
+              "version",
+              "client_hash"
+            ],
+            "license_key",
+            "/checkAuth?",
+            10,
+            [
+              "timeout"
+            ],
+            200,
+            false,
+            "서버 통신 오류 (코드: ",
+            ")",
+            "",
+            -1,
+            "authorized",
+            "message",
+            "expire_date",
+            "remaining_days",
+            "session_token",
+            "reason_code",
+            "서버 연결 오류: ",
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "start_heartbeat",
+          "qualname": "start_heartbeat",
+          "filename": "utils\\auth_client.py",
+          "first_line": 111,
+          "argcount": 3,
+          "varnames": [
+            "hwid",
+            "session_token",
+            "on_session_invalid",
+            "t"
+          ],
+          "names": [
+            "threading",
+            "Event",
+            "Timer",
+            "HEARTBEAT_INTERVAL_SEC",
+            "daemon",
+            "start"
+          ],
+          "constants": [
+            "3분마다 heartbeat 전송. 만료/차단 시 on_session_invalid(reason) 호출.\n\nReturns:\n    stop_event — set()하면 heartbeat 중단\n",
+            "fail_count",
+            0,
+            true
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "_beat",
+              "qualname": "start_heartbeat.<locals>._beat",
+              "filename": "utils\\auth_client.py",
+              "first_line": 120,
+              "argcount": 0,
+              "varnames": [
+                "url",
+                "headers",
+                "resp",
+                "data",
+                "reason",
+                "interval",
+                "t"
+              ],
+              "names": [
+                "is_set",
+                "BASE_URL",
+                "PRODUCT",
+                "get_exe_hash",
+                "requests",
+                "get",
+                "status_code",
+                "json",
+                "Exception",
+                "MAX_HEARTBEAT_FAILURES",
+                "HEARTBEAT_INTERVAL_SEC",
+                "min",
+                "threading",
+                "Timer",
+                "daemon",
+                "start"
+              ],
+              "constants": [
+                null,
+                "/heartbeat?hwid=",
+                "&product=",
+                "&client_hash=",
+                "Authorization",
+                "Bearer ",
+                10,
+                [
+                  "headers",
+                  "timeout"
+                ],
+                200,
+                "valid",
+                "reason",
+                "세션이 만료되었습니다.",
+                0,
+                "fail_count",
+                429,
+                1,
+                "서버 연결이 불안정합니다. 네트워크를 확인해주세요.",
+                2,
+                60,
+                true
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_license_path",
+          "qualname": "_license_path",
+          "filename": "utils\\auth_client.py",
+          "first_line": 165,
+          "argcount": 0,
+          "varnames": [
+            "app_data"
+          ],
+          "names": [
+            "os",
+            "path",
+            "join",
+            "environ",
+            "get",
+            "makedirs"
+          ],
+          "constants": [
+            null,
+            "APPDATA",
+            ".",
+            "PlanetTushape",
+            true,
+            [
+              "exist_ok"
+            ],
+            "license.dat"
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "load_license_key",
+          "qualname": "load_license_key",
+          "filename": "utils\\auth_client.py",
+          "first_line": 171,
+          "argcount": 0,
+          "varnames": [
+            "path",
+            "f",
+            "key"
+          ],
+          "names": [
+            "_license_path",
+            "os",
+            "path",
+            "exists",
+            "open",
+            "read",
+            "strip",
+            "Exception"
+          ],
+          "constants": [
+            null,
+            "r",
+            "utf-8",
+            [
+              "encoding"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "save_license_key",
+          "qualname": "save_license_key",
+          "filename": "utils\\auth_client.py",
+          "first_line": 183,
+          "argcount": 1,
+          "varnames": [
+            "key",
+            "f"
+          ],
+          "names": [
+            "open",
+            "_license_path",
+            "write",
+            "strip",
+            "Exception"
+          ],
+          "constants": [
+            null,
+            "w",
+            "utf-8",
+            [
+              "encoding"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "clear_license_key",
+          "qualname": "clear_license_key",
+          "filename": "utils\\auth_client.py",
+          "first_line": 191,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "os",
+            "remove",
+            "_license_path",
+            "Exception"
+          ],
+          "constants": [
+            null
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "get_update_info",
+          "qualname": "get_update_info",
+          "filename": "utils\\auth_client.py",
+          "first_line": 200,
+          "argcount": 1,
+          "varnames": [
+            "current",
+            "cur",
+            "url",
+            "resp",
+            "data"
+          ],
+          "names": [
+            "_numeric_version",
+            "CLIENT_VERSION",
+            "BASE_URL",
+            "urlencode",
+            "PRODUCT",
+            "requests",
+            "get",
+            "status_code",
+            "json",
+            "Exception"
+          ],
+          "constants": [
+            "서버 checkUpdate 호출 → 업데이트 정보 반환 (없으면 None).\n\nReturns:\n    {\"version\", \"download_url\", \"changelog\", \"force\", \"expected_hash\"} | None\n\n주의: product=tushape_dm 은 서버 checkUpdate 에서 license/hwid 게이트가 없으므로\nproduct + current 만 보내면 됨. current 는 'x.y.z' 숫자만 (CLIENT_VERSION 의\n'-tushape_dm' 접미사 제거 — 안 그러면 서버 semver 비교가 NaN 으로 깨짐).\n",
+            null,
+            "/checkUpdate?",
+            [
+              "product",
+              "current"
+            ],
+            8,
+            [
+              "timeout"
+            ],
+            200,
+            "update_available",
+            "download_url"
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "utils.config": {
+    "toc_type": 0,
+    "compressed_size": 1036,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "utils\\config.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "json",
+        "sys",
+        "pathlib",
+        "Path",
+        "_config_path",
+        "load",
+        "save"
+      ],
+      "constants": [
+        "사용자 설정 저장 — exe 같은 폴더 config.json.",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        [
+          "Path"
+        ],
+        [
+          "return",
+          "Path"
+        ],
+        [
+          "return",
+          "dict"
+        ],
+        [
+          "data",
+          "dict",
+          "return",
+          "None"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "_config_path",
+          "qualname": "_config_path",
+          "filename": "utils\\config.py",
+          "first_line": 9,
+          "argcount": 0,
+          "varnames": [
+            "base"
+          ],
+          "names": [
+            "getattr",
+            "sys",
+            "Path",
+            "executable",
+            "parent",
+            "__file__",
+            "resolve",
+            "parents"
+          ],
+          "constants": [
+            null,
+            "frozen",
+            false,
+            1,
+            "config.json"
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "load",
+          "qualname": "load",
+          "filename": "utils\\config.py",
+          "first_line": 17,
+          "argcount": 0,
+          "varnames": [
+            "p"
+          ],
+          "names": [
+            "_config_path",
+            "exists",
+            "json",
+            "loads",
+            "read_text",
+            "Exception"
+          ],
+          "constants": [
+            null,
+            "utf-8",
+            [
+              "encoding"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "save",
+          "qualname": "save",
+          "filename": "utils\\config.py",
+          "first_line": 27,
+          "argcount": 1,
+          "varnames": [
+            "data",
+            "p"
+          ],
+          "names": [
+            "_config_path",
+            "write_text",
+            "json",
+            "dumps",
+            "Exception"
+          ],
+          "constants": [
+            null,
+            false,
+            2,
+            [
+              "ensure_ascii",
+              "indent"
+            ],
+            "utf-8",
+            [
+              "encoding"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "utils.hwid": {
+    "toc_type": 0,
+    "compressed_size": 998,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "utils\\hwid.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "hashlib",
+        "uuid",
+        "get_hwid"
+      ],
+      "constants": [
+        "HWID 계산 — pj_fst와 동일 알고리즘.\n\nCPU ID + 메인보드 시리얼 + BIOS 시리얼 + MAC → SHA-256[:40]\n같은 PC에선 pj_fst와 동일한 HWID가 나옴 → Firebase 통합 인증 가능.\n",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        [
+          "return",
+          "str"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "get_hwid",
+          "qualname": "get_hwid",
+          "filename": "utils\\hwid.py",
+          "first_line": 12,
+          "argcount": 0,
+          "varnames": [
+            "wmi",
+            "c",
+            "cpu_id",
+            "item",
+            "board_serial",
+            "bios_serial",
+            "mac",
+            "raw"
+          ],
+          "names": [
+            "wmi",
+            "WMI",
+            "Win32_Processor",
+            "ProcessorId",
+            "strip",
+            "Win32_BaseBoard",
+            "SerialNumber",
+            "Win32_BIOS",
+            "format",
+            "uuid",
+            "getnode",
+            "hashlib",
+            "sha256",
+            "encode",
+            "hexdigest"
+          ],
+          "constants": [
+            null,
+            0,
+            "",
+            "012x",
+            "-",
+            40
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "utils.updater": {
+    "toc_type": 0,
+    "compressed_size": 5868,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "utils\\updater.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "hashlib",
+        "os",
+        "subprocess",
+        "sys",
+        "tempfile",
+        "requests",
+        "PyQt5",
+        "QtCore",
+        "QtWidgets",
+        "_download_with_progress",
+        "_sha256_of",
+        "_apply_and_restart",
+        "run_auto_update",
+        "check_and_prompt_update"
+      ],
+      "constants": [
+        "Planet_solver 자동 업데이트.\n\n흐름:\n  1. auth_client.get_update_info() 로 서버 checkUpdate 조회\n  2. download_url(10분 signed URL)에서 새 exe 다운로드\n  3. SHA-256 검증 (서버 expected_hash 와 대조 — 부분 다운로드/변조 차단)\n  4. .bat 스크립트로 현재 exe 교체 + 자동 재시작\n  5. 현재 프로세스 종료\n\n무결성검증실패(hash_mismatch)로 인증이 막힌 사용자도 이 경로로 새 버전을 받아\n데드락에서 빠져나온다. (서버는 expected_hashes 배열로 구버전을 일시 허용)\n",
+        0,
+        [
+          "annotations"
+        ],
+        null,
+        [
+          "QtCore",
+          "QtWidgets"
+        ],
+        [
+          null
+        ],
+        [
+          "url",
+          "str",
+          "dest",
+          "str",
+          "return",
+          "tuple[bool, str]"
+        ],
+        [
+          "path",
+          "str",
+          "return",
+          "str"
+        ],
+        [
+          "new_exe_path",
+          "str",
+          "return",
+          "bool"
+        ],
+        [
+          false
+        ],
+        [
+          "info",
+          "dict",
+          "force",
+          "bool",
+          "return",
+          "bool"
+        ],
+        [
+          "current",
+          "str | None",
+          "return",
+          "bool"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "_download_with_progress",
+          "qualname": "_download_with_progress",
+          "filename": "utils\\updater.py",
+          "first_line": 25,
+          "argcount": 3,
+          "varnames": [
+            "url",
+            "dest",
+            "on_progress",
+            "resp",
+            "total",
+            "downloaded",
+            "f",
+            "chunk",
+            "actual",
+            "e"
+          ],
+          "names": [
+            "requests",
+            "get",
+            "raise_for_status",
+            "int",
+            "headers",
+            "open",
+            "iter_content",
+            "write",
+            "len",
+            "Exception",
+            "os",
+            "path",
+            "getsize",
+            "type",
+            "__name__"
+          ],
+          "constants": [
+            "url → dest 다운로드. (ok, error). 진행률 콜백(0~100) 옵션.",
+            true,
+            300,
+            [
+              "stream",
+              "timeout"
+            ],
+            "content-length",
+            0,
+            "wb",
+            65536,
+            [
+              "chunk_size"
+            ],
+            100,
+            null,
+            0.95,
+            false,
+            "다운로드 불완전: ",
+            "/",
+            " bytes",
+            1000000,
+            "파일이 너무 작음: ",
+            [
+              true,
+              ""
+            ],
+            ": "
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_sha256_of",
+          "qualname": "_sha256_of",
+          "filename": "utils\\updater.py",
+          "first_line": 54,
+          "argcount": 1,
+          "varnames": [
+            "path",
+            "h",
+            "chunk"
+          ],
+          "names": [
+            "hashlib",
+            "sha256",
+            "open",
+            "iter",
+            "update",
+            "hexdigest"
+          ],
+          "constants": [
+            null,
+            "rb",
+            {
+              "bytes_length": 0,
+              "hex_prefix": ""
+            }
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "<lambda>",
+              "qualname": "_sha256_of.<locals>.<lambda>",
+              "filename": "utils\\updater.py",
+              "first_line": 57,
+              "argcount": 0,
+              "varnames": [],
+              "names": [
+                "read"
+              ],
+              "constants": [
+                null,
+                65536
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "_apply_and_restart",
+          "qualname": "_apply_and_restart",
+          "filename": "utils\\updater.py",
+          "first_line": 62,
+          "argcount": 1,
+          "varnames": [
+            "new_exe_path",
+            "current_exe",
+            "current_pid",
+            "bat_path",
+            "bak",
+            "bat",
+            "f",
+            "e"
+          ],
+          "names": [
+            "getattr",
+            "sys",
+            "QtWidgets",
+            "QMessageBox",
+            "information",
+            "executable",
+            "os",
+            "getpid",
+            "path",
+            "join",
+            "tempfile",
+            "gettempdir",
+            "open",
+            "write",
+            "subprocess",
+            "Popen",
+            "Exception",
+            "warning",
+            "type",
+            "__name__"
+          ],
+          "constants": [
+            "현재 exe를 새 exe로 교체 + 자동 재시작. frozen 일 때만 동작.",
+            "frozen",
+            false,
+            null,
+            "업데이트",
+            "개발 환경에서는 자동 업데이트를 적용하지 않습니다.",
+            "planet_solver_update_",
+            ".bat",
+            ".old",
+            "@echo off\nchcp 65001 >nul\n:wait\ntasklist /FI \"PID eq ",
+            "\" 2>nul | find \"",
+            "\" >nul\nif not errorlevel 1 (\n    timeout /t 1 /nobreak >nul\n    goto wait\n)\ntimeout /t 1 /nobreak >nul\ndel /f /q \"",
+            "\" 2>nul\nmove /y \"",
+            "\" \"",
+            "\"\nif errorlevel 1 goto run\nmove /y \"",
+            "\"\nif errorlevel 1 (\n    move /y \"",
+            "\"\n    goto run\n)\ndel /f /q \"",
+            "\" 2>nul\n:run\nstart \"\" \"",
+            "\"\ndel /f /q \"%~f0\"\n",
+            "w",
+            "utf-8",
+            [
+              "encoding"
+            ],
+            "cmd",
+            "/c",
+            "CREATE_NO_WINDOW",
+            0,
+            [
+              "creationflags"
+            ],
+            true,
+            "업데이트 실패",
+            "업데이트 적용 중 오류:\n",
+            ": "
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "run_auto_update",
+          "qualname": "run_auto_update",
+          "filename": "utils\\updater.py",
+          "first_line": 114,
+          "argcount": 2,
+          "varnames": [
+            "info",
+            "force",
+            "version",
+            "url",
+            "changelog",
+            "expected_hash",
+            "is_force",
+            "box",
+            "head",
+            "body",
+            "dest",
+            "_cb",
+            "ok",
+            "err",
+            "actual"
+          ],
+          "names": [
+            "get",
+            "strip",
+            "lower",
+            "bool",
+            "QtWidgets",
+            "QMessageBox",
+            "setWindowTitle",
+            "setIcon",
+            "Information",
+            "setText",
+            "setStandardButtons",
+            "Ok",
+            "Cancel",
+            "button",
+            "exec_",
+            "QProgressDialog",
+            "setCancelButton",
+            "setWindowModality",
+            "QtCore",
+            "Qt",
+            "ApplicationModal",
+            "setMinimumDuration",
+            "setValue",
+            "show",
+            "QApplication",
+            "processEvents",
+            "os",
+            "path",
+            "join",
+            "tempfile",
+            "gettempdir",
+            "getpid",
+            "_download_with_progress",
+            "close",
+            "warning",
+            "exists",
+            "remove",
+            "Exception",
+            "_sha256_of",
+            "_apply_and_restart"
+          ],
+          "constants": [
+            "업데이트 정보로 다운로드+검증+교체+재시작. 적용되어 종료 예정이면 True.\n\nforce=True 면 '나중에' 비활성 (무결성 실패 등 반드시 갱신해야 하는 경우).\n",
+            "version",
+            "",
+            "download_url",
+            "changelog",
+            "expected_hash",
+            "force",
+            false,
+            "업데이트",
+            "프로그램 무결성 검증 실패 — 최신 버전으로 업데이트가 필요합니다.",
+            "새 버전이 있습니다: v",
+            "\n\n[변경사항]\n",
+            "나중에",
+            "업데이트 다운로드 중...",
+            0,
+            100,
+            null,
+            "Planet_solver_update_",
+            ".exe",
+            "업데이트 실패",
+            "다운로드 실패:\n",
+            "다운로드한 파일이 손상되었습니다 (무결성 불일치).\n잠시 후 다시 시도해주세요."
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "_cb",
+              "qualname": "run_auto_update.<locals>._cb",
+              "filename": "utils\\updater.py",
+              "first_line": 159,
+              "argcount": 1,
+              "varnames": [
+                "pct"
+              ],
+              "names": [
+                "setValue",
+                "QtWidgets",
+                "QApplication",
+                "processEvents"
+              ],
+              "constants": [
+                null
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "check_and_prompt_update",
+          "qualname": "check_and_prompt_update",
+          "filename": "utils\\updater.py",
+          "first_line": 197,
+          "argcount": 1,
+          "varnames": [
+            "current",
+            "auth_client",
+            "info"
+          ],
+          "names": [
+            "utils",
+            "auth_client",
+            "get_update_info",
+            "run_auto_update",
+            "bool",
+            "get"
+          ],
+          "constants": [
+            "시작 시 업데이트 체크 → 있으면 다이얼로그. 적용되어 종료 예정이면 True.",
+            0,
+            [
+              "auth_client"
+            ],
+            false,
+            "force",
+            [
+              "force"
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  },
+  "utils.window_finder": {
+    "toc_type": 0,
+    "compressed_size": 1544,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "utils\\window_finder.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "__future__",
+        "annotations",
+        "typing",
+        "Optional",
+        "Tuple",
+        "win32gui",
+        "win32process",
+        "GAME_CLASSES",
+        "GAME_TITLES",
+        "find_maple_window",
+        "get_client_rect_screen"
+      ],
+      "constants": [
+        "메이플 게임창 hwnd 자동 검색.\n\n지원: 메이플스토리 본가, 메이플플래닛, MapleStory Worlds 등.\n",
+        0,
+        [
+          "annotations"
+        ],
+        [
+          "Optional",
+          "Tuple"
+        ],
+        null,
+        [
+          "MapleStoryClass",
+          "UnityWndClass",
+          "NEXON Plug-in Window"
+        ],
+        [
+          "maplestory",
+          "메이플",
+          "planet",
+          "worlds"
+        ],
+        [
+          "return",
+          "Optional[int]"
+        ],
+        [
+          "hwnd",
+          "int",
+          "return",
+          "Tuple[int, int, int, int]"
+        ]
+      ],
+      "instructions": [],
+      "children": [
+        {
+          "name": "find_maple_window",
+          "qualname": "find_maple_window",
+          "filename": "utils\\window_finder.py",
+          "first_line": 17,
+          "argcount": 0,
+          "varnames": [
+            "cb"
+          ],
+          "names": [
+            "win32gui",
+            "EnumWindows"
+          ],
+          "constants": [
+            "메이플 게임창 hwnd 반환. 못 찾으면 None.",
+            0,
+            null
+          ],
+          "instructions": [],
+          "children": [
+            {
+              "name": "cb",
+              "qualname": "find_maple_window.<locals>.cb",
+              "filename": "utils\\window_finder.py",
+              "first_line": 21,
+              "argcount": 2,
+              "varnames": [
+                "hwnd",
+                "_",
+                "cls",
+                "title"
+              ],
+              "names": [
+                "win32gui",
+                "IsWindowVisible",
+                "GetClassName",
+                "GetWindowText",
+                "GAME_CLASSES",
+                "lower",
+                "any",
+                "GAME_TITLES",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                true,
+                0,
+                false
+              ],
+              "instructions": [],
+              "children": [
+                {
+                  "name": "<genexpr>",
+                  "qualname": "find_maple_window.<locals>.cb.<locals>.<genexpr>",
+                  "filename": "utils\\window_finder.py",
+                  "first_line": 31,
+                  "argcount": 1,
+                  "varnames": [
+                    ".0",
+                    "k"
+                  ],
+                  "names": [],
+                  "constants": [
+                    null
+                  ],
+                  "instructions": [],
+                  "children": [],
+                  "instructions_error": "IndexError: tuple index out of range"
+                }
+              ],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ],
+          "instructions_error": "IndexError: tuple index out of range"
+        },
+        {
+          "name": "get_client_rect_screen",
+          "qualname": "get_client_rect_screen",
+          "filename": "utils\\window_finder.py",
+          "first_line": 42,
+          "argcount": 1,
+          "varnames": [
+            "hwnd",
+            "cx",
+            "cy",
+            "cw",
+            "ch",
+            "left",
+            "top",
+            "width",
+            "height"
+          ],
+          "names": [
+            "win32gui",
+            "GetClientRect",
+            "ClientToScreen"
+          ],
+          "constants": [
+            "메이플 클라이언트 영역의 화면 좌표 (left, top, width, height).",
+            [
+              0,
+              0
+            ]
+          ],
+          "instructions": [],
+          "children": [],
+          "instructions_error": "IndexError: tuple index out of range"
+        }
+      ],
+      "instructions_error": "IndexError: tuple index out of range"
+    }
+  }
+}
