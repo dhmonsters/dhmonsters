@@ -1,0 +1,2650 @@
+{
+  "core.routine_runner": {
+    "toc_type": 0,
+    "compressed_size": 11872,
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "core\\routine_runner.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "threading",
+        "time",
+        "pyautogui",
+        "RoutineRunner"
+      ],
+      "constants": [
+        "\nroutine_runner.py\n블록 시퀀스 실행 엔진. 별도 스레드에서 무한 루프 실행.\n\n외부 의존:\n  - get_coord_fn: () -> (x, y) | None     # 캐릭터 현재 좌표\n  - log_fn: (level, message) -> None      # UI 큐로 로그 전달\n  - finished_fn: () -> None               # 종료 시 콜백\n\nsettings 키:\n  tele_key (str)         — 텔포 키 (예: \"shift\")\n  tele_distance (int)    — 텔포 발동 최소 거리\n  attack_key (str)       — 기본 공격 키 (예: \"z\")\n  jump_key (str)         — 점프 키 (예: \"alt\")\n  skill_interval_ms (int)— 공격 연타 간격\n",
+        0,
+        null,
+        "RoutineRunner"
+      ],
+      "instructions": [
+        {
+          "offset": 0,
+          "op": "COPY_FREE_VARS",
+          "arg": ""
+        },
+        {
+          "offset": 2,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 4,
+          "op": "POP_JUMP_IF_FALSE",
+          "arg": "to 6"
+        },
+        {
+          "offset": 6,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 8,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 10,
+          "op": "RETURN_GENERATOR",
+          "arg": ""
+        },
+        {
+          "offset": 12,
+          "op": "POP_JUMP_IF_FALSE",
+          "arg": "to 16"
+        },
+        {
+          "offset": 14,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 16,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 18,
+          "op": "RETURN_GENERATOR",
+          "arg": ""
+        },
+        {
+          "offset": 20,
+          "op": "POP_JUMP_IF_FALSE",
+          "arg": "to 26"
+        },
+        {
+          "offset": 22,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 24,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 26,
+          "op": "RETURN_GENERATOR",
+          "arg": ""
+        },
+        {
+          "offset": 28,
+          "op": "POP_JUMP_IF_FALSE",
+          "arg": "to 36"
+        },
+        {
+          "offset": 30,
+          "op": "CALL",
+          "arg": ""
+        },
+        {
+          "offset": 38,
+          "op": "RETURN_VALUE",
+          "arg": ""
+        },
+        {
+          "offset": 40,
+          "op": "BEFORE_WITH",
+          "arg": ""
+        },
+        {
+          "offset": 42,
+          "op": "CACHE",
+          "arg": ""
+        },
+        {
+          "offset": 44,
+          "op": "CACHE",
+          "arg": ""
+        },
+        {
+          "offset": 46,
+          "op": "CACHE",
+          "arg": ""
+        },
+        {
+          "offset": 48,
+          "op": "POP_JUMP_IF_FALSE",
+          "arg": "to 58"
+        },
+        {
+          "offset": 50,
+          "op": "BUILD_LIST",
+          "arg": ""
+        }
+      ],
+      "children": [
+        {
+          "name": "RoutineRunner",
+          "qualname": "RoutineRunner",
+          "filename": "core\\routine_runner.py",
+          "first_line": 24,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__init__",
+            "list",
+            "dict",
+            "start",
+            "stop",
+            "pause",
+            "resume",
+            "bool",
+            "is_running",
+            "_run",
+            "_wait_unpause",
+            "_release_all_keys",
+            "str",
+            "float",
+            "_start_attack_loop",
+            "_stop_attack_loop",
+            "_execute_block",
+            "int",
+            "_curr_x",
+            "_curr_y",
+            "_do_move",
+            "_teleport_once",
+            "_walk_to",
+            "_do_attack",
+            "_do_patrol",
+            "_patrol_sweep",
+            "_sleep_chunked",
+            "_attack_burst",
+            "_do_ladder",
+            "_climb_ladder_up_until",
+            "_descend_ladder_jump",
+            "_jump_grab_ladder",
+            "_do_jump",
+            "__static_attributes__"
+          ],
+          "constants": [
+            "RoutineRunner",
+            24,
+            "blocks",
+            "settings",
+            "return",
+            null,
+            "skill_key",
+            "interval",
+            "block",
+            "direction",
+            "target_x",
+            "tele_key",
+            "use_tele",
+            "attack_sec",
+            "seconds",
+            "key",
+            "y_top",
+            "exit_side",
+            "ladder_x",
+            "side",
+            "y_bot",
+            [
+              "_attack_active",
+              "_attack_lock",
+              "_attack_thread",
+              "_pause_event",
+              "_stop_event",
+              "_thread",
+              "blocks",
+              "finished",
+              "get_coord",
+              "log",
+              "settings"
+            ],
+            [
+              "return",
+              null
+            ]
+          ],
+          "instructions": [
+            {
+              "offset": 0,
+              "op": "COPY_FREE_VARS",
+              "arg": ""
+            },
+            {
+              "offset": 2,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 6,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 8,
+              "op": "POP_JUMP_IF_FALSE",
+              "arg": "to 14"
+            },
+            {
+              "offset": 10,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 12,
+              "op": "POP_JUMP_IF_FALSE",
+              "arg": "to 20"
+            },
+            {
+              "offset": 14,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 16,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 18,
+              "op": "POP_JUMP_IF_FALSE",
+              "arg": "to 28"
+            },
+            {
+              "offset": 20,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 22,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 26,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 30,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 32,
+              "op": "BEFORE_ASYNC_WITH",
+              "arg": ""
+            },
+            {
+              "offset": 34,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 36,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 38,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 58,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 78,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 80,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 82,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 102,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 104,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 106,
+              "op": "POP_JUMP_IF_FALSE",
+              "arg": "to 138"
+            },
+            {
+              "offset": 108,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 110,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 114,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 118,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 120,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 122,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 142,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 162,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 182,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 202,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 222,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 224,
+              "op": "POP_JUMP_IF_FALSE",
+              "arg": "to 280"
+            },
+            {
+              "offset": 226,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 228,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 230,
+              "op": "POP_JUMP_IF_FALSE",
+              "arg": "to 288"
+            },
+            {
+              "offset": 232,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 234,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 238,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 242,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 246,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 250,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 252,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 254,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 274,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 278,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 282,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 286,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 288,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 290,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 310,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            },
+            {
+              "offset": 330,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 334,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 338,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 342,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 346,
+              "op": "UNPACK_SEQUENCE",
+              "arg": ""
+            },
+            {
+              "offset": 350,
+              "op": "RETURN_VALUE",
+              "arg": ""
+            },
+            {
+              "offset": 352,
+              "op": "BINARY_SLICE",
+              "arg": ""
+            },
+            {
+              "offset": 354,
+              "op": "LOAD_ATTR",
+              "arg": "__qualname__"
+            }
+          ],
+          "children": [
+            {
+              "name": "__init__",
+              "qualname": "RoutineRunner.__init__",
+              "filename": "core\\routine_runner.py",
+              "first_line": 25,
+              "argcount": 4,
+              "varnames": [
+                "self",
+                "get_coord_fn",
+                "log_fn",
+                "finished_fn"
+              ],
+              "names": [
+                "get_coord",
+                "log",
+                "finished",
+                "threading",
+                "Event",
+                "_stop_event",
+                "_pause_event",
+                "_thread",
+                "_attack_thread",
+                "_attack_active",
+                "Lock",
+                "_attack_lock",
+                "blocks",
+                "settings"
+              ],
+              "constants": [
+                null,
+                false
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "start",
+              "qualname": "RoutineRunner.start",
+              "filename": "core\\routine_runner.py",
+              "first_line": 44,
+              "argcount": 3,
+              "varnames": [
+                "self",
+                "blocks",
+                "settings"
+              ],
+              "names": [
+                "_thread",
+                "is_alive",
+                "log",
+                "list",
+                "blocks",
+                "dict",
+                "settings",
+                "_stop_event",
+                "clear",
+                "_pause_event",
+                "threading",
+                "Thread",
+                "_run",
+                "start"
+              ],
+              "constants": [
+                null,
+                "warn",
+                "[루틴] 블록이 비어있습니다.",
+                true,
+                [
+                  "target",
+                  "daemon"
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "stop",
+              "qualname": "RoutineRunner.stop",
+              "filename": "core\\routine_runner.py",
+              "first_line": 57,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "k"
+              ],
+              "names": [
+                "_stop_event",
+                "set",
+                "pyautogui",
+                "keyUp",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                [
+                  "left",
+                  "right",
+                  "up",
+                  "down",
+                  "space",
+                  "alt",
+                  "ctrl",
+                  "shift",
+                  "z",
+                  "x",
+                  "c",
+                  "v"
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "pause",
+              "qualname": "RoutineRunner.pause",
+              "filename": "core\\routine_runner.py",
+              "first_line": 67,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_pause_event",
+                "set"
+              ],
+              "constants": [
+                null
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "COPY_FREE_VARS",
+                  "arg": ""
+                },
+                {
+                  "offset": 2,
+                  "op": "SETUP_ANNOTATIONS",
+                  "arg": ""
+                },
+                {
+                  "offset": 4,
+                  "op": "LOAD_ATTR",
+                  "arg": "_pause_event"
+                },
+                {
+                  "offset": 24,
+                  "op": "LOAD_ATTR",
+                  "arg": "NULL|self + set"
+                },
+                {
+                  "offset": 44,
+                  "op": "BEFORE_WITH",
+                  "arg": ""
+                },
+                {
+                  "offset": 46,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 48,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 50,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 52,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 54,
+                  "op": "BUILD_LIST",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "resume",
+              "qualname": "RoutineRunner.resume",
+              "filename": "core\\routine_runner.py",
+              "first_line": 70,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_pause_event",
+                "clear"
+              ],
+              "constants": [
+                null
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "COPY_FREE_VARS",
+                  "arg": ""
+                },
+                {
+                  "offset": 2,
+                  "op": "SETUP_ANNOTATIONS",
+                  "arg": ""
+                },
+                {
+                  "offset": 4,
+                  "op": "LOAD_ATTR",
+                  "arg": "_pause_event"
+                },
+                {
+                  "offset": 24,
+                  "op": "LOAD_ATTR",
+                  "arg": "NULL|self + clear"
+                },
+                {
+                  "offset": 44,
+                  "op": "BEFORE_WITH",
+                  "arg": ""
+                },
+                {
+                  "offset": 46,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 48,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 50,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 52,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 54,
+                  "op": "BUILD_LIST",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "is_running",
+              "qualname": "RoutineRunner.is_running",
+              "filename": "core\\routine_runner.py",
+              "first_line": 73,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_thread",
+                "is_alive"
+              ],
+              "constants": [
+                null
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "COPY_FREE_VARS",
+                  "arg": ""
+                },
+                {
+                  "offset": 2,
+                  "op": "SETUP_ANNOTATIONS",
+                  "arg": ""
+                },
+                {
+                  "offset": 4,
+                  "op": "LOAD_ATTR",
+                  "arg": "_thread"
+                },
+                {
+                  "offset": 24,
+                  "op": "RETURN_VALUE",
+                  "arg": ""
+                },
+                {
+                  "offset": 26,
+                  "op": "LOAD_ATTR",
+                  "arg": "NULL|self + _thread"
+                },
+                {
+                  "offset": 46,
+                  "op": "LOAD_ATTR",
+                  "arg": "_thread"
+                },
+                {
+                  "offset": 66,
+                  "op": "LOAD_ATTR",
+                  "arg": "NULL|self + is_alive"
+                },
+                {
+                  "offset": 86,
+                  "op": "BEFORE_WITH",
+                  "arg": ""
+                },
+                {
+                  "offset": 88,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 90,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 92,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 94,
+                  "op": "CHECK_EXC_MATCH",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "_run",
+              "qualname": "RoutineRunner._run",
+              "filename": "core\\routine_runner.py",
+              "first_line": 78,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "iteration",
+                "idx",
+                "block",
+                "e"
+              ],
+              "names": [
+                "log",
+                "_stop_event",
+                "is_set",
+                "enumerate",
+                "blocks",
+                "_wait_unpause",
+                "get",
+                "_execute_block",
+                "Exception",
+                "type",
+                "__name__",
+                "_release_all_keys",
+                "finished"
+              ],
+              "constants": [
+                null,
+                "green",
+                "[루틴] 시작 — 블록 시퀀스 무한 반복",
+                0,
+                1,
+                "white",
+                "[루틴 #",
+                "] 블록 ",
+                ": ",
+                "type",
+                "red",
+                "[루틴] 오류: ",
+                "yellow",
+                "[루틴] 정지 완료"
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_wait_unpause",
+              "qualname": "RoutineRunner._wait_unpause",
+              "filename": "core\\routine_runner.py",
+              "first_line": 100,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_pause_event",
+                "is_set",
+                "_stop_event",
+                "time",
+                "sleep"
+              ],
+              "constants": [
+                null,
+                0.1
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_release_all_keys",
+              "qualname": "RoutineRunner._release_all_keys",
+              "filename": "core\\routine_runner.py",
+              "first_line": 104,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "k"
+              ],
+              "names": [
+                "pyautogui",
+                "keyUp",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                [
+                  "left",
+                  "right",
+                  "up",
+                  "down",
+                  "space",
+                  "alt",
+                  "ctrl",
+                  "shift",
+                  "z",
+                  "x",
+                  "c",
+                  "v",
+                  "a",
+                  "s",
+                  "d",
+                  "f"
+                ]
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_start_attack_loop",
+              "qualname": "RoutineRunner._start_attack_loop",
+              "filename": "core\\routine_runner.py",
+              "first_line": 114,
+              "argcount": 3,
+              "varnames": [
+                "self",
+                "skill_key",
+                "interval",
+                "_loop"
+              ],
+              "names": [
+                "_attack_lock",
+                "_attack_active",
+                "threading",
+                "Thread",
+                "_attack_thread",
+                "start"
+              ],
+              "constants": [
+                null,
+                true,
+                "RoutineAttackLoop",
+                [
+                  "target",
+                  "daemon",
+                  "name"
+                ]
+              ],
+              "instructions": [],
+              "children": [
+                {
+                  "name": "_loop",
+                  "qualname": "RoutineRunner._start_attack_loop.<locals>._loop",
+                  "filename": "core\\routine_runner.py",
+                  "first_line": 120,
+                  "argcount": 0,
+                  "varnames": [
+                    "active"
+                  ],
+                  "names": [
+                    "_stop_event",
+                    "is_set",
+                    "_attack_lock",
+                    "_attack_active",
+                    "_pause_event",
+                    "pyautogui",
+                    "keyDown",
+                    "time",
+                    "sleep",
+                    "keyUp",
+                    "Exception",
+                    "max"
+                  ],
+                  "constants": [
+                    null,
+                    0.04,
+                    0.01
+                  ],
+                  "instructions": [],
+                  "children": [],
+                  "instructions_error": "IndexError: tuple index out of range"
+                }
+              ],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_stop_attack_loop",
+              "qualname": "RoutineRunner._stop_attack_loop",
+              "filename": "core\\routine_runner.py",
+              "first_line": 138,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_attack_lock",
+                "_attack_active"
+              ],
+              "constants": [
+                null,
+                false
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "COPY_FREE_VARS",
+                  "arg": ""
+                },
+                {
+                  "offset": 2,
+                  "op": "SETUP_ANNOTATIONS",
+                  "arg": ""
+                },
+                {
+                  "offset": 4,
+                  "op": "LOAD_ATTR",
+                  "arg": "_attack_lock"
+                },
+                {
+                  "offset": 24,
+                  "op": "PUSH_NULL",
+                  "arg": ""
+                },
+                {
+                  "offset": 26,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 28,
+                  "op": "RETURN_VALUE",
+                  "arg": ""
+                },
+                {
+                  "offset": 30,
+                  "op": "SETUP_ANNOTATIONS",
+                  "arg": ""
+                },
+                {
+                  "offset": 32,
+                  "op": "IMPORT_NAME",
+                  "arg": "_attack_active"
+                },
+                {
+                  "offset": 34,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 36,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 38,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 40,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 42,
+                  "op": "RETURN_VALUE",
+                  "arg": ""
+                },
+                {
+                  "offset": 44,
+                  "op": "RETURN_VALUE",
+                  "arg": ""
+                },
+                {
+                  "offset": 46,
+                  "op": "RETURN_VALUE",
+                  "arg": ""
+                },
+                {
+                  "offset": 48,
+                  "op": "BEFORE_WITH",
+                  "arg": ""
+                },
+                {
+                  "offset": 50,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 52,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 54,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 56,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 58,
+                  "op": "BUILD_LIST",
+                  "arg": ""
+                },
+                {
+                  "offset": 60,
+                  "op": "MATCH_KEYS",
+                  "arg": ""
+                },
+                {
+                  "offset": 62,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 70,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 72,
+                  "op": "LOAD_CONST",
+                  "arg": "False"
+                },
+                {
+                  "offset": 74,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 76,
+                  "op": "BUILD_TUPLE",
+                  "arg": ""
+                },
+                {
+                  "offset": 78,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 80,
+                  "op": "MATCH_MAPPING",
+                  "arg": ""
+                },
+                {
+                  "offset": 82,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 84,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 86,
+                  "op": "BUILD_LIST",
+                  "arg": ""
+                },
+                {
+                  "offset": 88,
+                  "op": "DELETE_SUBSCR",
+                  "arg": ""
+                },
+                {
+                  "offset": 90,
+                  "op": "MATCH_MAPPING",
+                  "arg": ""
+                },
+                {
+                  "offset": 92,
+                  "op": "BUILD_TUPLE",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "_execute_block",
+              "qualname": "RoutineRunner._execute_block",
+              "filename": "core\\routine_runner.py",
+              "first_line": 146,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "block",
+                "t",
+                "e"
+              ],
+              "names": [
+                "get",
+                "_do_move",
+                "_do_attack",
+                "_do_patrol",
+                "_do_ladder",
+                "_do_jump",
+                "time",
+                "sleep",
+                "int",
+                "log",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                "type",
+                "move",
+                "attack",
+                "patrol",
+                "ladder",
+                "jump",
+                "wait",
+                "ms",
+                1000,
+                1000.0,
+                "warn",
+                "[루틴] 알 수 없는 블록: ",
+                "red",
+                "[루틴] 블록 실행 오류 (",
+                "): "
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_curr_x",
+              "qualname": "RoutineRunner._curr_x",
+              "filename": "core\\routine_runner.py",
+              "first_line": 161,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "coord"
+              ],
+              "names": [
+                "get_coord",
+                "int"
+              ],
+              "constants": [
+                null,
+                0
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_curr_y",
+              "qualname": "RoutineRunner._curr_y",
+              "filename": "core\\routine_runner.py",
+              "first_line": 167,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "coord"
+              ],
+              "names": [
+                "get_coord",
+                "int"
+              ],
+              "constants": [
+                null,
+                1
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_do_move",
+              "qualname": "RoutineRunner._do_move",
+              "filename": "core\\routine_runner.py",
+              "first_line": 175,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "block",
+                "target_x",
+                "use_tele",
+                "tele_dist",
+                "deadline",
+                "x",
+                "diff",
+                "direction"
+              ],
+              "names": [
+                "int",
+                "get",
+                "bool",
+                "settings",
+                "time",
+                "_stop_event",
+                "is_set",
+                "_curr_x",
+                "sleep",
+                "abs",
+                "_teleport_once",
+                "_walk_to"
+              ],
+              "constants": [
+                "X 좌표로 이동. 전역 설정의 use_teleport에 따라 텔포 사용 여부 결정.",
+                "x",
+                0,
+                "use_teleport",
+                true,
+                "tele_distance",
+                15,
+                15.0,
+                null,
+                0.2,
+                2,
+                "right",
+                "left",
+                0.25
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_teleport_once",
+              "qualname": "RoutineRunner._teleport_once",
+              "filename": "core\\routine_runner.py",
+              "first_line": 202,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "direction",
+                "tele_key",
+                "dir_key"
+              ],
+              "names": [
+                "settings",
+                "get",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "press",
+                "keyUp"
+              ],
+              "constants": [
+                null,
+                "tele_key",
+                "shift",
+                "right",
+                "left",
+                0.04
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_walk_to",
+              "qualname": "RoutineRunner._walk_to",
+              "filename": "core\\routine_runner.py",
+              "first_line": 211,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "target_x",
+                "deadline",
+                "last_dir",
+                "x",
+                "diff",
+                "wanted"
+              ],
+              "names": [
+                "time",
+                "_stop_event",
+                "is_set",
+                "_curr_x",
+                "sleep",
+                "abs",
+                "pyautogui",
+                "keyUp",
+                "keyDown"
+              ],
+              "constants": [
+                null,
+                5.0,
+                0.1,
+                1,
+                0,
+                "right",
+                "left",
+                0.05
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_do_attack",
+              "qualname": "RoutineRunner._do_attack",
+              "filename": "core\\routine_runner.py",
+              "first_line": 232,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "block",
+                "skill_key",
+                "interval",
+                "duration",
+                "end",
+                "count",
+                "_"
+              ],
+              "names": [
+                "get",
+                "settings",
+                "int",
+                "float",
+                "time",
+                "_stop_event",
+                "is_set",
+                "pyautogui",
+                "press",
+                "sleep",
+                "range"
+              ],
+              "constants": [
+                null,
+                "skill_key",
+                "attack_key",
+                "z",
+                "interval_ms",
+                "skill_interval_ms",
+                50,
+                1000.0,
+                "seconds",
+                "count",
+                1
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_do_patrol",
+              "qualname": "RoutineRunner._do_patrol",
+              "filename": "core\\routine_runner.py",
+              "first_line": 250,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "block",
+                "x_start",
+                "x_end",
+                "attack_sec",
+                "skill_key",
+                "skill_interval",
+                "tele_key",
+                "use_tele",
+                "k"
+              ],
+              "names": [
+                "int",
+                "get",
+                "float",
+                "min",
+                "max",
+                "settings",
+                "bool",
+                "log",
+                "_start_attack_loop",
+                "_stop_event",
+                "is_set",
+                "_patrol_sweep",
+                "_stop_attack_loop",
+                "pyautogui",
+                "keyUp",
+                "Exception"
+              ],
+              "constants": [
+                "왕복 사냥 — 공격 백그라운드 스레드 + 방향 키 유지 + N초마다 텔포.\n\nc-3.py 방식: 공격은 별도 스레드에서 끊김 없이 연타,\n메인 스레드는 방향 키 누른 채 + 일정 간격(=공격 시간)으로 텔포.\n사이클은 무한 (정지(F4) 또는 다음 블록 사라질 때까지).\n\n종료 조건 (sweep 1회):\n  - 우측 sweep: x + tele_distance >= x_hi\n  - 좌측 sweep: x - tele_distance <= x_lo\n",
+                "x_start",
+                0,
+                "x_end",
+                100,
+                "attack_hold_sec",
+                3.0,
+                "skill_key",
+                "attack_key",
+                "z",
+                40,
+                "skill_interval_ms",
+                50,
+                1000.0,
+                "tele_key",
+                "space",
+                "use_teleport",
+                true,
+                "tele_distance",
+                15,
+                "white",
+                "[왕복사냥] X=",
+                "~",
+                "  공격='",
+                "'(백그라운드)  텔포='",
+                "' 간격=",
+                "초  텔포거리=",
+                "  텔포=",
+                "right",
+                "left",
+                null
+              ],
+              "instructions": [],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RoutineRunner._do_patrol.<locals>.<lambda>",
+                  "filename": "core\\routine_runner.py",
+                  "first_line": 285,
+                  "argcount": 1,
+                  "varnames": [
+                    "x"
+                  ],
+                  "names": [],
+                  "constants": [
+                    null
+                  ],
+                  "instructions": [],
+                  "children": [],
+                  "instructions_error": "IndexError: tuple index out of range"
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RoutineRunner._do_patrol.<locals>.<lambda>",
+                  "filename": "core\\routine_runner.py",
+                  "first_line": 291,
+                  "argcount": 1,
+                  "varnames": [
+                    "x"
+                  ],
+                  "names": [],
+                  "constants": [
+                    null
+                  ],
+                  "instructions": [],
+                  "children": [],
+                  "instructions_error": "IndexError: tuple index out of range"
+                }
+              ],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_patrol_sweep",
+              "qualname": "RoutineRunner._patrol_sweep",
+              "filename": "core\\routine_runner.py",
+              "first_line": 300,
+              "argcount": 6,
+              "varnames": [
+                "self",
+                "direction",
+                "target_cond",
+                "tele_key",
+                "use_tele",
+                "attack_sec",
+                "deadline",
+                "x",
+                "tele_count"
+              ],
+              "names": [
+                "time",
+                "pyautogui",
+                "keyDown",
+                "_stop_event",
+                "is_set",
+                "_wait_unpause",
+                "_curr_x",
+                "log",
+                "sleep",
+                "keyUp",
+                "_sleep_chunked"
+              ],
+              "constants": [
+                "방향 키 유지 + 일정 간격으로 텔포. 공격은 백그라운드 스레드에서 진행 중.\ntarget_cond(x)가 True면 sweep 종료.\n",
+                90.0,
+                null,
+                "white",
+                "[",
+                " sweep] X=",
+                " → 종료",
+                0.05,
+                0,
+                0.1,
+                " → 종료 (텔포 ",
+                "회)",
+                0.06,
+                1
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_sleep_chunked",
+              "qualname": "RoutineRunner._sleep_chunked",
+              "filename": "core\\routine_runner.py",
+              "first_line": 345,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "seconds",
+                "end"
+              ],
+              "names": [
+                "time",
+                "max",
+                "_stop_event",
+                "is_set",
+                "_pause_event",
+                "_wait_unpause",
+                "sleep"
+              ],
+              "constants": [
+                "N초 sleep, stop/pause 체크는 50ms 단위.",
+                0.0,
+                null,
+                0.05
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_attack_burst",
+              "qualname": "RoutineRunner._attack_burst",
+              "filename": "core\\routine_runner.py",
+              "first_line": 355,
+              "argcount": 4,
+              "varnames": [
+                "self",
+                "key",
+                "seconds",
+                "interval",
+                "end"
+              ],
+              "names": [
+                "time",
+                "max",
+                "_stop_event",
+                "is_set",
+                "_pause_event",
+                "_wait_unpause",
+                "pyautogui",
+                "keyUp",
+                "Exception",
+                "keyDown",
+                "sleep"
+              ],
+              "constants": [
+                "N초간 키를 연타. stop/pause 시 즉시 해제.",
+                0.0,
+                null,
+                0.04
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_do_ladder",
+              "qualname": "RoutineRunner._do_ladder",
+              "filename": "core\\routine_runner.py",
+              "first_line": 375,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "block",
+                "ladder_x",
+                "y_top",
+                "y_bot",
+                "direction",
+                "exit_side",
+                "char_x",
+                "char_y",
+                "diff_y_bot",
+                "same_level",
+                "upstairs",
+                "side"
+              ],
+              "names": [
+                "int",
+                "get",
+                "_do_move",
+                "_stop_event",
+                "is_set",
+                "_curr_x",
+                "_curr_y",
+                "log",
+                "abs",
+                "_descend_ladder_jump",
+                "_climb_ladder_up_until",
+                "_jump_grab_ladder"
+              ],
+              "constants": [
+                "사다리 자동 판정 (캐릭터 X,Y vs 사다리 X, 맨위Y, 맨아래Y).\n\n좌표계 가정: Y가 작을수록 위, 클수록 아래.\n\nCase 1 — 같은 층 (char_y ≈ y_bot): ↑ 키 홀드 → y_top 도달까지 등반\nCase 2 — 위층 (char_y < y_top): ↓ 1초 + 좌/우+점프 (사다리에서 뛰어내림, 빠름)\nCase 3 — 애매 (Y 차이 ≥ 3): 좌/우 가다가 사다리 X ±4 진입 시 점프+↑ 잡기\n",
+                "x",
+                0,
+                "y_top",
+                "y_bot",
+                100,
+                "direction",
+                "up",
+                "exit_side",
+                "right",
+                null,
+                "warn",
+                "[사다리] 좌표 인식 실패 — 스킵",
+                2,
+                "white",
+                "[사다리] Case 2 — 위층 → 점프 하강 (X=",
+                ")",
+                "[사다리] Case 1 — 같은 층 → 등반 (X=",
+                ", ↑)",
+                "left",
+                "[사다리] Case 3 — 점프잡기 (",
+                "+점프+↑) (X="
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_climb_ladder_up_until",
+              "qualname": "RoutineRunner._climb_ladder_up_until",
+              "filename": "core\\routine_runner.py",
+              "first_line": 417,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "y_top",
+                "deadline",
+                "y"
+              ],
+              "names": [
+                "time",
+                "pyautogui",
+                "keyDown",
+                "_stop_event",
+                "is_set",
+                "_wait_unpause",
+                "_curr_y",
+                "sleep",
+                "keyUp"
+              ],
+              "constants": [
+                "↑ 키 홀드 → y_top 도달까지 등반.",
+                30.0,
+                "up",
+                null,
+                0.05,
+                2
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_descend_ladder_jump",
+              "qualname": "RoutineRunner._descend_ladder_jump",
+              "filename": "core\\routine_runner.py",
+              "first_line": 434,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "exit_side",
+                "jump_key"
+              ],
+              "names": [
+                "settings",
+                "get",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "keyUp",
+                "_stop_event",
+                "is_set",
+                "press"
+              ],
+              "constants": [
+                "위층에서 ↓ 1초 + 좌/우 + 점프 → 사다리에서 뛰어내림 (빠른 하강).",
+                "jump_key",
+                "alt",
+                "down",
+                1.0,
+                null,
+                0.04,
+                0.4
+              ],
+              "instructions": [
+                {
+                  "offset": 0,
+                  "op": "COPY_FREE_VARS",
+                  "arg": ""
+                },
+                {
+                  "offset": 2,
+                  "op": "SETUP_ANNOTATIONS",
+                  "arg": ""
+                },
+                {
+                  "offset": 4,
+                  "op": "LOAD_ATTR",
+                  "arg": "settings"
+                },
+                {
+                  "offset": 24,
+                  "op": "LOAD_ATTR",
+                  "arg": "NULL|self + get"
+                },
+                {
+                  "offset": 44,
+                  "op": "RETURN_VALUE",
+                  "arg": ""
+                },
+                {
+                  "offset": 46,
+                  "op": "RETURN_VALUE",
+                  "arg": ""
+                },
+                {
+                  "offset": 48,
+                  "op": "BEFORE_WITH",
+                  "arg": ""
+                },
+                {
+                  "offset": 50,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 52,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 54,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 56,
+                  "op": "JUMP_FORWARD",
+                  "arg": "to 62"
+                },
+                {
+                  "offset": 58,
+                  "op": "GET_LEN",
+                  "arg": ""
+                },
+                {
+                  "offset": 60,
+                  "op": "DELETE_NAME",
+                  "arg": "time"
+                },
+                {
+                  "offset": 62,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 64,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 66,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 68,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 70,
+                  "op": "LOAD_ATTR",
+                  "arg": "keyDown"
+                },
+                {
+                  "offset": 90,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 98,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 100,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 102,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 104,
+                  "op": "DELETE_NAME",
+                  "arg": "is_set"
+                },
+                {
+                  "offset": 106,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 108,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 110,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 112,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 114,
+                  "op": "LOAD_ATTR",
+                  "arg": "sleep"
+                },
+                {
+                  "offset": 134,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 142,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 144,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 146,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 148,
+                  "op": "DELETE_NAME",
+                  "arg": "time"
+                },
+                {
+                  "offset": 150,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 152,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 154,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 156,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 158,
+                  "op": "LOAD_ATTR",
+                  "arg": "keyUp"
+                },
+                {
+                  "offset": 178,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 186,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 188,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 190,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 192,
+                  "op": "SETUP_ANNOTATIONS",
+                  "arg": ""
+                },
+                {
+                  "offset": 194,
+                  "op": "LOAD_ATTR",
+                  "arg": "_stop_event"
+                },
+                {
+                  "offset": 214,
+                  "op": "LOAD_ATTR",
+                  "arg": "NULL|self + is_set"
+                },
+                {
+                  "offset": 234,
+                  "op": "BEFORE_WITH",
+                  "arg": ""
+                },
+                {
+                  "offset": 236,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 238,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 240,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 242,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 250,
+                  "op": "STORE_GLOBAL",
+                  "arg": "get"
+                },
+                {
+                  "offset": 252,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 254,
+                  "op": "BUILD_LIST",
+                  "arg": ""
+                },
+                {
+                  "offset": 256,
+                  "op": "GET_LEN",
+                  "arg": ""
+                },
+                {
+                  "offset": 258,
+                  "op": "DELETE_NAME",
+                  "arg": "time"
+                },
+                {
+                  "offset": 260,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 262,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 264,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 266,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 268,
+                  "op": "LOAD_ATTR",
+                  "arg": "keyDown"
+                },
+                {
+                  "offset": 288,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 296,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 298,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 300,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 302,
+                  "op": "DELETE_NAME",
+                  "arg": "is_set"
+                },
+                {
+                  "offset": 304,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 306,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 308,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 310,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 312,
+                  "op": "LOAD_ATTR",
+                  "arg": "sleep"
+                },
+                {
+                  "offset": 332,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 340,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 342,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 344,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 346,
+                  "op": "DELETE_NAME",
+                  "arg": "time"
+                },
+                {
+                  "offset": 348,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 350,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 352,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 354,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 356,
+                  "op": "LOAD_ATTR",
+                  "arg": "press"
+                },
+                {
+                  "offset": 376,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 384,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 386,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 388,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 390,
+                  "op": "DELETE_NAME",
+                  "arg": "is_set"
+                },
+                {
+                  "offset": 392,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 394,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 396,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 398,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 400,
+                  "op": "LOAD_ATTR",
+                  "arg": "sleep"
+                },
+                {
+                  "offset": 420,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 428,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 430,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 432,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 434,
+                  "op": "DELETE_NAME",
+                  "arg": "time"
+                },
+                {
+                  "offset": 436,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 438,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 440,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 442,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 444,
+                  "op": "LOAD_ATTR",
+                  "arg": "keyUp"
+                },
+                {
+                  "offset": 464,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 472,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 474,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 476,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 478,
+                  "op": "BUILD_LIST",
+                  "arg": ""
+                },
+                {
+                  "offset": 480,
+                  "op": "MATCH_KEYS",
+                  "arg": ""
+                },
+                {
+                  "offset": 482,
+                  "op": "DELETE_NAME",
+                  "arg": "time"
+                },
+                {
+                  "offset": 484,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 486,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 488,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 490,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 492,
+                  "op": "LOAD_ATTR",
+                  "arg": "keyUp"
+                },
+                {
+                  "offset": 512,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 520,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 522,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 524,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 526,
+                  "op": "BUILD_TUPLE",
+                  "arg": ""
+                },
+                {
+                  "offset": 528,
+                  "op": "DELETE_SUBSCR",
+                  "arg": ""
+                },
+                {
+                  "offset": 530,
+                  "op": "MATCH_MAPPING",
+                  "arg": ""
+                },
+                {
+                  "offset": 532,
+                  "op": "BUILD_TUPLE",
+                  "arg": ""
+                },
+                {
+                  "offset": 534,
+                  "op": "MATCH_KEYS",
+                  "arg": ""
+                },
+                {
+                  "offset": 536,
+                  "op": "DELETE_NAME",
+                  "arg": "time"
+                },
+                {
+                  "offset": 538,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 540,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 542,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 544,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 546,
+                  "op": "LOAD_ATTR",
+                  "arg": "keyUp"
+                },
+                {
+                  "offset": 566,
+                  "op": "CALL",
+                  "arg": ""
+                },
+                {
+                  "offset": 574,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 576,
+                  "op": "CACHE",
+                  "arg": ""
+                },
+                {
+                  "offset": 578,
+                  "op": "MATCH_SEQUENCE",
+                  "arg": ""
+                },
+                {
+                  "offset": 580,
+                  "op": "BUILD_TUPLE",
+                  "arg": ""
+                },
+                {
+                  "offset": 582,
+                  "op": "DELETE_SUBSCR",
+                  "arg": ""
+                },
+                {
+                  "offset": 584,
+                  "op": "MATCH_MAPPING",
+                  "arg": ""
+                },
+                {
+                  "offset": 586,
+                  "op": "BUILD_TUPLE",
+                  "arg": ""
+                }
+              ],
+              "children": []
+            },
+            {
+              "name": "_jump_grab_ladder",
+              "qualname": "RoutineRunner._jump_grab_ladder",
+              "filename": "core\\routine_runner.py",
+              "first_line": 456,
+              "argcount": 6,
+              "varnames": [
+                "self",
+                "ladder_x",
+                "side",
+                "direction",
+                "y_top",
+                "y_bot",
+                "jump_key",
+                "approach_deadline",
+                "x",
+                "k",
+                "deadline",
+                "y"
+              ],
+              "names": [
+                "settings",
+                "get",
+                "time",
+                "pyautogui",
+                "keyDown",
+                "_stop_event",
+                "is_set",
+                "_wait_unpause",
+                "_curr_x",
+                "sleep",
+                "abs",
+                "keyUp",
+                "Exception",
+                "press",
+                "_curr_y"
+              ],
+              "constants": [
+                "좌/우 키 누른 채 사다리 X로 가다가 ±4 진입 시 점프+↑ 잡기.\n매달린 후 direction에 따라 등반(up) 또는 하강(down).\n",
+                "jump_key",
+                "alt",
+                5.0,
+                null,
+                0.03,
+                4,
+                "up",
+                "down",
+                0.05,
+                0.5,
+                30.0,
+                2
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            },
+            {
+              "name": "_do_jump",
+              "qualname": "RoutineRunner._do_jump",
+              "filename": "core\\routine_runner.py",
+              "first_line": 520,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "block",
+                "direction",
+                "jump_key"
+              ],
+              "names": [
+                "get",
+                "settings",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "press",
+                "keyUp"
+              ],
+              "constants": [
+                null,
+                "direction",
+                "up",
+                "jump_key",
+                "alt",
+                [
+                  "left",
+                  "right"
+                ],
+                0.05,
+                0.3,
+                "down"
+              ],
+              "instructions": [],
+              "children": [],
+              "instructions_error": "IndexError: tuple index out of range"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
