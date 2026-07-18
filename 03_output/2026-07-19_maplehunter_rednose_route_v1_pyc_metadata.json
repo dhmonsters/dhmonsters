@@ -1,0 +1,4212 @@
+{
+  "빨코2(플래닛).cpython-313.pyc": {
+    "path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\03_output\\2026-07-19_maplehunter_rednose_route_v1_pyc_evidence\\MapleHunter_v3.1.17.exe\\maps_planet\\__pycache__\\빨코2(플래닛).cpython-313.pyc",
+    "size": 21621,
+    "sha256": "df8110eca33f81865c0f787f32ee161d7267a848453ed65f7c6d4b38f0b8177e",
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "time",
+        "threading",
+        "pyautogui",
+        "maps.map_base",
+        "MapBase",
+        "PAUSE",
+        "RedCo2Planet"
+      ],
+      "constants": [
+        "\n빨코2(플래닛) — 메이플플래닛 빨코2 사냥터.\n로나월드 빨코2.py 패턴(다층 텔포 사냥) 기반.\n\n미니맵 절대좌표: (60, 164) ~ (296, 301)\n\n⚠️ 좌표 placeholder: 사용자가 게임에서 측정 후 수정 필요\n  - floor2_y      : 2층 Y\n  - floor1_y_min/max : 1층 Y 범위\n  - right_x       : 우측 끝 X\n  - stair_x_min/max  : 계단 X 범위 (1층 → 2층 진입 위치)\n",
+        0,
+        null,
+        [
+          "MapBase"
+        ],
+        0.02,
+        "RedCo2Planet"
+      ],
+      "children": [
+        {
+          "name": "RedCo2Planet",
+          "qualname": "RedCo2Planet",
+          "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+          "first_line": 22,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__init__",
+            "bool",
+            "_is_attack_active",
+            "_attack_loop",
+            "_start_attack_thread",
+            "_set_attack",
+            "_xy",
+            "_release_move_keys",
+            "_check_stuck",
+            "_teleport_hunt",
+            "_teleport_down",
+            "_teleport_up",
+            "_is_floor1",
+            "_is_floor2",
+            "run_routine",
+            "__static_attributes__",
+            "__classcell__"
+          ],
+          "constants": [
+            "RedCo2Planet",
+            22,
+            "return",
+            "on",
+            [
+              "FIXED_X1",
+              "FIXED_X2",
+              "FIXED_Y1",
+              "FIXED_Y2",
+              "_attack_active",
+              "_attack_lock",
+              "_attack_thread_started",
+              "_stuck_time",
+              "_stuck_x",
+              "_stuck_y",
+              "floor1_y_max",
+              "floor1_y_min",
+              "floor2_y",
+              "key_jump",
+              "key_teleport",
+              "right_x",
+              "stair_x_max",
+              "stair_x_min"
+            ]
+          ],
+          "children": [
+            {
+              "name": "__init__",
+              "qualname": "RedCo2Planet.__init__",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 23,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "engine"
+              ],
+              "names": [
+                "super",
+                "__init__",
+                "FIXED_X1",
+                "FIXED_Y1",
+                "FIXED_X2",
+                "FIXED_Y2",
+                "key_teleport",
+                "getattr",
+                "key_jump",
+                "floor2_y",
+                "floor1_y_min",
+                "floor1_y_max",
+                "right_x",
+                "stair_x_min",
+                "stair_x_max",
+                "_stuck_x",
+                "_stuck_y",
+                "_stuck_time",
+                "_attack_active",
+                "threading",
+                "Lock",
+                "_attack_lock",
+                "_attack_thread_started"
+              ],
+              "constants": [
+                null,
+                [
+                  60,
+                  164
+                ],
+                [
+                  296,
+                  301
+                ],
+                "space",
+                "jump_key",
+                "alt",
+                82,
+                99,
+                101,
+                175,
+                48,
+                55,
+                false
+              ],
+              "children": []
+            },
+            {
+              "name": "_is_attack_active",
+              "qualname": "RedCo2Planet._is_attack_active",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 54,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_attack_lock",
+                "_attack_active"
+              ],
+              "constants": [
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_attack_loop",
+              "qualname": "RedCo2Planet._attack_loop",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 58,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "skill_key",
+                "end"
+              ],
+              "names": [
+                "engine",
+                "is_running",
+                "_is_attack_active",
+                "is_paused",
+                "getattr",
+                "skill_time",
+                "time",
+                "pyautogui",
+                "keyDown",
+                "sleep",
+                "keyUp",
+                "skill_delay"
+              ],
+              "constants": [
+                "공격 키를 백그라운드에서 끊김 없이 시전.\nengine.skill_time / engine.skill_delay / engine.skill_key 를 매 사이클 새로 읽어\nUI에서 변경하면 즉시 반영된다. inner while도 _is_attack_active를 체크해서\n공격 중간에 OFF되면 즉시 빠져나옴 (이동 시 공격 잔여 방지).\n",
+                "skill_key",
+                "a",
+                0,
+                0.03,
+                0.02,
+                0.05,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_start_attack_thread",
+              "qualname": "RedCo2Planet._start_attack_thread",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 90,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "t"
+              ],
+              "names": [
+                "_attack_thread_started",
+                "threading",
+                "Thread",
+                "_attack_loop",
+                "start"
+              ],
+              "constants": [
+                null,
+                true,
+                "빨코2P_AttackLoop",
+                [
+                  "target",
+                  "daemon",
+                  "name"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_set_attack",
+              "qualname": "RedCo2Planet._set_attack",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 97,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "on"
+              ],
+              "names": [
+                "_attack_lock",
+                "_attack_active",
+                "pyautogui",
+                "keyUp",
+                "getattr",
+                "engine",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                "skill_key",
+                "a"
+              ],
+              "children": []
+            },
+            {
+              "name": "_xy",
+              "qualname": "RedCo2Planet._xy",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 109,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "x",
+                "y"
+              ],
+              "names": [
+                "engine",
+                "current_x",
+                "current_y",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                0,
+                [
+                  null,
+                  null
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_release_move_keys",
+              "qualname": "RedCo2Planet._release_move_keys",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 119,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "key"
+              ],
+              "names": [
+                "pyautogui",
+                "keyUp"
+              ],
+              "constants": [
+                null,
+                [
+                  "left",
+                  "right",
+                  "up",
+                  "down"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_check_stuck",
+              "qualname": "RedCo2Planet._check_stuck",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 123,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "x",
+                "y"
+              ],
+              "names": [
+                "_xy",
+                "_stuck_x",
+                "_stuck_y",
+                "_stuck_time",
+                "time",
+                "engine",
+                "_log",
+                "_release_move_keys",
+                "pyautogui",
+                "keyDown",
+                "sleep",
+                "press",
+                "key_jump",
+                "keyUp"
+              ],
+              "constants": [
+                "좌표가 3초 이상 동결되면 ←점프로 탈출.",
+                null,
+                false,
+                3.0,
+                "[빨코2P] 🚨 3초 낑김 감지 → ←점프 탈출",
+                "red",
+                "left",
+                0.08,
+                0.3,
+                true
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_hunt",
+              "qualname": "RedCo2Planet._teleport_hunt",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 148,
+              "argcount": 3,
+              "varnames": [
+                "self",
+                "direction",
+                "target_condition",
+                "last_dir_repress",
+                "no_coord_logged",
+                "tele_count",
+                "no_coord_start",
+                "x",
+                "y",
+                "interval",
+                "end"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "_set_attack",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "is_running",
+                "is_paused",
+                "keyUp",
+                "_wait_if_paused",
+                "_check_stuck",
+                "_xy",
+                "sleep",
+                "key_teleport",
+                "max",
+                "float",
+                "getattr"
+              ],
+              "constants": [
+                "방향 키 유지 + 텔포 반복. 공격은 백그라운드 스레드가 처리.\n메이플플래닛 키 입력 안정화 패턴:\n  - 방향 키 1초마다 재입력 (씹힘 방지)\n  - 텔포 직전 방향 강조 + space 명시 hold\n텔포 간격: 매 텔포마다 engine.tele_interval 새로 읽어 UI 변경 즉시 반영.\n",
+                "[빨코2P] ",
+                " 텔포 사냥",
+                "white",
+                true,
+                false,
+                0,
+                null,
+                "[빨코2P] ⚠ 좌표 인식 실패",
+                "red",
+                5.0,
+                "[빨코2P] ⚠ 좌표 5초 실패 → sweep 강제 종료",
+                "yellow",
+                0.1,
+                " sweep 종료 (X=",
+                ", 텔포 ",
+                "회)",
+                "green",
+                1.0,
+                0.02,
+                0.04,
+                0.06,
+                0.03,
+                1,
+                3,
+                10,
+                "[빨코2P] 텔포 #",
+                " (X=",
+                ")",
+                0.05,
+                "tele_interval",
+                0.25
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_down",
+              "qualname": "RedCo2Planet._teleport_down",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 229,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "key_teleport",
+                "keyUp"
+              ],
+              "constants": [
+                "↓+space (1층으로 강제 하강) — 명시 hold 패턴.",
+                "down",
+                0.15,
+                0.08,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_up",
+              "qualname": "RedCo2Planet._teleport_up",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 239,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "key_teleport",
+                "keyUp"
+              ],
+              "constants": [
+                "↑+space (계단 위로 텔포 = 2층 진입) — 명시 hold 패턴.\n메이플플래닛이 ↑+space 동시 인식 못 할 때가 있어서 ↑를 충분히 누른 후 space 명시.\n",
+                "up",
+                0.15,
+                0.08,
+                0.1,
+                0.05,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_is_floor1",
+              "qualname": "RedCo2Planet._is_floor1",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 252,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "y"
+              ],
+              "names": [
+                "floor1_y_min",
+                "floor1_y_max"
+              ],
+              "constants": [
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_is_floor2",
+              "qualname": "RedCo2Planet._is_floor2",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 255,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "y"
+              ],
+              "names": [
+                "abs",
+                "floor2_y"
+              ],
+              "constants": [
+                null,
+                2
+              ],
+              "children": []
+            },
+            {
+              "name": "run_routine",
+              "qualname": "RedCo2Planet.run_routine",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+              "first_line": 260,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "config_manager",
+                "x",
+                "y",
+                "_",
+                "cy",
+                "step4_start",
+                "cx",
+                "move_dir",
+                "overshoot_min",
+                "overshoot_max",
+                "inner_start"
+              ],
+              "names": [
+                "utils.config_manager",
+                "config_manager",
+                "set_minimap_region",
+                "FIXED_X1",
+                "FIXED_Y1",
+                "FIXED_X2",
+                "FIXED_Y2",
+                "engine",
+                "_log",
+                "_start_attack_thread",
+                "is_running",
+                "_wait_if_paused",
+                "_xy",
+                "time",
+                "sleep",
+                "_check_stuck",
+                "_teleport_hunt",
+                "check_and_use_buffs",
+                "_is_floor1",
+                "_teleport_down",
+                "stair_x_min",
+                "pyautogui",
+                "keyDown",
+                "stair_x_max",
+                "keyUp",
+                "_release_move_keys",
+                "_teleport_up",
+                "_is_floor2"
+              ],
+              "constants": [
+                null,
+                0,
+                [
+                  "config_manager"
+                ],
+                "[빨코2P] 사냥 루틴 시작!",
+                "green",
+                0.05,
+                "[빨코2P] STEP 1: 2층 우측 사냥",
+                "white",
+                "right",
+                "[빨코2P] STEP 2: ↓ 텔포 → 1층",
+                "[빨코2P] ✅ 1층 도착",
+                0.5,
+                "[빨코2P] STEP 3: 1층 좌측 사냥",
+                "left",
+                "[빨코2P] STEP 4: 계단 → 2층 복귀",
+                "[빨코2P] 계단 좌측 지나침 → 우측 복귀",
+                "yellow",
+                50,
+                "[빨코2P] ⚠ 우측 지나침(X=",
+                ") — 즉시 정지",
+                0.03,
+                "[빨코2P] ⚠ 2층 미도착 → 계단 복귀 후 재시도",
+                25.0,
+                "[빨코2P] ⚠ STEP 4 timeout(25초) — 다음 사이클",
+                "[빨코2P] ⚠ 추락 감지 (1층 복귀) — 다음 사이클",
+                30,
+                2.0,
+                "[빨코2P] 🔄 1사이클 완료"
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2Planet.run_routine.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+                  "first_line": 283,
+                  "argcount": 2,
+                  "varnames": [
+                    "x",
+                    "y"
+                  ],
+                  "names": [
+                    "right_x"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2Planet.run_routine.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2(플래닛).py",
+                  "first_line": 305,
+                  "argcount": 2,
+                  "varnames": [
+                    "x",
+                    "y"
+                  ],
+                  "names": [
+                    "stair_x_max"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "빨코2_v2.cpython-313.pyc": {
+    "path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\03_output\\2026-07-19_maplehunter_rednose_route_v1_pyc_evidence\\MapleHunter_v3.1.17.exe\\maps_planet\\__pycache__\\빨코2_v2.cpython-313.pyc",
+    "size": 33894,
+    "sha256": "addb451095aed6c64f657e814cd3fdff960ed842b62359b6711fec0d290b80f0",
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "maps_planet/빨코2_v2.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "time",
+        "threading",
+        "pyautogui",
+        "maps.map_base",
+        "MapBase",
+        "utils.humanize",
+        "hhold",
+        "hgap",
+        "jitter",
+        "PAUSE",
+        "RedCo2V2"
+      ],
+      "constants": [
+        "빨코2 v2 — 메모리 기반 매크로 (전면 수정 2026-05-11).\n\n- 좌표: engine.memory_reader (인젝션 0회, 외부 RPM)\n- 2층 X=-2.70~5.72 텔포 sweep + 공격\n- 3사이클마다: 우측 텔포+공격 sweep → ID39 발판 → 걸어서 끝 → 점프 낙하\n- 1층 좌측 텔포 sweep (2.5초 간격) → 7번 계단 안전 범위(-4.66~-4.05)\n- walk만으로 X 정밀 보정 → ↑텔포 → 1층 계단 → →텔포 → 2층 복귀\n\n엔진 연동:\n- engine.skill_key, jump_key (사용자 콤보박스 설정)\n- engine.skill_time, skill_delay (사용자 입력)\n- engine.tele_interval (2층 sweep에만)\n- engine.is_paused (묘묘/유저감지/채팅 연동)\n- engine.check_and_use_buffs() (사이클 끝마다 버프 시전)\n- engine.memory_reader (GUI가 매크로 시작 시 set)\n",
+        0,
+        null,
+        [
+          "MapBase"
+        ],
+        [
+          "hhold",
+          "hgap",
+          "jitter"
+        ],
+        0.02,
+        "RedCo2V2"
+      ],
+      "children": [
+        {
+          "name": "RedCo2V2",
+          "qualname": "RedCo2V2",
+          "filename": "maps_planet/빨코2_v2.py",
+          "first_line": 27,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__doc__",
+            "HUNT_X_LEFT",
+            "HUNT_X_RIGHT",
+            "FLOOR2_Y",
+            "FLOOR1_Y",
+            "FLOOR_THRESHOLD",
+            "STAIR39_X_START",
+            "STAIR39_X_END",
+            "STAIR7_SAFE_X_MIN",
+            "STAIR7_SAFE_X_MAX",
+            "PICKUP_TELEPORT_INTERVAL",
+            "CYCLES_PER_PICKUP",
+            "FIXED_X1",
+            "FIXED_Y1",
+            "FIXED_X2",
+            "FIXED_Y2",
+            "__init__",
+            "_attack_loop",
+            "_start_attack_thread",
+            "bool",
+            "_set_attack",
+            "_get_pos",
+            "_is_floor1",
+            "_is_floor2",
+            "_release_move_keys",
+            "_wait_if_paused",
+            "_teleport_up",
+            "_teleport_right",
+            "str",
+            "_teleport_sweep",
+            "_drop_right_to_floor1",
+            "_pickup_to_stair7",
+            "_climb_stair7",
+            "_recover_to_floor2",
+            "run_routine",
+            "__static_attributes__",
+            "__classcell__"
+          ],
+          "constants": [
+            "RedCo2V2",
+            27,
+            "빨코2 v2 — 메모리 매크로.",
+            -2.7,
+            5.72,
+            0.94,
+            -0.7,
+            0.3,
+            7.4,
+            8.4,
+            -4.66,
+            -4.05,
+            2.5,
+            3,
+            [
+              60,
+              164
+            ],
+            [
+              296,
+              301
+            ],
+            "on",
+            "direction",
+            "return",
+            [
+              "_attack_active",
+              "_attack_lock",
+              "_attack_thread_started"
+            ],
+            [
+              60
+            ]
+          ],
+          "children": [
+            {
+              "name": "__init__",
+              "qualname": "RedCo2V2.__init__",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 53,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "engine"
+              ],
+              "names": [
+                "super",
+                "__init__",
+                "_attack_active",
+                "threading",
+                "Lock",
+                "_attack_lock",
+                "_attack_thread_started"
+              ],
+              "constants": [
+                null,
+                false
+              ],
+              "children": []
+            },
+            {
+              "name": "_attack_loop",
+              "qualname": "RedCo2V2._attack_loop",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 61,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "active",
+                "skill_key",
+                "skill_time",
+                "end",
+                "skill_delay"
+              ],
+              "names": [
+                "engine",
+                "is_running",
+                "_attack_active",
+                "is_paused",
+                "skill_key",
+                "max",
+                "float",
+                "skill_time",
+                "time",
+                "pyautogui",
+                "keyDown",
+                "hhold",
+                "getattr",
+                "keyUp",
+                "hgap",
+                "skill_delay",
+                "sleep"
+              ],
+              "constants": [
+                null,
+                0.0,
+                0,
+                "skill_hold",
+                0.21,
+                "attack_step_sleep",
+                0.02,
+                0.05
+              ],
+              "children": []
+            },
+            {
+              "name": "_start_attack_thread",
+              "qualname": "RedCo2V2._start_attack_thread",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 88,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "t"
+              ],
+              "names": [
+                "_attack_thread_started",
+                "threading",
+                "Thread",
+                "_attack_loop",
+                "start"
+              ],
+              "constants": [
+                null,
+                true,
+                "RedCo2v2_Attack",
+                [
+                  "target",
+                  "daemon",
+                  "name"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_set_attack",
+              "qualname": "RedCo2V2._set_attack",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 96,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "on"
+              ],
+              "names": [
+                "_attack_lock",
+                "_attack_active",
+                "pyautogui",
+                "keyUp",
+                "engine",
+                "skill_key",
+                "Exception"
+              ],
+              "constants": [
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_get_pos",
+              "qualname": "RedCo2V2._get_pos",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 105,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "reader",
+                "p"
+              ],
+              "names": [
+                "getattr",
+                "engine",
+                "get_player_pos"
+              ],
+              "constants": [
+                null,
+                "memory_reader",
+                [
+                  null,
+                  null
+                ],
+                "x",
+                "y"
+              ],
+              "children": []
+            },
+            {
+              "name": "_is_floor1",
+              "qualname": "RedCo2V2._is_floor1",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 114,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "y"
+              ],
+              "names": [
+                "FLOOR1_Y",
+                "FLOOR_THRESHOLD"
+              ],
+              "constants": [
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_is_floor2",
+              "qualname": "RedCo2V2._is_floor2",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 117,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "y"
+              ],
+              "names": [
+                "FLOOR2_Y",
+                "FLOOR_THRESHOLD"
+              ],
+              "constants": [
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_release_move_keys",
+              "qualname": "RedCo2V2._release_move_keys",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 120,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "k"
+              ],
+              "names": [
+                "pyautogui",
+                "keyUp",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                [
+                  "left",
+                  "right",
+                  "up",
+                  "down",
+                  "space"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_wait_if_paused",
+              "qualname": "RedCo2V2._wait_if_paused",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 125,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "engine",
+                "is_paused",
+                "is_running",
+                "time",
+                "sleep"
+              ],
+              "constants": [
+                null,
+                0.1
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_up",
+              "qualname": "RedCo2V2._teleport_up",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 131,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "getattr",
+                "engine",
+                "keyUp"
+              ],
+              "constants": [
+                "↑+space — 사다리/계단 위로",
+                "up",
+                0.15,
+                "space",
+                "space_hold",
+                0.16,
+                0.3,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_right",
+              "qualname": "RedCo2V2._teleport_right",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 141,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "getattr",
+                "engine",
+                "keyUp"
+              ],
+              "constants": [
+                "→+space — 1층 계단 → 2층 (right hold 중간 길이)",
+                "right",
+                0.07,
+                "space",
+                "space_hold",
+                0.16,
+                0.15,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_sweep",
+              "qualname": "RedCo2V2._teleport_sweep",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 153,
+              "argcount": 4,
+              "varnames": [
+                "self",
+                "direction",
+                "target_condition",
+                "timeout",
+                "skill_key",
+                "start",
+                "x",
+                "y",
+                "step",
+                "interval"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "skill_key",
+                "time",
+                "is_running",
+                "pyautogui",
+                "keyUp",
+                "Exception",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "_is_floor2",
+                "getattr",
+                "keyDown",
+                "max",
+                "float",
+                "jitter"
+              ],
+              "constants": [
+                "2층 좌/우 sweep — 매 사이클 6단계 키 입력 순서.\n1) 방향키↓ 2) space↓ 3) skill↓ 4) space↑ 5) 방향키↑ 6) skill↑\n",
+                "[빨코2v2] ",
+                " sweep (6단계 키 순서)",
+                "white",
+                "[빨코2v2] sweep timeout",
+                "yellow",
+                "space",
+                false,
+                null,
+                0.05,
+                "[빨코2v2] 2층 벗어남 (y=",
+                ".2f",
+                ")",
+                true,
+                "sweep_step_sleep",
+                "space_hold",
+                0.16,
+                "tele_interval",
+                0.15,
+                0.25
+              ],
+              "children": []
+            },
+            {
+              "name": "_drop_right_to_floor1",
+              "qualname": "RedCo2V2._drop_right_to_floor1",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 214,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "t0",
+                "x",
+                "_",
+                "MID_Y_MIN",
+                "MID_Y_MAX",
+                "MAX_EXTRA_JUMPS",
+                "retry",
+                "landed",
+                "y",
+                "y_chk"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "_teleport_sweep",
+                "is_running",
+                "_set_attack",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "is_paused",
+                "keyUp",
+                "_wait_if_paused",
+                "sleep",
+                "_get_pos",
+                "STAIR39_X_END",
+                "jump_key",
+                "range",
+                "_is_floor1"
+              ],
+              "constants": [
+                null,
+                "[빨코2v2] 우측 텔포+공격 → ID39 발판",
+                "white",
+                "right",
+                12,
+                [
+                  "timeout"
+                ],
+                false,
+                "[빨코2v2] 걸어서 ID39 끝까지",
+                4,
+                0.2,
+                0.05,
+                0.1,
+                "[빨코2v2] 발판 끝 도달 (x=",
+                ".2f",
+                ")",
+                "[빨코2v2] 우측+점프 낙하",
+                0.06,
+                0.5,
+                -0.4,
+                5,
+                1,
+                1.5,
+                "[빨코2v2] 1층 도달 (x=",
+                ", y=",
+                "green",
+                true,
+                "[빨코2v2] ⚠ 40/41/42 발판 걸침 (y=",
+                ") → 우측 점프 추가 #",
+                "yellow",
+                0.03
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V2._drop_right_to_floor1.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코2_v2.py",
+                  "first_line": 218,
+                  "argcount": 1,
+                  "varnames": [
+                    "x"
+                  ],
+                  "names": [
+                    "STAIR39_X_START"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_pickup_to_stair7",
+              "qualname": "RedCo2V2._pickup_to_stair7",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 296,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "last_tp",
+                "start",
+                "x",
+                "_",
+                "now"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "STAIR7_SAFE_X_MAX",
+                "_set_attack",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "is_running",
+                "is_paused",
+                "keyUp",
+                "_wait_if_paused",
+                "sleep",
+                "_get_pos",
+                "PICKUP_TELEPORT_INTERVAL",
+                "getattr"
+              ],
+              "constants": [
+                null,
+                "[빨코2v2] 1층 좌측 텔포 → 7번 계단(X<=",
+                ")",
+                "white",
+                false,
+                "left",
+                0,
+                30,
+                0.3,
+                0.05,
+                "[빨코2v2] 안전 범위 진입 (x=",
+                ".2f",
+                "space",
+                "space_hold",
+                0.16
+              ],
+              "children": []
+            },
+            {
+              "name": "_climb_stair7",
+              "qualname": "RedCo2V2._climb_stair7",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 334,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "TARGET_X_MIN",
+                "TARGET_X_MAX",
+                "attempt",
+                "t_start",
+                "x_ok",
+                "last_dir",
+                "x",
+                "_",
+                "direction",
+                "t0",
+                "on_stair",
+                "y"
+              ],
+              "names": [
+                "STAIR7_SAFE_X_MIN",
+                "STAIR7_SAFE_X_MAX",
+                "_set_attack",
+                "range",
+                "engine",
+                "is_running",
+                "_log",
+                "time",
+                "is_paused",
+                "pyautogui",
+                "keyUp",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "keyDown",
+                "_teleport_up",
+                "_is_floor2",
+                "_teleport_right"
+              ],
+              "constants": [
+                "walk만으로 X 보정 → ↑텔포 → 1층 계단 → →텔포 → 2층.",
+                0.2,
+                false,
+                5,
+                "[빨코2v2] 2층 복귀 시도 ",
+                1,
+                "/5",
+                "white",
+                null,
+                8,
+                0.05,
+                true,
+                "[빨코2v2] X 보정 완료 (x=",
+                ".2f",
+                ")",
+                "left",
+                "right",
+                0.03,
+                "[빨코2v2] X 보정 timeout, 재시도",
+                "yellow",
+                "[빨코2v2] ↑텔포",
+                3,
+                0.7,
+                "[빨코2v2] 1층 계단 도달 (x=",
+                ", y=",
+                "[빨코2v2] 2층 직접 도달",
+                "green",
+                "[빨코2v2] 1층 계단 도달 실패, 재시도",
+                0.25,
+                "[빨코2v2] →텔포",
+                0.4,
+                "[빨코2v2] 2층 도달 (x=",
+                "[빨코2v2] 2층 도달 실패 (y=",
+                "), 재시도",
+                0.3,
+                "[빨코2v2] 2층 복귀 5회 실패",
+                "red"
+              ],
+              "children": []
+            },
+            {
+              "name": "_recover_to_floor2",
+              "qualname": "RedCo2V2._recover_to_floor2",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 432,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "attempt",
+                "xnow",
+                "ynow"
+              ],
+              "names": [
+                "engine",
+                "is_running",
+                "_wait_if_paused",
+                "_get_pos",
+                "time",
+                "sleep",
+                "_is_floor2",
+                "_log",
+                "_is_floor1",
+                "STAIR7_SAFE_X_MAX",
+                "_pickup_to_stair7",
+                "_climb_stair7",
+                "pyautogui",
+                "keyDown",
+                "jump_key",
+                "keyUp"
+              ],
+              "constants": [
+                "1층에서 2층 복귀 — 매크로 정지 전까지 무한 재시도.\n묘묘 도중 피격 등으로 1층 떨어진 모든 케이스 대응.\nreturn: True 복귀 성공 / False 매크로 정지됨\n",
+                0,
+                false,
+                0.3,
+                "[빨코2v2] ✓ 2층 복귀 성공 (x=",
+                ".2f",
+                ", y=",
+                ")",
+                "green",
+                true,
+                1,
+                "[빨코2v2] 1층 복귀 시도 #",
+                " (x=",
+                "white",
+                "[빨코2v2] 복귀 시도 #",
+                " 실패 — 3초 후 재시도",
+                "yellow",
+                3.0,
+                -0.4,
+                0.5,
+                "[빨코2v2] ⚠ 중간 발판 갇힘 (x=",
+                ") → 우측 점프로 1층 강하",
+                "right",
+                0.05,
+                0.06,
+                0.6
+              ],
+              "children": []
+            },
+            {
+              "name": "run_routine",
+              "qualname": "RedCo2V2.run_routine",
+              "filename": "maps_planet/빨코2_v2.py",
+              "first_line": 497,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "reader",
+                "user_info",
+                "cycle",
+                "x",
+                "y",
+                "sweep_ok_r",
+                "_",
+                "ynow",
+                "sweep_ok_l"
+              ],
+              "names": [
+                "getattr",
+                "engine",
+                "is_connected",
+                "_log",
+                "get_user_info",
+                "get",
+                "Exception",
+                "HUNT_X_LEFT",
+                "HUNT_X_RIGHT",
+                "CYCLES_PER_PICKUP",
+                "_start_attack_thread",
+                "_set_attack",
+                "is_running",
+                "_wait_if_paused",
+                "_get_pos",
+                "_is_floor1",
+                "_recover_to_floor2",
+                "_teleport_sweep",
+                "time",
+                "sleep",
+                "check_and_use_buffs",
+                "_drop_right_to_floor1",
+                "_release_move_keys"
+              ],
+              "constants": [
+                null,
+                "memory_reader",
+                "[빨코2v2] ⚠ 메모리 reader 없음 — 매크로 중단\n    GUI에서 닉네임 입력 후 다시 시작하세요.",
+                "red",
+                "[빨코2v2] 메모리 매크로 시작 — 닉네임=",
+                "nickname",
+                "?",
+                "green",
+                "[빨코2v2] 2층 X=",
+                "~",
+                ", ",
+                "사이클마다 수거",
+                true,
+                0,
+                "[빨코2v2] ⚠ 사고 낙하 감지 → 복귀",
+                "yellow",
+                "right",
+                0.6,
+                -0.3,
+                "[빨코2v2] ⚠ 우측 sweep 후 1층 낙하 (y=",
+                ".2f",
+                ") → 복귀",
+                "left",
+                "[빨코2v2] ⚠ 좌측 sweep 후 1층 낙하 (y=",
+                1,
+                "[빨코2v2] 🔄 사이클 ",
+                "/",
+                "[빨코2v2] === ",
+                "사이클 완료 → 수거 단계 ===",
+                "[빨코2v2] === 수거 완료, 사냥 재개 ===",
+                false,
+                "[빨코2v2] 루틴 종료",
+                "white"
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V2.run_routine.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코2_v2.py",
+                  "first_line": 544,
+                  "argcount": 1,
+                  "varnames": [
+                    "cx"
+                  ],
+                  "names": [
+                    "HUNT_X_RIGHT"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V2.run_routine.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코2_v2.py",
+                  "first_line": 571,
+                  "argcount": 1,
+                  "varnames": [
+                    "cx"
+                  ],
+                  "names": [
+                    "HUNT_X_LEFT"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "빨코2_v3.cpython-313.pyc": {
+    "path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\03_output\\2026-07-19_maplehunter_rednose_route_v1_pyc_evidence\\MapleHunter_v3.1.17.exe\\maps_planet\\__pycache__\\빨코2_v3.cpython-313.pyc",
+    "size": 750,
+    "sha256": "04c2b928f5dfd944583ba30663a02781e0cd60f81cfaac0e1dfe8af25341a243",
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v3.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "importlib",
+        "import_module",
+        "_v2_module",
+        "RedCo2V2",
+        "RedCo2V3"
+      ],
+      "constants": [
+        "빨코2 v3 — 메모리 매크로 (v2 상속, 5사이클).",
+        0,
+        null,
+        "maps_planet.빨코2_v2",
+        "RedCo2V3"
+      ],
+      "children": [
+        {
+          "name": "RedCo2V3",
+          "qualname": "RedCo2V3",
+          "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v3.py",
+          "first_line": 8,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__doc__",
+            "CYCLES_PER_PICKUP",
+            "__static_attributes__"
+          ],
+          "constants": [
+            "RedCo2V3",
+            8,
+            "빨코2 v3 — 5사이클마다 1층 수거.",
+            5,
+            [],
+            null
+          ],
+          "children": []
+        }
+      ]
+    }
+  },
+  "빨코2_v5.cpython-313.pyc": {
+    "path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\03_output\\2026-07-19_maplehunter_rednose_route_v1_pyc_evidence\\MapleHunter_v3.1.17.exe\\maps_planet\\__pycache__\\빨코2_v5.cpython-313.pyc",
+    "size": 39009,
+    "sha256": "315f2b7bc269d76b8e3b2243f2ea7fbf1f2b6b7c1be3f547cab4ed9f75276746",
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "time",
+        "random",
+        "threading",
+        "pyautogui",
+        "maps.map_base",
+        "MapBase",
+        "utils.humanize",
+        "hgap",
+        "jitter",
+        "PAUSE",
+        "RedCo2V5"
+      ],
+      "constants": [
+        "빨코2 v5 — 메모리 기반 매크로 (전면 재작성 2026-05-29).\n\n동선 (사용자 동선 기록 기반):\n  PHASE 1) 2층(y0.941, x -3.5~6.5) 좌↔우 텔포 왕복 사냥 90초\n           (아이템 120초 증발 전에 전 발판 수거하러 떠나기 위함)\n  PHASE 2) 90초 경과 후 좌측 sweep 중 x<-3.8 넘으면 → 좌텔포 1회 더 → 24번 발판(y~1.13)\n  PHASE 3) 아래텔포(↓+space) → 1층 경로(y-0.699)\n  PHASE 4) 1층에서 7번 계단 x범위(-4.7~-4.1)로 walk 정렬 → 윗텔포 → 계단(y0.381)\n           · 계단 안착 실패(y≠0.381, 8/9계단 걸침 등)면 x 재정렬 후 윗텔포 재시도\n           · 이 구간만 공격 OFF\n  PHASE 5) 계단에서 우텔포 → 2층(y0.941) 복귀\n  PHASE 6) 펫 따라오게 천천히 우측 x6.5까지 텔포 사냥\n  PHASE 7) 좌측으로 x2.0~2.69까지 텔포 사냥 → 윗텔포 → 14/15번 발판(y≥1.8)\n           · 실패 시 x 재정렬 후 윗텔포 재시도\n  PHASE 8) 윗텔포 1회 더 → 16번 발판(y2.707)\n  PHASE 9) 좌측 텔포 사냥 → 27번 발판(y2.351), x≤-1.5 도달 시 아래텔포 → 2층\n  → PHASE 1부터 반복 (90초 타이머 리셋)\n\n엔진 연동:\n- engine.skill_key (공격키 — 기록 시 'a'였으나 사용자 GUI 설정값 사용)\n- engine.skill_hold / attack_step_sleep (공격 타이밍)\n- engine.tele_interval (2층 메인 사냥 텔포 간격 — 사용자 조절)\n- engine.space_hold (텔포 space 홀드)\n- engine.is_paused / is_running\n- engine.check_and_use_buffs()\n- engine.memory_reader (좌표)\n\n텔포 거리 = x 1.5 (고정). 텔포 = 방향키+space 동시.\n",
+        0,
+        null,
+        [
+          "MapBase"
+        ],
+        [
+          "hgap",
+          "jitter"
+        ],
+        0.02,
+        "RedCo2V5"
+      ],
+      "children": [
+        {
+          "name": "RedCo2V5",
+          "qualname": "RedCo2V5",
+          "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+          "first_line": 41,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__doc__",
+            "FLOOR2_Y",
+            "FLOOR2_Y_MIN",
+            "FLOOR2_Y_MAX",
+            "FLOOR2_FALL_Y",
+            "FLOOR2_X_RIGHT_TURN",
+            "FLOOR2_X_LEFT_TURN",
+            "HUNT_DURATION_MIN",
+            "HUNT_DURATION_MAX",
+            "SWEEP_REGRIP_MIN",
+            "SWEEP_REGRIP_MAX",
+            "NOISE_MICROPAUSE_P",
+            "NOISE_DOUBLETAP_P",
+            "PLATFORM24_Y_MIN",
+            "FLOOR1_Y_MAX",
+            "STAIR7_X_MIN",
+            "STAIR7_X_MAX",
+            "STAIR7_CENTER_X",
+            "STAIR7_Y_LO",
+            "STAIR7_Y_HI",
+            "P1415_Y_MIN",
+            "P1415_X_MIN",
+            "P1415_X_MAX",
+            "P16_Y_MIN",
+            "P27_Y_MIN",
+            "P27_Y_MAX",
+            "P27_DROP_WAIT",
+            "PLATFORM24_TELE_X",
+            "P1415_CENTER_X",
+            "APPROACH_TOL",
+            "PICKUP_TELE_INTERVAL",
+            "RECOVER_TELE_INTERVAL",
+            "ATTACK_BURST_MIN",
+            "ATTACK_BURST_MAX",
+            "READER_DEAD_TIMEOUT",
+            "RECOVER_TIMEOUT",
+            "FIXED_X1",
+            "FIXED_Y1",
+            "FIXED_X2",
+            "FIXED_Y2",
+            "__init__",
+            "_attack_loop",
+            "_start_attack_thread",
+            "bool",
+            "_set_attack",
+            "_get_pos",
+            "_is_floor2",
+            "_wait_if_paused",
+            "_release_move_keys",
+            "staticmethod",
+            "_rand_up",
+            "str",
+            "_teleport",
+            "_tap_teleport",
+            "_sweep_to",
+            "_walk_align_x",
+            "_approach_x",
+            "_aligned_teleport",
+            "_teleport_until",
+            "_wait_pos",
+            "_hunt_floor2",
+            "_climb_platform24",
+            "_drop_to_floor1",
+            "_climb_floor1_to_floor2",
+            "_pickup_tour",
+            "run_routine",
+            "__static_attributes__",
+            "__classcell__"
+          ],
+          "constants": [
+            "RedCo2V5",
+            41,
+            "빨코2 v5 — 메모리 매크로 (90초 사냥 + 전 발판 수거 투어).",
+            0.941,
+            0.8,
+            1.4,
+            0.841,
+            6.0,
+            -2.9,
+            92.83,
+            102.483,
+            1.135,
+            3.12,
+            0.1,
+            0.06,
+            1.05,
+            -0.5,
+            -4.7,
+            -4.1,
+            -4.4,
+            0.26,
+            0.5,
+            1.7,
+            2.0,
+            2.69,
+            2.6,
+            2.2,
+            2.55,
+            -4.25,
+            2.345,
+            0.15,
+            1.3,
+            0.4,
+            1.5,
+            20.0,
+            60.0,
+            [
+              60,
+              164
+            ],
+            [
+              296,
+              301
+            ],
+            "on",
+            "return",
+            "direction",
+            [
+              "_attack_active",
+              "_attack_lock",
+              "_attack_thread_started",
+              "_last_tc_refresh"
+            ],
+            [
+              0.5
+            ],
+            [
+              60
+            ],
+            [
+              8
+            ],
+            [
+              null,
+              null,
+              12
+            ],
+            [
+              15,
+              null
+            ],
+            [
+              6,
+              0.25
+            ],
+            [
+              3.0
+            ]
+          ],
+          "children": [
+            {
+              "name": "__init__",
+              "qualname": "RedCo2V5.__init__",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 92,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "engine"
+              ],
+              "names": [
+                "super",
+                "__init__",
+                "_attack_active",
+                "threading",
+                "Lock",
+                "_attack_lock",
+                "_attack_thread_started",
+                "_last_tc_refresh"
+              ],
+              "constants": [
+                null,
+                false,
+                0.0
+              ],
+              "children": []
+            },
+            {
+              "name": "_attack_loop",
+              "qualname": "RedCo2V5._attack_loop",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 101,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "skill_key",
+                "end"
+              ],
+              "names": [
+                "engine",
+                "is_running",
+                "_attack_active",
+                "is_paused",
+                "skill_key",
+                "time",
+                "sleep",
+                "pyautogui",
+                "keyDown",
+                "random",
+                "uniform",
+                "ATTACK_BURST_MIN",
+                "ATTACK_BURST_MAX",
+                "keyUp"
+              ],
+              "constants": [
+                "수거 투어용 백그라운드 공격 — 사람처럼 0.4~1.5초 홀드 버스트 + 짧은 seam.\n\n고정 0.2초 연타는 매크로 시그니처(깨끗한 down/up이 일정 간격) → 홀드 길이를\n매번 흔들고, 홀드 도중 정지/일시정지/공격OFF 시 즉시 키를 뗀다.\n",
+                0.05,
+                0.03,
+                0.2,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_start_attack_thread",
+              "qualname": "RedCo2V5._start_attack_thread",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 123,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_attack_thread_started",
+                "threading",
+                "Thread",
+                "_attack_loop",
+                "start"
+              ],
+              "constants": [
+                null,
+                true,
+                "RedCo2v5_Attack",
+                [
+                  "target",
+                  "daemon",
+                  "name"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_set_attack",
+              "qualname": "RedCo2V5._set_attack",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 130,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "on"
+              ],
+              "names": [
+                "_attack_lock",
+                "_attack_active",
+                "pyautogui",
+                "keyUp",
+                "engine",
+                "skill_key",
+                "Exception"
+              ],
+              "constants": [
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_get_pos",
+              "qualname": "RedCo2V5._get_pos",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 139,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "reader",
+                "p",
+                "now"
+              ],
+              "names": [
+                "getattr",
+                "engine",
+                "get_player_pos",
+                "time",
+                "_last_tc_refresh",
+                "hasattr",
+                "refresh_tc",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                "memory_reader",
+                [
+                  null,
+                  null
+                ],
+                1.0,
+                "refresh_tc",
+                "x",
+                "y"
+              ],
+              "children": []
+            },
+            {
+              "name": "_is_floor2",
+              "qualname": "RedCo2V5._is_floor2",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 157,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "y"
+              ],
+              "names": [
+                "FLOOR2_Y_MIN",
+                "FLOOR2_Y_MAX"
+              ],
+              "constants": [
+                "2층 판정 — 위 발판(14/15·16·27)을 2층으로 오인하지 않게 범위로 판정.",
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_wait_if_paused",
+              "qualname": "RedCo2V5._wait_if_paused",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 161,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "engine",
+                "is_paused",
+                "is_running",
+                "time",
+                "sleep"
+              ],
+              "constants": [
+                null,
+                0.1
+              ],
+              "children": []
+            },
+            {
+              "name": "_release_move_keys",
+              "qualname": "RedCo2V5._release_move_keys",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 165,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "k"
+              ],
+              "names": [
+                "pyautogui",
+                "keyUp",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                [
+                  "left",
+                  "right",
+                  "up",
+                  "down",
+                  "space"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_rand_up",
+              "qualname": "RedCo2V5._rand_up",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 172,
+              "argcount": 2,
+              "varnames": [
+                "base",
+                "ratio"
+              ],
+              "names": [
+                "random",
+                "uniform"
+              ],
+              "constants": [
+                "base 이상으로만 랜덤 증가 (절대 줄지 않음). 고정 타이밍 봇 시그니처 회피.",
+                0.0
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport",
+              "qualname": "RedCo2V5._teleport",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 177,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "direction",
+                "space_hold",
+                "lead"
+              ],
+              "names": [
+                "_rand_up",
+                "getattr",
+                "engine",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "keyUp"
+              ],
+              "constants": [
+                "방향키+space 텔포 1회 (수평/수직 공용). 텔포 거리 x≈1.5.\n\n방향키→space 간격(lead)·space 홀드는 매번 사람처럼 랜덤 (최소값 이하로는 안 줄임).\n",
+                "space_hold",
+                0.16,
+                [
+                  "up",
+                  "down"
+                ],
+                0.15,
+                0.07,
+                "space",
+                0.08,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_tap_teleport",
+              "qualname": "RedCo2V5._tap_teleport",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 192,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "_rand_up",
+                "getattr",
+                "engine",
+                "keyUp"
+              ],
+              "constants": [
+                "방향키가 이미 눌린 상태에서 space만 탭 (2층 홀드 sweep용). space 홀드 랜덤.",
+                "space",
+                "space_hold",
+                0.16,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_sweep_to",
+              "qualname": "RedCo2V5._sweep_to",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 198,
+              "argcount": 5,
+              "varnames": [
+                "self",
+                "direction",
+                "reached",
+                "interval",
+                "timeout",
+                "start",
+                "x",
+                "y"
+              ],
+              "names": [
+                "time",
+                "engine",
+                "is_running",
+                "_log",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "_teleport",
+                "max",
+                "jitter"
+              ],
+              "constants": [
+                "direction으로 반복 텔포하며 reached(x,y)==True까지. 공격 상태는 호출부 관리.",
+                "[빨코2v5] sweep timeout (",
+                ")",
+                "yellow",
+                false,
+                0.05,
+                true,
+                0.2
+              ],
+              "children": []
+            },
+            {
+              "name": "_walk_align_x",
+              "qualname": "RedCo2V5._walk_align_x",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 218,
+              "argcount": 4,
+              "varnames": [
+                "self",
+                "xmin",
+                "xmax",
+                "timeout",
+                "last_dir",
+                "start",
+                "x",
+                "_",
+                "d"
+              ],
+              "names": [
+                "time",
+                "engine",
+                "is_running",
+                "is_paused",
+                "pyautogui",
+                "keyUp",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "keyDown"
+              ],
+              "constants": [
+                "텔포 없이 걸어서 x를 [xmin, xmax] 범위로 맞춤. (공격 상태는 호출부 관리)",
+                null,
+                false,
+                0.05,
+                0.15,
+                true,
+                "left",
+                "right",
+                0.03
+              ],
+              "children": []
+            },
+            {
+              "name": "_approach_x",
+              "qualname": "RedCo2V5._approach_x",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 253,
+              "argcount": 5,
+              "varnames": [
+                "self",
+                "target_x",
+                "tol",
+                "interval",
+                "timeout",
+                "start",
+                "x",
+                "_",
+                "d"
+              ],
+              "names": [
+                "APPROACH_TOL",
+                "PICKUP_TELE_INTERVAL",
+                "time",
+                "engine",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "abs",
+                "_set_attack",
+                "_walk_align_x",
+                "_teleport",
+                "max",
+                "jitter"
+              ],
+              "constants": [
+                "target_x로 접근. 거리>=1.5면 텔포로 연속 접근, 거리<1.5면 걸어서 도착.\n\n텔포 거리(1.5)를 넘겨 발판을 지나치는 overshoot 손해를 막기 위함.\ninterval: 접근 텔포 사이 간격 (기본 = 수거 투어용 느린 간격).\n(공격 상태는 호출부 관리)\n",
+                false,
+                0.05,
+                1.5,
+                6,
+                [
+                  "timeout"
+                ],
+                0,
+                "right",
+                "left",
+                0.2
+              ],
+              "children": []
+            },
+            {
+              "name": "_aligned_teleport",
+              "qualname": "RedCo2V5._aligned_teleport",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 284,
+              "argcount": 8,
+              "varnames": [
+                "self",
+                "target_x",
+                "tele_dir",
+                "y_ok",
+                "label",
+                "attack",
+                "max_attempts",
+                "approach_interval",
+                "attempt",
+                "x",
+                "y"
+              ],
+              "names": [
+                "range",
+                "engine",
+                "is_running",
+                "_set_attack",
+                "_approach_x",
+                "_log",
+                "is_paused",
+                "_wait_if_paused",
+                "_teleport",
+                "time",
+                "sleep",
+                "_get_pos"
+              ],
+              "constants": [
+                "target_x로 접근(멀면 텔포-사냥, 1.5칸 미만이면 공격 멈추고 걷기) 후\ntele_dir 텔포로 발판 탑승. y_ok(y) 될 때까지 재시도. 탑승 확인되면 공격 복귀.\n\napproach_interval: 접근 텔포 간격 (None이면 수거 투어용 느린 간격, 복구는 짧게).\n",
+                false,
+                [
+                  "interval"
+                ],
+                "[빨코2v5] ",
+                " x접근 실패, 재시도 ",
+                1,
+                "yellow",
+                0.2,
+                " 탑승 (x=",
+                ".2f",
+                ", y=",
+                ")",
+                "green",
+                true,
+                " 안착 실패 (y=",
+                "), 재정렬 후 재시도 ",
+                " ",
+                "회 실패",
+                "red"
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_until",
+              "qualname": "RedCo2V5._teleport_until",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 315,
+              "argcount": 6,
+              "varnames": [
+                "self",
+                "direction",
+                "y_ok",
+                "label",
+                "max_attempts",
+                "settle",
+                "i",
+                "x",
+                "y"
+              ],
+              "names": [
+                "range",
+                "engine",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "_log",
+                "round",
+                "_teleport",
+                "time",
+                "sleep"
+              ],
+              "constants": [
+                "direction 텔포를 y_ok(y) 될 때까지 반복 (씹힘 대비 재시도).",
+                false,
+                true,
+                "[빨코2v5] ",
+                " 시도 ",
+                1,
+                "/",
+                ": 현재 x=",
+                2,
+                ", y=",
+                " → ",
+                "텔포",
+                "white",
+                " ",
+                "회 시도했으나 실패 (y=",
+                ")",
+                "yellow"
+              ],
+              "children": []
+            },
+            {
+              "name": "_wait_pos",
+              "qualname": "RedCo2V5._wait_pos",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 339,
+              "argcount": 3,
+              "varnames": [
+                "self",
+                "y_ok",
+                "timeout",
+                "start",
+                "x",
+                "y"
+              ],
+              "names": [
+                "time",
+                "engine",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep"
+              ],
+              "constants": [
+                "좌표 y가 y_ok(y) 만족할 때까지 대기 (발판 안착 확인). 성공 True / 타임아웃 False.\n\n텔포 직후 안착 전에 다음 텔포를 쏘면 씹히므로, 안착을 확인하고 다음 동작.\n",
+                false,
+                true,
+                0.05
+              ],
+              "children": []
+            },
+            {
+              "name": "_hunt_floor2",
+              "qualname": "RedCo2V5._hunt_floor2",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 357,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "hunt_duration",
+                "start",
+                "none_since",
+                "interval",
+                "press_hold",
+                "release_hold",
+                "regrip_deadline",
+                "dir_deadline",
+                "skill_deadline",
+                "x",
+                "y",
+                "now",
+                "regripped",
+                "near_edge",
+                "deep_mid",
+                "r"
+              ],
+              "names": [
+                "random",
+                "uniform",
+                "HUNT_DURATION_MIN",
+                "HUNT_DURATION_MAX",
+                "engine",
+                "_log",
+                "FLOOR2_X_LEFT_TURN",
+                "FLOOR2_X_RIGHT_TURN",
+                "_set_attack",
+                "time",
+                "sleep",
+                "skill_key",
+                "max",
+                "float",
+                "getattr",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "READER_DEAD_TIMEOUT",
+                "FLOOR2_FALL_Y",
+                "_climb_floor1_to_floor2",
+                "pyautogui",
+                "keyUp",
+                "keyDown",
+                "NOISE_MICROPAUSE_P",
+                "_tap_teleport",
+                "NOISE_DOUBLETAP_P",
+                "hgap"
+              ],
+              "constants": [
+                "2층 좌↔우 왕복 사냥 (방향키+스킬키 홀드 + space 탭 — 사람처럼).\n\n- 방향·스킬 홀드를 각각 독립 타이머(1.135~3.12초)로 재그립 → 떼는 순간이 안 겹쳐\n  초 단위 주기성이 사라짐. 좌표(끝 도달)는 홀드 타이머보다 항상 우선.\n- 노이즈: 텔포 한 박자 거름 / 가운데서 가끔 더블탭 / 간격 스큐(hgap).\n- 사냥 시간은 매 사이클 92.83~104.948초 랜덤 (주기성 깨기).\n반환: 사냥 시간 경과 후 좌측 끝 도달 시 True(→수거).\n",
+                "[빨코2v5] 2층 사냥 ",
+                ".1f",
+                "초 시작 (홀드 sweep, x ",
+                "~",
+                ")",
+                "green",
+                false,
+                0.35,
+                "right",
+                null,
+                0.05,
+                "tele_interval",
+                0.3,
+                "[빨코2v5] ⚠ 좌표 20초 연속 실패 — reader 끊김, 매크로 중단",
+                "red",
+                "[빨코2v5] ⚠ 2층 사냥 중 낙하 (y=",
+                ".2f",
+                ") → 7계단 복구",
+                "yellow",
+                0.5,
+                0.06,
+                0.16,
+                "left",
+                0.04,
+                0.09,
+                "[빨코2v5] === ",
+                "초 경과 → 수거 투어 시작 ===",
+                true,
+                0.13,
+                0.12,
+                0.08,
+                1.0,
+                3.0,
+                0.25,
+                0.6
+              ],
+              "children": [
+                {
+                  "name": "press_hold",
+                  "qualname": "RedCo2V5._hunt_floor2.<locals>.press_hold",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 381,
+                  "argcount": 0,
+                  "varnames": [],
+                  "names": [
+                    "pyautogui",
+                    "keyDown"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "release_hold",
+                  "qualname": "RedCo2V5._hunt_floor2.<locals>.release_hold",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 386,
+                  "argcount": 0,
+                  "varnames": [],
+                  "names": [
+                    "pyautogui",
+                    "keyUp",
+                    "Exception"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "regrip_deadline",
+                  "qualname": "RedCo2V5._hunt_floor2.<locals>.regrip_deadline",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 393,
+                  "argcount": 0,
+                  "varnames": [],
+                  "names": [
+                    "time",
+                    "random",
+                    "uniform",
+                    "SWEEP_REGRIP_MIN",
+                    "SWEEP_REGRIP_MAX"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_climb_platform24",
+              "qualname": "RedCo2V5._climb_platform24",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 503,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "_aligned_teleport",
+                "PLATFORM24_TELE_X"
+              ],
+              "constants": [
+                "x-4.25로 접근(거리<1.5면 걷기) 후 좌텔포 → 24번 발판.",
+                "[빨코2v5] 24번 발판 climb (x-4.25 → 좌텔포)",
+                "white",
+                "left",
+                "24번 발판",
+                true,
+                [
+                  "attack"
+                ]
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V5._climb_platform24.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 508,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "PLATFORM24_Y_MIN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_drop_to_floor1",
+              "qualname": "RedCo2V5._drop_to_floor1",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 510,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "_set_attack",
+                "_teleport_until"
+              ],
+              "constants": [
+                "24번 발판에서 아래텔포 → 1층 경로(y-0.699). 씹힘 대비 재시도.\n\n1층 도달 후 공격 OFF — 이어지는 7계단 x정렬은 걸어가야 하므로\n(스킬 쓰면 모션 때문에 못 걸음).\n",
+                "[빨코2v5] 아래텔포 → 1층 (공격 OFF)",
+                "white",
+                false,
+                "down",
+                "1층 낙하",
+                8,
+                [
+                  "max_attempts"
+                ]
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V5._drop_to_floor1.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 521,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "FLOOR1_Y_MAX"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_climb_floor1_to_floor2",
+              "qualname": "RedCo2V5._climb_floor1_to_floor2",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 525,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "start",
+                "climbed",
+                "x",
+                "y"
+              ],
+              "names": [
+                "_set_attack",
+                "time",
+                "engine",
+                "is_running",
+                "RECOVER_TIMEOUT",
+                "_log",
+                "_aligned_teleport",
+                "STAIR7_CENTER_X",
+                "RECOVER_TELE_INTERVAL",
+                "sleep",
+                "_teleport",
+                "_get_pos",
+                "_is_floor2"
+              ],
+              "constants": [
+                "1층에서 7번 계단까지 텔포로 접근 → 윗텔포 등반 → 우텔포로 2층 복귀.\n\n등반 중/직후 몹에 맞아 다시 떨어져도 2층 도달까지 끈질기게 재시도\n(최대 RECOVER_TIMEOUT초). 계단 등반 구간은 공격 OFF (걷기/안착 안정).\n",
+                false,
+                "[빨코2v5] ",
+                ".0f",
+                "초간 2층 복구 실패 — 중단",
+                "red",
+                "up",
+                "7번 계단",
+                10,
+                [
+                  "attack",
+                  "max_attempts",
+                  "approach_interval"
+                ],
+                "[빨코2v5] 계단 등반 실패 — 재시도",
+                "yellow",
+                0.5,
+                0.1,
+                "[빨코2v5] 우텔포 → 2층",
+                "white",
+                "right",
+                0.25,
+                "[빨코2v5] 2층 복귀 (x=",
+                ".2f",
+                ", y=",
+                ")",
+                "green",
+                true,
+                "[빨코2v5] 2층 아님 (y=",
+                ") — 몹 피격/낙하 가능, 재시도"
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V5._climb_floor1_to_floor2.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 541,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "STAIR7_Y_LO",
+                    "STAIR7_Y_HI"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_pickup_tour",
+              "qualname": "RedCo2V5._pickup_tour",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 565,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "on_27",
+                "deadline",
+                "x",
+                "y"
+              ],
+              "names": [
+                "_set_attack",
+                "engine",
+                "_log",
+                "_sweep_to",
+                "PICKUP_TELE_INTERVAL",
+                "is_running",
+                "check_and_use_buffs",
+                "Exception",
+                "_aligned_teleport",
+                "P1415_CENTER_X",
+                "_teleport",
+                "_wait_pos",
+                "is_paused",
+                "_wait_if_paused",
+                "P27_DROP_WAIT",
+                "time",
+                "sleep",
+                "_teleport_until",
+                "_is_floor2",
+                "_get_pos",
+                "_climb_floor1_to_floor2"
+              ],
+              "constants": [
+                "2층 우측 → 14/15 → 16 → 27 발판 수거 투어 후 2층 복귀.",
+                true,
+                "[빨코2v5] 우측 수거 사냥 → x6.5",
+                "white",
+                "right",
+                40,
+                [
+                  "timeout"
+                ],
+                false,
+                "[빨코2v5] 좌측 수거 사냥 → 14/15번 발판",
+                "up",
+                "14/15번 발판",
+                [
+                  "attack"
+                ],
+                "[빨코2v5] 윗텔포 → 16번 발판",
+                "16번 발판",
+                "[빨코2v5] 27번 발판 진입 (좌텔포 → 안착확인 → 좌텔포)",
+                "left",
+                3.0,
+                "[빨코2v5] 27 안착 확인 실패 — 그대로 진행",
+                "yellow",
+                "[빨코2v5] 27번 도착 → ",
+                ".0f",
+                "초 후 아래텔포",
+                0.1,
+                "[빨코2v5] 아래텔포 → 2층 복귀 (도착까지 재시도)",
+                "down",
+                "27→2층 아래텔포",
+                20,
+                [
+                  "max_attempts"
+                ],
+                "[빨코2v5] 2층 복귀 (x=",
+                ".2f",
+                ", y=",
+                ")",
+                "green",
+                "[빨코2v5] 27번→2층 복귀 실패 — 1층 복구 시도"
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V5._pickup_tour.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 570,
+                  "argcount": 2,
+                  "varnames": [
+                    "x",
+                    "y"
+                  ],
+                  "names": [
+                    "FLOOR2_X_RIGHT_TURN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V5._pickup_tour.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 580,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "P1415_Y_MIN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V5._pickup_tour.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 587,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "P16_Y_MIN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2V5._pickup_tour.<locals>.<lambda>",
+                  "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+                  "first_line": 593,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "P27_Y_MIN",
+                    "P27_Y_MAX"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "run_routine",
+              "qualname": "RedCo2V5.run_routine",
+              "filename": "C:\\Users\\GRC72\\Desktop\\pj_fst\\maps_planet\\빨코2_v5.py",
+              "first_line": 633,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "reader",
+                "info",
+                "x",
+                "y"
+              ],
+              "names": [
+                "getattr",
+                "engine",
+                "is_connected",
+                "_log",
+                "get_user_info",
+                "get",
+                "Exception",
+                "_start_attack_thread",
+                "is_running",
+                "_wait_if_paused",
+                "_hunt_floor2",
+                "_climb_platform24",
+                "_drop_to_floor1",
+                "_get_pos",
+                "_is_floor2",
+                "_climb_floor1_to_floor2",
+                "_pickup_tour",
+                "_set_attack",
+                "_release_move_keys"
+              ],
+              "constants": [
+                null,
+                "memory_reader",
+                "[빨코2v5] ⚠ 메모리 reader 없음 — 매크로 중단\n    GUI에서 닉네임 입력 후 다시 시작하세요.",
+                "red",
+                "[빨코2v5] 메모리 매크로 시작 — 닉네임=",
+                "nickname",
+                "?",
+                "green",
+                "[빨코2v5] === 수거 투어 완료 → 사이클 재시작 ===",
+                false,
+                "[빨코2v5] 루틴 종료",
+                "white"
+              ],
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "빨코new.cpython-313.pyc": {
+    "path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\03_output\\2026-07-19_maplehunter_rednose_route_v1_pyc_evidence\\MapleHunter_v3.1.17.exe\\maps_planet\\__pycache__\\빨코new.cpython-313.pyc",
+    "size": 39008,
+    "sha256": "41f5fe6711737110359c79f10dbd98cfc90ad7b868979c6bd993b2dff0f2ae83",
+    "code": {
+      "name": "<module>",
+      "qualname": "<module>",
+      "filename": "maps_planet/빨코new.py",
+      "first_line": 1,
+      "argcount": 0,
+      "varnames": [],
+      "names": [
+        "__doc__",
+        "time",
+        "random",
+        "threading",
+        "pyautogui",
+        "maps.map_base",
+        "MapBase",
+        "utils.humanize",
+        "hgap",
+        "jitter",
+        "PAUSE",
+        "RedCo2New"
+      ],
+      "constants": [
+        "빨코new — 메모리 기반 매크로 (전면 재작성 2026-05-29).\n\n동선 (사용자 동선 기록 기반):\n  PHASE 1) 2층(y0.941, x -3.5~6.5) 좌↔우 텔포 왕복 사냥 90초\n           (아이템 120초 증발 전에 전 발판 수거하러 떠나기 위함)\n  PHASE 2) 90초 경과 후 좌측 sweep 중 x<-3.8 넘으면 → 좌텔포 1회 더 → 24번 발판(y~1.13)\n  PHASE 3) 아래텔포(↓+space) → 1층 경로(y-0.699)\n  PHASE 4) 1층에서 7번 계단 x범위(-4.7~-4.1)로 walk 정렬 → 윗텔포 → 계단(y0.381)\n           · 계단 안착 실패(y≠0.381, 8/9계단 걸침 등)면 x 재정렬 후 윗텔포 재시도\n           · 이 구간만 공격 OFF\n  PHASE 5) 계단에서 우텔포 → 2층(y0.941) 복귀\n  PHASE 6) 펫 따라오게 천천히 우측 x6.5까지 텔포 사냥\n  PHASE 7) 좌측으로 x2.0~2.69까지 텔포 사냥 → 윗텔포 → 14/15번 발판(y≥1.8)\n           · 실패 시 x 재정렬 후 윗텔포 재시도\n  PHASE 8) 윗텔포 1회 더 → 16번 발판(y2.707)\n  PHASE 9) 좌측 텔포 사냥 → 27번 발판(y2.351), x≤-1.5 도달 시 아래텔포 → 2층\n  → PHASE 1부터 반복 (90초 타이머 리셋)\n\n엔진 연동:\n- engine.skill_key (공격키 — 기록 시 'a'였으나 사용자 GUI 설정값 사용)\n- engine.skill_hold / attack_step_sleep (공격 타이밍)\n- engine.tele_interval (2층 메인 사냥 텔포 간격 — 사용자 조절)\n- engine.space_hold (텔포 space 홀드)\n- engine.is_paused / is_running\n- engine.check_and_use_buffs()\n- engine.memory_reader (좌표)\n\n텔포 거리 = x 1.5 (고정). 텔포 = 방향키+space 동시.\n",
+        0,
+        null,
+        [
+          "MapBase"
+        ],
+        [
+          "hgap",
+          "jitter"
+        ],
+        0.02,
+        "RedCo2New"
+      ],
+      "children": [
+        {
+          "name": "RedCo2New",
+          "qualname": "RedCo2New",
+          "filename": "maps_planet/빨코new.py",
+          "first_line": 41,
+          "argcount": 0,
+          "varnames": [],
+          "names": [
+            "__name__",
+            "__module__",
+            "__qualname__",
+            "__firstlineno__",
+            "__doc__",
+            "FLOOR2_Y",
+            "FLOOR2_Y_MIN",
+            "FLOOR2_Y_MAX",
+            "FLOOR2_FALL_Y",
+            "FLOOR2_X_RIGHT_TURN",
+            "FLOOR2_X_LEFT_TURN",
+            "HUNT_DURATION_MIN",
+            "HUNT_DURATION_MAX",
+            "SWEEP_REGRIP_MIN",
+            "SWEEP_REGRIP_MAX",
+            "NOISE_MICROPAUSE_P",
+            "NOISE_DOUBLETAP_P",
+            "PLATFORM24_Y_MIN",
+            "FLOOR1_Y_MAX",
+            "STAIR7_X_MIN",
+            "STAIR7_X_MAX",
+            "STAIR7_CENTER_X",
+            "STAIR7_Y_LO",
+            "STAIR7_Y_HI",
+            "P1415_Y_MIN",
+            "P1415_X_MIN",
+            "P1415_X_MAX",
+            "P16_Y_MIN",
+            "P27_Y_MIN",
+            "P27_Y_MAX",
+            "P27_DROP_WAIT",
+            "PLATFORM24_TELE_X",
+            "P1415_CENTER_X",
+            "APPROACH_TOL",
+            "PICKUP_TELE_INTERVAL",
+            "RECOVER_TELE_INTERVAL",
+            "ATTACK_BURST_MIN",
+            "ATTACK_BURST_MAX",
+            "READER_DEAD_TIMEOUT",
+            "RECOVER_TIMEOUT",
+            "FIXED_X1",
+            "FIXED_Y1",
+            "FIXED_X2",
+            "FIXED_Y2",
+            "__init__",
+            "_attack_loop",
+            "_start_attack_thread",
+            "bool",
+            "_set_attack",
+            "_get_pos",
+            "_is_floor2",
+            "_wait_if_paused",
+            "_release_move_keys",
+            "staticmethod",
+            "_rand_up",
+            "str",
+            "_teleport",
+            "_tap_teleport",
+            "_sweep_to",
+            "_walk_align_x",
+            "_approach_x",
+            "_aligned_teleport",
+            "_teleport_until",
+            "_wait_pos",
+            "_hunt_floor2",
+            "_climb_platform24",
+            "_drop_to_floor1",
+            "_climb_floor1_to_floor2",
+            "_pickup_tour",
+            "run_routine",
+            "__static_attributes__",
+            "__classcell__"
+          ],
+          "constants": [
+            "RedCo2New",
+            41,
+            "빨코new — 메모리 매크로 (90초 사냥 + 전 발판 수거 투어).",
+            0.941,
+            0.8,
+            1.4,
+            0.841,
+            6.0,
+            -2.9,
+            92.83,
+            102.483,
+            1.135,
+            3.12,
+            0.1,
+            0.06,
+            1.05,
+            -0.5,
+            -4.7,
+            -4.1,
+            -4.4,
+            0.26,
+            0.5,
+            1.7,
+            2.0,
+            2.69,
+            2.6,
+            2.2,
+            2.55,
+            -4.25,
+            2.345,
+            0.15,
+            1.3,
+            0.4,
+            1.5,
+            20.0,
+            60.0,
+            [
+              60,
+              164
+            ],
+            [
+              296,
+              301
+            ],
+            "on",
+            "return",
+            "direction",
+            [
+              "_attack_active",
+              "_attack_lock",
+              "_attack_thread_started",
+              "_last_tc_refresh"
+            ],
+            [
+              0.5
+            ],
+            [
+              60
+            ],
+            [
+              8
+            ],
+            [
+              null,
+              null,
+              12
+            ],
+            [
+              15,
+              null
+            ],
+            [
+              6,
+              0.25
+            ],
+            [
+              3.0
+            ]
+          ],
+          "children": [
+            {
+              "name": "__init__",
+              "qualname": "RedCo2New.__init__",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 92,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "engine"
+              ],
+              "names": [
+                "super",
+                "__init__",
+                "_attack_active",
+                "threading",
+                "Lock",
+                "_attack_lock",
+                "_attack_thread_started",
+                "_last_tc_refresh"
+              ],
+              "constants": [
+                null,
+                false,
+                0.0
+              ],
+              "children": []
+            },
+            {
+              "name": "_attack_loop",
+              "qualname": "RedCo2New._attack_loop",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 101,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "skill_key",
+                "end"
+              ],
+              "names": [
+                "engine",
+                "is_running",
+                "_attack_active",
+                "is_paused",
+                "skill_key",
+                "time",
+                "sleep",
+                "pyautogui",
+                "keyDown",
+                "random",
+                "uniform",
+                "ATTACK_BURST_MIN",
+                "ATTACK_BURST_MAX",
+                "keyUp"
+              ],
+              "constants": [
+                "수거 투어용 백그라운드 공격 — 사람처럼 0.4~1.5초 홀드 버스트 + 짧은 seam.\n\n고정 0.2초 연타는 매크로 시그니처(깨끗한 down/up이 일정 간격) → 홀드 길이를\n매번 흔들고, 홀드 도중 정지/일시정지/공격OFF 시 즉시 키를 뗀다.\n",
+                0.05,
+                0.03,
+                0.2,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_start_attack_thread",
+              "qualname": "RedCo2New._start_attack_thread",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 123,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "_attack_thread_started",
+                "threading",
+                "Thread",
+                "_attack_loop",
+                "start"
+              ],
+              "constants": [
+                null,
+                true,
+                "RedCo2New_Attack",
+                [
+                  "target",
+                  "daemon",
+                  "name"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_set_attack",
+              "qualname": "RedCo2New._set_attack",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 130,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "on"
+              ],
+              "names": [
+                "_attack_lock",
+                "_attack_active",
+                "pyautogui",
+                "keyUp",
+                "engine",
+                "skill_key",
+                "Exception"
+              ],
+              "constants": [
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_get_pos",
+              "qualname": "RedCo2New._get_pos",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 139,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "reader",
+                "p",
+                "now"
+              ],
+              "names": [
+                "getattr",
+                "engine",
+                "get_player_pos",
+                "time",
+                "_last_tc_refresh",
+                "hasattr",
+                "refresh_tc",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                "memory_reader",
+                [
+                  null,
+                  null
+                ],
+                1.0,
+                "refresh_tc",
+                "x",
+                "y"
+              ],
+              "children": []
+            },
+            {
+              "name": "_is_floor2",
+              "qualname": "RedCo2New._is_floor2",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 157,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "y"
+              ],
+              "names": [
+                "FLOOR2_Y_MIN",
+                "FLOOR2_Y_MAX"
+              ],
+              "constants": [
+                "2층 판정 — 위 발판(14/15·16·27)을 2층으로 오인하지 않게 범위로 판정.",
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_wait_if_paused",
+              "qualname": "RedCo2New._wait_if_paused",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 161,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "engine",
+                "is_paused",
+                "is_running",
+                "time",
+                "sleep"
+              ],
+              "constants": [
+                null,
+                0.1
+              ],
+              "children": []
+            },
+            {
+              "name": "_release_move_keys",
+              "qualname": "RedCo2New._release_move_keys",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 165,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "k"
+              ],
+              "names": [
+                "pyautogui",
+                "keyUp",
+                "Exception"
+              ],
+              "constants": [
+                null,
+                [
+                  "left",
+                  "right",
+                  "up",
+                  "down",
+                  "space"
+                ]
+              ],
+              "children": []
+            },
+            {
+              "name": "_rand_up",
+              "qualname": "RedCo2New._rand_up",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 172,
+              "argcount": 2,
+              "varnames": [
+                "base",
+                "ratio"
+              ],
+              "names": [
+                "random",
+                "uniform"
+              ],
+              "constants": [
+                "base 이상으로만 랜덤 증가 (절대 줄지 않음). 고정 타이밍 봇 시그니처 회피.",
+                0.0
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport",
+              "qualname": "RedCo2New._teleport",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 177,
+              "argcount": 2,
+              "varnames": [
+                "self",
+                "direction",
+                "space_hold",
+                "lead"
+              ],
+              "names": [
+                "_rand_up",
+                "getattr",
+                "engine",
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "keyUp"
+              ],
+              "constants": [
+                "방향키+space 텔포 1회 (수평/수직 공용). 텔포 거리 x≈1.5.\n\n방향키→space 간격(lead)·space 홀드는 매번 사람처럼 랜덤 (최소값 이하로는 안 줄임).\n",
+                "space_hold",
+                0.16,
+                [
+                  "up",
+                  "down"
+                ],
+                0.15,
+                0.07,
+                "space",
+                0.08,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_tap_teleport",
+              "qualname": "RedCo2New._tap_teleport",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 192,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "pyautogui",
+                "keyDown",
+                "time",
+                "sleep",
+                "_rand_up",
+                "getattr",
+                "engine",
+                "keyUp"
+              ],
+              "constants": [
+                "방향키가 이미 눌린 상태에서 space만 탭 (2층 홀드 sweep용). space 홀드 랜덤.",
+                "space",
+                "space_hold",
+                0.16,
+                null
+              ],
+              "children": []
+            },
+            {
+              "name": "_sweep_to",
+              "qualname": "RedCo2New._sweep_to",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 198,
+              "argcount": 5,
+              "varnames": [
+                "self",
+                "direction",
+                "reached",
+                "interval",
+                "timeout",
+                "start",
+                "x",
+                "y"
+              ],
+              "names": [
+                "time",
+                "engine",
+                "is_running",
+                "_log",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "_teleport",
+                "max",
+                "jitter"
+              ],
+              "constants": [
+                "direction으로 반복 텔포하며 reached(x,y)==True까지. 공격 상태는 호출부 관리.",
+                "[빨코2v5] sweep timeout (",
+                ")",
+                "yellow",
+                false,
+                0.05,
+                true,
+                0.2
+              ],
+              "children": []
+            },
+            {
+              "name": "_walk_align_x",
+              "qualname": "RedCo2New._walk_align_x",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 218,
+              "argcount": 4,
+              "varnames": [
+                "self",
+                "xmin",
+                "xmax",
+                "timeout",
+                "last_dir",
+                "start",
+                "x",
+                "_",
+                "d"
+              ],
+              "names": [
+                "time",
+                "engine",
+                "is_running",
+                "is_paused",
+                "pyautogui",
+                "keyUp",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "keyDown"
+              ],
+              "constants": [
+                "텔포 없이 걸어서 x를 [xmin, xmax] 범위로 맞춤. (공격 상태는 호출부 관리)",
+                null,
+                false,
+                0.05,
+                0.15,
+                true,
+                "left",
+                "right",
+                0.03
+              ],
+              "children": []
+            },
+            {
+              "name": "_approach_x",
+              "qualname": "RedCo2New._approach_x",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 253,
+              "argcount": 5,
+              "varnames": [
+                "self",
+                "target_x",
+                "tol",
+                "interval",
+                "timeout",
+                "start",
+                "x",
+                "_",
+                "d"
+              ],
+              "names": [
+                "APPROACH_TOL",
+                "PICKUP_TELE_INTERVAL",
+                "time",
+                "engine",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep",
+                "abs",
+                "_set_attack",
+                "_walk_align_x",
+                "_teleport",
+                "max",
+                "jitter"
+              ],
+              "constants": [
+                "target_x로 접근. 거리>=1.5면 텔포로 연속 접근, 거리<1.5면 걸어서 도착.\n\n텔포 거리(1.5)를 넘겨 발판을 지나치는 overshoot 손해를 막기 위함.\ninterval: 접근 텔포 사이 간격 (기본 = 수거 투어용 느린 간격).\n(공격 상태는 호출부 관리)\n",
+                false,
+                0.05,
+                1.5,
+                6,
+                [
+                  "timeout"
+                ],
+                0,
+                "right",
+                "left",
+                0.2
+              ],
+              "children": []
+            },
+            {
+              "name": "_aligned_teleport",
+              "qualname": "RedCo2New._aligned_teleport",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 284,
+              "argcount": 8,
+              "varnames": [
+                "self",
+                "target_x",
+                "tele_dir",
+                "y_ok",
+                "label",
+                "attack",
+                "max_attempts",
+                "approach_interval",
+                "attempt",
+                "x",
+                "y"
+              ],
+              "names": [
+                "range",
+                "engine",
+                "is_running",
+                "_set_attack",
+                "_approach_x",
+                "_log",
+                "is_paused",
+                "_wait_if_paused",
+                "_teleport",
+                "time",
+                "sleep",
+                "_get_pos"
+              ],
+              "constants": [
+                "target_x로 접근(멀면 텔포-사냥, 1.5칸 미만이면 공격 멈추고 걷기) 후\ntele_dir 텔포로 발판 탑승. y_ok(y) 될 때까지 재시도. 탑승 확인되면 공격 복귀.\n\napproach_interval: 접근 텔포 간격 (None이면 수거 투어용 느린 간격, 복구는 짧게).\n",
+                false,
+                [
+                  "interval"
+                ],
+                "[빨코2v5] ",
+                " x접근 실패, 재시도 ",
+                1,
+                "yellow",
+                0.2,
+                " 탑승 (x=",
+                ".2f",
+                ", y=",
+                ")",
+                "green",
+                true,
+                " 안착 실패 (y=",
+                "), 재정렬 후 재시도 ",
+                " ",
+                "회 실패",
+                "red"
+              ],
+              "children": []
+            },
+            {
+              "name": "_teleport_until",
+              "qualname": "RedCo2New._teleport_until",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 315,
+              "argcount": 6,
+              "varnames": [
+                "self",
+                "direction",
+                "y_ok",
+                "label",
+                "max_attempts",
+                "settle",
+                "i",
+                "x",
+                "y"
+              ],
+              "names": [
+                "range",
+                "engine",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "_log",
+                "round",
+                "_teleport",
+                "time",
+                "sleep"
+              ],
+              "constants": [
+                "direction 텔포를 y_ok(y) 될 때까지 반복 (씹힘 대비 재시도).",
+                false,
+                true,
+                "[빨코2v5] ",
+                " 시도 ",
+                1,
+                "/",
+                ": 현재 x=",
+                2,
+                ", y=",
+                " → ",
+                "텔포",
+                "white",
+                " ",
+                "회 시도했으나 실패 (y=",
+                ")",
+                "yellow"
+              ],
+              "children": []
+            },
+            {
+              "name": "_wait_pos",
+              "qualname": "RedCo2New._wait_pos",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 339,
+              "argcount": 3,
+              "varnames": [
+                "self",
+                "y_ok",
+                "timeout",
+                "start",
+                "x",
+                "y"
+              ],
+              "names": [
+                "time",
+                "engine",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "sleep"
+              ],
+              "constants": [
+                "좌표 y가 y_ok(y) 만족할 때까지 대기 (발판 안착 확인). 성공 True / 타임아웃 False.\n\n텔포 직후 안착 전에 다음 텔포를 쏘면 씹히므로, 안착을 확인하고 다음 동작.\n",
+                false,
+                true,
+                0.05
+              ],
+              "children": []
+            },
+            {
+              "name": "_hunt_floor2",
+              "qualname": "RedCo2New._hunt_floor2",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 357,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "hunt_duration",
+                "start",
+                "none_since",
+                "interval",
+                "press_hold",
+                "release_hold",
+                "regrip_deadline",
+                "dir_deadline",
+                "skill_deadline",
+                "x",
+                "y",
+                "now",
+                "regripped",
+                "near_edge",
+                "deep_mid",
+                "r"
+              ],
+              "names": [
+                "random",
+                "uniform",
+                "HUNT_DURATION_MIN",
+                "HUNT_DURATION_MAX",
+                "engine",
+                "_log",
+                "FLOOR2_X_LEFT_TURN",
+                "FLOOR2_X_RIGHT_TURN",
+                "_set_attack",
+                "time",
+                "sleep",
+                "skill_key",
+                "max",
+                "float",
+                "getattr",
+                "is_running",
+                "is_paused",
+                "_wait_if_paused",
+                "_get_pos",
+                "READER_DEAD_TIMEOUT",
+                "FLOOR2_FALL_Y",
+                "_climb_floor1_to_floor2",
+                "pyautogui",
+                "keyUp",
+                "keyDown",
+                "NOISE_MICROPAUSE_P",
+                "_tap_teleport",
+                "NOISE_DOUBLETAP_P",
+                "hgap"
+              ],
+              "constants": [
+                "2층 좌↔우 왕복 사냥 (방향키+스킬키 홀드 + space 탭 — 사람처럼).\n\n- 방향·스킬 홀드를 각각 독립 타이머(1.135~3.12초)로 재그립 → 떼는 순간이 안 겹쳐\n  초 단위 주기성이 사라짐. 좌표(끝 도달)는 홀드 타이머보다 항상 우선.\n- 노이즈: 텔포 한 박자 거름 / 가운데서 가끔 더블탭 / 간격 스큐(hgap).\n- 사냥 시간은 매 사이클 92.83~104.948초 랜덤 (주기성 깨기).\n반환: 사냥 시간 경과 후 좌측 끝 도달 시 True(→수거).\n",
+                "[빨코2v5] 2층 사냥 ",
+                ".1f",
+                "초 시작 (홀드 sweep, x ",
+                "~",
+                ")",
+                "green",
+                false,
+                0.35,
+                "right",
+                null,
+                0.05,
+                "tele_interval",
+                0.3,
+                "[빨코2v5] ⚠ 좌표 20초 연속 실패 — reader 끊김, 매크로 중단",
+                "red",
+                "[빨코2v5] ⚠ 2층 사냥 중 낙하 (y=",
+                ".2f",
+                ") → 7계단 복구",
+                "yellow",
+                0.5,
+                0.06,
+                0.16,
+                "left",
+                0.04,
+                0.09,
+                "[빨코2v5] === ",
+                "초 경과 → 수거 투어 시작 ===",
+                true,
+                0.13,
+                0.12,
+                0.08,
+                1.0,
+                3.0,
+                0.25,
+                0.6
+              ],
+              "children": [
+                {
+                  "name": "press_hold",
+                  "qualname": "RedCo2New._hunt_floor2.<locals>.press_hold",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 381,
+                  "argcount": 0,
+                  "varnames": [],
+                  "names": [
+                    "pyautogui",
+                    "keyDown"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "release_hold",
+                  "qualname": "RedCo2New._hunt_floor2.<locals>.release_hold",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 386,
+                  "argcount": 0,
+                  "varnames": [],
+                  "names": [
+                    "pyautogui",
+                    "keyUp",
+                    "Exception"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "regrip_deadline",
+                  "qualname": "RedCo2New._hunt_floor2.<locals>.regrip_deadline",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 393,
+                  "argcount": 0,
+                  "varnames": [],
+                  "names": [
+                    "time",
+                    "random",
+                    "uniform",
+                    "SWEEP_REGRIP_MIN",
+                    "SWEEP_REGRIP_MAX"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_climb_platform24",
+              "qualname": "RedCo2New._climb_platform24",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 503,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "_aligned_teleport",
+                "PLATFORM24_TELE_X"
+              ],
+              "constants": [
+                "x-4.25로 접근(거리<1.5면 걷기) 후 좌텔포 → 24번 발판.",
+                "[빨코2v5] 24번 발판 climb (x-4.25 → 좌텔포)",
+                "white",
+                "left",
+                "24번 발판",
+                true,
+                [
+                  "attack"
+                ]
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2New._climb_platform24.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 508,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "PLATFORM24_Y_MIN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_drop_to_floor1",
+              "qualname": "RedCo2New._drop_to_floor1",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 510,
+              "argcount": 1,
+              "varnames": [
+                "self"
+              ],
+              "names": [
+                "engine",
+                "_log",
+                "_set_attack",
+                "_teleport_until"
+              ],
+              "constants": [
+                "24번 발판에서 아래텔포 → 1층 경로(y-0.699). 씹힘 대비 재시도.\n\n1층 도달 후 공격 OFF — 이어지는 7계단 x정렬은 걸어가야 하므로\n(스킬 쓰면 모션 때문에 못 걸음).\n",
+                "[빨코2v5] 아래텔포 → 1층 (공격 OFF)",
+                "white",
+                false,
+                "down",
+                "1층 낙하",
+                8,
+                [
+                  "max_attempts"
+                ]
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2New._drop_to_floor1.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 521,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "FLOOR1_Y_MAX"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_climb_floor1_to_floor2",
+              "qualname": "RedCo2New._climb_floor1_to_floor2",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 525,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "start",
+                "climbed",
+                "x",
+                "y"
+              ],
+              "names": [
+                "_set_attack",
+                "time",
+                "engine",
+                "is_running",
+                "RECOVER_TIMEOUT",
+                "_log",
+                "_aligned_teleport",
+                "STAIR7_CENTER_X",
+                "RECOVER_TELE_INTERVAL",
+                "sleep",
+                "_teleport",
+                "_get_pos",
+                "_is_floor2"
+              ],
+              "constants": [
+                "1층에서 7번 계단까지 텔포로 접근 → 윗텔포 등반 → 우텔포로 2층 복귀.\n\n등반 중/직후 몹에 맞아 다시 떨어져도 2층 도달까지 끈질기게 재시도\n(최대 RECOVER_TIMEOUT초). 계단 등반 구간은 공격 OFF (걷기/안착 안정).\n",
+                false,
+                "[빨코2v5] ",
+                ".0f",
+                "초간 2층 복구 실패 — 중단",
+                "red",
+                "up",
+                "7번 계단",
+                10,
+                [
+                  "attack",
+                  "max_attempts",
+                  "approach_interval"
+                ],
+                "[빨코2v5] 계단 등반 실패 — 재시도",
+                "yellow",
+                0.5,
+                0.1,
+                "[빨코2v5] 우텔포 → 2층",
+                "white",
+                "right",
+                0.25,
+                "[빨코2v5] 2층 복귀 (x=",
+                ".2f",
+                ", y=",
+                ")",
+                "green",
+                true,
+                "[빨코2v5] 2층 아님 (y=",
+                ") — 몹 피격/낙하 가능, 재시도"
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2New._climb_floor1_to_floor2.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 541,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "STAIR7_Y_LO",
+                    "STAIR7_Y_HI"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "_pickup_tour",
+              "qualname": "RedCo2New._pickup_tour",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 565,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "on_27",
+                "deadline",
+                "x",
+                "y"
+              ],
+              "names": [
+                "_set_attack",
+                "engine",
+                "_log",
+                "_sweep_to",
+                "PICKUP_TELE_INTERVAL",
+                "is_running",
+                "check_and_use_buffs",
+                "Exception",
+                "_aligned_teleport",
+                "P1415_CENTER_X",
+                "_teleport",
+                "_wait_pos",
+                "is_paused",
+                "_wait_if_paused",
+                "P27_DROP_WAIT",
+                "time",
+                "sleep",
+                "_teleport_until",
+                "_is_floor2",
+                "_get_pos",
+                "_climb_floor1_to_floor2"
+              ],
+              "constants": [
+                "2층 우측 → 14/15 → 16 → 27 발판 수거 투어 후 2층 복귀.",
+                true,
+                "[빨코2v5] 우측 수거 사냥 → x6.5",
+                "white",
+                "right",
+                40,
+                [
+                  "timeout"
+                ],
+                false,
+                "[빨코2v5] 좌측 수거 사냥 → 14/15번 발판",
+                "up",
+                "14/15번 발판",
+                [
+                  "attack"
+                ],
+                "[빨코2v5] 윗텔포 → 16번 발판",
+                "16번 발판",
+                "[빨코2v5] 27번 발판 진입 (좌텔포 → 안착확인 → 좌텔포)",
+                "left",
+                3.0,
+                "[빨코2v5] 27 안착 확인 실패 — 그대로 진행",
+                "yellow",
+                "[빨코2v5] 27번 도착 → ",
+                ".0f",
+                "초 후 아래텔포",
+                0.1,
+                "[빨코2v5] 아래텔포 → 2층 복귀 (도착까지 재시도)",
+                "down",
+                "27→2층 아래텔포",
+                20,
+                [
+                  "max_attempts"
+                ],
+                "[빨코2v5] 2층 복귀 (x=",
+                ".2f",
+                ", y=",
+                ")",
+                "green",
+                "[빨코2v5] 27번→2층 복귀 실패 — 1층 복구 시도"
+              ],
+              "children": [
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2New._pickup_tour.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 570,
+                  "argcount": 2,
+                  "varnames": [
+                    "x",
+                    "y"
+                  ],
+                  "names": [
+                    "FLOOR2_X_RIGHT_TURN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2New._pickup_tour.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 580,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "P1415_Y_MIN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2New._pickup_tour.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 587,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "P16_Y_MIN"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                },
+                {
+                  "name": "<lambda>",
+                  "qualname": "RedCo2New._pickup_tour.<locals>.<lambda>",
+                  "filename": "maps_planet/빨코new.py",
+                  "first_line": 593,
+                  "argcount": 1,
+                  "varnames": [
+                    "y"
+                  ],
+                  "names": [
+                    "P27_Y_MIN",
+                    "P27_Y_MAX"
+                  ],
+                  "constants": [
+                    null
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "run_routine",
+              "qualname": "RedCo2New.run_routine",
+              "filename": "maps_planet/빨코new.py",
+              "first_line": 633,
+              "argcount": 1,
+              "varnames": [
+                "self",
+                "reader",
+                "info",
+                "x",
+                "y"
+              ],
+              "names": [
+                "getattr",
+                "engine",
+                "is_connected",
+                "_log",
+                "get_user_info",
+                "get",
+                "Exception",
+                "_start_attack_thread",
+                "is_running",
+                "_wait_if_paused",
+                "_hunt_floor2",
+                "_climb_platform24",
+                "_drop_to_floor1",
+                "_get_pos",
+                "_is_floor2",
+                "_climb_floor1_to_floor2",
+                "_pickup_tour",
+                "_set_attack",
+                "_release_move_keys"
+              ],
+              "constants": [
+                null,
+                "memory_reader",
+                "[빨코2v5] ⚠ 메모리 reader 없음 — 매크로 중단\n    GUI에서 닉네임 입력 후 다시 시작하세요.",
+                "red",
+                "[빨코2v5] 메모리 매크로 시작 — 닉네임=",
+                "nickname",
+                "?",
+                "green",
+                "[빨코2v5] === 수거 투어 완료 → 사이클 재시작 ===",
+                false,
+                "[빨코2v5] 루틴 종료",
+                "white"
+              ],
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
