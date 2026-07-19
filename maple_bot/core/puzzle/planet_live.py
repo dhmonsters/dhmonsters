@@ -26,12 +26,39 @@ IDENTITY_TEMPORAL_DIVERGENCE_LIMIT = 28.0
 IDENTITY_TEMPORAL_MIN_CONFIDENCE = 0.65
 IDENTITY_TEMPORAL_HARD_DIVERGENCE_LIMIT = 120.0
 IDENTITY_TEMPORAL_HOLD_MIN_CONFIDENCE = 0.25
-IDENTITY_TEMPORAL_ALIVE_STATES = frozenset({
+IDENTITY_TEMPORAL_FADED_REACQUIRE_MIN_CONFIDENCE = 0.55
+IDENTITY_TEMPORAL_OCCLUSION_MIN_CONFIDENCE = 0.35
+IDENTITY_LOCAL_REACQUIRE_LIMIT = 45.0
+KINEMATIC_TEXTURE_ADVANTAGE_LIMIT = 0.01
+KINEMATIC_SHAPE_TEXTURE_LIMIT = 0.938
+KINEMATIC_CONFIDENT_TEXTURE_ADVANTAGE_LIMIT = -0.04
+KINEMATIC_HOLD_SAME_CANDIDATE_MIN_SHIFT = 20.0
+KINEMATIC_BEAM_APPEARANCE_ADVANTAGE_LIMIT = 0.011
+KINEMATIC_BEAM_SAME_CANDIDATE_MAX_SHIFT = 100.0
+KINEMATIC_BEAM_BOTTOM_EDGE_MARGIN = 1.0
+KINEMATIC_WIDE_BEAM_TEXTURE_ADVANTAGE_LIMIT = -0.06
+KINEMATIC_WIDE_BEAM_MIN_SHIFT = 50.0
+KINEMATIC_WIDE_BEAM_MOTION_ADVANTAGE_LIMIT = 0.0
+KINEMATIC_WIDE_BEAM_YOLO_ADVANTAGE_LIMIT = -0.10
+KINEMATIC_WIDE_BEAM_MERGE_ADVANTAGE_LIMIT = -0.10
+IDENTITY_TEMPORAL_HARD_OVERRIDE_STATES = frozenset({
     "TRACK_CONFIDENT",
-    "REACQUIRE",
     "OCCLUSION_SUSPECTED",
     "IDENTITY_HOLD",
 })
+CCTV_OBSERVATION_TOP_LEFT = (0.04, 0.08)
+CCTV_OBSERVATION_TOP_RIGHT = (0.82, 0.10)
+CCTV_OBSERVATION_BOTTOM_RIGHT = (0.76, 0.66)
+CCTV_OBSERVATION_BOTTOM_LEFT = (0.04, 0.62)
+CCTV_OBSERVATION_LEFT_SIDE_TOP = (0.01, 0.11)
+CCTV_OBSERVATION_LEFT_SIDE_BOTTOM = (0.01, 0.595)
+CCTV_OBSERVATION_RIGHT_SIDE_TOP = (0.885, 0.125)
+CCTV_OBSERVATION_RIGHT_SIDE_BOTTOM = (0.832, 0.705)
+CCTV_OBSERVATION_SIDE_STRIP_RATIO = 0.07
+CCTV_OBSERVATION_SCANLINE_ALPHA = 0.84
+CCTV_OBSERVATION_LEFT_SIDE_SHADE = 0.50
+CCTV_OBSERVATION_RIGHT_SIDE_SHADE = 0.50
+CCTV_OBSERVATION_CONTRAST_CLIP_LIMIT = 1.18
 
 
 @dataclass(frozen=True)
@@ -294,6 +321,23 @@ class PlanetLiveSolver:
         self._last_detect_debug: dict[str, object] = {}
         self._visible_white_lock = _VisibleWhiteLock()
         self._motion_coast = _MotionCoast()
+        self._target_history: list[tuple[float, float]] = []
+
+    def reset(self) -> None:
+        for component in (self.evidence_judges, self.identity_tracker, self.temporal_selector):
+            reset = getattr(component, "reset", None)
+            if callable(reset):
+                reset()
+        self._last_detect_debug = {}
+        self._visible_white_lock = _VisibleWhiteLock(
+            stable_frames=self._visible_white_lock.required_stable_frames,
+            max_jump_px=self._visible_white_lock.max_jump_px,
+        )
+        self._motion_coast = _MotionCoast(
+            max_age_frames=self._motion_coast.max_age_frames,
+            max_velocity_px=self._motion_coast.max_velocity_px,
+        )
+        self._target_history = []
 
     def analyze(self, packet: FramePacket, *, solver_running: bool) -> PlanetLiveResult:
         detect_payload = packet.roi_snapshot.get("detect", {})
@@ -302,11 +346,21 @@ class PlanetLiveSolver:
         board_roi = _roi_from_payload(board_payload, fallback_name="board")
         det_frame = crop_by_roi(packet.source_frame, detect_roi)
         raw_rows = list(self._detect_rows(det_frame))
-        white_anchor_rows = _detect_white_anchor_rows(det_frame)
+        detected_white_anchor_rows = _detect_white_anchor_rows(det_frame)
+        white_anchor_rows = _refine_white_anchor_rows(detected_white_anchor_rows, raw_rows)
+        white_anchor_refined = bool(
+            detected_white_anchor_rows
+            and white_anchor_rows
+            and (
+                float(detected_white_anchor_rows[0]["cx"]) != float(white_anchor_rows[0]["cx"])
+                or float(detected_white_anchor_rows[0]["cy"]) != float(white_anchor_rows[0]["cy"])
+            )
+        )
         candidate_rows = [*white_anchor_rows, *raw_rows]
         self._last_detect_debug = {
             **self._last_detect_debug,
             "white_anchor_count": len(white_anchor_rows),
+            "white_anchor_refined": white_anchor_refined,
             "candidate_count": len(candidate_rows),
         }
         candidates = _candidates_from_det_rows(
@@ -338,6 +392,7 @@ class PlanetLiveSolver:
             candidates.append(_motion_coast_candidate(motion_prediction, frame_index=packet.frame_index))
             motion_coast_inserted = True
         visible_lock = self._visible_white_lock.update(white_anchor)
+        trusted_white_anchor = visible_lock.point if visible_lock.locked else None
         self._last_detect_debug = {
             **self._last_detect_debug,
             "candidate_count": len(candidates),
@@ -349,36 +404,82 @@ class PlanetLiveSolver:
             "visible_lock_stable": visible_lock.stable_frames,
             "visible_lock_reason": visible_lock.reason,
             "visible_lock_point": visible_lock.point,
+            "white_anchor_trusted": trusted_white_anchor is not None,
         }
         evidence = self.evidence_judges.score(candidates, packet)
         decision = self.identity_tracker.update(
             frame_index=packet.frame_index,
             candidates=candidates,
             evidence=evidence,
-            white_anchor=white_anchor,
+            white_anchor=trusted_white_anchor,
         )
         temporal_decision = self.temporal_selector.update(
             frame_index=packet.frame_index,
             candidates=_candidate_rows_from_candidates(candidates),
             primary_point=decision.point,
-            white_anchor=white_anchor,
+            white_anchor=trusted_white_anchor,
+            wide_white_anchor=white_anchor,
             frame_shape=_frame_shape(packet.board_frame),
         )
         if visible_lock.locked and visible_lock.point is not None:
             target_point = visible_lock.point
+            kinematic_texture_gate = {
+                "available": False,
+                "selected": False,
+                "reason": "visible_lock",
+            }
+            kinematic_beam_gate = {
+                "available": False,
+                "selected": False,
+                "reason": "visible_lock",
+            }
+            kinematic_wide_beam_gate = {
+                "available": False,
+                "selected": False,
+                "reason": "visible_lock",
+            }
         else:
-            target_point = _choose_live_target_point(
+            base_target_point = _choose_live_target_point(
                 decision=decision,
                 temporal_decision=temporal_decision,
                 visible_lock=visible_lock,
+            )
+            target_point, kinematic_texture_gate = _choose_kinematic_texture_target(
+                base_point=base_target_point,
+                shape_point=temporal_decision.debug.get("kinematic_shape_point"),
+                candidates=candidates,
+                evidence=evidence,
+                identity_state=decision.state,
+            )
+            target_point, kinematic_beam_gate = _choose_kinematic_beam_target(
+                base_point=target_point,
+                beam_point=temporal_decision.debug.get("kinematic_beam_point"),
+                candidates=candidates,
+                evidence=evidence,
+                identity_state=decision.state,
+                frame_shape=_frame_shape(packet.board_frame),
+            )
+            target_point, kinematic_wide_beam_gate = _choose_kinematic_wide_beam_target(
+                base_point=target_point,
+                hypothesis_points=temporal_decision.debug.get("kinematic_wide_beam_points"),
+                candidates=candidates,
+                evidence=evidence,
+                identity_state=decision.state,
+                frame_shape=_frame_shape(packet.board_frame),
             )
         target_selection = _target_selection_payload(
             decision=decision,
             temporal_decision=temporal_decision,
             visible_lock=visible_lock,
             target_point=target_point,
+            kinematic_texture_gate=kinematic_texture_gate,
+            kinematic_beam_gate=kinematic_beam_gate,
+            kinematic_wide_beam_gate=kinematic_wide_beam_gate,
         )
         det_point = _board_point_to_det_point(target_point, detect_roi=detect_roi, board_roi=board_roi)
+        if det_point is not None:
+            self._target_history.append((float(det_point[0]), float(det_point[1])))
+            self._target_history = self._target_history[-48:]
         mouse_move = self.mouse.move_to_det_point(
             detect_roi=detect_roi,
             point=det_point,
@@ -391,6 +492,7 @@ class PlanetLiveSolver:
             packet.source_frame,
             candidates=det_candidates,
             track_pos=det_point,
+            target_history=self._target_history,
             engine=_decision_engine_name(decision, temporal_decision),
         )
         return PlanetLiveResult(
@@ -458,6 +560,7 @@ def render_planet_cctv_preview(
     popup_score: float | None = None,
     candidates: Sequence[Sequence[float]] | None = None,
     track_pos: tuple[float, float] | None = None,
+    target_history: Sequence[tuple[float, float]] | None = None,
     engine: str = "WAIT",
 ) -> Any:
     frame_h, frame_w = frame.shape[:2]
@@ -465,8 +568,8 @@ def render_planet_cctv_preview(
     header_roi = _optional_header_roi(frame_w=frame_w, frame_h=frame_h)
     detect_roi = fixed_detect_roi(frame_w=frame_w, frame_h=frame_h)
     popup = crop_by_roi(frame, popup_roi)
-    vis = popup.copy()
     cv2 = _cv2()
+    vis, observation_matrix = _skew_grayscale_observation(popup, cv2=cv2)
     header_text_x = 4
     header_text_y = 14
     if header_roi is not None:
@@ -474,14 +577,25 @@ def render_planet_cctv_preview(
         header_ly = header_roi.y - popup_roi.y
         header_rx = header_lx + header_roi.w - 1
         header_ry = header_ly + header_roi.h - 1
-        cv2.rectangle(vis, (header_lx, header_ly), (header_rx, header_ry), (0, 230, 255), 2)
+        _draw_transformed_rect(
+            vis,
+            observation_matrix,
+            header_lx,
+            header_ly,
+            header_rx,
+            header_ry,
+            (0, 230, 255),
+            2,
+            cv2=cv2,
+        )
         header_text_x = header_lx + 4
         header_text_y = header_ly + 14
     score_text = "HDR score --" if popup_score is None else f"HDR score={popup_score:.2f} / thr=0.50"
+    score_pos = _transform_preview_point(observation_matrix, header_text_x, header_text_y)
     cv2.putText(
         vis,
         score_text,
-        (header_text_x, header_text_y),
+        score_pos,
         cv2.FONT_HERSHEY_SIMPLEX,
         0.4,
         (0, 230, 255),
@@ -493,10 +607,31 @@ def render_planet_cctv_preview(
     det_ly = detect_roi.y - popup_roi.y
     det_rx = det_lx + detect_roi.w
     det_ry = det_ly + detect_roi.h
-    cv2.rectangle(vis, (det_lx, det_ly), (det_rx, det_ry), (0, 140, 255), 2)
-    cv2.putText(vis, "DET", (det_lx + 4, det_ly + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 140, 255), 1, cv2.LINE_AA)
+    _draw_transformed_rect(
+        vis,
+        observation_matrix,
+        det_lx,
+        det_ly,
+        det_rx,
+        det_ry,
+        (0, 140, 255),
+        2,
+        cv2=cv2,
+    )
+    cv2.putText(
+        vis,
+        "DET",
+        _transform_preview_point(observation_matrix, det_lx + 4, det_ly + 14),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.4,
+        (0, 140, 255),
+        1,
+        cv2.LINE_AA,
+    )
 
-    for row in candidates or []:
+    candidate_rows = [row for row in candidates or [] if len(row) >= 5]
+    candidate_roles = _preview_candidate_roles(candidate_rows, track_pos)
+    for candidate_index, row in enumerate(candidate_rows, start=1):
         if len(row) < 5:
             continue
         cx, cy, score, width, height = [float(value) for value in row[:5]]
@@ -504,18 +639,287 @@ def render_planet_cctv_preview(
         y1 = det_ly + int(cy - height / 2.0)
         x2 = det_lx + int(cx + width / 2.0)
         y2 = det_ly + int(cy + height / 2.0)
-        selected = _contains_point((cx, cy, width, height), track_pos)
-        color = (0, 255, 80) if selected else (0, 190, 0)
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2 if selected else 1)
-        cv2.putText(vis, f"{score:.2f}", (x1, max(0, y1 - 3)), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1, cv2.LINE_AA)
+        role = candidate_roles[candidate_index - 1]
+        color, thickness = _preview_candidate_style(role)
+        _draw_transformed_rect(
+            vis,
+            observation_matrix,
+            x1,
+            y1,
+            x2,
+            y2,
+            color,
+            thickness,
+            cv2=cv2,
+        )
+        cv2.putText(
+            vis,
+            f"{score:.2f}",
+            _transform_preview_point(observation_matrix, x1, max(0, y1 - 3)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.38,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            vis,
+            f"#{candidate_index} {role}",
+            _transform_preview_point(observation_matrix, x1 + 2, y1 + 12),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+
+    history_points = [
+        _transform_preview_point(observation_matrix, det_lx + float(point[0]), det_ly + float(point[1]))
+        for point in target_history or []
+        if point is not None
+    ]
+    if len(history_points) >= 2:
+        pts = np.array(history_points, dtype=np.int32)
+        cv2.polylines(vis, [pts], False, (0, 255, 80), 2)
 
     if track_pos is not None:
-        marker_x = det_lx + int(track_pos[0])
-        marker_y = det_ly + int(track_pos[1])
-        cv2.drawMarker(vis, (marker_x, marker_y), (0, 255, 80), cv2.MARKER_CROSS, 22, 2)
-        cv2.putText(vis, engine, (det_lx + 4, max(det_ly + 18, det_ry - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 220, 0), 1, cv2.LINE_AA)
+        marker_x, marker_y = _transform_preview_point(
+            observation_matrix,
+            det_lx + int(track_pos[0]),
+            det_ly + int(track_pos[1]),
+        )
+        cv2.circle(vis, (marker_x, marker_y), 24, (0, 255, 80), 3, cv2.LINE_AA)
+        cv2.circle(vis, (marker_x, marker_y), 4, (0, 255, 80), -1, cv2.LINE_AA)
+        cv2.drawMarker(vis, (marker_x, marker_y), (0, 255, 80), cv2.MARKER_CROSS, 34, 3)
+        cv2.putText(
+            vis,
+            engine,
+            _transform_preview_point(observation_matrix, det_lx + 4, max(det_ly + 18, det_ry - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.4,
+            (255, 220, 0),
+            1,
+            cv2.LINE_AA,
+        )
 
     return vis
+
+
+def _preview_candidate_roles(
+    candidates: Sequence[Sequence[float]],
+    track_pos: tuple[float, float] | None,
+) -> list[str]:
+    if not candidates:
+        return []
+    if track_pos is None:
+        return ["CHECK" for _row in candidates]
+    rows = [[float(value) for value in row[:5]] for row in candidates]
+    selected_index = _preview_selected_candidate_index(rows, track_pos)
+    roles: list[str] = []
+    for index, row in enumerate(rows):
+        if index == selected_index:
+            roles.append("PICK")
+            continue
+        cx, cy, _score, width, height = row
+        distance = hypot(float(track_pos[0]) - cx, float(track_pos[1]) - cy)
+        check_radius = max(32.0, max(width, height) * 0.85)
+        roles.append("CHECK" if distance <= check_radius else "DROP")
+    return roles
+
+
+def _preview_selected_candidate_index(
+    rows: Sequence[Sequence[float]],
+    track_pos: tuple[float, float],
+) -> int | None:
+    containing = [
+        (hypot(float(track_pos[0]) - row[0], float(track_pos[1]) - row[1]), index)
+        for index, row in enumerate(rows)
+        if _contains_point((row[0], row[1], row[3], row[4]), track_pos)
+    ]
+    if containing:
+        return min(containing)[1]
+    nearest = [
+        (hypot(float(track_pos[0]) - row[0], float(track_pos[1]) - row[1]), index)
+        for index, row in enumerate(rows)
+    ]
+    return min(nearest)[1] if nearest else None
+
+
+def _preview_candidate_style(role: str) -> tuple[tuple[int, int, int], int]:
+    if role == "PICK":
+        return (0, 255, 80), 2
+    if role == "CHECK":
+        return (0, 220, 255), 1
+    return (0, 70, 255), 1
+
+
+def _skew_grayscale_observation(frame: Any, *, cv2: Any) -> tuple[Any, Any]:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = _enhance_observation_gray(gray, cv2=cv2)
+    gray_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    height, width = gray_bgr.shape[:2]
+    matrix = _cctv_observation_matrix(width, height)
+    canvas = np.zeros_like(gray_bgr)
+    side_strip = max(12, int(round(width * CCTV_OBSERVATION_SIDE_STRIP_RATIO)))
+    src_left = np.array(
+        [
+            [0.0, 0.0],
+            [float(side_strip), 0.0],
+            [float(side_strip), float(height - 1)],
+            [0.0, float(height - 1)],
+        ],
+        dtype=np.float32,
+    )
+    src_right = np.array(
+        [
+            [float(width - side_strip - 1), 0.0],
+            [float(width - 1), 0.0],
+            [float(width - 1), float(height - 1)],
+            [float(width - side_strip - 1), float(height - 1)],
+        ],
+        dtype=np.float32,
+    )
+    main_dst = _cctv_observation_dst_points(width, height)
+    left_dst = np.array(
+        [
+            _ratio_point(width, height, CCTV_OBSERVATION_LEFT_SIDE_TOP),
+            main_dst[0],
+            main_dst[3],
+            _ratio_point(width, height, CCTV_OBSERVATION_LEFT_SIDE_BOTTOM),
+        ],
+        dtype=np.float32,
+    )
+    right_dst = np.array(
+        [
+            main_dst[1],
+            _ratio_point(width, height, CCTV_OBSERVATION_RIGHT_SIDE_TOP),
+            _ratio_point(width, height, CCTV_OBSERVATION_RIGHT_SIDE_BOTTOM),
+            main_dst[2],
+        ],
+        dtype=np.float32,
+    )
+    _warp_observation_face(canvas, gray_bgr, src_left, left_dst, shade=CCTV_OBSERVATION_LEFT_SIDE_SHADE, cv2=cv2)
+    _warp_observation_face(canvas, gray_bgr, src_right, right_dst, shade=CCTV_OBSERVATION_RIGHT_SIDE_SHADE, cv2=cv2)
+    src_main = np.array(
+        [
+            [0.0, 0.0],
+            [float(width - 1), 0.0],
+            [float(width - 1), float(height - 1)],
+            [0.0, float(height - 1)],
+        ],
+        dtype=np.float32,
+    )
+    _warp_observation_face(canvas, gray_bgr, src_main, main_dst, shade=1.0, cv2=cv2)
+    _apply_observation_scanlines(canvas)
+    return canvas, matrix
+
+
+def _cctv_observation_matrix(width: int, height: int) -> Any:
+    cv2 = _cv2()
+    src = np.array(
+        [
+            [0.0, 0.0],
+            [float(width - 1), 0.0],
+            [float(width - 1), float(height - 1)],
+            [0.0, float(height - 1)],
+        ],
+        dtype=np.float32,
+    )
+    return cv2.getPerspectiveTransform(src, _cctv_observation_dst_points(width, height))
+
+
+def _cctv_observation_dst_points(width: int, height: int) -> Any:
+    dst = np.array(
+        [
+            _ratio_point(width, height, CCTV_OBSERVATION_TOP_LEFT),
+            _ratio_point(width, height, CCTV_OBSERVATION_TOP_RIGHT),
+            _ratio_point(width, height, CCTV_OBSERVATION_BOTTOM_RIGHT),
+            _ratio_point(width, height, CCTV_OBSERVATION_BOTTOM_LEFT),
+        ],
+        dtype=np.float32,
+    )
+    return dst
+
+
+def _ratio_point(width: int, height: int, ratio: tuple[float, float]) -> tuple[float, float]:
+    return (float(width - 1) * ratio[0], float(height - 1) * ratio[1])
+
+
+def _cctv_observation_transform_point(width: int, height: int, x: float, y: float) -> tuple[int, int]:
+    return _transform_preview_point(_cctv_observation_matrix(width, height), x, y)
+
+
+def _transform_preview_point(matrix: Any, x: float, y: float) -> tuple[int, int]:
+    tx = float(matrix[0, 0]) * float(x) + float(matrix[0, 1]) * float(y) + float(matrix[0, 2])
+    ty = float(matrix[1, 0]) * float(x) + float(matrix[1, 1]) * float(y) + float(matrix[1, 2])
+    tw = float(matrix[2, 0]) * float(x) + float(matrix[2, 1]) * float(y) + float(matrix[2, 2])
+    if abs(tw) > 1e-6:
+        tx /= tw
+        ty /= tw
+    return (int(round(tx)), int(round(ty)))
+
+
+def _draw_transformed_rect(
+    frame: Any,
+    matrix: Any,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    color: tuple[int, int, int],
+    thickness: int,
+    *,
+    cv2: Any,
+) -> None:
+    pts = np.array(
+        [
+            _transform_preview_point(matrix, x1, y1),
+            _transform_preview_point(matrix, x2, y1),
+            _transform_preview_point(matrix, x2, y2),
+            _transform_preview_point(matrix, x1, y2),
+        ],
+        dtype=np.int32,
+    )
+    cv2.polylines(frame, [pts], True, color, thickness)
+
+
+def _warp_observation_face(
+    canvas: Any,
+    source: Any,
+    src_points: Any,
+    dst_points: Any,
+    *,
+    shade: float,
+    cv2: Any,
+) -> None:
+    height, width = canvas.shape[:2]
+    matrix = cv2.getPerspectiveTransform(src_points, dst_points)
+    warped = cv2.warpPerspective(
+        source,
+        matrix,
+        (width, height),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0),
+    )
+    if shade != 1.0:
+        warped = cv2.convertScaleAbs(warped, alpha=float(shade), beta=0)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillConvexPoly(mask, np.round(dst_points).astype(np.int32), 255)
+    canvas[mask > 0] = warped[mask > 0]
+
+
+def _apply_observation_scanlines(frame: Any) -> None:
+    if frame.size == 0:
+        return
+    frame[1::4] = (frame[1::4].astype(np.float32) * CCTV_OBSERVATION_SCANLINE_ALPHA).astype(frame.dtype)
+
+
+def _enhance_observation_gray(gray: Any, *, cv2: Any) -> Any:
+    if gray.size == 0:
+        return gray
+    clahe = cv2.createCLAHE(clipLimit=CCTV_OBSERVATION_CONTRAST_CLIP_LIMIT, tileGridSize=(8, 8))
+    return clahe.apply(gray)
 
 
 def _optional_header_roi(*, frame_w: int, frame_h: int) -> RoiSpec | None:
@@ -663,6 +1067,59 @@ def _detect_white_anchor_rows(det_frame: Any) -> list[dict[str, float | str]]:
     return [best[1]] if best is not None else []
 
 
+def _refine_white_anchor_rows(
+    white_rows: Sequence[Any],
+    raw_rows: Sequence[Any],
+) -> list[dict[str, float | str]]:
+    if len(white_rows) != 1 or not raw_rows:
+        return [dict(row) for row in white_rows]
+
+    white = _parse_row(white_rows[0])
+    white_area = max(1.0, float(white["w"]) * float(white["h"]))
+    matches: list[tuple[float, float, dict[str, float | str]]] = []
+    for raw_row in raw_rows:
+        raw = _parse_row(raw_row)
+        if float(raw["score"]) < 0.2:
+            continue
+        width = float(raw["w"])
+        height = float(raw["h"])
+        if width > max(160.0, float(white["w"]) * 4.0):
+            continue
+        if height > max(160.0, float(white["h"]) * 4.0):
+            continue
+        raw_area = max(1.0, width * height)
+        area_ratio = raw_area / white_area
+        if area_ratio < 2.0 or area_ratio > 20.0:
+            continue
+        if not _contains_point(
+            (float(raw["cx"]), float(raw["cy"]), width, height),
+            (float(white["cx"]), float(white["cy"])),
+        ):
+            continue
+        distance = hypot(
+            float(raw["cx"]) - float(white["cx"]),
+            float(raw["cy"]) - float(white["cy"]),
+        )
+        matches.append((distance, -float(raw["score"]), raw))
+
+    if not matches:
+        return [dict(row) for row in white_rows]
+    _distance_to_fragment, _negative_score, best = min(matches, key=lambda item: (item[0], item[1]))
+    refined = dict(white_rows[0])
+    refined.update(
+        {
+            "cx": float(best["cx"]),
+            "cy": float(best["cy"]),
+            "score": max(float(white["score"]), float(best["score"])),
+            "w": float(best["w"]),
+            "h": float(best["h"]),
+            "source": "white_anchor",
+            "class_name": "white_anchor",
+        }
+    )
+    return [refined]
+
+
 def _parse_row(row: Any) -> dict[str, float | str]:
     if isinstance(row, dict):
         return {
@@ -736,14 +1193,316 @@ def _choose_live_target_point(
     return temporal_decision.point
 
 
+def _choose_kinematic_texture_target(
+    *,
+    base_point: Sequence[float] | None,
+    shape_point: object,
+    candidates: Sequence[Candidate],
+    evidence: dict[str, CandidateEvidence],
+    identity_state: str = "",
+    texture_advantage_limit: float = KINEMATIC_TEXTURE_ADVANTAGE_LIMIT,
+    shape_texture_limit: float = KINEMATIC_SHAPE_TEXTURE_LIMIT,
+    confident_texture_advantage_limit: float = KINEMATIC_CONFIDENT_TEXTURE_ADVANTAGE_LIMIT,
+    hold_same_candidate_min_shift: float = KINEMATIC_HOLD_SAME_CANDIDATE_MIN_SHIFT,
+) -> tuple[tuple[float, float] | None, dict[str, object]]:
+    base = _coerce_point(base_point)
+    shape = _coerce_point(shape_point)
+    if base is None or shape is None or not candidates:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_path_or_candidates",
+        }
+    base_candidate = min(candidates, key=lambda candidate: _point_distance(candidate.center, base))
+    shape_candidate = min(candidates, key=lambda candidate: _point_distance(candidate.center, shape))
+    base_evidence = evidence.get(base_candidate.candidate_id)
+    shape_evidence = evidence.get(shape_candidate.candidate_id)
+    if base_evidence is None or shape_evidence is None:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_texture_evidence",
+        }
+    shape_texture = float(shape_evidence.texture_bg_score)
+    texture_advantage = shape_texture - float(base_evidence.texture_bg_score)
+    shape_shift = _point_distance(base, shape)
+    if shape_texture > float(shape_texture_limit):
+        selected = False
+        reason = "shape_too_background_like"
+    elif texture_advantage > float(texture_advantage_limit):
+        selected = False
+        reason = "shape_more_background_like"
+    elif identity_state == "TRACK_CONFIDENT" and texture_advantage > float(confident_texture_advantage_limit):
+        selected = False
+        reason = "confident_texture_gain_too_weak"
+    elif (
+        identity_state == "IDENTITY_HOLD"
+        and base_candidate.candidate_id == shape_candidate.candidate_id
+        and shape_shift < float(hold_same_candidate_min_shift)
+    ):
+        selected = False
+        reason = "hold_same_candidate_shift_too_small"
+    else:
+        selected = True
+        reason = "accepted"
+    return (shape if selected else base), {
+        "available": True,
+        "selected": selected,
+        "reason": reason,
+        "base_point": base,
+        "shape_point": shape,
+        "selected_point": shape if selected else base,
+        "base_candidate_id": base_candidate.candidate_id,
+        "shape_candidate_id": shape_candidate.candidate_id,
+        "base_texture_bg_score": float(base_evidence.texture_bg_score),
+        "shape_texture_bg_score": float(shape_evidence.texture_bg_score),
+        "texture_advantage": texture_advantage,
+        "texture_advantage_limit": float(texture_advantage_limit),
+        "shape_texture_limit": float(shape_texture_limit),
+        "identity_state": identity_state,
+        "confident_texture_advantage_limit": float(confident_texture_advantage_limit),
+        "shape_shift": shape_shift,
+        "hold_same_candidate_min_shift": float(hold_same_candidate_min_shift),
+    }
+
+
+def _choose_kinematic_beam_target(
+    *,
+    base_point: Sequence[float] | None,
+    beam_point: object,
+    candidates: Sequence[Candidate],
+    evidence: dict[str, CandidateEvidence],
+    identity_state: str = "",
+    appearance_advantage_limit: float = KINEMATIC_BEAM_APPEARANCE_ADVANTAGE_LIMIT,
+    same_candidate_max_shift: float = KINEMATIC_BEAM_SAME_CANDIDATE_MAX_SHIFT,
+    bottom_edge_margin: float = KINEMATIC_BEAM_BOTTOM_EDGE_MARGIN,
+    frame_shape: tuple[int, int] | None = None,
+) -> tuple[tuple[float, float] | None, dict[str, object]]:
+    base = _coerce_point(base_point)
+    beam = _coerce_point(beam_point)
+    if base is None or beam is None or not candidates:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_path_or_candidates",
+        }
+    base_candidate = min(candidates, key=lambda candidate: _point_distance(candidate.center, base))
+    beam_candidate = min(candidates, key=lambda candidate: _point_distance(candidate.center, beam))
+    base_evidence = evidence.get(base_candidate.candidate_id)
+    beam_evidence = evidence.get(beam_candidate.candidate_id)
+    if base_evidence is None or beam_evidence is None:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_appearance_evidence",
+        }
+    appearance_advantage = float(beam_evidence.color_residual) - float(base_evidence.color_residual)
+    beam_shift = _point_distance(base, beam)
+    same_candidate = base_candidate.candidate_id == beam_candidate.candidate_id
+    bottom_margin = None
+    if frame_shape is not None:
+        bottom_margin = float(frame_shape[0]) - float(beam_candidate.bbox[3])
+    if identity_state == "INIT_VISIBLE":
+        selected = False
+        reason = "visible_identity_locked"
+    elif same_candidate and beam_shift < float(same_candidate_max_shift):
+        selected = False
+        reason = "same_candidate_shift_too_small"
+    elif bottom_margin is not None and bottom_margin <= float(bottom_edge_margin):
+        selected = False
+        reason = "beam_candidate_bottom_clipped"
+    elif appearance_advantage > float(appearance_advantage_limit):
+        selected = False
+        reason = "beam_appearance_worse"
+    else:
+        selected = True
+        reason = "appearance_parity"
+    return (beam if selected else base), {
+        "available": True,
+        "selected": selected,
+        "reason": reason,
+        "base_point": base,
+        "beam_point": beam,
+        "selected_point": beam if selected else base,
+        "base_candidate_id": base_candidate.candidate_id,
+        "beam_candidate_id": beam_candidate.candidate_id,
+        "base_color_residual": float(base_evidence.color_residual),
+        "beam_color_residual": float(beam_evidence.color_residual),
+        "appearance_advantage": appearance_advantage,
+        "appearance_advantage_limit": float(appearance_advantage_limit),
+        "identity_state": identity_state,
+        "same_candidate": same_candidate,
+        "beam_shift": beam_shift,
+        "same_candidate_max_shift": float(same_candidate_max_shift),
+        "bottom_margin": bottom_margin,
+        "bottom_edge_margin": float(bottom_edge_margin),
+    }
+
+
+def _choose_kinematic_wide_beam_target(
+    *,
+    base_point: Sequence[float] | None,
+    hypothesis_points: object,
+    candidates: Sequence[Candidate],
+    evidence: dict[str, CandidateEvidence],
+    identity_state: str = "",
+    texture_advantage_limit: float = KINEMATIC_WIDE_BEAM_TEXTURE_ADVANTAGE_LIMIT,
+    min_shift: float = KINEMATIC_WIDE_BEAM_MIN_SHIFT,
+    frame_shape: tuple[int, int] | None = None,
+) -> tuple[tuple[float, float] | None, dict[str, object]]:
+    base = _coerce_point(base_point)
+    if not isinstance(hypothesis_points, Sequence) or isinstance(hypothesis_points, (str, bytes)):
+        points: list[tuple[float, float]] = []
+    else:
+        points = [point for value in hypothesis_points if (point := _coerce_point(value)) is not None]
+    if base is None or not points or not candidates:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_path_or_hypotheses",
+        }
+
+    base_candidate = min(candidates, key=lambda candidate: _point_distance(candidate.center, base))
+    base_evidence = evidence.get(base_candidate.candidate_id)
+    if base_evidence is None:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_base_evidence",
+        }
+
+    hypotheses: list[tuple[tuple[float, float], Candidate, CandidateEvidence]] = []
+    seen_candidate_ids: set[str] = set()
+    for point in points:
+        candidate = min(candidates, key=lambda item: _point_distance(item.center, point))
+        if candidate.candidate_id in seen_candidate_ids:
+            continue
+        candidate_evidence = evidence.get(candidate.candidate_id)
+        if candidate_evidence is None:
+            continue
+        seen_candidate_ids.add(candidate.candidate_id)
+        hypotheses.append((point, candidate, candidate_evidence))
+    if not hypotheses:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_hypothesis_evidence",
+        }
+
+    wide_point, wide_candidate, wide_evidence = min(
+        hypotheses,
+        key=lambda row: float(row[2].texture_bg_score),
+    )
+    guarded_point, beam_guard = _choose_kinematic_beam_target(
+        base_point=base,
+        beam_point=wide_point,
+        candidates=candidates,
+        evidence=evidence,
+        identity_state=identity_state,
+        frame_shape=frame_shape,
+    )
+    wide_shift = _point_distance(base, wide_point)
+    texture_advantage = (
+        float(wide_evidence.texture_bg_score) - float(base_evidence.texture_bg_score)
+    )
+    motion_advantage = (
+        float(wide_evidence.motion_divergence) - float(base_evidence.motion_divergence)
+    )
+    yolo_advantage = float(wide_candidate.score) - float(base_candidate.score)
+    merge_advantage = (
+        float(wide_evidence.merge_likelihood) - float(base_evidence.merge_likelihood)
+    )
+    texture_guard = (
+        wide_shift >= float(min_shift)
+        and texture_advantage <= float(texture_advantage_limit)
+    )
+    observation_consensus = (
+        motion_advantage >= KINEMATIC_WIDE_BEAM_MOTION_ADVANTAGE_LIMIT
+        and yolo_advantage >= KINEMATIC_WIDE_BEAM_YOLO_ADVANTAGE_LIMIT
+        and merge_advantage >= KINEMATIC_WIDE_BEAM_MERGE_ADVANTAGE_LIMIT
+    )
+    if not bool(beam_guard.get("selected")):
+        selected = False
+        reason = str(beam_guard.get("reason") or "beam_guard_rejected")
+    elif texture_guard:
+        selected = True
+        reason = "wide_texture_guard"
+    elif observation_consensus:
+        selected = True
+        reason = "wide_observation_consensus"
+    elif wide_shift < float(min_shift):
+        selected = False
+        reason = "paths_not_separated"
+    else:
+        selected = False
+        reason = "texture_gain_too_weak"
+    return (guarded_point if selected else base), {
+        "available": True,
+        "selected": selected,
+        "reason": reason,
+        "base_point": base,
+        "wide_point": wide_point,
+        "selected_point": guarded_point if selected else base,
+        "base_candidate_id": base_candidate.candidate_id,
+        "wide_candidate_id": wide_candidate.candidate_id,
+        "base_texture_bg_score": float(base_evidence.texture_bg_score),
+        "wide_texture_bg_score": float(wide_evidence.texture_bg_score),
+        "texture_advantage": texture_advantage,
+        "texture_advantage_limit": float(texture_advantage_limit),
+        "motion_advantage": motion_advantage,
+        "motion_advantage_limit": KINEMATIC_WIDE_BEAM_MOTION_ADVANTAGE_LIMIT,
+        "yolo_advantage": yolo_advantage,
+        "yolo_advantage_limit": KINEMATIC_WIDE_BEAM_YOLO_ADVANTAGE_LIMIT,
+        "merge_advantage": merge_advantage,
+        "merge_advantage_limit": KINEMATIC_WIDE_BEAM_MERGE_ADVANTAGE_LIMIT,
+        "observation_consensus": observation_consensus,
+        "wide_shift": wide_shift,
+        "min_shift": float(min_shift),
+        "hypothesis_count": len(hypotheses),
+        "beam_guard": dict(beam_guard),
+    }
+
+
+def _coerce_point(value: object) -> tuple[float, float] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) < 2:
+        return None
+    try:
+        return (float(value[0]), float(value[1]))
+    except (TypeError, ValueError):
+        return None
+
+
 def _should_prefer_identity_target(decision: IdentityDecision, temporal_decision: LiveTemporalDecision) -> bool:
     if decision.point is None or temporal_decision.point is None:
         return False
     distance = hypot(decision.point[0] - temporal_decision.point[0], decision.point[1] - temporal_decision.point[1])
+    if distance > IDENTITY_TEMPORAL_HARD_DIVERGENCE_LIMIT and _is_temporal_overlap_recovery(temporal_decision):
+        if decision.state == "REACQUIRE":
+            distance_to_last = decision.debug.get("distance_to_last")
+            color_weight = decision.debug.get("color_weight")
+            if (
+                isinstance(distance_to_last, (int, float))
+                and float(distance_to_last) <= IDENTITY_LOCAL_REACQUIRE_LIMIT
+                and decision.confidence >= IDENTITY_TEMPORAL_MIN_CONFIDENCE
+            ):
+                return True
+            if (
+                isinstance(color_weight, (int, float))
+                and float(color_weight) <= 0.0
+                and decision.confidence >= IDENTITY_TEMPORAL_FADED_REACQUIRE_MIN_CONFIDENCE
+            ):
+                return True
+            return False
     if (
-        decision.state in IDENTITY_TEMPORAL_ALIVE_STATES
+        decision.state in IDENTITY_TEMPORAL_HARD_OVERRIDE_STATES
         and decision.confidence >= IDENTITY_TEMPORAL_HOLD_MIN_CONFIDENCE
         and distance > IDENTITY_TEMPORAL_HARD_DIVERGENCE_LIMIT
+    ):
+        return True
+    if (
+        decision.state == "OCCLUSION_SUSPECTED"
+        and decision.confidence >= IDENTITY_TEMPORAL_OCCLUSION_MIN_CONFIDENCE
+        and distance > IDENTITY_TEMPORAL_DIVERGENCE_LIMIT
     ):
         return True
     if decision.state != "TRACK_CONFIDENT":
@@ -753,12 +1512,29 @@ def _should_prefer_identity_target(decision: IdentityDecision, temporal_decision
     return distance > IDENTITY_TEMPORAL_DIVERGENCE_LIMIT
 
 
+def _is_temporal_overlap_recovery(temporal_decision: LiveTemporalDecision) -> bool:
+    if temporal_decision.point is None:
+        return False
+    if temporal_decision.reason != "selected_family":
+        return False
+    family = str(temporal_decision.family or "")
+    return (
+        family.startswith("raw_candidate_cont")
+        or "box_rel" in family
+        or "occlusion" in family
+        or family.startswith("guarded_decal_identity_consensus")
+    )
+
+
 def _target_selection_payload(
     *,
     decision: IdentityDecision,
     temporal_decision: LiveTemporalDecision,
     visible_lock: Any,
     target_point: tuple[float, float] | None,
+    kinematic_texture_gate: dict[str, object] | None = None,
+    kinematic_beam_gate: dict[str, object] | None = None,
+    kinematic_wide_beam_gate: dict[str, object] | None = None,
 ) -> dict[str, object]:
     distance = _point_distance(decision.point, temporal_decision.point)
     if visible_lock.locked and visible_lock.point is not None:
@@ -767,6 +1543,15 @@ def _target_selection_payload(
     elif temporal_decision.point is None:
         source = "identity"
         reason = "temporal_missing"
+    elif kinematic_wide_beam_gate and bool(kinematic_wide_beam_gate.get("selected")):
+        source = "kinematic_wide_beam"
+        reason = "wide_texture_guard"
+    elif kinematic_beam_gate and bool(kinematic_beam_gate.get("selected")):
+        source = "kinematic_beam"
+        reason = "appearance_parity_guard"
+    elif kinematic_texture_gate and bool(kinematic_texture_gate.get("selected")):
+        source = "kinematic_shape"
+        reason = "dual_texture_guard"
     elif _should_prefer_identity_target(decision, temporal_decision):
         source = "identity"
         reason = "identity_temporal_divergence"
@@ -782,6 +1567,9 @@ def _target_selection_payload(
         "identity_confidence": decision.confidence,
         "temporal_point": temporal_decision.point,
         "temporal_family": temporal_decision.family,
+        "kinematic_texture_gate": dict(kinematic_texture_gate or {}),
+        "kinematic_beam_gate": dict(kinematic_beam_gate or {}),
+        "kinematic_wide_beam_gate": dict(kinematic_wide_beam_gate or {}),
     }
 
 

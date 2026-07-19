@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.vision.transparent_family_selector_runtime import TransparentFamilySelectorRuntime
+from core.vision.transparent_kinematic_shape import (
+    TransparentKinematicBeamTracker,
+    TransparentKinematicShapeTracker,
+)
 from core.vision.transparent_live_family_pool import LiveFamilyDecision, TransparentLiveFamilyPool
 from core.vision.transparent_selector_shadow import TransparentSelectorShadow
 from core.vision.transparent_track_health import TrackHealthDecision, TransparentTrackHealthSelector
@@ -29,6 +33,8 @@ FAST_LIVE_BOX_REL_PAIRS = frozenset({
     ("z0", "p05"),
     ("z0", "p1"),
 })
+LEGACY_RESCUE_MIN_BOARD_WIDTH = 600
+KINEMATIC_SHAPE_FAMILY = "kinematic_shape_center_mild_state_mild"
 
 
 @dataclass(frozen=True)
@@ -51,12 +57,17 @@ class LiveTemporalSelector:
         family_pool: Any | None = None,
         selector_shadow: Any | None = None,
         health_selector: TransparentTrackHealthSelector | None = None,
+        kinematic_shape_tracker: Any | None = None,
+        kinematic_beam_tracker: Any | None = None,
+        kinematic_wide_beam_tracker: Any | None = None,
+        enable_kinematic_shape: bool = False,
         clip_id: str = "live",
         window: int = 24,
         min_frames: int = 8,
         live_max_candidates: int = 24,
         include_local_box: bool = False,
         use_expected_background: bool = False,
+        legacy_rescue_min_board_width: int = LEGACY_RESCUE_MIN_BOARD_WIDTH,
     ) -> None:
         self.runtime = runtime or TransparentFamilySelectorRuntime()
         self.family_pool = family_pool or TransparentLiveFamilyPool(
@@ -87,8 +98,19 @@ class LiveTemporalSelector:
             merge_size_ratio=1.30,
         )
         self.health_selector = health_selector or TransparentTrackHealthSelector()
+        self.kinematic_shape_tracker = kinematic_shape_tracker or TransparentKinematicShapeTracker()
+        self.kinematic_beam_tracker = kinematic_beam_tracker or TransparentKinematicBeamTracker()
+        self.kinematic_wide_beam_tracker = kinematic_wide_beam_tracker or TransparentKinematicBeamTracker(
+            width=16,
+            branch=5,
+            cost_decay=1.0,
+            acceleration_weight=0.5,
+            yolo_penalty_weight=0.0,
+        )
+        self.enable_kinematic_shape = bool(enable_kinematic_shape)
         self.live_max_candidates = max(1, int(live_max_candidates))
         self.use_expected_background = bool(use_expected_background)
+        self.legacy_rescue_min_board_width = max(1, int(legacy_rescue_min_board_width))
         self._seeded = False
 
     def reset(self, *, point: Point | None = None) -> None:
@@ -97,6 +119,9 @@ class LiveTemporalSelector:
         if hasattr(self.selector_shadow, "reset"):
             self.selector_shadow.reset(clip_id="live")
         self.health_selector.reset(point)
+        self.kinematic_shape_tracker.reset()
+        self.kinematic_beam_tracker.reset()
+        self.kinematic_wide_beam_tracker.reset()
         self._seeded = point is not None
 
     def update(
@@ -106,6 +131,7 @@ class LiveTemporalSelector:
         candidates: Sequence[Sequence[float]],
         primary_point: Sequence[float] | None,
         white_anchor: Sequence[float] | None = None,
+        wide_white_anchor: Sequence[float] | None = None,
         engine_point: Sequence[float] | None = None,
         frame_shape: Sequence[int] | None = None,
     ) -> LiveTemporalDecision:
@@ -126,6 +152,23 @@ class LiveTemporalSelector:
             white_anchor=anchor,
         )
         anchors = _anchors_from_live_family(live_decision)
+        shape_point = self.kinematic_shape_tracker.update(
+            clean_candidates,
+            white_anchor=anchor,
+        )
+        beam_point = self.kinematic_beam_tracker.update(
+            clean_candidates,
+            white_anchor=anchor,
+        )
+        self.kinematic_wide_beam_tracker.update(
+            clean_candidates,
+            white_anchor=_point(wide_white_anchor) or anchor,
+        )
+        wide_beam_points = tuple(
+            self.kinematic_wide_beam_tracker.hypothesis_points
+        )
+        if self.enable_kinematic_shape and shape_point is not None:
+            anchors[KINEMATIC_SHAPE_FAMILY] = shape_point
         primary = _point(primary_point)
         if primary is not None:
             anchors["panel_default_center_mild_state_mild"] = primary
@@ -147,6 +190,10 @@ class LiveTemporalSelector:
                     if self.use_expected_background
                     else {}
                 ),
+                allow_legacy_rescues=_legacy_rescues_allowed(
+                    frame_shape,
+                    min_board_width=self.legacy_rescue_min_board_width,
+                ),
             )
 
         selected = _selector_point(selector_record)
@@ -167,7 +214,15 @@ class LiveTemporalSelector:
                 selector_record=selector_record,
                 live_family_points=anchors,
                 health=health,
-                debug=_debug_payload(live_decision, selector_record),
+                debug=_debug_payload(
+                    live_decision,
+                    selector_record,
+                    shape_point=shape_point,
+                    beam_point=beam_point,
+                    beam_debug=getattr(self.kinematic_beam_tracker, "last_debug", {}),
+                    wide_beam_points=wide_beam_points,
+                    wide_beam_debug=getattr(self.kinematic_wide_beam_tracker, "last_debug", {}),
+                ),
             )
         return LiveTemporalDecision(
             point=health.point,
@@ -176,7 +231,15 @@ class LiveTemporalSelector:
             selector_record=selector_record,
             live_family_points=anchors,
             health=health,
-            debug=_debug_payload(live_decision, selector_record),
+            debug=_debug_payload(
+                live_decision,
+                selector_record,
+                shape_point=shape_point,
+                beam_point=beam_point,
+                beam_debug=getattr(self.kinematic_beam_tracker, "last_debug", {}),
+                wide_beam_points=wide_beam_points,
+                wide_beam_debug=getattr(self.kinematic_wide_beam_tracker, "last_debug", {}),
+            ),
         )
 
 
@@ -190,6 +253,16 @@ def _normalize_candidates(candidates: Sequence[Sequence[float]]) -> list[Candida
         height = float(row[4]) if len(row) >= 5 else 24.0
         out.append((float(row[0]), float(row[1]), score, width, height))
     return out
+
+
+def _legacy_rescues_allowed(
+    frame_shape: Sequence[int] | None,
+    *,
+    min_board_width: int,
+) -> bool:
+    if frame_shape is None or len(frame_shape) < 2:
+        return True
+    return int(frame_shape[1]) >= int(min_board_width)
 
 
 def _expected_background_by_frame(
@@ -243,10 +316,26 @@ def _point(value: object) -> Point | None:
         return None
 
 
-def _debug_payload(live_decision: LiveFamilyDecision, selector_record: object) -> dict[str, object]:
+def _debug_payload(
+    live_decision: LiveFamilyDecision,
+    selector_record: object,
+    *,
+    shape_point: Point | None,
+    beam_point: Point | None,
+    beam_debug: object,
+    wide_beam_points: Sequence[Point],
+    wide_beam_debug: object,
+) -> dict[str, object]:
     return {
         "live_family": dict(live_decision.debug),
         "selector_available": bool(
             isinstance(selector_record, Mapping) and selector_record.get("available", False)
+        ),
+        "kinematic_shape_point": shape_point,
+        "kinematic_beam_point": beam_point,
+        "kinematic_beam_debug": dict(beam_debug) if isinstance(beam_debug, Mapping) else {},
+        "kinematic_wide_beam_points": tuple(wide_beam_points),
+        "kinematic_wide_beam_debug": (
+            dict(wide_beam_debug) if isinstance(wide_beam_debug, Mapping) else {}
         ),
     }
