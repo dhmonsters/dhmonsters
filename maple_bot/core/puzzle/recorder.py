@@ -103,6 +103,14 @@ class SessionRecorder:
         )
 
 
+class SnapshotOnlySessionRecorder(SessionRecorder):
+    def write(self, packet: FramePacket, overlay_frame: Any | None = None) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
 class AsyncSessionRecorder:
     def __init__(self, recorder: SessionRecorder, *, max_queue: int = 180) -> None:
         self.recorder = recorder

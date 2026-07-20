@@ -77,6 +77,16 @@ def test_color_residual_uses_color_frames_but_ignores_grayscale_frames():
     assert gray_evidence["color"].color_residual == 0.0
 
 
+def test_color_residual_detects_bright_white_blob_against_dark_ring():
+    frame = np.full((40, 40, 3), 40, dtype=np.uint8)
+    frame[15:25, 15:25] = 240
+    candidate = _candidate("white_blob", (20.0, 20.0), size=(10.0, 10.0))
+
+    evidence = EvidenceJudges().score([candidate], _packet(frame))
+
+    assert evidence["white_blob"].color_residual > 0.0
+
+
 def test_extension_hooks_fill_only_their_named_evidence_fields():
     candidate = _candidate("hooked", (10.0, 10.0))
     packet = _packet(np.zeros((30, 30), dtype=np.uint8))
@@ -121,3 +131,57 @@ def test_live_evidence_judges_populate_motion_background_and_texture_scores():
     assert evidence["bg_now"].texture_bg_score > 0.0
     assert evidence["target_now"].motion_divergence > evidence["bg_now"].motion_divergence
     assert evidence["target_now"].rigid_violation > evidence["bg_now"].rigid_violation
+
+
+def test_live_evidence_local_rigid_residual_is_independent_from_candidate_motion():
+    y, x = np.mgrid[0:80, 0:90]
+    previous = np.stack(
+        [
+            (x * 7 + y * 3) % 256,
+            (x * 5 + y * 11) % 256,
+            (x * 13 + y * 2) % 256,
+        ],
+        axis=2,
+    ).astype(np.uint8)
+    current = previous.copy()
+    current[14:26, 59:71] = np.flip(current[14:26, 59:71], axis=1)
+    judges = LiveEvidenceJudges()
+
+    judges.score(
+        [
+            _candidate("bg_prev", (20.0, 20.0), size=(12.0, 12.0)),
+            _candidate("target_prev", (65.0, 20.0), size=(12.0, 12.0)),
+        ],
+        _packet(previous),
+    )
+    evidence = judges.score(
+        [
+            _candidate("bg_now", (20.0, 20.0), size=(12.0, 12.0)),
+            _candidate("target_now", (65.0, 20.0), size=(12.0, 12.0)),
+        ],
+        _packet(current),
+    )
+
+    assert evidence["bg_now"].motion_divergence == evidence["target_now"].motion_divergence
+    assert evidence["bg_now"].local_rigid_residual < 0.05
+    assert evidence["target_now"].local_rigid_residual > evidence["bg_now"].local_rigid_residual + 0.2
+
+
+def test_live_evidence_reset_forgets_previous_motion_frame():
+    frame = np.full((80, 90, 3), 120, dtype=np.uint8)
+    judges = LiveEvidenceJudges()
+    judges.score(
+        [_candidate("previous", (20.0, 20.0), size=(12.0, 12.0))],
+        _packet(frame),
+    )
+
+    judges.reset()
+    evidence = judges.score(
+        [_candidate("new_run", (70.0, 20.0), size=(12.0, 12.0))],
+        _packet(frame),
+    )["new_run"]
+
+    assert evidence.motion_divergence == 0.0
+    assert evidence.rigid_violation == 0.0
+    assert evidence.local_rigid_residual == 0.0
+    assert evidence.phase_similarity == 0.0

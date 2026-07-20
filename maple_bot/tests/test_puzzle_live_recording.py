@@ -65,6 +65,27 @@ def test_live_recording_runtime_writes_lossless_session_outputs(tmp_path):
     assert runtime.report_path == report_path
 
 
+def test_live_recording_runtime_can_skip_videos_but_keep_trace_and_previews(tmp_path):
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(3),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+        record_video=False,
+    )
+
+    report_path = runtime.run_until_stopped(max_frames=3)
+
+    session_dir = report_path.parent
+    assert not (session_dir / "raw_cctv.mkv").exists()
+    assert not (session_dir / "board_crop.mkv").exists()
+    assert not (session_dir / "overlay.mkv").exists()
+    assert len(list((session_dir / "snapshots").glob("live_preview_*.png"))) == 3
+    events = _events(session_dir / "trace.jsonl")
+    assert [event["type"] for event in events].count("FRAME_RECORDED") == 3
+    assert events[-1]["type"] == "SESSION_END"
+
+
 def test_live_recording_solver_stop_keeps_recording_until_f3(tmp_path):
     runtime = LiveRecordingRuntime(
         output_root=tmp_path,
@@ -146,6 +167,44 @@ def test_live_recording_calls_planet_solver_and_records_solver_trace(tmp_path):
     assert solver_events[0]["payload"]["solver_running"] is True
     assert runtime.latest_preview_path is not None
     assert runtime.latest_preview_path.exists()
+
+
+def test_live_recording_reset_solver_state_records_run_boundary(tmp_path):
+    class _ResettableSolver:
+        def __init__(self):
+            self.reset_calls = 0
+
+        def analyze(self, packet, *, solver_running: bool):
+            return PlanetLiveResult(
+                preview_frame=np.full((6, 8, 3), packet.frame_index, dtype=np.uint8),
+            )
+
+        def reset(self):
+            self.reset_calls += 1
+
+    solver = _ResettableSolver()
+    runtime = LiveRecordingRuntime(
+        output_root=tmp_path,
+        frame_grabber=_frames(1),
+        fps=10.0,
+        sleeper=lambda _seconds: None,
+        live_solver=solver,
+        mouse_enabled=False,
+        visual_check_mode=True,
+    )
+    session = runtime.start()
+
+    reset = runtime.reset_solver_state(reason="studio_run_boundary", run_index=2)
+
+    assert reset is True
+    assert solver.reset_calls == 1
+    events = _events(session.trace_path)
+    reset_events = [event for event in events if event["type"] == "SOLVER_STATE_RESET"]
+    assert len(reset_events) == 1
+    assert reset_events[0]["payload"]["reason"] == "studio_run_boundary"
+    assert reset_events[0]["payload"]["run_index"] == 2
+    assert runtime.mouse_enabled is False
+    runtime.stop_recording(reason="test_cleanup")
 
 
 def test_live_recording_analyzes_before_blocking_recorder_write(monkeypatch, tmp_path):
@@ -251,14 +310,16 @@ def test_game_client_grabber_captures_maple_client_rect():
             captured["region"] = dict(region)
             return np.zeros((4, 5, 4), dtype=np.uint8)
 
-    fake_solver = SimpleNamespace(
-        find_maple_hwnd=lambda: 1234,
-        get_client_rect_screen=lambda hwnd: (10, 20, 5, 4),
-    )
     fake_mss = SimpleNamespace(mss=lambda: _FakeMss())
 
-    with mock.patch.dict(sys.modules, {"planet_live_solver": fake_solver, "mss": fake_mss}):
-        frame = live_recording.GameClientFrameGrabber()()
+    with mock.patch.dict(sys.modules, {"mss": fake_mss}):
+        with mock.patch.object(live_recording, "_find_game_hwnd", return_value=1234):
+            with mock.patch.object(
+                live_recording,
+                "_game_client_rect_screen",
+                return_value=(10, 20, 5, 4),
+            ):
+                frame = live_recording.GameClientFrameGrabber()()
 
     assert captured["region"] == {"left": 10, "top": 20, "width": 5, "height": 4}
     assert frame.shape == (4, 5, 3)

@@ -1,17 +1,17 @@
 # 투명도형 퍼즐 라이브 화면을 무손실 세션 녹화로 저장한다.
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.puzzle.defaults import fixed_puzzle_rois, roi_to_payload
-from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen
+from core.puzzle.game_window import find_game_hwnd, find_window_hwnd_by_title, get_game_client_rect_screen
 from core.puzzle.models import FramePacket, PuzzleSession, RoiSpec
 from core.puzzle.live_session_review import LiveSessionReviewBuilder
-from core.puzzle.planet_live import PlanetLiveResult, PlanetLiveSolver, render_planet_cctv_preview
-from core.puzzle.recorder import AsyncSessionRecorder, SessionRecorder
+from core.puzzle.recorder import AsyncSessionRecorder, SessionRecorder, SnapshotOnlySessionRecorder
 from core.puzzle.recording_controller import RecordingController
 from core.puzzle.report import ReportBuilder
 from core.puzzle.roi import crop_by_roi
@@ -21,6 +21,9 @@ from core.puzzle.trace import TraceLogger
 
 FrameGrabber = Callable[[], Any]
 Sleeper = Callable[[float], None]
+
+if TYPE_CHECKING:
+    from core.puzzle.planet_live import PlanetLiveResult
 
 
 class LiveRecordingRuntime:
@@ -33,6 +36,8 @@ class LiveRecordingRuntime:
         sleeper: Sleeper | None = None,
         live_solver: Any | None = None,
         mouse_enabled: bool = True,
+        visual_check_mode: bool = False,
+        record_video: bool = True,
     ) -> None:
         if fps <= 0:
             raise ValueError("fps must be positive")
@@ -40,12 +45,16 @@ class LiveRecordingRuntime:
         self.frame_grabber = frame_grabber or GameClientFrameGrabber()
         self.fps = fps
         self.sleeper = sleeper or time.sleep
-        self.mouse_enabled = bool(mouse_enabled)
+        self.visual_check_mode = bool(visual_check_mode)
+        self.record_video = bool(record_video)
+        self.mouse_enabled = bool(mouse_enabled) and not self.visual_check_mode
         self.live_solver = (
             live_solver
             if live_solver is not None
-            else PlanetLiveSolver(mouse_enabled=self.mouse_enabled)
+            else _planet_live_solver(mouse_enabled=self.mouse_enabled)
         )
+        if hasattr(self.live_solver, "mouse_enabled"):
+            self.live_solver.mouse_enabled = self.mouse_enabled
         self.session: PuzzleSession | None = None
         self.trace: TraceLogger | None = None
         self.recording: RecordingController | None = None
@@ -55,6 +64,7 @@ class LiveRecordingRuntime:
         self.latest_preview_frame: Any | None = None
         self.frame_count = 0
         self._finished = False
+        self._solver_lock = threading.RLock()
 
     @property
     def is_recording(self) -> bool:
@@ -65,9 +75,32 @@ class LiveRecordingRuntime:
         return self.recording is not None and self.recording.is_solver_running
 
     def set_mouse_enabled(self, enabled: bool) -> None:
-        self.mouse_enabled = bool(enabled)
+        self.mouse_enabled = bool(enabled) and not self.visual_check_mode
         if hasattr(self.live_solver, "mouse_enabled"):
             self.live_solver.mouse_enabled = self.mouse_enabled
+
+    def reset_solver_state(
+        self,
+        *,
+        reason: str = "studio_run_boundary",
+        run_index: int | None = None,
+    ) -> bool:
+        reset = getattr(self.live_solver, "reset", None)
+        if not callable(reset):
+            return False
+        with self._solver_lock:
+            reset()
+            if self.trace is not None:
+                self.trace.write_event(
+                    "SOLVER_STATE_RESET",
+                    None,
+                    {
+                        "reason": reason,
+                        "run_index": run_index,
+                        "frame_count": self.frame_count,
+                    },
+                )
+        return True
 
     def start(
         self,
@@ -81,8 +114,13 @@ class LiveRecordingRuntime:
 
         first_frame = initial_frame if initial_frame is not None else self.frame_grabber()
         frame_h, frame_w = first_frame.shape[:2]
+        window_title = str(getattr(self.frame_grabber, "window_title", "") or "")
         if detect_roi is None or board_roi is None:
-            default_detect_roi, default_board_roi = fixed_puzzle_rois(frame_w=frame_w, frame_h=frame_h)
+            default_detect_roi, default_board_roi = fixed_puzzle_rois(
+                frame_w=frame_w,
+                frame_h=frame_h,
+                window_title=window_title,
+            )
             detect_roi = detect_roi or default_detect_roi
             board_roi = board_roi or default_board_roi
         session = SessionManager(output_root=self.output_root).start(
@@ -94,7 +132,12 @@ class LiveRecordingRuntime:
         self.session = session
         self.trace = trace
         self.recording = RecordingController(
-            recorder=_live_recorder(session, fps=self.fps, trace_logger=trace),
+            recorder=_live_recorder(
+                session,
+                fps=self.fps,
+                trace_logger=trace,
+                record_video=self.record_video,
+            ),
             trace_logger=trace,
         )
         self.report_path = None
@@ -110,6 +153,9 @@ class LiveRecordingRuntime:
                 "source_kind": "live_screen",
                 "fps": self.fps,
                 "mouse_enabled": self.mouse_enabled,
+                "target_visual_check": self.visual_check_mode,
+                "mouse_output_forced_off": self.visual_check_mode,
+                "video_recording_enabled": self.record_video,
                 "detect_roi": roi_to_payload(detect_roi),
                 "board_roi": roi_to_payload(board_roi),
             },
@@ -209,18 +255,33 @@ class LiveRecordingRuntime:
         if self.trace is None or self.recording is None or self.live_solver is None:
             return None
         try:
-            result = self.live_solver.analyze(packet, solver_running=self.recording.is_solver_running)
+            with self._solver_lock:
+                result = self.live_solver.analyze(packet, solver_running=self.recording.is_solver_running)
         except Exception as exc:
             self.trace.write_event("PLANET_LIVE_SOLVER_FAILED", packet.frame_index, {"error": str(exc)})
             return None
         for event_type, payload in result.trace_events:
             self.trace.write_event(event_type, packet.frame_index, payload)
+        self.trace.write_event(
+            "SOLVER_VISUAL_TRACE",
+            packet.frame_index,
+            _solver_visual_trace_payload(result, mouse_enabled=self.mouse_enabled),
+        )
+        self.trace.write_event(
+            "VISUAL_CHECK_GUARD",
+            packet.frame_index,
+            _visual_check_guard_payload(
+                visual_check_mode=self.visual_check_mode,
+                mouse_enabled=self.mouse_enabled,
+                result=result,
+            ),
+        )
         return result
 
     def _write_live_preview(self, packet: FramePacket, *, preview_frame: Any | None = None) -> None:
         if self.session is None:
             return
-        frame = preview_frame if preview_frame is not None else render_planet_cctv_preview(packet.source_frame)
+        frame = preview_frame if preview_frame is not None else _render_planet_cctv_preview(packet.source_frame)
         self.latest_preview_frame = frame
         preview_path = self.session.output_dir / "snapshots" / f"live_preview_{packet.frame_index:06d}.png"
         ok = _cv2().imwrite(str(preview_path), frame)
@@ -254,6 +315,52 @@ class GameClientFrameGrabber:
         if self._hwnd is not None:
             return self._hwnd
         self._hwnd = _find_game_hwnd()
+        return self._hwnd
+
+
+class WindowTitleFrameGrabber:
+    def __init__(
+        self,
+        window_title: str,
+        *,
+        win32gui_module: Any | None = None,
+        region_grabber: Callable[..., Any] | None = None,
+    ) -> None:
+        title = window_title.strip()
+        if not title:
+            raise ValueError("window_title must not be empty")
+        self.window_title = title
+        self._win32gui = win32gui_module
+        self._region_grabber = region_grabber or _grab_screen_region_bgr
+        self._hwnd: int | None = None
+
+    def __call__(self) -> Any:
+        for retry in range(2):
+            hwnd = self._require_hwnd()
+            try:
+                left, top, width, height = get_game_client_rect_screen(
+                    hwnd,
+                    win32gui_module=self._win32gui,
+                )
+                break
+            except Exception:
+                self._hwnd = None
+                if retry == 0:
+                    continue
+                raise
+        else:
+            raise RuntimeError(f"window not found: {self.window_title}")
+        if width <= 0 or height <= 0:
+            raise RuntimeError(f"invalid window client rect: {width}x{height}")
+        return self._region_grabber(left=left, top=top, width=width, height=height)
+
+    def _require_hwnd(self) -> int:
+        if self._hwnd is not None:
+            return self._hwnd
+        hwnd = find_window_hwnd_by_title(self.window_title, win32gui_module=self._win32gui)
+        if hwnd is None:
+            raise RuntimeError(f"window not found: {self.window_title}")
+        self._hwnd = int(hwnd)
         return self._hwnd
 
 
@@ -330,6 +437,18 @@ def _cv2() -> Any:
     return cv2
 
 
+def _planet_live_solver(*, mouse_enabled: bool) -> Any:
+    from core.puzzle.planet_live import PlanetLiveSolver
+
+    return PlanetLiveSolver(mouse_enabled=mouse_enabled)
+
+
+def _render_planet_cctv_preview(frame: Any) -> Any:
+    from core.puzzle.planet_live import render_planet_cctv_preview
+
+    return render_planet_cctv_preview(frame)
+
+
 def _select_main_monitor(monitors: list[dict[str, int]]) -> dict[str, int]:
     physical_monitors = monitors[1:] if len(monitors) > 1 else monitors
     for monitor in physical_monitors:
@@ -340,6 +459,67 @@ def _select_main_monitor(monitors: list[dict[str, int]]) -> dict[str, int]:
     raise RuntimeError("no monitor available")
 
 
-def _live_recorder(session: PuzzleSession, *, fps: float, trace_logger: TraceLogger) -> Any:
+def _solver_visual_trace_payload(result: PlanetLiveResult, *, mouse_enabled: bool) -> dict[str, object]:
+    decision = result.decision
+    temporal = result.temporal_decision
+    mouse = result.mouse_move
+    point = _result_point(decision)
+    temporal_point = _result_point(temporal)
+    return {
+        "selected_x": point[0] if point is not None else None,
+        "selected_y": point[1] if point is not None else None,
+        "candidate_id": str(getattr(decision, "candidate_id", "") or ""),
+        "confidence": _optional_float(getattr(decision, "confidence", None)),
+        "reason": str(getattr(decision, "reason", "") or ""),
+        "candidate_count": len(result.candidates),
+        "temporal_x": temporal_point[0] if temporal_point is not None else None,
+        "temporal_y": temporal_point[1] if temporal_point is not None else None,
+        "temporal_family": str(getattr(temporal, "family", "") or ""),
+        "temporal_reason": str(getattr(temporal, "reason", "") or ""),
+        "mouse_enabled": bool(mouse_enabled),
+        "mouse_moved": bool(getattr(mouse, "moved", False)),
+        "mouse_reason": str(getattr(mouse, "reason", "") or ""),
+    }
+
+
+def _visual_check_guard_payload(
+    *,
+    visual_check_mode: bool,
+    mouse_enabled: bool,
+    result: PlanetLiveResult,
+) -> dict[str, object]:
+    mouse = result.mouse_move
+    mouse_moved = bool(getattr(mouse, "moved", False))
+    safe = (not visual_check_mode) or ((not mouse_enabled) and (not mouse_moved))
+    return {
+        "visual_check_mode": bool(visual_check_mode),
+        "mouse_enabled": bool(mouse_enabled),
+        "mouse_moved": mouse_moved,
+        "safe": safe,
+    }
+
+
+def _result_point(value: object) -> tuple[float, float] | None:
+    point = getattr(value, "point", None)
+    if isinstance(point, (list, tuple)) and len(point) >= 2:
+        return (float(point[0]), float(point[1]))
+    return None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _live_recorder(
+    session: PuzzleSession,
+    *,
+    fps: float,
+    trace_logger: TraceLogger,
+    record_video: bool = True,
+) -> Any:
+    if not record_video:
+        return SnapshotOnlySessionRecorder(session, fps=fps, trace_logger=trace_logger)
     recorder = SessionRecorder(session, fps=fps, trace_logger=trace_logger)
     return AsyncSessionRecorder(recorder)

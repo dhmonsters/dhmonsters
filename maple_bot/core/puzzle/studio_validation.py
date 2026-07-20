@@ -108,8 +108,11 @@ class CandidateDiagnostic:
 @dataclass(frozen=True)
 class CandidateCoverageSummary:
     aligned_target_frames: int
+    retained_hypothesis_oracle_frames: int
     center_oracle_frames: int
     box_oracle_frames: int
+    failed_selector_frames: int
+    failed_hypothesis_generation_frames: int
     failed_center_recoverable_frames: int
     failed_box_only_frames: int
     failed_candidate_absent_frames: int
@@ -513,9 +516,19 @@ def _candidate_coverage_summary(
         and row.get("frame_index") is not None
         and isinstance(row.get("payload"), dict)
     }
+    hypotheses_by_frame = {
+        int(row["frame_index"]): _retained_hypothesis_points(row.get("payload"))
+        for row in trace_rows
+        if row.get("type") == "TEMPORAL_SELECTOR"
+        and row.get("frame_index") is not None
+        and isinstance(row.get("payload"), dict)
+    }
     aligned_target_frames = 0
+    retained_hypothesis_oracle_frames = 0
     center_oracle_frames = 0
     box_oracle_frames = 0
+    failed_selector_frames = 0
+    failed_hypothesis_generation_frames = 0
     failed_center_recoverable_frames = 0
     failed_box_only_frames = 0
     failed_candidate_absent_frames = 0
@@ -528,16 +541,25 @@ def _candidate_coverage_summary(
             for candidate in candidates_by_frame.get(frame.solver_frame_index, [])
             if isinstance(candidate, dict)
         ]
+        retained_hit = any(
+            _point_gt_distance(point, gt) <= pass_distance_px
+            for point in hypotheses_by_frame.get(frame.solver_frame_index, ())
+        )
         center_hit = any(
             _candidate_gt_distance(candidate, gt) <= pass_distance_px
             for candidate in candidates
         )
         box_hit = any(_candidate_contains_gt(candidate, gt) for candidate in candidates)
+        retained_hypothesis_oracle_frames += int(retained_hit)
         center_oracle_frames += int(center_hit)
         box_oracle_frames += int(box_hit)
         if frame.passed:
             continue
-        if center_hit:
+        if retained_hit:
+            failed_selector_frames += 1
+            failed_center_recoverable_frames += 1
+        elif center_hit:
+            failed_hypothesis_generation_frames += 1
             failed_center_recoverable_frames += 1
         elif box_hit:
             failed_box_only_frames += 1
@@ -545,8 +567,11 @@ def _candidate_coverage_summary(
             failed_candidate_absent_frames += 1
     return CandidateCoverageSummary(
         aligned_target_frames=aligned_target_frames,
+        retained_hypothesis_oracle_frames=retained_hypothesis_oracle_frames,
         center_oracle_frames=center_oracle_frames,
         box_oracle_frames=box_oracle_frames,
+        failed_selector_frames=failed_selector_frames,
+        failed_hypothesis_generation_frames=failed_hypothesis_generation_frames,
         failed_center_recoverable_frames=failed_center_recoverable_frames,
         failed_box_only_frames=failed_box_only_frames,
         failed_candidate_absent_frames=failed_candidate_absent_frames,
@@ -601,6 +626,36 @@ def _candidate_gt_distance(candidate: dict[str, Any], gt: dict[str, Any]) -> flo
         _optional_float(gt.get("target_y")),
         _optional_float(center[0]),
         _optional_float(center[1]),
+    )
+    return distance if distance is not None else float("inf")
+
+
+def _retained_hypothesis_points(payload: object) -> tuple[tuple[float, float], ...]:
+    if not isinstance(payload, dict):
+        return ()
+    debug = payload.get("debug")
+    if not isinstance(debug, dict):
+        return ()
+    raw_points = debug.get("kinematic_wide_beam_points")
+    if not isinstance(raw_points, (list, tuple)):
+        return ()
+    points: list[tuple[float, float]] = []
+    for raw_point in raw_points:
+        if not isinstance(raw_point, (list, tuple)) or len(raw_point) < 2:
+            continue
+        x = _optional_float(raw_point[0])
+        y = _optional_float(raw_point[1])
+        if x is not None and y is not None:
+            points.append((x, y))
+    return tuple(points)
+
+
+def _point_gt_distance(point: tuple[float, float], gt: dict[str, Any]) -> float:
+    distance = _distance(
+        _optional_float(gt.get("target_x")),
+        _optional_float(gt.get("target_y")),
+        point[0],
+        point[1],
     )
     return distance if distance is not None else float("inf")
 
@@ -943,8 +998,11 @@ def _render_report(
         "## Candidate Coverage",
         "",
         f"- aligned_target_frames: {candidate_coverage.aligned_target_frames}",
+        f"- retained_hypothesis_oracle_frames: {candidate_coverage.retained_hypothesis_oracle_frames}",
         f"- center_oracle_frames: {candidate_coverage.center_oracle_frames}",
         f"- box_oracle_frames: {candidate_coverage.box_oracle_frames}",
+        f"- failed_selector_frames: {candidate_coverage.failed_selector_frames}",
+        f"- failed_hypothesis_generation_frames: {candidate_coverage.failed_hypothesis_generation_frames}",
         f"- failed_center_recoverable_frames: {candidate_coverage.failed_center_recoverable_frames}",
         f"- failed_box_only_frames: {candidate_coverage.failed_box_only_frames}",
         f"- failed_candidate_absent_frames: {candidate_coverage.failed_candidate_absent_frames}",

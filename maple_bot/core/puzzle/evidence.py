@@ -26,6 +26,9 @@ class EvidenceJudges:
         if unknown:
             raise ValueError(f"unsupported evidence hook field: {sorted(unknown)[0]}")
 
+    def reset(self) -> None:
+        pass
+
     def score(
         self,
         candidates: Sequence[Candidate],
@@ -77,6 +80,10 @@ class LiveEvidenceJudges(EvidenceJudges):
         self._prev_gray: np.ndarray | None = None
         self._prev_candidates: list[tuple[float, float]] = []
 
+    def reset(self) -> None:
+        self._prev_gray = None
+        self._prev_candidates = []
+
     def score(
         self,
         candidates: Sequence[Candidate],
@@ -89,6 +96,7 @@ class LiveEvidenceJudges(EvidenceJudges):
 
         for candidate in candidates:
             motion = self._motion_values(candidate, bg_shift)
+            local_rigid_residual = _local_rigid_residual(candidate, self._prev_gray, gray, bg_shift)
             texture_bg_score = _texture_bg_score(candidate, packet.board_frame, scale=self.texture_scale)
             bg_score = max(motion["bg_score"], texture_bg_score * 0.35)
             old = base[candidate.candidate_id]
@@ -97,11 +105,12 @@ class LiveEvidenceJudges(EvidenceJudges):
                 bg_score=round(_clamp01(bg_score), 6),
                 motion_divergence=round(_clamp01(motion["motion_divergence"]), 6),
                 rigid_violation=round(_clamp01(motion["rigid_violation"]), 6),
+                local_rigid_residual=round(_clamp01(local_rigid_residual), 6),
                 phase_similarity=round(_clamp01(motion["phase_similarity"]), 6),
                 texture_bg_score=round(_clamp01(texture_bg_score), 6),
                 color_residual=old.color_residual,
                 merge_likelihood=old.merge_likelihood,
-                notes=old.notes + ("live:motion", "live:texture"),
+                notes=old.notes + ("live:motion", "live:local_rigid", "live:texture"),
             )
 
         self._prev_gray = gray
@@ -189,16 +198,30 @@ def _board_area(board_frame: object) -> float:
 def _color_residual(candidate: Candidate, board_frame: object) -> float:
     if not isinstance(board_frame, np.ndarray):
         return 0.0
-    if board_frame.ndim != 3 or board_frame.shape[2] < 3:
+    if board_frame.ndim not in {2, 3}:
+        return 0.0
+    if board_frame.ndim == 3 and board_frame.shape[2] < 3:
         return 0.0
 
     crop = _candidate_crop(candidate, board_frame)
     if crop.size == 0:
         return 0.0
 
-    channels = crop[:, :, :3].astype(float)
-    channel_means = channels.mean(axis=(0, 1))
-    residual = float(channel_means.max() - channel_means.min())
+    ring = _candidate_ring(candidate, board_frame)
+    color_delta = 0.0
+    if board_frame.ndim == 3:
+        channels = crop[:, :, :3].astype(float)
+        channel_means = channels.mean(axis=(0, 1))
+        color_delta = float(channel_means.max() - channel_means.min())
+
+    brightness_delta = 0.0
+    if ring.size > 0:
+        crop_luma = _luma_values(crop)
+        ring_luma = _luma_values(ring)
+        if crop_luma.size > 0 and ring_luma.size > 0:
+            brightness_delta = max(0.0, float(crop_luma.mean() - ring_luma.mean()))
+
+    residual = max(color_delta, brightness_delta)
     if residual <= 1.0:
         return 0.0
     return round(_clamp01(residual / 255.0), 6)
@@ -264,6 +287,66 @@ def _nearest_previous_snapshot(
     return best
 
 
+def _local_rigid_residual(
+    candidate: Candidate,
+    previous_gray: np.ndarray | None,
+    current_gray: np.ndarray | None,
+    bg_shift: tuple[float, float],
+) -> float:
+    if previous_gray is None or current_gray is None:
+        return 0.0
+    if previous_gray.shape != current_gray.shape or previous_gray.ndim != 2:
+        return 0.0
+
+    height, width = current_gray.shape
+    x1, y1, x2, y2 = candidate.bbox
+    left = max(0, min(width, int(np.floor(x1))))
+    top = max(0, min(height, int(np.floor(y1))))
+    right = max(0, min(width, int(np.ceil(x2))))
+    bottom = max(0, min(height, int(np.ceil(y2))))
+    crop_width = right - left
+    crop_height = bottom - top
+    if crop_width < 6 or crop_height < 6:
+        return 0.0
+
+    previous_left = int(round(left - float(bg_shift[0])))
+    previous_top = int(round(top - float(bg_shift[1])))
+    previous_right = previous_left + crop_width
+    previous_bottom = previous_top + crop_height
+    if previous_left < 0 or previous_top < 0 or previous_right > width or previous_bottom > height:
+        return 0.0
+
+    current_crop = current_gray[top:bottom, left:right]
+    previous_crop = previous_gray[previous_top:previous_bottom, previous_left:previous_right]
+    return _normalized_patch_residual(previous_crop, current_crop)
+
+
+def _normalized_patch_residual(previous: np.ndarray, current: np.ndarray) -> float:
+    if previous.shape != current.shape or previous.size == 0:
+        return 0.0
+
+    previous_norm = _normalize_patch(previous)
+    current_norm = _normalize_patch(current)
+    pixel_residual = float(np.mean(np.abs(previous_norm - current_norm))) / 2.0
+
+    previous_dx = np.diff(previous_norm, axis=1)
+    current_dx = np.diff(current_norm, axis=1)
+    previous_dy = np.diff(previous_norm, axis=0)
+    current_dy = np.diff(current_norm, axis=0)
+    edge_residual = (
+        float(np.mean(np.abs(previous_dx - current_dx)))
+        + float(np.mean(np.abs(previous_dy - current_dy)))
+    ) / 4.0
+    return _clamp01(pixel_residual * 0.4 + edge_residual * 0.6)
+
+
+def _normalize_patch(patch: np.ndarray) -> np.ndarray:
+    values = patch.astype(np.float32)
+    mean = float(values.mean())
+    std = float(values.std())
+    return (values - mean) / max(8.0, std)
+
+
 def _texture_bg_score(candidate: Candidate, board_frame: object, *, scale: float) -> float:
     if not isinstance(board_frame, np.ndarray) or board_frame.ndim < 2:
         return 0.0
@@ -316,6 +399,16 @@ def _as_color_values(values: np.ndarray) -> np.ndarray:
     if values.ndim == 3:
         return values[:, :, : min(3, values.shape[2])].reshape(-1, min(3, values.shape[2])).astype(float)
     return np.zeros((0, 1), dtype=float)
+
+
+def _luma_values(values: np.ndarray) -> np.ndarray:
+    if values.ndim == 2:
+        return values.reshape(-1).astype(float)
+    if values.ndim == 3:
+        return values[:, :, : min(3, values.shape[2])].mean(axis=2).reshape(-1).astype(float)
+    if values.ndim == 1:
+        return values.astype(float)
+    return np.zeros((0,), dtype=float)
 
 
 def _cv2():

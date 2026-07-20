@@ -80,6 +80,7 @@ class CandidateEvidence:
     bg_score: float = 0.0
     motion_divergence: float = 0.0
     rigid_violation: float = 0.0
+    local_rigid_residual: float = 0.0
     phase_similarity: float = 0.0
     texture_bg_score: float = 0.0
     color_residual: float = 0.0

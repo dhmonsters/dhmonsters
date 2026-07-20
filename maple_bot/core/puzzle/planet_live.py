@@ -41,6 +41,9 @@ KINEMATIC_WIDE_BEAM_MIN_SHIFT = 50.0
 KINEMATIC_WIDE_BEAM_MOTION_ADVANTAGE_LIMIT = 0.0
 KINEMATIC_WIDE_BEAM_YOLO_ADVANTAGE_LIMIT = -0.10
 KINEMATIC_WIDE_BEAM_MERGE_ADVANTAGE_LIMIT = -0.10
+KINEMATIC_LOCAL_RIGID_MIN_RESIDUAL = 0.20
+KINEMATIC_LOCAL_RIGID_MIN_ADVANTAGE = 0.121
+KINEMATIC_LOCAL_RIGID_MIN_SHIFT = 30.0
 IDENTITY_TEMPORAL_HARD_OVERRIDE_STATES = frozenset({
     "TRACK_CONFIDENT",
     "OCCLUSION_SUSPECTED",
@@ -438,6 +441,11 @@ class PlanetLiveSolver:
                 "selected": False,
                 "reason": "visible_lock",
             }
+            kinematic_local_rigid_gate = {
+                "available": False,
+                "selected": False,
+                "reason": "visible_lock",
+            }
         else:
             base_target_point = _choose_live_target_point(
                 decision=decision,
@@ -467,6 +475,13 @@ class PlanetLiveSolver:
                 identity_state=decision.state,
                 frame_shape=_frame_shape(packet.board_frame),
             )
+            target_point, kinematic_local_rigid_gate = _choose_kinematic_local_rigid_target(
+                base_point=target_point,
+                hypothesis_points=temporal_decision.debug.get("kinematic_wide_beam_points"),
+                candidates=candidates,
+                evidence=evidence,
+                identity_state=decision.state,
+            )
         target_selection = _target_selection_payload(
             decision=decision,
             temporal_decision=temporal_decision,
@@ -475,6 +490,7 @@ class PlanetLiveSolver:
             kinematic_texture_gate=kinematic_texture_gate,
             kinematic_beam_gate=kinematic_beam_gate,
             kinematic_wide_beam_gate=kinematic_wide_beam_gate,
+            kinematic_local_rigid_gate=kinematic_local_rigid_gate,
         )
         det_point = _board_point_to_det_point(target_point, detect_roi=detect_roi, board_roi=board_roi)
         if det_point is not None:
@@ -1463,6 +1479,108 @@ def _choose_kinematic_wide_beam_target(
     }
 
 
+def _choose_kinematic_local_rigid_target(
+    *,
+    base_point: Sequence[float] | None,
+    hypothesis_points: object,
+    candidates: Sequence[Candidate],
+    evidence: dict[str, CandidateEvidence],
+    identity_state: str = "",
+    min_residual: float = KINEMATIC_LOCAL_RIGID_MIN_RESIDUAL,
+    min_advantage: float = KINEMATIC_LOCAL_RIGID_MIN_ADVANTAGE,
+    min_shift: float = KINEMATIC_LOCAL_RIGID_MIN_SHIFT,
+) -> tuple[tuple[float, float] | None, dict[str, object]]:
+    base = _coerce_point(base_point)
+    if not isinstance(hypothesis_points, Sequence) or isinstance(hypothesis_points, (str, bytes)):
+        points: list[tuple[float, float]] = []
+    else:
+        points = [point for value in hypothesis_points if (point := _coerce_point(value)) is not None]
+    if base is None or not points or not candidates:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_path_or_hypotheses",
+        }
+    if identity_state == "INIT_VISIBLE":
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "visible_identity_locked",
+        }
+
+    base_candidate = min(candidates, key=lambda candidate: _point_distance(candidate.center, base))
+    base_evidence = evidence.get(base_candidate.candidate_id)
+    if base_evidence is None:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_base_evidence",
+        }
+
+    hypotheses: list[tuple[tuple[float, float], Candidate, CandidateEvidence]] = []
+    seen_candidate_ids: set[str] = set()
+    for point in points:
+        candidate = min(candidates, key=lambda item: _point_distance(item.center, point))
+        if candidate.candidate_id in seen_candidate_ids:
+            continue
+        candidate_evidence = evidence.get(candidate.candidate_id)
+        if candidate_evidence is None:
+            continue
+        seen_candidate_ids.add(candidate.candidate_id)
+        hypotheses.append((point, candidate, candidate_evidence))
+    if not hypotheses:
+        return base, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_hypothesis_evidence",
+        }
+
+    selected_point, selected_candidate, selected_evidence = max(
+        hypotheses,
+        key=lambda row: float(row[2].local_rigid_residual),
+    )
+    base_residual = float(base_evidence.local_rigid_residual)
+    selected_residual = float(selected_evidence.local_rigid_residual)
+    residual_advantage = selected_residual - base_residual
+    shift = _point_distance(base, selected_point)
+    if base_residual <= 0.0:
+        selected = False
+        reason = "base_residual_unavailable"
+    elif selected_candidate.candidate_id == base_candidate.candidate_id:
+        selected = False
+        reason = "same_candidate"
+    elif selected_residual < float(min_residual):
+        selected = False
+        reason = "residual_too_weak"
+    elif residual_advantage < float(min_advantage):
+        selected = False
+        reason = "advantage_too_weak"
+    elif shift < float(min_shift):
+        selected = False
+        reason = "paths_not_separated"
+    else:
+        selected = True
+        reason = "local_rigid_advantage"
+    return (selected_point if selected else base), {
+        "available": True,
+        "selected": selected,
+        "reason": reason,
+        "base_point": base,
+        "selected_point": selected_point if selected else base,
+        "hypothesis_point": selected_point,
+        "base_candidate_id": base_candidate.candidate_id,
+        "selected_candidate_id": selected_candidate.candidate_id,
+        "base_residual": base_residual,
+        "selected_residual": selected_residual,
+        "residual_advantage": residual_advantage,
+        "min_residual": float(min_residual),
+        "min_advantage": float(min_advantage),
+        "shift": shift,
+        "min_shift": float(min_shift),
+        "hypothesis_count": len(hypotheses),
+    }
+
+
 def _coerce_point(value: object) -> tuple[float, float] | None:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) < 2:
         return None
@@ -1535,6 +1653,7 @@ def _target_selection_payload(
     kinematic_texture_gate: dict[str, object] | None = None,
     kinematic_beam_gate: dict[str, object] | None = None,
     kinematic_wide_beam_gate: dict[str, object] | None = None,
+    kinematic_local_rigid_gate: dict[str, object] | None = None,
 ) -> dict[str, object]:
     distance = _point_distance(decision.point, temporal_decision.point)
     if visible_lock.locked and visible_lock.point is not None:
@@ -1543,6 +1662,9 @@ def _target_selection_payload(
     elif temporal_decision.point is None:
         source = "identity"
         reason = "temporal_missing"
+    elif kinematic_local_rigid_gate and bool(kinematic_local_rigid_gate.get("selected")):
+        source = "kinematic_local_rigid"
+        reason = "local_rigid_advantage"
     elif kinematic_wide_beam_gate and bool(kinematic_wide_beam_gate.get("selected")):
         source = "kinematic_wide_beam"
         reason = "wide_texture_guard"
@@ -1570,6 +1692,7 @@ def _target_selection_payload(
         "kinematic_texture_gate": dict(kinematic_texture_gate or {}),
         "kinematic_beam_gate": dict(kinematic_beam_gate or {}),
         "kinematic_wide_beam_gate": dict(kinematic_wide_beam_gate or {}),
+        "kinematic_local_rigid_gate": dict(kinematic_local_rigid_gate or {}),
     }
 
 
@@ -1666,6 +1789,7 @@ def _evidence_payload(evidence: CandidateEvidence) -> dict[str, object]:
         "bg_score": evidence.bg_score,
         "motion_divergence": evidence.motion_divergence,
         "rigid_violation": evidence.rigid_violation,
+        "local_rigid_residual": evidence.local_rigid_residual,
         "phase_similarity": evidence.phase_similarity,
         "texture_bg_score": evidence.texture_bg_score,
         "color_residual": evidence.color_residual,

@@ -21,6 +21,79 @@ def _write_jsonl(path, rows):
 
 
 class StudioValidationTest(unittest.TestCase):
+    def test_score_decomposes_failures_across_retained_raw_box_and_absent_stages(self) -> None:
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+
+        with TemporaryDirectory(prefix="studio-validation-bottleneck-") as tmp:
+            root = Path(tmp)
+            gt_path = root / "gt.jsonl"
+            trace_path = root / "trace.jsonl"
+            _write_jsonl(
+                gt_path,
+                [
+                    {"run_id": "r1", "frame_id": 0, "target_x": 10, "target_y": 10},
+                    {"run_id": "r1", "frame_id": 1, "target_x": 20, "target_y": 20},
+                    {"run_id": "r1", "frame_id": 2, "target_x": 41, "target_y": 41},
+                    {"run_id": "r1", "frame_id": 3, "target_x": 20, "target_y": 20},
+                ],
+            )
+            candidates = (
+                {"candidate_id": "retained", "center": [10, 10], "bbox": [5, 5, 15, 15]},
+                {"candidate_id": "raw", "center": [20, 20], "bbox": [15, 15, 25, 25]},
+                {"candidate_id": "box", "center": [70, 70], "bbox": [40, 40, 100, 100]},
+                {"candidate_id": "absent", "center": [80, 80], "bbox": [75, 75, 85, 85]},
+            )
+            trace_rows = []
+            for frame_index, candidate in enumerate(candidates):
+                retained_points = [[10, 10]] if frame_index == 0 else [[100, 100]]
+                trace_rows.extend(
+                    [
+                        {
+                            "type": "CANDIDATES",
+                            "frame_index": frame_index,
+                            "payload": {"candidates": [candidate]},
+                        },
+                        {
+                            "type": "TEMPORAL_SELECTOR",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "debug": {"kinematic_wide_beam_points": retained_points},
+                            },
+                        },
+                        {
+                            "type": "SOLVER_VISUAL_TRACE",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "selected_x": 120,
+                                "selected_y": 120,
+                                "mouse_enabled": False,
+                                "candidate_count": 1,
+                            },
+                        },
+                    ]
+                )
+            _write_jsonl(trace_path, trace_rows)
+
+            result = score_studio_session(gt_path, trace_path, root / "report", pass_distance_px=10.0)
+
+            coverage = result.candidate_coverage
+            self.assertEqual(coverage.retained_hypothesis_oracle_frames, 1)
+            self.assertEqual(coverage.failed_selector_frames, 1)
+            self.assertEqual(coverage.failed_hypothesis_generation_frames, 1)
+            self.assertEqual(coverage.failed_box_only_frames, 1)
+            self.assertEqual(coverage.failed_candidate_absent_frames, 1)
+            self.assertEqual(
+                coverage.failed_selector_frames
+                + coverage.failed_hypothesis_generation_frames
+                + coverage.failed_box_only_frames
+                + coverage.failed_candidate_absent_frames,
+                result.summary.failed_frames,
+            )
+            report = result.report_path.read_text(encoding="utf-8")
+            self.assertIn("failed_selector_frames: 1", report)
+            self.assertIn("failed_hypothesis_generation_frames: 1", report)
+
     def test_score_reports_candidate_center_and_box_oracle_coverage(self) -> None:
         from tempfile import TemporaryDirectory
         from pathlib import Path
