@@ -60,6 +60,7 @@ class LiveTemporalSelector:
         kinematic_shape_tracker: Any | None = None,
         kinematic_beam_tracker: Any | None = None,
         kinematic_wide_beam_tracker: Any | None = None,
+        kinematic_explorer_beam_tracker: Any | None = None,
         enable_kinematic_shape: bool = False,
         clip_id: str = "live",
         window: int = 24,
@@ -107,6 +108,16 @@ class LiveTemporalSelector:
             acceleration_weight=0.5,
             yolo_penalty_weight=0.0,
         )
+        self.kinematic_explorer_beam_tracker = (
+            kinematic_explorer_beam_tracker or TransparentKinematicBeamTracker(
+                width=24,
+                branch=5,
+                cost_decay=1.0,
+                acceleration_weight=0.5,
+                yolo_penalty_weight=0.0,
+                diverse_first=True,
+            )
+        )
         self.enable_kinematic_shape = bool(enable_kinematic_shape)
         self.live_max_candidates = max(1, int(live_max_candidates))
         self.use_expected_background = bool(use_expected_background)
@@ -122,6 +133,7 @@ class LiveTemporalSelector:
         self.kinematic_shape_tracker.reset()
         self.kinematic_beam_tracker.reset()
         self.kinematic_wide_beam_tracker.reset()
+        self.kinematic_explorer_beam_tracker.reset()
         self._seeded = point is not None
 
     def update(
@@ -164,8 +176,15 @@ class LiveTemporalSelector:
             clean_candidates,
             white_anchor=_point(wide_white_anchor) or anchor,
         )
+        self.kinematic_explorer_beam_tracker.update(
+            clean_candidates,
+            white_anchor=_point(wide_white_anchor) or anchor,
+        )
         wide_beam_points = tuple(
             self.kinematic_wide_beam_tracker.hypothesis_points
+        )
+        explorer_beam_points = tuple(
+            self.kinematic_explorer_beam_tracker.hypothesis_points
         )
         if self.enable_kinematic_shape and shape_point is not None:
             anchors[KINEMATIC_SHAPE_FAMILY] = shape_point
@@ -222,6 +241,8 @@ class LiveTemporalSelector:
                     beam_debug=getattr(self.kinematic_beam_tracker, "last_debug", {}),
                     wide_beam_points=wide_beam_points,
                     wide_beam_debug=getattr(self.kinematic_wide_beam_tracker, "last_debug", {}),
+                    explorer_beam_points=explorer_beam_points,
+                    explorer_beam_debug=getattr(self.kinematic_explorer_beam_tracker, "last_debug", {}),
                 ),
             )
         return LiveTemporalDecision(
@@ -239,6 +260,8 @@ class LiveTemporalSelector:
                 beam_debug=getattr(self.kinematic_beam_tracker, "last_debug", {}),
                 wide_beam_points=wide_beam_points,
                 wide_beam_debug=getattr(self.kinematic_wide_beam_tracker, "last_debug", {}),
+                explorer_beam_points=explorer_beam_points,
+                explorer_beam_debug=getattr(self.kinematic_explorer_beam_tracker, "last_debug", {}),
             ),
         )
 
@@ -325,6 +348,8 @@ def _debug_payload(
     beam_debug: object,
     wide_beam_points: Sequence[Point],
     wide_beam_debug: object,
+    explorer_beam_points: Sequence[Point],
+    explorer_beam_debug: object,
 ) -> dict[str, object]:
     return {
         "live_family": dict(live_decision.debug),
@@ -337,5 +362,9 @@ def _debug_payload(
         "kinematic_wide_beam_points": tuple(wide_beam_points),
         "kinematic_wide_beam_debug": (
             dict(wide_beam_debug) if isinstance(wide_beam_debug, Mapping) else {}
+        ),
+        "kinematic_explorer_beam_points": tuple(explorer_beam_points),
+        "kinematic_explorer_beam_debug": (
+            dict(explorer_beam_debug) if isinstance(explorer_beam_debug, Mapping) else {}
         ),
     }

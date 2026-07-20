@@ -4,6 +4,7 @@ import unittest
 from core.vision.transparent_kinematic_shape import (
     TransparentKinematicBeamTracker,
     TransparentKinematicShapeTracker,
+    _BeamState,
 )
 
 
@@ -84,6 +85,19 @@ class TransparentKinematicBeamTrackerTest(unittest.TestCase):
         tracker.reset()
 
         self.assertEqual(tracker.hypothesis_points, ())
+
+    def test_diversity_first_preserves_distinct_candidates_before_duplicates(self) -> None:
+        tracker = TransparentKinematicBeamTracker(width=3, diverse_first=True)
+        states = [
+            _BeamState(0.0, (10.0, 10.0), (0.0, 0.0), 400.0, 1.0, 0),
+            _BeamState(1.0, (10.0, 10.0), (1.0, 0.0), 400.0, 1.0, 0),
+            _BeamState(2.0, (20.0, 10.0), (0.0, 0.0), 400.0, 1.0, 1),
+            _BeamState(3.0, (30.0, 10.0), (0.0, 0.0), 400.0, 1.0, 2),
+        ]
+
+        kept = tracker._prune(states)
+
+        self.assertEqual([state.candidate_key for state in kept], [0, 1, 2])
 
 
 if __name__ == "__main__":

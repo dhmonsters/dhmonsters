@@ -9,6 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 import core.puzzle.planet_live as planet_live
+from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
 from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
 from core.puzzle.evidence import LiveEvidenceJudges
 from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision, RoiSpec
@@ -597,6 +598,14 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(selector.family_pool.raw_beam_families, 0)
         self.assertEqual(selector.family_pool.raw_max_candidates_per_frame, 24)
         self.assertIn(("p1", "p05"), selector.family_pool.raw_box_rel_pairs)
+
+    def test_live_temporal_selector_keeps_incumbent_and_explorer_hypotheses_separate(self) -> None:
+        selector = LiveTemporalSelector()
+
+        self.assertEqual(selector.kinematic_wide_beam_tracker.width, 16)
+        self.assertFalse(selector.kinematic_wide_beam_tracker.diverse_first)
+        self.assertEqual(selector.kinematic_explorer_beam_tracker.width, 24)
+        self.assertTrue(selector.kinematic_explorer_beam_tracker.diverse_first)
 
     def test_live_temporal_selector_passes_expected_background_to_shadow(self) -> None:
         class _FakeFamilyPool:
@@ -1265,6 +1274,78 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertFalse(debug["selected"])
         self.assertEqual(debug["reason"], "advantage_too_weak")
 
+    def test_explorer_target_requires_three_consistent_frames_before_replacing_incumbent(self) -> None:
+        base = Candidate("base", 1, (40.0, 40.0, 60.0, 60.0), (50.0, 50.0), 0.8, "raw")
+        target = Candidate("target", 1, (140.0, 40.0, 160.0, 60.0), (150.0, 50.0), 0.7, "raw")
+        evidence = {
+            "base": CandidateEvidence("base", local_rigid_residual=0.10, texture_bg_score=0.80),
+            "target": CandidateEvidence("target", local_rigid_residual=0.35, texture_bg_score=0.90),
+        }
+        guard = HypothesisChallengeGuard(confirm_frames=3, max_step_px=60.0)
+
+        first, first_debug = planet_live._choose_kinematic_explorer_target(
+            incumbent_point=base.center,
+            incumbent_source="temporal",
+            pre_wide_point=base.center,
+            hypothesis_points=(base.center, target.center),
+            candidates=[base, target],
+            evidence=evidence,
+            identity_state="IDENTITY_HOLD",
+            frame_shape=(200, 220),
+            challenge_guard=guard,
+        )
+        second, _ = planet_live._choose_kinematic_explorer_target(
+            incumbent_point=base.center,
+            incumbent_source="temporal",
+            pre_wide_point=base.center,
+            hypothesis_points=(base.center, (155.0, 50.0)),
+            candidates=[base, target],
+            evidence=evidence,
+            identity_state="IDENTITY_HOLD",
+            frame_shape=(200, 220),
+            challenge_guard=guard,
+        )
+        third, third_debug = planet_live._choose_kinematic_explorer_target(
+            incumbent_point=base.center,
+            incumbent_source="temporal",
+            pre_wide_point=base.center,
+            hypothesis_points=(base.center, (160.0, 50.0)),
+            candidates=[base, target],
+            evidence=evidence,
+            identity_state="IDENTITY_HOLD",
+            frame_shape=(200, 220),
+            challenge_guard=guard,
+        )
+
+        self.assertEqual(first, base.center)
+        self.assertEqual(first_debug["reason"], "challenger_pending")
+        self.assertEqual(second, base.center)
+        self.assertEqual(third, (160.0, 50.0))
+        self.assertEqual(third_debug["reason"], "challenger_confirmed")
+
+    def test_explorer_target_cannot_replace_local_rigid_incumbent(self) -> None:
+        base = Candidate("base", 1, (40.0, 40.0, 60.0, 60.0), (50.0, 50.0), 0.8, "raw")
+        target = Candidate("target", 1, (140.0, 40.0, 160.0, 60.0), (150.0, 50.0), 0.7, "raw")
+        evidence = {
+            "base": CandidateEvidence("base", local_rigid_residual=0.10, texture_bg_score=0.80),
+            "target": CandidateEvidence("target", local_rigid_residual=0.35, texture_bg_score=0.90),
+        }
+
+        point, debug = planet_live._choose_kinematic_explorer_target(
+            incumbent_point=base.center,
+            incumbent_source="kinematic_local_rigid",
+            pre_wide_point=base.center,
+            hypothesis_points=(base.center, target.center),
+            candidates=[base, target],
+            evidence=evidence,
+            identity_state="IDENTITY_HOLD",
+            frame_shape=(200, 220),
+            challenge_guard=HypothesisChallengeGuard(confirm_frames=1),
+        )
+
+        self.assertEqual(point, base.center)
+        self.assertEqual(debug["reason"], "incumbent_protected")
+
     def test_analyze_applies_local_rigid_gate_after_existing_target_gates(self) -> None:
         class _FakeDetector:
             enabled = True
@@ -1336,6 +1417,90 @@ class PlanetLiveSolverTemporalSelectorTest(unittest.TestCase):
         self.assertEqual(result.mouse_move.det_point, (150.0, 50.0))
         self.assertEqual(target_payload["source"], "kinematic_local_rigid")
         self.assertTrue(target_payload["kinematic_local_rigid_gate"]["selected"])
+
+    def test_analyze_promotes_explorer_only_after_three_consistent_frames(self) -> None:
+        class _FakeDetector:
+            enabled = True
+
+            def detect_all(self, _frame):
+                return [
+                    (50.0, 50.0, 0.8, 20.0, 20.0),
+                    (150.0, 50.0, 0.5, 20.0, 20.0),
+                ]
+
+        class _FakeEvidenceJudges:
+            def score(self, candidates, _packet):
+                return {
+                    candidate.candidate_id: CandidateEvidence(
+                        candidate.candidate_id,
+                        local_rigid_residual=0.10 if candidate.center[0] < 100.0 else 0.35,
+                        texture_bg_score=0.80 if candidate.center[0] < 100.0 else 0.90,
+                        color_residual=0.34,
+                    )
+                    for candidate in candidates
+                }
+
+        class _FakeIdentityTracker:
+            def update(self, **_kwargs):
+                return IdentityDecision(
+                    "IDENTITY_HOLD",
+                    (50.0, 50.0),
+                    "base",
+                    0.5,
+                    "hold",
+                    1,
+                    {},
+                )
+
+        class _FakeTemporalSelector:
+            def update(self, *, frame_index, **_kwargs):
+                explorer_x = 150.0 + frame_index * 5.0
+                return LiveTemporalDecision(
+                    point=(50.0, 50.0),
+                    source="selector_shadow",
+                    reason="selected_family",
+                    family="base_family",
+                    debug={
+                        "kinematic_wide_beam_points": [(50.0, 50.0)],
+                        "kinematic_explorer_beam_points": [
+                            (50.0, 50.0),
+                            (explorer_x, 50.0),
+                        ],
+                    },
+                )
+
+        solver = PlanetLiveSolver(
+            detector=_FakeDetector(),
+            evidence_judges=_FakeEvidenceJudges(),
+            identity_tracker=_FakeIdentityTracker(),
+            temporal_selector=_FakeTemporalSelector(),
+            mouse_enabled=False,
+        )
+        roi = {"name": "detect", "x": 0, "y": 0, "w": 220, "h": 120}
+        frame = np.zeros((120, 220, 3), dtype=np.uint8)
+
+        results = []
+        for frame_index in range(3):
+            packet = FramePacket(
+                session_id="s",
+                frame_index=frame_index,
+                timestamp_ms=frame_index,
+                source_frame=frame,
+                board_frame=frame,
+                source_kind="test",
+                roi_snapshot={"detect": roi, "board": dict(roi, name="board")},
+            )
+            results.append(solver.analyze(packet, solver_running=True))
+
+        payloads = [
+            dict(next(payload for event, payload in result.trace_events if event == "TARGET_SELECTION"))
+            for result in results
+        ]
+        self.assertEqual(results[0].mouse_move.det_point, (50.0, 50.0))
+        self.assertEqual(results[1].mouse_move.det_point, (50.0, 50.0))
+        self.assertEqual(results[2].mouse_move.det_point, (160.0, 50.0))
+        self.assertEqual(payloads[0]["kinematic_explorer_gate"]["reason"], "challenger_pending")
+        self.assertEqual(payloads[2]["source"], "kinematic_explorer")
 
     def test_analyze_uses_temporal_selector_point_for_mouse_target(self) -> None:
         clicked: list[tuple[int, int]] = []

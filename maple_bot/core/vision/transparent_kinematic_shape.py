@@ -169,6 +169,7 @@ class TransparentKinematicBeamTracker:
         yolo_penalty_weight: float = 4.0,
         yolo_full_score: float = 0.4,
         max_jump: float = 140.0,
+        diverse_first: bool = False,
     ) -> None:
         self.width = max(1, int(width))
         self.branch = max(1, int(branch))
@@ -180,6 +181,7 @@ class TransparentKinematicBeamTracker:
         self.yolo_penalty_weight = max(0.0, float(yolo_penalty_weight))
         self.yolo_full_score = max(0.01, float(yolo_full_score))
         self.max_jump = max(1.0, float(max_jump))
+        self.diverse_first = bool(diverse_first)
         self.reset()
 
     def reset(self) -> None:
@@ -263,6 +265,7 @@ class TransparentKinematicBeamTracker:
             "best_cost": best.cost,
             "cost_margin": margin,
             "state_count": len(self._states),
+            "unique_state_count": len({state.candidate_key for state in self._states}),
         }
         return best.point
 
@@ -331,9 +334,28 @@ class TransparentKinematicBeamTracker:
         return position_cost + acceleration_cost + area_cost + aspect_cost + yolo_cost
 
     def _prune(self, states: list[_BeamState]) -> list[_BeamState]:
+        ordered = sorted(states, key=lambda row: row.cost)
+        if self.diverse_first:
+            kept: list[_BeamState] = []
+            seen: set[int | str] = set()
+            for state in ordered:
+                if state.candidate_key in seen:
+                    continue
+                kept.append(state)
+                seen.add(state.candidate_key)
+                if len(kept) >= self.width:
+                    return kept
+            for state in ordered:
+                if state in kept:
+                    continue
+                kept.append(state)
+                if len(kept) >= self.width:
+                    break
+            return kept
+
         kept: list[_BeamState] = []
         per_candidate: defaultdict[int | str, int] = defaultdict(int)
-        for state in sorted(states, key=lambda row: row.cost):
+        for state in ordered:
             if per_candidate[state.candidate_key] >= 2:
                 continue
             kept.append(state)

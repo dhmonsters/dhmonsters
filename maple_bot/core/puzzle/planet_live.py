@@ -11,6 +11,7 @@ import numpy as np
 from core.puzzle.defaults import fixed_detect_roi, fixed_popup_header_roi, fixed_popup_preview_roi
 from core.puzzle.evidence import EvidenceJudges, LiveEvidenceJudges
 from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen
+from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
 from core.puzzle.identity import IdentityTracker
 from core.puzzle.live_temporal_selector import LiveTemporalDecision, LiveTemporalSelector
 from core.puzzle.models import Candidate, CandidateEvidence, FramePacket, IdentityDecision, RoiSpec
@@ -44,6 +45,7 @@ KINEMATIC_WIDE_BEAM_MERGE_ADVANTAGE_LIMIT = -0.10
 KINEMATIC_LOCAL_RIGID_MIN_RESIDUAL = 0.20
 KINEMATIC_LOCAL_RIGID_MIN_ADVANTAGE = 0.121
 KINEMATIC_LOCAL_RIGID_MIN_SHIFT = 30.0
+KINEMATIC_EXPLORER_HYPOTHESIS_LIMIT = 12
 IDENTITY_TEMPORAL_HARD_OVERRIDE_STATES = frozenset({
     "TRACK_CONFIDENT",
     "OCCLUSION_SUSPECTED",
@@ -324,6 +326,10 @@ class PlanetLiveSolver:
         self._last_detect_debug: dict[str, object] = {}
         self._visible_white_lock = _VisibleWhiteLock()
         self._motion_coast = _MotionCoast()
+        self._hypothesis_challenge_guard = HypothesisChallengeGuard(
+            confirm_frames=3,
+            max_step_px=60.0,
+        )
         self._target_history: list[tuple[float, float]] = []
 
     def reset(self) -> None:
@@ -340,6 +346,7 @@ class PlanetLiveSolver:
             max_age_frames=self._motion_coast.max_age_frames,
             max_velocity_px=self._motion_coast.max_velocity_px,
         )
+        self._hypothesis_challenge_guard.reset()
         self._target_history = []
 
     def analyze(self, packet: FramePacket, *, solver_running: bool) -> PlanetLiveResult:
@@ -446,6 +453,12 @@ class PlanetLiveSolver:
                 "selected": False,
                 "reason": "visible_lock",
             }
+            kinematic_explorer_gate = {
+                "available": False,
+                "selected": False,
+                "reason": "visible_lock",
+            }
+            self._hypothesis_challenge_guard.reset()
         else:
             base_target_point = _choose_live_target_point(
                 decision=decision,
@@ -467,6 +480,7 @@ class PlanetLiveSolver:
                 identity_state=decision.state,
                 frame_shape=_frame_shape(packet.board_frame),
             )
+            pre_wide_target_point = target_point
             target_point, kinematic_wide_beam_gate = _choose_kinematic_wide_beam_target(
                 base_point=target_point,
                 hypothesis_points=temporal_decision.debug.get("kinematic_wide_beam_points"),
@@ -482,6 +496,27 @@ class PlanetLiveSolver:
                 evidence=evidence,
                 identity_state=decision.state,
             )
+            incumbent_selection = _target_selection_payload(
+                decision=decision,
+                temporal_decision=temporal_decision,
+                visible_lock=visible_lock,
+                target_point=target_point,
+                kinematic_texture_gate=kinematic_texture_gate,
+                kinematic_beam_gate=kinematic_beam_gate,
+                kinematic_wide_beam_gate=kinematic_wide_beam_gate,
+                kinematic_local_rigid_gate=kinematic_local_rigid_gate,
+            )
+            target_point, kinematic_explorer_gate = _choose_kinematic_explorer_target(
+                incumbent_point=target_point,
+                incumbent_source=str(incumbent_selection.get("source", "")),
+                pre_wide_point=pre_wide_target_point,
+                hypothesis_points=temporal_decision.debug.get("kinematic_explorer_beam_points"),
+                candidates=candidates,
+                evidence=evidence,
+                identity_state=decision.state,
+                frame_shape=_frame_shape(packet.board_frame),
+                challenge_guard=self._hypothesis_challenge_guard,
+            )
         target_selection = _target_selection_payload(
             decision=decision,
             temporal_decision=temporal_decision,
@@ -491,6 +526,7 @@ class PlanetLiveSolver:
             kinematic_beam_gate=kinematic_beam_gate,
             kinematic_wide_beam_gate=kinematic_wide_beam_gate,
             kinematic_local_rigid_gate=kinematic_local_rigid_gate,
+            kinematic_explorer_gate=kinematic_explorer_gate,
         )
         det_point = _board_point_to_det_point(target_point, detect_roi=detect_roi, board_roi=board_roi)
         if det_point is not None:
@@ -1581,6 +1617,67 @@ def _choose_kinematic_local_rigid_target(
     }
 
 
+def _choose_kinematic_explorer_target(
+    *,
+    incumbent_point: Sequence[float] | None,
+    incumbent_source: str,
+    pre_wide_point: Sequence[float] | None,
+    hypothesis_points: object,
+    candidates: Sequence[Candidate],
+    evidence: dict[str, CandidateEvidence],
+    identity_state: str,
+    frame_shape: tuple[int, int] | None,
+    challenge_guard: HypothesisChallengeGuard,
+    hypothesis_limit: int = KINEMATIC_EXPLORER_HYPOTHESIS_LIMIT,
+) -> tuple[tuple[float, float] | None, dict[str, object]]:
+    incumbent = _coerce_point(incumbent_point)
+    if not isinstance(hypothesis_points, Sequence) or isinstance(hypothesis_points, (str, bytes)):
+        points: tuple[object, ...] = ()
+    else:
+        points = tuple(hypothesis_points)[:max(1, int(hypothesis_limit))]
+    if incumbent is None or not points:
+        challenge_guard.reset()
+        return incumbent, {
+            "available": False,
+            "selected": False,
+            "reason": "missing_incumbent_or_hypotheses",
+        }
+
+    challenger, wide_gate = _choose_kinematic_wide_beam_target(
+        base_point=pre_wide_point,
+        hypothesis_points=points,
+        candidates=candidates,
+        evidence=evidence,
+        identity_state=identity_state,
+        frame_shape=frame_shape,
+    )
+    challenger, local_rigid_gate = _choose_kinematic_local_rigid_target(
+        base_point=challenger,
+        hypothesis_points=points,
+        candidates=candidates,
+        evidence=evidence,
+        identity_state=identity_state,
+    )
+    selected, guard_debug = challenge_guard.update(
+        incumbent_point=incumbent,
+        challenger_point=challenger,
+        protect_incumbent=incumbent_source == "kinematic_local_rigid",
+    )
+    return selected, {
+        "available": True,
+        "selected": bool(guard_debug.get("selected")),
+        "reason": str(guard_debug.get("reason", "")),
+        "incumbent_point": incumbent,
+        "incumbent_source": incumbent_source,
+        "challenger_point": challenger,
+        "selected_point": selected,
+        "hypothesis_count": len(points),
+        "wide_gate": dict(wide_gate),
+        "local_rigid_gate": dict(local_rigid_gate),
+        "challenge_guard": dict(guard_debug),
+    }
+
+
 def _coerce_point(value: object) -> tuple[float, float] | None:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) < 2:
         return None
@@ -1654,6 +1751,7 @@ def _target_selection_payload(
     kinematic_beam_gate: dict[str, object] | None = None,
     kinematic_wide_beam_gate: dict[str, object] | None = None,
     kinematic_local_rigid_gate: dict[str, object] | None = None,
+    kinematic_explorer_gate: dict[str, object] | None = None,
 ) -> dict[str, object]:
     distance = _point_distance(decision.point, temporal_decision.point)
     if visible_lock.locked and visible_lock.point is not None:
@@ -1662,6 +1760,9 @@ def _target_selection_payload(
     elif temporal_decision.point is None:
         source = "identity"
         reason = "temporal_missing"
+    elif kinematic_explorer_gate and bool(kinematic_explorer_gate.get("selected")):
+        source = "kinematic_explorer"
+        reason = str(kinematic_explorer_gate.get("reason") or "challenger_confirmed")
     elif kinematic_local_rigid_gate and bool(kinematic_local_rigid_gate.get("selected")):
         source = "kinematic_local_rigid"
         reason = "local_rigid_advantage"
@@ -1693,6 +1794,7 @@ def _target_selection_payload(
         "kinematic_beam_gate": dict(kinematic_beam_gate or {}),
         "kinematic_wide_beam_gate": dict(kinematic_wide_beam_gate or {}),
         "kinematic_local_rigid_gate": dict(kinematic_local_rigid_gate or {}),
+        "kinematic_explorer_gate": dict(kinematic_explorer_gate or {}),
     }
 
 
