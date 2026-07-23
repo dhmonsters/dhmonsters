@@ -24,13 +24,19 @@ class PersistentEvidenceQuorum:
         required_groups: int = 3,
         required_observations: int = 3,
         max_prediction_error_scales: float = 1.5,
+        support_groups: Sequence[str] = SUPPORT_GROUPS,
         required_positive_groups: Sequence[str] = (),
     ) -> None:
         self.required_groups = max(1, int(required_groups))
         self.required_observations = max(1, int(required_observations))
         self.max_prediction_error_scales = max(0.1, float(max_prediction_error_scales))
+        self.support_groups = tuple(
+            dict.fromkeys(str(group) for group in support_groups)
+        )
         self.required_positive_groups = tuple(
-            str(group) for group in required_positive_groups if str(group) in SUPPORT_GROUPS
+            str(group)
+            for group in required_positive_groups
+            if str(group) in self.support_groups
         )
         self.reset()
 
@@ -59,7 +65,7 @@ class PersistentEvidenceQuorum:
         if incumbent is None:
             self.reset()
             return challenger, self._debug("incumbent_missing", incumbent, challenger, 0.0, None)
-        if not any(group_margins.get(group) is not None for group in SUPPORT_GROUPS):
+        if not any(group_margins.get(group) is not None for group in self.support_groups):
             self.reset()
             return incumbent, self._debug("support_missing", incumbent, challenger, 0.0, None)
 
@@ -72,7 +78,7 @@ class PersistentEvidenceQuorum:
         observed = {
             str(group): float(value)
             for group, value in group_margins.items()
-            if value is not None and (group in SUPPORT_GROUPS or group == "yolo_penalty")
+            if value is not None and (group in self.support_groups or group == "yolo_penalty")
         }
         for group, value in observed.items():
             self._latest_margins[group] = value
@@ -118,7 +124,11 @@ class PersistentEvidenceQuorum:
         return hypot(predicted[0] - challenger[0], predicted[1] - challenger[1]) / scale
 
     def _positive_groups(self) -> tuple[str, ...]:
-        return tuple(group for group in SUPPORT_GROUPS if self._latest_margins.get(group, 0.0) > 0.0)
+        return tuple(
+            group
+            for group in self.support_groups
+            if self._latest_margins.get(group, 0.0) > 0.0
+        )
 
     def _debug(
         self,

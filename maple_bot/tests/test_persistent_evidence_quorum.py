@@ -293,6 +293,88 @@ class PersistentEvidenceQuorumTest(unittest.TestCase):
         self.assertEqual(selected, (10.0, 10.0))
         self.assertEqual(debug["reason"], "required_support_rejected")
 
+    def test_custom_merge_groups_confirm_persistent_relative_identity(self) -> None:
+        module = importlib.import_module("core.puzzle.persistent_evidence_quorum")
+        quorum = module.PersistentEvidenceQuorum(
+            support_groups=(
+                "background_relative_identity",
+                "background_motion",
+                "anchor_shape_identity",
+            ),
+            required_groups=2,
+            required_observations=2,
+            required_positive_groups=("background_relative_identity",),
+        )
+
+        first, first_debug = quorum.update(
+            incumbent_point=(10.0, 10.0),
+            challenger_point=(14.0, 10.0),
+            stable_scale_px=20.0,
+            group_margins={
+                "background_relative_identity": 2.4,
+                "background_motion": 0.3,
+            },
+        )
+        second, second_debug = quorum.update(
+            incumbent_point=(11.0, 10.0),
+            challenger_point=(15.0, 10.0),
+            stable_scale_px=20.0,
+            group_margins={
+                "background_relative_identity": 2.1,
+                "background_motion": 0.2,
+            },
+        )
+
+        self.assertEqual(first, (10.0, 10.0))
+        self.assertEqual(first_debug["reason"], "persistence_pending")
+        self.assertEqual(second, (15.0, 10.0))
+        self.assertEqual(second_debug["reason"], "persistent_quorum_confirmed")
+
+    def test_custom_groups_ignore_unlisted_stock_support(self) -> None:
+        module = importlib.import_module("core.puzzle.persistent_evidence_quorum")
+        quorum = module.PersistentEvidenceQuorum(
+            support_groups=("background_relative_identity", "background_motion"),
+            required_groups=2,
+            required_observations=2,
+        )
+
+        selected, debug = quorum.update(
+            incumbent_point=(10.0, 10.0),
+            challenger_point=(14.0, 10.0),
+            stable_scale_px=20.0,
+            group_margins={"local_rigid": 1.0},
+        )
+
+        self.assertEqual(selected, (10.0, 10.0))
+        self.assertEqual(debug["reason"], "support_missing")
+
+    def test_required_custom_group_vetoes_other_positive_votes(self) -> None:
+        module = importlib.import_module("core.puzzle.persistent_evidence_quorum")
+        quorum = module.PersistentEvidenceQuorum(
+            support_groups=(
+                "background_relative_identity",
+                "background_motion",
+                "anchor_shape_identity",
+            ),
+            required_groups=2,
+            required_observations=1,
+            required_positive_groups=("background_relative_identity",),
+        )
+
+        selected, debug = quorum.update(
+            incumbent_point=(10.0, 10.0),
+            challenger_point=(14.0, 10.0),
+            stable_scale_px=20.0,
+            group_margins={
+                "background_relative_identity": -0.1,
+                "background_motion": 0.8,
+                "anchor_shape_identity": 0.8,
+            },
+        )
+
+        self.assertEqual(selected, (10.0, 10.0))
+        self.assertEqual(debug["reason"], "required_support_rejected")
+
 
 def _candidate(
     candidate_id: str,
