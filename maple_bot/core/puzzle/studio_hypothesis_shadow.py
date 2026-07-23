@@ -6,12 +6,17 @@ from dataclasses import asdict, dataclass
 import json
 from math import hypot
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 from openpyxl import Workbook
 
 from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
 from core.puzzle.models import Candidate, CandidateEvidence
+from core.puzzle.persistent_evidence_quorum import (
+    PersistentEvidenceQuorum,
+    pairwise_persistent_margins,
+)
 from core.puzzle.planet_live import (
     _choose_kinematic_local_rigid_target,
     _choose_kinematic_wide_beam_target,
@@ -97,6 +102,7 @@ def replay_hypothesis_selection(
     challenge_confirm_frames: int | None = None,
     challenge_max_step_px: float = 90.0,
     protect_incumbent_sources: tuple[str, ...] = (),
+    persistent_evidence_quorum: bool = False,
     _details: list[dict[str, object]] | None = None,
 ) -> HypothesisSelectionReplaySummary:
     score_rows = _read_jsonl(Path(score_jsonl))
@@ -127,6 +133,10 @@ def replay_hypothesis_selection(
         )
         if challenge_confirm_frames is not None else None
     )
+    persistent_guard = (
+        PersistentEvidenceQuorum(required_positive_groups=("local_rigid",))
+        if persistent_evidence_quorum else None
+    )
     frame_shape = _board_frame_shape(trace_rows)
     total_frames = 0
     recorded_passed_frames = 0
@@ -136,10 +146,12 @@ def replay_hypothesis_selection(
     changed_frames = 0
     wide_selected_frames = 0
     local_rigid_selected_frames = 0
+    anchor_shapes: list[tuple[float, float]] = []
 
     for frame_index in candidate_frames:
         candidate_payload = events[(frame_index, "CANDIDATES")]
         temporal_payload = events.get((frame_index, "TEMPORAL_SELECTOR"), {})
+        candidates = _candidate_models(frame_index, candidate_payload)
         candidate_rows = [
             row
             for candidate in candidate_payload.get("candidates", [])
@@ -147,6 +159,9 @@ def replay_hypothesis_selection(
         ]
         wide_debug = _wide_debug(temporal_payload)
         anchor = _point(wide_debug.get("point")) if wide_debug.get("reason") == "white_anchor" else None
+        if anchor is not None and candidates:
+            anchor_candidate = min(candidates, key=lambda candidate: _distance(candidate.center, anchor))
+            anchor_shapes.append(_candidate_shape(anchor_candidate))
         tracker.update(candidate_rows, white_anchor=anchor)
         hypothesis_points = tracker.hypothesis_points
         if judge_hypothesis_limit is not None:
@@ -164,9 +179,9 @@ def replay_hypothesis_selection(
         replay_point = recorded_point
         replay_source = str(target_selection.get("source", "recorded"))
         challenge_debug: dict[str, object] = {}
+        persistent_debug: dict[str, object] = {}
         wide_gate: dict[str, object] = {}
         local_rigid_gate: dict[str, object] = {}
-        candidates = _candidate_models(frame_index, candidate_payload)
         evidence = _evidence_models(events.get((frame_index, "EVIDENCE"), {}))
         identity_payload = events.get((frame_index, "IDENTITY_STATE"), {})
         identity_state = str(identity_payload.get("state", ""))
@@ -210,6 +225,39 @@ def replay_hypothesis_selection(
             )
             if not bool(challenge_debug.get("selected")):
                 replay_source = str(target_selection.get("source", "recorded"))
+        if persistent_guard is not None:
+            baseline_replay_point = replay_point
+            baseline_replay_source = replay_source
+            preferred_challenger = (
+                baseline_replay_point
+                if baseline_replay_point is not None
+                and _distance(baseline_replay_point, recorded_point) > 1e-6
+                else None
+            )
+            challenger_point, group_margins, challenger_debug = _persistent_challenger(
+                incumbent_point=recorded_point,
+                hypothesis_points=judge_points,
+                candidates=candidates,
+                evidence=evidence,
+                preferred_point=preferred_challenger,
+                anchor_shape=_median_anchor_shape(anchor_shapes),
+                frame_shape=frame_shape,
+            )
+            persistent_point, persistent_debug = persistent_guard.update(
+                incumbent_point=recorded_point,
+                challenger_point=challenger_point,
+                stable_scale_px=_stable_candidate_scale(candidates),
+                group_margins=group_margins,
+                protect_incumbent=str(target_selection.get("source", ""))
+                in protect_incumbent_sources,
+            )
+            persistent_debug = {**persistent_debug, "challenger": challenger_debug}
+            if bool(persistent_debug.get("selected")):
+                replay_point = persistent_point
+                replay_source = "persistent_evidence_quorum"
+            else:
+                replay_point = baseline_replay_point
+                replay_source = baseline_replay_source
         if replay_point is None:
             replay_point = recorded_point
         recorded_passed = _distance(recorded_point, target) <= pass_distance_px
@@ -245,6 +293,7 @@ def replay_hypothesis_selection(
                 "wide_gate": dict(wide_gate),
                 "local_rigid_gate": dict(local_rigid_gate),
                 "challenge_guard": dict(challenge_debug),
+                "persistent_evidence_quorum": dict(persistent_debug),
             })
 
     return HypothesisSelectionReplaySummary(
@@ -271,6 +320,7 @@ def replay_hypothesis_selection_details(
     challenge_confirm_frames: int | None = None,
     challenge_max_step_px: float = 90.0,
     protect_incumbent_sources: tuple[str, ...] = (),
+    persistent_evidence_quorum: bool = False,
 ) -> list[dict[str, object]]:
     details: list[dict[str, object]] = []
     replay_hypothesis_selection(
@@ -284,9 +334,109 @@ def replay_hypothesis_selection_details(
         challenge_confirm_frames=challenge_confirm_frames,
         challenge_max_step_px=challenge_max_step_px,
         protect_incumbent_sources=protect_incumbent_sources,
+        persistent_evidence_quorum=persistent_evidence_quorum,
         _details=details,
     )
     return details
+
+
+def _persistent_challenger(
+    *,
+    incumbent_point: tuple[float, float] | None,
+    hypothesis_points: object,
+    candidates: list[Candidate],
+    evidence: dict[str, CandidateEvidence],
+    preferred_point: tuple[float, float] | None = None,
+    anchor_shape: tuple[float, float] | None = None,
+    frame_shape: tuple[int, int] | None = None,
+) -> tuple[tuple[float, float] | None, dict[str, float | None], dict[str, object]]:
+    incumbent = _point(incumbent_point)
+    if incumbent is None or not candidates:
+        return None, {}, {"reason": "missing_incumbent_or_candidates"}
+    if preferred_point is None and not isinstance(hypothesis_points, (list, tuple)):
+        return None, {}, {"reason": "missing_hypotheses"}
+    incumbent_candidate = min(candidates, key=lambda candidate: _distance(candidate.center, incumbent))
+    incumbent_evidence = evidence.get(incumbent_candidate.candidate_id)
+    if incumbent_evidence is None:
+        return None, {}, {"reason": "missing_incumbent_evidence"}
+
+    rows: list[
+        tuple[int, float, tuple[float, float], Candidate, dict[str, float | None]]
+    ] = []
+    seen_candidate_ids: set[str] = set()
+    point_values = (preferred_point,) if preferred_point is not None else hypothesis_points
+    for value in point_values:
+        point = _point(value)
+        if point is None:
+            continue
+        candidate = min(candidates, key=lambda item: _distance(item.center, point))
+        if candidate.candidate_id in seen_candidate_ids:
+            continue
+        seen_candidate_ids.add(candidate.candidate_id)
+        if candidate.candidate_id == incumbent_candidate.candidate_id:
+            continue
+        challenger_evidence = evidence.get(candidate.candidate_id)
+        if challenger_evidence is None:
+            continue
+        margins = pairwise_persistent_margins(
+            incumbent_candidate=incumbent_candidate,
+            challenger_candidate=candidate,
+            incumbent_evidence=incumbent_evidence,
+            challenger_evidence=challenger_evidence,
+            candidate_pool=candidates,
+            anchor_shape=anchor_shape,
+            frame_shape=frame_shape,
+        )
+        observed = [float(value) for value in margins.values() if value is not None]
+        if not observed:
+            continue
+        positive_count = sum(
+            float(margins.get(group) or 0.0) > 0.0
+            for group in (
+                "background_motion",
+                "local_rigid",
+                "texture_background",
+                "anchor_shape_identity",
+            )
+        )
+        rows.append((positive_count, sum(observed), point, candidate, margins))
+    if not rows:
+        return None, {}, {"reason": "missing_challenger_evidence"}
+
+    positive_count, net_margin, point, candidate, margins = max(rows, key=lambda row: row[:2])
+    return point, margins, {
+        "reason": "preferred_baseline_challenger" if preferred_point is not None else "best_persistent_quorum",
+        "candidate_id": candidate.candidate_id,
+        "point": point,
+        "positive_group_count": positive_count,
+        "net_margin": net_margin,
+        "group_margins": dict(margins),
+    }
+
+
+def _stable_candidate_scale(candidates: list[Candidate]) -> float:
+    diagonals = [
+        hypot(candidate.bbox[2] - candidate.bbox[0], candidate.bbox[3] - candidate.bbox[1])
+        for candidate in candidates
+    ]
+    return max(1.0, float(median(diagonals))) if diagonals else 1.0
+
+
+def _candidate_shape(candidate: Candidate) -> tuple[float, float]:
+    width = max(1.0, candidate.bbox[2] - candidate.bbox[0])
+    height = max(1.0, candidate.bbox[3] - candidate.bbox[1])
+    return width * height, width / height
+
+
+def _median_anchor_shape(
+    anchor_shapes: list[tuple[float, float]],
+) -> tuple[float, float] | None:
+    if not anchor_shapes:
+        return None
+    return (
+        float(median(shape[0] for shape in anchor_shapes)),
+        float(median(shape[1] for shape in anchor_shapes)),
+    )
 
 
 def sweep_hypothesis_suite(

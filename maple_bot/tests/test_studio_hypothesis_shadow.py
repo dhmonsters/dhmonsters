@@ -305,6 +305,25 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertEqual(protected.replay_passed_frames, 0)
             self.assertEqual(protected.changed_frames, 0)
 
+            persistent_details = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                width=2,
+                branch=2,
+                diverse_first=True,
+                persistent_evidence_quorum=True,
+            )
+
+            self.assertTrue(persistent_details[0]["replay_passed"])
+            self.assertEqual(
+                persistent_details[0]["persistent_evidence_quorum"]["reason"],
+                "quorum_pending",
+            )
+            self.assertIsNotNone(
+                persistent_details[0]["persistent_evidence_quorum"]
+                ["challenger"]["group_margins"]["anchor_shape_identity"]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
