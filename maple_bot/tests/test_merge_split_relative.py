@@ -104,6 +104,22 @@ class MergeSplitEventDetectorTest(unittest.TestCase):
         self.assertEqual(second.state, module.MergeState.PARTIAL_OVERLAP)
         self.assertGreater(second.overlap_ratio, 0.0)
 
+    def test_nearly_identical_duplicate_box_is_not_partial_overlap(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        detector = module.MergeSplitEventDetector(confirm_observations=1)
+        target = _candidate("white-anchor", (0.0, 0.0, 100.0, 100.0))
+        duplicate = _candidate("raw-duplicate", (5.0, 5.0, 95.0, 95.0))
+
+        event = detector.update(
+            target_candidate=target,
+            candidates=(target, duplicate),
+            stable_area=10000.0,
+            predicted_target_point=(50.0, 50.0),
+        )
+
+        self.assertEqual(event.state, module.MergeState.SEPARATE)
+        self.assertEqual(event.overlap_ratio, 0.0)
+
     def test_unrelated_large_box_does_not_start_full_merge(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         detector = module.MergeSplitEventDetector(confirm_observations=2)
@@ -198,6 +214,33 @@ class MergeSplitEventDetectorTest(unittest.TestCase):
 
 
 class SplitChildAssignmentTest(unittest.TestCase):
+    def test_non_background_incumbent_is_preserved_over_closer_prediction(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        anchors = (
+            module.BackgroundAnchor("a", (0.0, 0.0), 8),
+            module.BackgroundAnchor("b", (10.0, 0.0), 8),
+        )
+        fingerprint = module.RelationFingerprint.from_observations(
+            background_point=(5.0, 4.0),
+            anchors=anchors,
+            jitter=0.1,
+        )
+
+        decision = module.assign_split_children(
+            children=(
+                _candidate("background", (4.0, 3.0, 6.0, 5.0)),
+                _candidate("incumbent-target", (7.0, 3.0, 9.0, 5.0)),
+                _candidate("prediction-distractor", (9.0, 3.0, 11.0, 5.0)),
+            ),
+            anchors=anchors,
+            fingerprint=fingerprint,
+            predicted_target_point=(10.0, 4.0),
+            incumbent_candidate_id="incumbent-target",
+        )
+
+        self.assertEqual(decision.target_candidate_id, "incumbent-target")
+        self.assertEqual(decision.reason, "background_relation_assigned")
+
     def test_relation_preserving_child_is_background(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         fingerprint = module.RelationFingerprint.from_observations(
@@ -304,6 +347,53 @@ class SplitChildAssignmentTest(unittest.TestCase):
 
 
 class BackgroundAnchorManagerTest(unittest.TestCase):
+    def test_nearby_anchor_selection_ignores_far_and_clipped_tracks(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        anchors = (
+            module.BackgroundAnchor("far-a", (0.0, 0.0), 8),
+            module.BackgroundAnchor("far-b", (100.0, 100.0), 8),
+            module.BackgroundAnchor("clipped", (49.0, 50.0), 8, clipped=True),
+            module.BackgroundAnchor("near-a", (45.0, 50.0), 8),
+            module.BackgroundAnchor("near-b", (55.0, 50.0), 8),
+            module.BackgroundAnchor("near-c", (50.0, 58.0), 8),
+        )
+
+        selected = module.nearest_background_anchors(
+            background_point=(50.0, 50.0),
+            anchors=anchors,
+            limit=3,
+        )
+
+        self.assertEqual(
+            tuple(anchor.track_id for anchor in selected),
+            ("near-a", "near-b", "near-c"),
+        )
+
+    def test_excluded_merge_participant_cannot_take_over_anchor_track(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        anchor = _center_candidate("anchor", (20.0, 20.0))
+
+        first = manager.update(
+            candidates=(anchor,),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=10.0,
+        )
+        merge_participant = _center_candidate("merge-participant", (21.0, 20.0))
+        second = manager.update(
+            candidates=(merge_participant,),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=10.0,
+            excluded_candidate_ids=("merge-participant",),
+        )
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, ())
+
     def test_tracks_background_anchors_when_candidate_ids_change(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         manager = module.BackgroundAnchorManager(minimum_stable_observations=2)
@@ -365,6 +455,82 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
 
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
+    def test_partial_overlap_refreshes_visible_background_fingerprint(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        target = _center_candidate("target", (50.0, 50.0), size=10.0)
+        background = _center_candidate("background", (55.0, 50.0), size=10.0)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0), size=4.0)
+        anchor_b = _center_candidate("anchor-b", (80.0, 20.0), size=4.0)
+
+        decision = resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=100.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(decision.state, module.MergeState.PARTIAL_OVERLAP)
+        self.assertEqual(decision.debug["fingerprint_pair_count"], 1)
+
+    def test_partial_overlap_keeps_visible_target_motion_current(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        anchor_a = _center_candidate("anchor-a", (10.0, 10.0), size=2.0)
+        anchor_b = _center_candidate("anchor-b", (90.0, 10.0), size=2.0)
+
+        for x in (30.0, 32.0):
+            target = _center_candidate(f"target-{x}", (x, 50.0), size=2.0)
+            background = _center_candidate(f"background-{x}", (40.0, 50.0), size=2.0)
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+            )
+
+        overlap_target = _center_candidate("overlap-target", (34.0, 50.0), size=2.0)
+        overlapping_background = _center_candidate(
+            "overlapping-background", (35.0, 50.0), size=2.0
+        )
+        resolver.update(
+            incumbent_point=overlap_target.center,
+            candidates=(overlap_target, overlapping_background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(resolver._predicted_target_point(None, ()), (36.0, 50.0))
+
+    def test_distant_large_box_does_not_create_partial_overlap(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        target = _center_candidate("target", (50.0, 50.0), size=10.0)
+        nearest_background = _center_candidate("nearest-background", (65.0, 50.0), size=10.0)
+        distant_large = _candidate("distant-large", (-100.0, -100.0, 55.0, 55.0))
+
+        decision = resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, nearest_background, distant_large),
+            evidence={},
+            stable_area=100.0,
+            frame_shape=(200, 200),
+        )
+
+        self.assertEqual(decision.state, module.MergeState.SEPARATE)
+
     def test_partial_overlap_split_restores_non_background_child(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         resolver = module.MergeSplitRelativeResolver(
@@ -403,9 +569,16 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         target_child = _center_candidate("target-child", (33.0, 31.0))
         background_child = _center_candidate("background-child", (30.0, 28.0))
+        far_distractor = _center_candidate("far-distractor", (25.0, 28.0))
         decision = resolver.update(
             incumbent_point=(31.0, 29.0),
-            candidates=(target_child, background_child, anchor_a, anchor_b),
+            candidates=(
+                target_child,
+                background_child,
+                far_distractor,
+                anchor_a,
+                anchor_b,
+            ),
             evidence=evidence,
             stable_area=4.0,
             frame_shape=(100, 100),
@@ -415,6 +588,8 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(decision.background_candidate_id, "background-child")
         self.assertEqual(decision.target_candidate_id, "target-child")
         self.assertEqual(decision.target_point, (33.0, 31.0))
+        self.assertNotIn("far-distractor", decision.debug["local_child_ids"])
+        self.assertIn("predicted_target_point", decision.debug)
 
     def test_split_assignment_remains_available_for_three_observations(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")

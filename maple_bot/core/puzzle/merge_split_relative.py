@@ -56,6 +56,22 @@ class BackgroundAnchor:
     clipped: bool = False
 
 
+def nearest_background_anchors(
+    *,
+    background_point: Point,
+    anchors: Sequence[BackgroundAnchor],
+    limit: int = 3,
+) -> tuple[BackgroundAnchor, ...]:
+    usable = [anchor for anchor in anchors if not anchor.clipped]
+    usable.sort(
+        key=lambda anchor: hypot(
+            anchor.point[0] - background_point[0],
+            anchor.point[1] - background_point[1],
+        )
+    )
+    return tuple(usable[: max(0, int(limit))])
+
+
 class BackgroundAnchorManager:
     def __init__(self, *, minimum_stable_observations: int = 3) -> None:
         self.minimum_stable_observations = max(1, int(minimum_stable_observations))
@@ -73,13 +89,18 @@ class BackgroundAnchorManager:
         evidence: Mapping[str, CandidateEvidence],
         frame_shape: tuple[int, int] | None,
         stable_scale_px: float,
+        excluded_candidate_ids: Sequence[str] = (),
     ) -> tuple[BackgroundAnchor, ...]:
         del evidence
+        excluded_ids = set(excluded_candidate_ids)
         eligible = [
             candidate
             for candidate in candidates
-            if target_candidate is None
-            or candidate.candidate_id != target_candidate.candidate_id
+            if candidate.candidate_id not in excluded_ids
+            and (
+                target_candidate is None
+                or candidate.candidate_id != target_candidate.candidate_id
+            )
         ]
         remaining = list(eligible)
         updated: dict[str, BackgroundAnchor] = {}
@@ -166,6 +187,7 @@ def assign_split_children(
     anchors: Sequence[BackgroundAnchor],
     fingerprint: RelationFingerprint,
     predicted_target_point: Point,
+    incumbent_candidate_id: str | None = None,
 ) -> MergeSplitDecision:
     usable = {anchor.track_id: anchor for anchor in anchors if not anchor.clipped}
     child_residuals: list[tuple[float, Candidate]] = []
@@ -207,12 +229,23 @@ def assign_split_children(
         )
 
     remaining = [row[1] for row in child_residuals[1:]]
-    target = min(
+    incumbent = next(
+        (
+            candidate
+            for candidate in remaining
+            if candidate.candidate_id == incumbent_candidate_id
+        ),
+        None,
+    )
+    target = incumbent or min(
         remaining,
         key=lambda candidate: hypot(
             candidate.center[0] - predicted_target_point[0],
             candidate.center[1] - predicted_target_point[1],
         ),
+    )
+    debug["target_selection_basis"] = (
+        "incumbent_identity" if incumbent is not None else "motion_prediction"
     )
     return MergeSplitDecision(
         state=MergeState.SPLITTING,
@@ -389,6 +422,7 @@ class MergeSplitRelativeResolver:
         self._current_anchors: tuple[BackgroundAnchor, ...] = ()
         self._fingerprint: RelationFingerprint | None = None
         self._merge_center: Point | None = None
+        self._merge_bbox: tuple[float, float, float, float] | None = None
         self._split_recovery_remaining = 0
 
     def update(
@@ -409,9 +443,18 @@ class MergeSplitRelativeResolver:
             if area_ratio <= 1.25:
                 target_candidate = nearest
 
+        collision_candidate = _nearest_other_candidate(candidate_tuple, target_candidate)
+        event_candidates = candidate_tuple
+        if target_candidate is not None:
+            event_candidates = (
+                (target_candidate, collision_candidate)
+                if collision_candidate is not None
+                else (target_candidate,)
+            )
+
         event = self._event_detector.update(
             target_candidate=target_candidate,
-            candidates=candidate_tuple,
+            candidates=event_candidates,
             stable_area=stable_area,
             predicted_target_point=predicted,
         )
@@ -425,7 +468,7 @@ class MergeSplitRelativeResolver:
         )
 
         if event.state is MergeState.SEPARATE and not recovering_split:
-            collision = _nearest_other_candidate(candidate_tuple, target_candidate)
+            collision = collision_candidate
             anchor_candidates = tuple(
                 candidate
                 for candidate in candidate_tuple
@@ -440,44 +483,53 @@ class MergeSplitRelativeResolver:
                 stable_scale_px=scale,
             )
             self._remember_target(target_candidate)
-            if collision is not None and len(self._current_anchors) >= 2:
-                collision_evidence = evidence.get(collision.candidate_id)
-                normalized_jitter = 0.0
-                if collision_evidence is not None:
-                    normalized_jitter = collision_evidence.local_rigid_residual / scale
-                self._fingerprint = RelationFingerprint.from_observations(
-                    background_point=collision.center,
-                    anchors=self._current_anchors[:3],
-                    jitter=max(0.02, normalized_jitter),
-                )
+            self._remember_background_relation(collision, evidence, scale)
             self._merge_center = None
+            self._merge_bbox = None
             return self._event_hold(event, "separate")
 
+        overlapping = (
+            _most_overlapping_candidate(target_candidate, candidate_tuple)
+            if event.state is MergeState.PARTIAL_OVERLAP
+            else None
+        )
+        merged = (
+            _expanded_candidate_near(candidate_tuple, predicted, stable_area)
+            if event.state is MergeState.MERGED
+            else None
+        )
+        excluded_anchor_ids = tuple(
+            candidate.candidate_id
+            for candidate in (overlapping, merged)
+            if candidate is not None
+        )
         self._current_anchors = self._anchor_manager.update(
             candidates=candidate_tuple,
             target_candidate=target_candidate,
             evidence=evidence,
             frame_shape=frame_shape,
             stable_scale_px=scale,
+            excluded_candidate_ids=excluded_anchor_ids,
         )
 
         if event.state is MergeState.PARTIAL_OVERLAP:
-            overlapping = _most_overlapping_candidate(target_candidate, candidate_tuple)
             if target_candidate is not None and overlapping is not None:
                 self._merge_center = (
                     (target_candidate.center[0] + overlapping.center[0]) / 2.0,
                     (target_candidate.center[1] + overlapping.center[1]) / 2.0,
                 )
+                self._merge_bbox = _bbox_union(
+                    target_candidate.bbox,
+                    overlapping.bbox,
+                )
+                self._remember_target(target_candidate)
+                self._remember_background_relation(overlapping, evidence, scale)
             return self._event_hold(event, "partial_overlap")
 
         if event.state is MergeState.MERGED:
-            merged = _expanded_candidate_near(
-                candidate_tuple,
-                predicted,
-                stable_area,
-            )
             if merged is not None:
                 self._merge_center = merged.center
+                self._merge_bbox = merged.bbox
             self._advance_latent_target(incumbent_point)
             return self._event_hold(event, "merged_identity_hold")
 
@@ -486,19 +538,30 @@ class MergeSplitRelativeResolver:
             local_children = tuple(
                 candidate
                 for candidate in candidate_tuple
-                if hypot(
-                    candidate.center[0] - child_center[0],
-                    candidate.center[1] - child_center[1],
+                if (
+                    _point_to_bbox_distance(candidate.center, self._merge_bbox)
+                    <= 0.75 * scale
+                    if self._merge_bbox is not None
+                    else hypot(
+                        candidate.center[0] - child_center[0],
+                        candidate.center[1] - child_center[1],
+                    )
+                    <= 1.5 * scale
                 )
-                <= 4.0 * scale
+            )
+            predicted_target_point = self._predicted_target_point(
+                incumbent_point,
+                candidate_tuple,
             )
             decision = assign_split_children(
                 children=local_children,
                 anchors=self._current_anchors,
                 fingerprint=self._fingerprint,
-                predicted_target_point=self._predicted_target_point(
-                    incumbent_point,
-                    candidate_tuple,
+                predicted_target_point=predicted_target_point,
+                incumbent_candidate_id=(
+                    target_candidate.candidate_id
+                    if target_candidate is not None
+                    else None
                 ),
             )
             self._split_recovery_remaining -= 1
@@ -512,6 +575,10 @@ class MergeSplitRelativeResolver:
                 debug={
                     **decision.debug,
                     "event_id": event.event_id,
+                    "anchor_count": len(self._current_anchors),
+                    "fingerprint_pair_count": len(self._fingerprint.pair_coordinates),
+                    "merge_bbox": self._merge_bbox,
+                    "predicted_target_point": predicted_target_point,
                     "local_child_ids": tuple(
                         candidate.candidate_id for candidate in local_children
                     ),
@@ -525,6 +592,29 @@ class MergeSplitRelativeResolver:
             return
         self._target_points.append(candidate.center)
         self._target_points = self._target_points[-8:]
+
+    def _remember_background_relation(
+        self,
+        candidate: Candidate | None,
+        evidence: Mapping[str, CandidateEvidence],
+        scale: float,
+    ) -> None:
+        if candidate is None or len(self._current_anchors) < 2:
+            return
+        candidate_evidence = evidence.get(candidate.candidate_id)
+        normalized_jitter = 0.0
+        if candidate_evidence is not None:
+            normalized_jitter = candidate_evidence.local_rigid_residual / scale
+        nearby_anchors = nearest_background_anchors(
+            background_point=candidate.center,
+            anchors=self._current_anchors,
+            limit=3,
+        )
+        self._fingerprint = RelationFingerprint.from_observations(
+            background_point=candidate.center,
+            anchors=nearby_anchors,
+            jitter=max(0.02, normalized_jitter),
+        )
 
     def _advance_latent_target(self, fallback: Point | None) -> None:
         point = self._predicted_target_point(fallback, ())
@@ -551,8 +641,7 @@ class MergeSplitRelativeResolver:
             return candidates[0].center
         return (0.0, 0.0)
 
-    @staticmethod
-    def _event_hold(event: MergeEvent, reason: str) -> MergeSplitDecision:
+    def _event_hold(self, event: MergeEvent, reason: str) -> MergeSplitDecision:
         return MergeSplitDecision(
             state=event.state,
             background_candidate_id=None,
@@ -565,6 +654,12 @@ class MergeSplitRelativeResolver:
                 "event_reason": event.reason,
                 "overlap_ratio": event.overlap_ratio,
                 "area_ratio": event.area_ratio,
+                "anchor_count": len(self._current_anchors),
+                "fingerprint_pair_count": (
+                    len(self._fingerprint.pair_coordinates)
+                    if self._fingerprint is not None
+                    else 0
+                ),
             },
         )
 
@@ -583,6 +678,7 @@ def _maximum_target_overlap(
             _bbox_intersection(target_candidate.bbox, candidate.bbox) / target_area
             for candidate in candidates
             if candidate.candidate_id != target_candidate.candidate_id
+            and not _is_duplicate_observation(target_candidate, candidate)
         ),
         default=0.0,
     )
@@ -609,7 +705,12 @@ def _nearest_other_candidate(
 ) -> Candidate | None:
     if target_candidate is None:
         return None
-    others = [candidate for candidate in candidates if candidate is not target_candidate]
+    others = [
+        candidate
+        for candidate in candidates
+        if candidate is not target_candidate
+        and not _is_duplicate_observation(target_candidate, candidate)
+    ]
     return _nearest_candidate(others, target_candidate.center)
 
 
@@ -619,7 +720,12 @@ def _most_overlapping_candidate(
 ) -> Candidate | None:
     if target_candidate is None:
         return None
-    others = [candidate for candidate in candidates if candidate is not target_candidate]
+    others = [
+        candidate
+        for candidate in candidates
+        if candidate is not target_candidate
+        and not _is_duplicate_observation(target_candidate, candidate)
+    ]
     if not others:
         return None
     candidate = max(
@@ -661,6 +767,39 @@ def _bbox_intersection(
     width = max(0.0, min(left[2], right[2]) - max(left[0], right[0]))
     height = max(0.0, min(left[3], right[3]) - max(left[1], right[1]))
     return width * height
+
+
+def _bbox_union(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    return (
+        min(left[0], right[0]),
+        min(left[1], right[1]),
+        max(left[2], right[2]),
+        max(left[3], right[3]),
+    )
+
+
+def _is_duplicate_observation(left: Candidate, right: Candidate) -> bool:
+    left_area = _bbox_area(left.bbox)
+    right_area = _bbox_area(right.bbox)
+    smaller_area = min(left_area, right_area)
+    larger_area = max(left_area, right_area)
+    if smaller_area <= 0.0 or larger_area <= 0.0:
+        return False
+    area_similarity = smaller_area / larger_area
+    covered_fraction = _bbox_intersection(left.bbox, right.bbox) / smaller_area
+    center_distance = hypot(
+        left.center[0] - right.center[0],
+        left.center[1] - right.center[1],
+    )
+    normalized_center_distance = center_distance / max(1.0, left_area**0.5)
+    return (
+        area_similarity >= 0.7
+        and covered_fraction >= 0.7
+        and normalized_center_distance <= 0.25
+    )
 
 
 def _point_to_bbox_distance(

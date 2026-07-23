@@ -283,7 +283,11 @@ def replay_hypothesis_selection(
                 incumbent_point=replay_point,
                 candidates=candidates,
                 evidence=evidence,
-                stable_area=_stable_candidate_area(candidates),
+                stable_area=_stable_target_area(
+                    candidates,
+                    incumbent_point=replay_point,
+                    anchor_shapes=anchor_shapes,
+                ),
                 frame_shape=frame_shape,
             )
             challenger_point = merge_decision.target_point
@@ -300,8 +304,11 @@ def replay_hypothesis_selection(
                 challenger_point=challenger_point,
                 stable_scale_px=_stable_candidate_scale(candidates),
                 group_margins=group_margins,
-                protect_incumbent=str(target_selection.get("source", ""))
-                in protect_incumbent_sources,
+                protect_incumbent=(
+                    anchor is not None
+                    or str(target_selection.get("source", ""))
+                    in protect_incumbent_sources
+                ),
             )
             if bool(merge_quorum_debug.get("selected")):
                 replay_point = merge_point
@@ -537,6 +544,24 @@ def _stable_candidate_area(candidates: list[Candidate]) -> float:
         for candidate in candidates
     ]
     return max(1.0, float(median(areas))) if areas else 1.0
+
+
+def _stable_target_area(
+    candidates: list[Candidate],
+    *,
+    incumbent_point: tuple[float, float] | None,
+    anchor_shapes: list[tuple[float, float]],
+) -> float:
+    anchor_shape = _median_anchor_shape(anchor_shapes)
+    if anchor_shape is not None:
+        return max(1.0, float(anchor_shape[0]))
+    if incumbent_point is not None and candidates:
+        nearest = min(
+            candidates,
+            key=lambda candidate: _distance(candidate.center, incumbent_point),
+        )
+        return _candidate_shape(nearest)[0]
+    return _stable_candidate_area(candidates)
 
 
 def _candidate_shape(candidate: Candidate) -> tuple[float, float]:

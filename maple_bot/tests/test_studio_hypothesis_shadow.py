@@ -7,7 +7,9 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
+from core.puzzle.models import Candidate
 from core.puzzle.studio_hypothesis_shadow import (
+    _stable_target_area,
     replay_hypothesis_selection,
     replay_hypothesis_selection_details,
     replay_hypothesis_tracker,
@@ -21,6 +23,21 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 
 
 class StudioHypothesisShadowTest(unittest.TestCase):
+    def test_stable_target_area_prefers_visible_anchor_shape(self) -> None:
+        candidates = [
+            Candidate("small-a", 0, (0.0, 0.0, 2.0, 2.0), (1.0, 1.0), 0.8, "raw"),
+            Candidate("small-b", 0, (4.0, 0.0, 6.0, 2.0), (5.0, 1.0), 0.8, "raw"),
+            Candidate("target", 0, (10.0, 10.0, 20.0, 20.0), (15.0, 15.0), 0.9, "raw"),
+        ]
+
+        area = _stable_target_area(
+            candidates,
+            incumbent_point=(15.0, 15.0),
+            anchor_shapes=[(100.0, 1.0)],
+        )
+
+        self.assertEqual(area, 100.0)
+
     def test_challenger_must_persist_before_replacing_incumbent(self) -> None:
         guard = HypothesisChallengeGuard(confirm_frames=2, max_step_px=30.0)
 
@@ -361,6 +378,18 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                         "frame_index": 0,
                         "payload": {"point": [20.0, 20.0], "source": "recorded"},
                     },
+                    {
+                        "type": "TEMPORAL_SELECTOR",
+                        "frame_index": 0,
+                        "payload": {
+                            "debug": {
+                                "kinematic_wide_beam_debug": {
+                                    "reason": "white_anchor",
+                                    "point": [20.0, 20.0],
+                                }
+                            }
+                        },
+                    },
                 ],
             )
 
@@ -376,6 +405,12 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertIn(
                 enabled[0]["merge_split_relative"]["state"],
                 {"SEPARATE", "PARTIAL_OVERLAP", "MERGED", "SPLITTING", "REACQUIRED"},
+            )
+            self.assertIn("anchor_count", enabled[0]["merge_split_relative"])
+            self.assertIn("fingerprint_pair_count", enabled[0]["merge_split_relative"])
+            self.assertEqual(
+                enabled[0]["merge_split_relative"]["quorum"]["reason"],
+                "protected_incumbent",
             )
 
     def test_merge_split_relative_reports_relation_preserving_split_child(self) -> None:
