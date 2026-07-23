@@ -1,5 +1,5 @@
 {
-  "version": "2.1.5",
-  "notes": "- 밀집 기반 사냥 — 희소(≤1마리) 통과, 밀집(≥3마리) 멈춰 처치(시간당 처치 최적화)\n- 공격키 홀드 시간: 목표 방수×스킬시전시간, 홀드/재누름/체류 -5%~0 랜덤\n- 사다리 등반 오실레이션 수정 (정점 도달 후 복귀 차단)\n- 층 인식 수정 (route_mode 다층 추출)\n- 투명도형 해제 엔진 planet v2 완전 일치 (M1앙상블+3헤드+imgsz192)",
-  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.5/DHMONSTERS_v2.1.5_Setup.exe"
+    "version":  "2.1.9",
+    "notes":  "라이선스 v2 발급·관리 서버 연동, 자동판매 상태기계 보강, 빨코2 v5 동선 보정, 거탐 알림 로그 보강, run_integrated 자동 업데이트 확인 연결",
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.9/Claude_v2.1.9_Setup.exe"
 }
