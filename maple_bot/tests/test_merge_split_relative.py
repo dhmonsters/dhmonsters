@@ -416,6 +416,54 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(decision.target_candidate_id, "target-child")
         self.assertEqual(decision.target_point, (33.0, 31.0))
 
+    def test_split_assignment_remains_available_for_three_observations(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=2,
+        )
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        target = _center_candidate("target", (34.0, 32.0))
+        evidence: dict[str, CandidateEvidence] = {}
+
+        for _ in range(2):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence=evidence,
+                stable_area=4.0,
+                frame_shape=(100, 100),
+            )
+        overlap = _center_candidate("overlap", (31.0, 29.0))
+        resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(overlap, background, anchor_a, anchor_b),
+            evidence=evidence,
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        decisions = []
+        for index in range(3):
+            target_child = _center_candidate(f"target-{index}", (33.0, 31.0))
+            background_child = _center_candidate(f"background-{index}", (30.0, 28.0))
+            decisions.append(
+                resolver.update(
+                    incumbent_point=(30.0, 28.0),
+                    candidates=(target_child, background_child, anchor_a, anchor_b),
+                    evidence=evidence,
+                    stable_area=4.0,
+                    frame_shape=(100, 100),
+                )
+            )
+
+        self.assertEqual(
+            [decision.target_candidate_id for decision in decisions],
+            ["target-0", "target-1", "target-2"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

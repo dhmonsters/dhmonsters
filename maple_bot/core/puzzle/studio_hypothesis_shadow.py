@@ -13,6 +13,7 @@ from openpyxl import Workbook
 
 from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
 from core.puzzle.models import Candidate, CandidateEvidence
+from core.puzzle.merge_split_relative import MergeSplitDecision, MergeSplitRelativeResolver
 from core.puzzle.persistent_evidence_quorum import (
     PersistentEvidenceQuorum,
     pairwise_persistent_margins,
@@ -103,6 +104,7 @@ def replay_hypothesis_selection(
     challenge_max_step_px: float = 90.0,
     protect_incumbent_sources: tuple[str, ...] = (),
     persistent_evidence_quorum: bool = False,
+    merge_split_relative: bool = False,
     _details: list[dict[str, object]] | None = None,
 ) -> HypothesisSelectionReplaySummary:
     score_rows = _read_jsonl(Path(score_jsonl))
@@ -136,6 +138,20 @@ def replay_hypothesis_selection(
     persistent_guard = (
         PersistentEvidenceQuorum(required_positive_groups=("local_rigid",))
         if persistent_evidence_quorum else None
+    )
+    merge_resolver = MergeSplitRelativeResolver() if merge_split_relative else None
+    merge_guard = (
+        PersistentEvidenceQuorum(
+            support_groups=(
+                "background_relative_identity",
+                "background_motion",
+                "anchor_shape_identity",
+            ),
+            required_groups=2,
+            required_observations=3,
+            required_positive_groups=("background_relative_identity",),
+        )
+        if merge_split_relative else None
     )
     frame_shape = _board_frame_shape(trace_rows)
     total_frames = 0
@@ -180,6 +196,8 @@ def replay_hypothesis_selection(
         replay_source = str(target_selection.get("source", "recorded"))
         challenge_debug: dict[str, object] = {}
         persistent_debug: dict[str, object] = {}
+        merge_decision: MergeSplitDecision | None = None
+        merge_quorum_debug: dict[str, object] = {}
         wide_gate: dict[str, object] = {}
         local_rigid_gate: dict[str, object] = {}
         evidence = _evidence_models(events.get((frame_index, "EVIDENCE"), {}))
@@ -258,6 +276,39 @@ def replay_hypothesis_selection(
             else:
                 replay_point = baseline_replay_point
                 replay_source = baseline_replay_source
+        if merge_resolver is not None:
+            baseline_replay_point = replay_point
+            baseline_replay_source = replay_source
+            merge_decision = merge_resolver.update(
+                incumbent_point=replay_point,
+                candidates=candidates,
+                evidence=evidence,
+                stable_area=_stable_candidate_area(candidates),
+                frame_shape=frame_shape,
+            )
+            challenger_point = merge_decision.target_point
+            group_margins = _merge_split_group_margins(
+                incumbent_point=baseline_replay_point,
+                decision=merge_decision,
+                candidates=candidates,
+                evidence=evidence,
+                anchor_shape=_median_anchor_shape(anchor_shapes),
+                frame_shape=frame_shape,
+            )
+            merge_point, merge_quorum_debug = merge_guard.update(
+                incumbent_point=baseline_replay_point,
+                challenger_point=challenger_point,
+                stable_scale_px=_stable_candidate_scale(candidates),
+                group_margins=group_margins,
+                protect_incumbent=str(target_selection.get("source", ""))
+                in protect_incumbent_sources,
+            )
+            if bool(merge_quorum_debug.get("selected")):
+                replay_point = merge_point
+                replay_source = "merge_split_relative"
+            else:
+                replay_point = baseline_replay_point
+                replay_source = baseline_replay_source
         if replay_point is None:
             replay_point = recorded_point
         recorded_passed = _distance(recorded_point, target) <= pass_distance_px
@@ -273,7 +324,7 @@ def replay_hypothesis_selection(
                 min(range(len(judge_points)), key=lambda index: _distance(judge_points[index], replay_point))
                 if judge_points else None
             )
-            _details.append({
+            detail: dict[str, object] = {
                 "frame_index": frame_index,
                 "target_point": [target[0], target[1]],
                 "recorded_point": [recorded_point[0], recorded_point[1]],
@@ -294,7 +345,18 @@ def replay_hypothesis_selection(
                 "local_rigid_gate": dict(local_rigid_gate),
                 "challenge_guard": dict(challenge_debug),
                 "persistent_evidence_quorum": dict(persistent_debug),
-            })
+            }
+            if merge_decision is not None:
+                detail["merge_split_relative"] = {
+                    **merge_decision.debug,
+                    "state": merge_decision.state.name,
+                    "reason": merge_decision.reason,
+                    "background_candidate_id": merge_decision.background_candidate_id,
+                    "target_candidate_id": merge_decision.target_candidate_id,
+                    "relative_margin": merge_decision.relative_margin,
+                    "quorum": dict(merge_quorum_debug),
+                }
+            _details.append(detail)
 
     return HypothesisSelectionReplaySummary(
         total_frames=total_frames,
@@ -321,6 +383,7 @@ def replay_hypothesis_selection_details(
     challenge_max_step_px: float = 90.0,
     protect_incumbent_sources: tuple[str, ...] = (),
     persistent_evidence_quorum: bool = False,
+    merge_split_relative: bool = False,
 ) -> list[dict[str, object]]:
     details: list[dict[str, object]] = []
     replay_hypothesis_selection(
@@ -335,6 +398,7 @@ def replay_hypothesis_selection_details(
         challenge_max_step_px=challenge_max_step_px,
         protect_incumbent_sources=protect_incumbent_sources,
         persistent_evidence_quorum=persistent_evidence_quorum,
+        merge_split_relative=merge_split_relative,
         _details=details,
     )
     return details
@@ -414,12 +478,65 @@ def _persistent_challenger(
     }
 
 
+def _merge_split_group_margins(
+    *,
+    incumbent_point: tuple[float, float] | None,
+    decision: MergeSplitDecision,
+    candidates: list[Candidate],
+    evidence: dict[str, CandidateEvidence],
+    anchor_shape: tuple[float, float] | None,
+    frame_shape: tuple[int, int] | None,
+) -> dict[str, float | None]:
+    if (
+        incumbent_point is None
+        or decision.target_point is None
+        or decision.relative_margin is None
+        or not candidates
+    ):
+        return {}
+    incumbent_candidate = min(
+        candidates,
+        key=lambda candidate: _distance(candidate.center, incumbent_point),
+    )
+    challenger_candidate = min(
+        candidates,
+        key=lambda candidate: _distance(candidate.center, decision.target_point),
+    )
+    incumbent_evidence = evidence.get(incumbent_candidate.candidate_id)
+    challenger_evidence = evidence.get(challenger_candidate.candidate_id)
+    if incumbent_evidence is None or challenger_evidence is None:
+        return {"background_relative_identity": decision.relative_margin}
+    pairwise = pairwise_persistent_margins(
+        incumbent_candidate=incumbent_candidate,
+        challenger_candidate=challenger_candidate,
+        incumbent_evidence=incumbent_evidence,
+        challenger_evidence=challenger_evidence,
+        candidate_pool=candidates,
+        anchor_shape=anchor_shape,
+        frame_shape=frame_shape,
+    )
+    return {
+        "background_relative_identity": decision.relative_margin,
+        "background_motion": pairwise.get("background_motion"),
+        "anchor_shape_identity": pairwise.get("anchor_shape_identity"),
+    }
+
+
 def _stable_candidate_scale(candidates: list[Candidate]) -> float:
     diagonals = [
         hypot(candidate.bbox[2] - candidate.bbox[0], candidate.bbox[3] - candidate.bbox[1])
         for candidate in candidates
     ]
     return max(1.0, float(median(diagonals))) if diagonals else 1.0
+
+
+def _stable_candidate_area(candidates: list[Candidate]) -> float:
+    areas = [
+        max(1.0, candidate.bbox[2] - candidate.bbox[0])
+        * max(1.0, candidate.bbox[3] - candidate.bbox[1])
+        for candidate in candidates
+    ]
+    return max(1.0, float(median(areas))) if areas else 1.0
 
 
 def _candidate_shape(candidate: Candidate) -> tuple[float, float]:

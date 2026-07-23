@@ -324,6 +324,169 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 ["challenger"]["group_margins"]["anchor_shape_identity"]
             )
 
+    def test_merge_split_relative_is_opt_in_and_reports_state(self) -> None:
+        with TemporaryDirectory(prefix="studio-merge-split-opt-in-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            trace_path = root / "trace.jsonl"
+            _write_jsonl(
+                score_path,
+                [{"solver_frame_index": 0, "target_x": 20.0, "target_y": 20.0}],
+            )
+            _write_jsonl(
+                trace_path,
+                [
+                    {
+                        "type": "SESSION_START",
+                        "frame_index": None,
+                        "payload": {"board_roi": {"w": 100, "h": 100}},
+                    },
+                    {
+                        "type": "CANDIDATES",
+                        "frame_index": 0,
+                        "payload": {
+                            "candidates": [
+                                {
+                                    "candidate_id": "target",
+                                    "center": [20.0, 20.0],
+                                    "bbox": [18.0, 18.0, 22.0, 22.0],
+                                    "score": 0.9,
+                                    "source": "raw",
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "type": "TARGET_SELECTION",
+                        "frame_index": 0,
+                        "payload": {"point": [20.0, 20.0], "source": "recorded"},
+                    },
+                ],
+            )
+
+            baseline = replay_hypothesis_selection_details(score_path, trace_path)
+            enabled = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                merge_split_relative=True,
+            )
+
+            self.assertNotIn("merge_split_relative", baseline[0])
+            self.assertIn("merge_split_relative", enabled[0])
+            self.assertIn(
+                enabled[0]["merge_split_relative"]["state"],
+                {"SEPARATE", "PARTIAL_OVERLAP", "MERGED", "SPLITTING", "REACQUIRED"},
+            )
+
+    def test_merge_split_relative_reports_relation_preserving_split_child(self) -> None:
+        with TemporaryDirectory(prefix="studio-merge-split-trace-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            trace_path = root / "trace.jsonl"
+            frame_candidates = [
+                ((34.0, 32.0), (30.0, 28.0), "target"),
+                ((34.0, 32.0), (30.0, 28.0), "target"),
+                ((34.0, 32.0), (30.0, 28.0), "target"),
+                ((31.0, 29.0), (30.0, 28.0), "overlap-target"),
+                ((31.0, 29.0), (30.0, 28.0), "overlap-target"),
+                ((33.0, 31.0), (30.0, 28.0), "target-child"),
+                ((33.0, 31.0), (30.0, 28.0), "target-child"),
+                ((33.0, 31.0), (30.0, 28.0), "target-child"),
+            ]
+            scores: list[dict[str, object]] = []
+            trace: list[dict[str, object]] = [
+                {
+                    "type": "SESSION_START",
+                    "frame_index": None,
+                    "payload": {"board_roi": {"w": 100, "h": 100}},
+                }
+            ]
+            for frame_index, (target, background, target_id) in enumerate(frame_candidates):
+                scores.append(
+                    {
+                        "solver_frame_index": frame_index,
+                        "target_x": target[0],
+                        "target_y": target[1],
+                    }
+                )
+                candidates = [
+                    _trace_candidate(target_id, target),
+                    _trace_candidate(
+                        "background-child" if frame_index == 5 else "background",
+                        background,
+                    ),
+                    _trace_candidate("anchor-a", (20.0, 20.0)),
+                    _trace_candidate("anchor-b", (40.0, 20.0)),
+                ]
+                trace.extend(
+                    [
+                        {
+                            "type": "CANDIDATES",
+                            "frame_index": frame_index,
+                            "payload": {"candidates": candidates},
+                        },
+                        {
+                            "type": "EVIDENCE",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "evidence": [
+                                    {
+                                        "candidate_id": candidate["candidate_id"],
+                                        "bg_score": (
+                                            0.1 if candidate["candidate_id"] == target_id else 0.8
+                                        ),
+                                        "motion_divergence": (
+                                            0.9 if candidate["candidate_id"] == target_id else 0.1
+                                        ),
+                                    }
+                                    for candidate in candidates
+                                ]
+                            },
+                        },
+                        {
+                            "type": "TARGET_SELECTION",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "point": (
+                                    [background[0], background[1]]
+                                    if frame_index >= 5
+                                    else [target[0], target[1]]
+                                ),
+                                "source": "recorded",
+                            },
+                        },
+                    ]
+                )
+            _write_jsonl(score_path, scores)
+            _write_jsonl(trace_path, trace)
+
+            details = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                merge_split_relative=True,
+            )
+
+            split = details[5]["merge_split_relative"]
+            self.assertEqual(split["state"], "SPLITTING")
+            self.assertEqual(split["background_candidate_id"], "background-child")
+            self.assertEqual(split["target_candidate_id"], "target-child")
+            self.assertGreater(split["relative_margin"], 1.0)
+            self.assertFalse(details[5]["changed"])
+            self.assertFalse(details[6]["changed"])
+            self.assertEqual(details[7]["replay_source"], "merge_split_relative")
+            self.assertEqual(details[7]["replay_point"], [33.0, 31.0])
+            self.assertTrue(details[7]["replay_passed"])
+
+
+def _trace_candidate(candidate_id: str, center: tuple[float, float]) -> dict[str, object]:
+    return {
+        "candidate_id": candidate_id,
+        "center": [center[0], center[1]],
+        "bbox": [center[0] - 1.0, center[1] - 1.0, center[0] + 1.0, center[1] + 1.0],
+        "score": 0.8,
+        "source": "raw",
+    }
+
 
 if __name__ == "__main__":
     unittest.main()

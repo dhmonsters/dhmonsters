@@ -389,6 +389,7 @@ class MergeSplitRelativeResolver:
         self._current_anchors: tuple[BackgroundAnchor, ...] = ()
         self._fingerprint: RelationFingerprint | None = None
         self._merge_center: Point | None = None
+        self._split_recovery_remaining = 0
 
     def update(
         self,
@@ -415,8 +416,15 @@ class MergeSplitRelativeResolver:
             predicted_target_point=predicted,
         )
         scale = max(1.0, stable_area**0.5)
+        if event.state is MergeState.SPLITTING:
+            self._split_recovery_remaining = 3
+        recovering_split = (
+            self._split_recovery_remaining > 0
+            and event.state
+            in (MergeState.SPLITTING, MergeState.REACQUIRED, MergeState.SEPARATE)
+        )
 
-        if event.state is MergeState.SEPARATE:
+        if event.state is MergeState.SEPARATE and not recovering_split:
             collision = _nearest_other_candidate(candidate_tuple, target_candidate)
             anchor_candidates = tuple(
                 candidate
@@ -473,7 +481,7 @@ class MergeSplitRelativeResolver:
             self._advance_latent_target(incumbent_point)
             return self._event_hold(event, "merged_identity_hold")
 
-        if event.state is MergeState.SPLITTING and self._fingerprint is not None:
+        if recovering_split and self._fingerprint is not None:
             child_center = self._merge_center or predicted
             local_children = tuple(
                 candidate
@@ -493,6 +501,7 @@ class MergeSplitRelativeResolver:
                     candidate_tuple,
                 ),
             )
+            self._split_recovery_remaining -= 1
             return MergeSplitDecision(
                 state=event.state,
                 background_candidate_id=decision.background_candidate_id,
