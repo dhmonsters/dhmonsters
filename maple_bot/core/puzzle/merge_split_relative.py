@@ -743,6 +743,9 @@ class MergeSplitEventDetector:
         self._pending_state = None
         self._pending_count = 0
 
+    def complete_split_recovery(self) -> None:
+        self._set_state(MergeState.SEPARATE, increment_event=False)
+
     def update(
         self,
         *,
@@ -860,6 +863,8 @@ class MergeSplitRelativeResolver:
         self._merge_center: Point | None = None
         self._merge_bbox: tuple[float, float, float, float] | None = None
         self._split_recovery_remaining = 0
+        self._split_recovery_event_id: int | None = None
+        self._split_first_unresolved_held = False
 
     def update(
         self,
@@ -895,8 +900,13 @@ class MergeSplitRelativeResolver:
             predicted_target_point=predicted,
         )
         scale = max(1.0, stable_area**0.5)
-        if event.state is MergeState.SPLITTING:
+        if (
+            event.state is MergeState.SPLITTING
+            and self._split_recovery_event_id != event.event_id
+        ):
             self._split_recovery_remaining = 3
+            self._split_recovery_event_id = event.event_id
+            self._split_first_unresolved_held = False
         recovering_split = (
             self._split_recovery_remaining > 0
             and event.state
@@ -983,8 +993,7 @@ class MergeSplitRelativeResolver:
 
         if recovering_split:
             if self._fingerprint is None:
-                self._consume_unresolved_split_recovery(event)
-                return self._event_hold(event, "missing_fingerprint")
+                return self._unresolved_split_hold(event, "missing_fingerprint")
             child_center = self._merge_center or predicted
             local_children = tuple(
                 candidate
@@ -1015,8 +1024,7 @@ class MergeSplitRelativeResolver:
                 else None
             )
             if split_pair is None:
-                self._consume_unresolved_split_recovery(event)
-                return self._event_hold(event, "split_pair_ambiguous")
+                return self._unresolved_split_hold(event, "split_pair_ambiguous")
             decision = assign_split_children(
                 children=split_pair.children,
                 anchors=self._current_anchors,
@@ -1149,12 +1157,36 @@ class MergeSplitRelativeResolver:
             event_id=event_id,
         )
 
-    def _consume_unresolved_split_recovery(self, event: MergeEvent) -> None:
-        if event.state is not MergeState.SPLITTING:
-            self._split_recovery_remaining = max(
-                0,
-                self._split_recovery_remaining - 1,
-            )
+    def _unresolved_split_hold(
+        self,
+        event: MergeEvent,
+        reason: str,
+    ) -> MergeSplitDecision:
+        if (
+            event.state is MergeState.SPLITTING
+            and not self._split_first_unresolved_held
+        ):
+            self._split_first_unresolved_held = True
+            return self._event_hold(event, reason)
+
+        self._split_first_unresolved_held = True
+        self._split_recovery_remaining = max(
+            0,
+            self._split_recovery_remaining - 1,
+        )
+        if self._split_recovery_remaining > 0:
+            return self._event_hold(event, reason)
+
+        self._event_detector.complete_split_recovery()
+        expired_event = MergeEvent(
+            event_id=event.event_id,
+            state=MergeState.SEPARATE,
+            reason="split_recovery_expired",
+            overlap_ratio=event.overlap_ratio,
+            area_ratio=event.area_ratio,
+            candidate_count=event.candidate_count,
+        )
+        return self._event_hold(expired_event, "split_recovery_expired")
 
     def _remember_background_relation(
         self,

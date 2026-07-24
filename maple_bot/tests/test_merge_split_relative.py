@@ -1328,6 +1328,74 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(next_decision.debug["event_id"], 2)
         self.assertIsNone(resolver._merge_context)
 
+    def test_hysteresis_split_recovery_expires_for_one_event(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=99)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        target = _center_candidate("target", (34.0, 32.0))
+
+        for _ in range(2):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+            )
+
+        overlap = _center_candidate("overlap", (31.0, 29.0))
+        for _ in range(2):
+            resolver.update(
+                incumbent_point=overlap.center,
+                candidates=(overlap, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+            )
+
+        child = _center_candidate("child", (33.0, 31.0))
+        first_hold = resolver.update(
+            incumbent_point=target.center,
+            candidates=(child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        self.assertEqual(first_hold.state, module.MergeState.SPLITTING)
+        self.assertEqual(resolver._split_recovery_remaining, 3)
+
+        partial_hold = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(overlap, background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        merged = _candidate("merged", (25.0, 23.0, 40.0, 38.0))
+        merged_hold = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        final_hold = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(overlap, background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(partial_hold.state, module.MergeState.SPLITTING)
+        self.assertEqual(merged_hold.state, module.MergeState.SPLITTING)
+        self.assertEqual(final_hold.reason, "split_recovery_expired")
+        self.assertEqual(final_hold.state, module.MergeState.SEPARATE)
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
+
 
 if __name__ == "__main__":
     unittest.main()
