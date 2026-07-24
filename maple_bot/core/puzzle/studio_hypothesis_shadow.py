@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 import json
-from math import hypot
+from math import hypot, isfinite
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -13,7 +13,11 @@ from openpyxl import Workbook
 
 from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
 from core.puzzle.models import Candidate, CandidateEvidence
-from core.puzzle.merge_split_relative import MergeSplitDecision, MergeSplitRelativeResolver
+from core.puzzle.merge_split_relative import (
+    CyclePhaseContext,
+    MergeSplitDecision,
+    MergeSplitRelativeResolver,
+)
 from core.puzzle.persistent_evidence_quorum import (
     PersistentEvidenceQuorum,
     pairwise_persistent_margins,
@@ -23,6 +27,7 @@ from core.puzzle.planet_live import (
     _choose_kinematic_wide_beam_target,
 )
 from core.vision.transparent_kinematic_shape import TransparentKinematicBeamTracker
+from core.vision.transparent_puzzle_engine import BackgroundCatalog, PuzzleCandidate
 
 from .studio_validation import _read_jsonl, _retained_hypothesis_points
 
@@ -154,6 +159,13 @@ def replay_hypothesis_selection(
         if merge_split_relative else None
     )
     frame_shape = _board_frame_shape(trace_rows)
+    catalog = BackgroundCatalog() if merge_split_relative else None
+    catalog_period: int | None = None
+    catalog_period_score: float | None = None
+    catalog_observation_frames: set[int] = set()
+    cycle_evidence_reason = "not_started"
+    cycle_observation_started = False
+    was_white = False
     total_frames = 0
     recorded_passed_frames = 0
     replay_passed_frames = 0
@@ -178,6 +190,68 @@ def replay_hypothesis_selection(
         if anchor is not None and candidates:
             anchor_candidate = min(candidates, key=lambda candidate: _distance(candidate.center, anchor))
             anchor_shapes.append(_candidate_shape(anchor_candidate))
+        phase_context: CyclePhaseContext | None = None
+        if catalog is not None:
+            catalog_candidates = list(candidates)
+            if anchor is not None and catalog_candidates:
+                white_candidate = min(
+                    catalog_candidates,
+                    key=lambda candidate: _distance(candidate.center, anchor),
+                )
+                catalog_candidates = [
+                    candidate
+                    for candidate in catalog_candidates
+                    if candidate.candidate_id != white_candidate.candidate_id
+                ]
+            catalog.add_frame(
+                frame_index,
+                [
+                    PuzzleCandidate(
+                        cx=candidate.center[0],
+                        cy=candidate.center[1],
+                        score=candidate.score,
+                        w=max(1.0, candidate.bbox[2] - candidate.bbox[0]),
+                        h=max(1.0, candidate.bbox[3] - candidate.bbox[1]),
+                    )
+                    for candidate in catalog_candidates
+                ],
+            )
+            catalog_observation_frames.add(frame_index)
+            if anchor is not None:
+                was_white = True
+                cycle_observation_started = True
+                cycle_evidence_reason = "preparing_white_anchor"
+            elif was_white and catalog_period is None:
+                observed_period, observed_score = catalog.estimate_period(
+                    prep_end=frame_index,
+                    min_lag=2,
+                    max_lag=frame_index,
+                )
+                supporting_frames = {
+                    frame_index,
+                    frame_index - observed_period,
+                    frame_index - 2 * observed_period,
+                }
+                if (
+                    observed_period >= 2
+                    and isfinite(observed_score)
+                    and supporting_frames.issubset(catalog_observation_frames)
+                ):
+                    catalog_period = observed_period
+                    catalog_period_score = observed_score
+                    cycle_evidence_reason = "observed_period"
+                else:
+                    cycle_evidence_reason = "period_unavailable"
+                was_white = False
+            phase_context = CyclePhaseContext(
+                period=catalog_period,
+                local_lag=(
+                    catalog.choose_local_lag(frame_index, catalog_period)
+                    if catalog_period is not None
+                    else None
+                ),
+                period_score=catalog_period_score,
+            )
         tracker.update(candidate_rows, white_anchor=anchor)
         hypothesis_points = tracker.hypothesis_points
         if judge_hypothesis_limit is not None:
@@ -289,6 +363,10 @@ def replay_hypothesis_selection(
                     anchor_shapes=anchor_shapes,
                 ),
                 frame_shape=frame_shape,
+                frame_index=frame_index,
+                phase_context=(
+                    phase_context if cycle_observation_started else None
+                ),
             )
             challenger_point = merge_decision.target_point
             group_margins = _merge_split_group_margins(
@@ -354,14 +432,71 @@ def replay_hypothesis_selection(
                 "persistent_evidence_quorum": dict(persistent_debug),
             }
             if merge_decision is not None:
+                merge_debug = merge_decision.debug
+                qualified_anchor_count = int(
+                    merge_debug.get(
+                        "qualified_anchor_count",
+                        merge_debug.get("anchor_count", 0),
+                    )
+                )
+                local_lag = (
+                    phase_context.local_lag if phase_context is not None else None
+                )
                 detail["merge_split_relative"] = {
-                    **merge_decision.debug,
+                    **merge_debug,
                     "state": merge_decision.state.name,
                     "reason": merge_decision.reason,
                     "background_candidate_id": merge_decision.background_candidate_id,
                     "target_candidate_id": merge_decision.target_candidate_id,
                     "relative_margin": merge_decision.relative_margin,
                     "quorum": dict(merge_quorum_debug),
+                    "period": (
+                        phase_context.period if phase_context is not None else None
+                    ),
+                    "period_score": (
+                        phase_context.period_score if phase_context is not None else None
+                    ),
+                    "local_lag": local_lag,
+                    "reference_frame": (
+                        frame_index - local_lag if local_lag is not None else None
+                    ),
+                    "cycle_evidence_reason": cycle_evidence_reason,
+                    "cycle_input": {
+                        "frame_index": frame_index,
+                        "candidate_count": len(candidates),
+                        "catalog_candidate_count": len(catalog_candidates),
+                        "white_anchor_observed": anchor is not None,
+                    },
+                    "phase_qualified": bool(
+                        phase_context is not None
+                        and phase_context.period is not None
+                        and phase_context.local_lag is not None
+                    ),
+                    "qualified_anchor_count": qualified_anchor_count,
+                    "merge_event_id": merge_debug.get("event_id"),
+                    "merge_event_context": {
+                        "event_id": merge_debug.get("event_id"),
+                        "fingerprint_mode": merge_debug.get("fingerprint_mode"),
+                        "phase_reference_frame": merge_debug.get(
+                            "phase_reference_frame"
+                        ),
+                    },
+                    "selected_split_child_ids": tuple(
+                        merge_debug.get("split_child_pair_ids", ())
+                    ),
+                    "selected_child_ids": tuple(
+                        candidate_id
+                        for candidate_id in (
+                            merge_decision.background_candidate_id,
+                            merge_decision.target_candidate_id,
+                        )
+                        if candidate_id is not None
+                    ),
+                    "hold_reason": (
+                        merge_decision.reason
+                        if merge_decision.target_candidate_id is None
+                        else None
+                    ),
                 }
             _details.append(detail)
 

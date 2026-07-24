@@ -413,6 +413,183 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 "protected_incumbent",
             )
 
+    def test_merge_split_shadow_reports_cycle_phase_without_runtime_gt(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-lineage-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            trace_path = root / "trace.jsonl"
+            scores: list[dict[str, object]] = []
+            trace: list[dict[str, object]] = [
+                {
+                    "type": "SESSION_START",
+                    "frame_index": None,
+                    "payload": {"board_roi": {"w": 120, "h": 100}},
+                }
+            ]
+            for frame_index in range(10):
+                phase = frame_index % 3
+                anchor_a = (20.0 + phase * 2.0, 20.0)
+                anchor_b = (80.0 + phase * 2.0, 20.0)
+                background = (48.0 + phase * 2.0, 50.0)
+                target = (
+                    (60.0, 50.0)
+                    if frame_index < 6
+                    else (58.0 + float(frame_index - 6), 50.0)
+                )
+                candidates = [
+                    _trace_candidate(f"anchor-a-{frame_index}", anchor_a),
+                    _trace_candidate(f"anchor-b-{frame_index}", anchor_b),
+                    _trace_candidate(f"background-{frame_index}", background),
+                    _trace_candidate(f"target-{frame_index}", target),
+                ]
+                scores.append(
+                    {
+                        "solver_frame_index": frame_index,
+                        "target_x": target[0],
+                        "target_y": target[1],
+                    }
+                )
+                trace.append(
+                    {
+                        "type": "CANDIDATES",
+                        "frame_index": frame_index,
+                        "payload": {"candidates": candidates},
+                    }
+                )
+                if frame_index < 6:
+                    trace.append(
+                        {
+                            "type": "TEMPORAL_SELECTOR",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "debug": {
+                                    "kinematic_wide_beam_debug": {
+                                        "reason": "white_anchor",
+                                        "point": [target[0], target[1]],
+                                    }
+                                }
+                            },
+                        }
+                    )
+                trace.extend(
+                    [
+                        {
+                            "type": "EVIDENCE",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "evidence": [
+                                    {
+                                        "candidate_id": row["candidate_id"],
+                                        "bg_score": (
+                                            0.1
+                                            if row["candidate_id"].startswith("target-")
+                                            else 0.8
+                                        ),
+                                    }
+                                    for row in candidates
+                                ]
+                            },
+                        },
+                        {
+                            "type": "TARGET_SELECTION",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "point": [target[0], target[1]],
+                                "source": "recorded",
+                            },
+                        },
+                    ]
+                )
+            _write_jsonl(score_path, scores)
+            _write_jsonl(trace_path, trace)
+
+            baseline = replay_hypothesis_selection_details(score_path, trace_path)
+            details = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                merge_split_relative=True,
+            )
+
+            self.assertNotIn("merge_split_relative", baseline[-1])
+            self.assertEqual(baseline[-1]["replay_point"], details[-1]["replay_point"])
+            phased = [
+                row["merge_split_relative"]
+                for row in details
+                if row["merge_split_relative"]["period"] is not None
+            ]
+            self.assertTrue(phased)
+            diagnostic = phased[-1]
+            self.assertEqual(diagnostic["period"], 3)
+            self.assertEqual(diagnostic["local_lag"], 3)
+            self.assertEqual(diagnostic["reference_frame"], 6)
+            self.assertGreaterEqual(diagnostic["qualified_anchor_count"], 2)
+            self.assertIn("merge_event_id", diagnostic)
+            self.assertIn("selected_split_child_ids", diagnostic)
+            self.assertIn("hold_reason", diagnostic)
+            self.assertIn("quorum", diagnostic)
+            self.assertNotIn("target_point", diagnostic["cycle_input"])
+
+    def test_merge_split_shadow_fails_closed_without_cycle_evidence(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-lineage-weak-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            trace_path = root / "trace.jsonl"
+            scores = [
+                {"solver_frame_index": frame_index, "target_x": 60.0, "target_y": 50.0}
+                for frame_index in range(4)
+            ]
+            trace: list[dict[str, object]] = [
+                {
+                    "type": "SESSION_START",
+                    "frame_index": None,
+                    "payload": {"board_roi": {"w": 120, "h": 100}},
+                }
+            ]
+            for frame_index in range(4):
+                candidates = [
+                    _trace_candidate(f"anchor-{frame_index}", (20.0 + frame_index, 20.0)),
+                    _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+                ]
+                trace.extend(
+                    [
+                        {
+                            "type": "CANDIDATES",
+                            "frame_index": frame_index,
+                            "payload": {"candidates": candidates},
+                        },
+                        {
+                            "type": "TEMPORAL_SELECTOR",
+                            "frame_index": frame_index,
+                            "payload": {
+                                "debug": {
+                                    "kinematic_wide_beam_debug": {
+                                        "reason": "white_anchor" if frame_index < 2 else "tracking",
+                                        "point": [60.0, 50.0],
+                                    }
+                                }
+                            },
+                        },
+                        {
+                            "type": "TARGET_SELECTION",
+                            "frame_index": frame_index,
+                            "payload": {"point": [60.0, 50.0], "source": "recorded"},
+                        },
+                    ]
+                )
+            _write_jsonl(score_path, scores)
+            _write_jsonl(trace_path, trace)
+
+            details = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                merge_split_relative=True,
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertIsNone(diagnostic["local_lag"])
+            self.assertEqual(diagnostic["cycle_evidence_reason"], "period_unavailable")
+
     def test_merge_split_relative_reports_relation_preserving_split_child(self) -> None:
         with TemporaryDirectory(prefix="studio-merge-split-trace-") as tmp:
             root = Path(tmp)
