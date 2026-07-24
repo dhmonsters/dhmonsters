@@ -207,6 +207,11 @@ def replay_hypothesis_selection(
             merge_split_relative and anchor is not None and not was_white
         )
         if new_white_episode:
+            tracker.reset()
+            if challenge_guard is not None:
+                challenge_guard.reset()
+            if persistent_guard is not None:
+                persistent_guard.reset()
             if merge_resolver is not None:
                 merge_resolver.reset()
             if merge_guard is not None:
@@ -381,9 +386,16 @@ def replay_hypothesis_selection(
         else:
             judge_points = hypothesis_points
 
+        score = None
+        target = None
+        if not merge_split_relative:
+            score = scores.get(frame_index)
+            target = _target_point(score)
         target_selection = events.get((frame_index, "TARGET_SELECTION"), {})
         recorded_point = _point(target_selection.get("point"))
-        if recorded_point is None:
+        if recorded_point is None or (
+            not merge_split_relative and (score is None or target is None)
+        ):
             continue
 
         replay_point = recorded_point
@@ -515,8 +527,9 @@ def replay_hypothesis_selection(
                 replay_source = baseline_replay_source
         if replay_point is None:
             replay_point = recorded_point
-        score = scores.get(frame_index)
-        target = _target_point(score)
+        if merge_split_relative:
+            score = scores.get(frame_index)
+            target = _target_point(score)
         if score is None or target is None:
             continue
         recorded_passed = _distance(recorded_point, target) <= pass_distance_px
@@ -831,6 +844,7 @@ def _candidate_shape(candidate: Candidate) -> tuple[float, float]:
 
 _CYCLE_ASSOCIATION_QUALITY_LIMIT = 0.75
 _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN = 0.15
+_MAX_CYCLE_LOOP_RESIDUAL = 0.25
 _TRACK_ASSOCIATION_QUALITY_LIMIT = 1.5
 _MIN_CYCLE_ASSOCIATIONS = 3
 _MIN_CYCLE_COVERAGE = 0.95
@@ -1510,10 +1524,14 @@ def _observed_episode_period(
                 observations,
                 period,
             )
-            if recurrence_residual is not None:
-                accepted.append(
-                    (recurrence_residual, period, comparisons, float(score))
-                )
+            if recurrence_residual is None:
+                continue
+            if recurrence_residual > _MAX_CYCLE_LOOP_RESIDUAL:
+                failures.append("period_loop_residual")
+                continue
+            accepted.append(
+                (recurrence_residual, period, comparisons, float(score))
+            )
         else:
             failures.append(reason)
     if accepted:
@@ -1535,6 +1553,8 @@ def _observed_episode_period(
         return None, None, "period_association_ambiguous", 0
     if "period_association_permutation" in failures:
         return None, None, "period_association_permutation", 0
+    if "period_loop_residual" in failures:
+        return None, None, "period_loop_residual", 0
     if "period_association_quality" in failures:
         return None, None, "period_association_quality", 0
     if "period_association_incomplete" in failures:
@@ -1610,6 +1630,8 @@ def _local_lag_temporal_support(
     selected_residual = _frozen_pair_residual(reference, current)
     if selected_residual is None:
         return False, "association_incomplete"
+    if selected_residual > _MAX_CYCLE_LOOP_RESIDUAL:
+        return False, "loop_residual"
 
     alternatives: list[tuple[float, int]] = []
     earliest_frame = min(observations, default=frame_index)

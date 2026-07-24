@@ -1695,6 +1695,48 @@ class StudioHypothesisShadowTest(unittest.TestCase):
         self.assertFalse(local_ok)
         self.assertEqual(local_reason, "nonunique_recurrence")
 
+    def test_unique_small_lag_constant_translation_is_not_a_closed_loop(self) -> None:
+        start_frame = 17
+        velocity = (2.4, 1.8)
+        origins = ((40.0, 30.0), (75.0, 30.0), (110.0, 30.0))
+        observations = {
+            frame_index: tuple(
+                _FrozenCycleObservation(
+                    f"cycle-track-{track_index}",
+                    PuzzleCandidate(
+                        origin[0] + velocity[0] * (frame_index - start_frame),
+                        origin[1] + velocity[1] * (frame_index - start_frame),
+                        0.8,
+                        10.0,
+                        10.0,
+                    ),
+                )
+                for track_index, origin in enumerate(origins)
+            )
+            for frame_index in range(start_frame, start_frame + 6)
+        }
+        catalog = BackgroundCatalog()
+        for frame_index, frame in observations.items():
+            catalog.add_frame(
+                frame_index,
+                [observation.candidate for observation in frame],
+            )
+
+        period, _score, reason, _comparisons = _observed_episode_period(
+            catalog,
+            observations,
+        )
+        local_ok, local_reason = _local_lag_temporal_support(
+            observations,
+            frame_index=start_frame + 5,
+            lag=2,
+        )
+
+        self.assertIsNone(period)
+        self.assertEqual(reason, "period_loop_residual")
+        self.assertFalse(local_ok)
+        self.assertEqual(local_reason, "loop_residual")
+
     def test_global_assignment_keeps_unique_non_mutual_optimum(self) -> None:
         from core.puzzle import studio_hypothesis_shadow as shadow
 
@@ -1777,6 +1819,117 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertEqual(after_reset["fingerprint_pair_count"], 0)
             self.assertEqual(after_reset["selected_child_ids"], ())
 
+    def test_new_white_episode_resets_beam_and_guard_timeline(self) -> None:
+        with TemporaryDirectory(prefix="studio-full-timeline-reset-") as tmp:
+            root = Path(tmp)
+            full_score_path = root / "full-score.jsonl"
+            fresh_score_path = root / "fresh-score.jsonl"
+            full_trace_path = root / "full-trace.jsonl"
+            fresh_trace_path = root / "fresh-trace.jsonl"
+            _write_jsonl(
+                full_score_path,
+                [
+                    {
+                        "solver_frame_index": 11,
+                        "target_x": 60.0,
+                        "target_y": 50.0,
+                    },
+                    {
+                        "solver_frame_index": 13,
+                        "target_x": 20.0,
+                        "target_y": 50.0,
+                    },
+                ],
+            )
+            _write_jsonl(
+                fresh_score_path,
+                [
+                    {
+                        "solver_frame_index": 13,
+                        "target_x": 20.0,
+                        "target_y": 50.0,
+                    }
+                ],
+            )
+            _write_jsonl(full_trace_path, _two_episode_reset_trace(include_history=True))
+            _write_jsonl(fresh_trace_path, _two_episode_reset_trace(include_history=False))
+
+            full = replay_hypothesis_selection_details(
+                full_score_path,
+                full_trace_path,
+                width=3,
+                branch=3,
+                challenge_confirm_frames=2,
+                challenge_max_step_px=500.0,
+                persistent_evidence_quorum=True,
+                merge_split_relative=True,
+            )
+            fresh = replay_hypothesis_selection_details(
+                fresh_score_path,
+                fresh_trace_path,
+                width=3,
+                branch=3,
+                challenge_confirm_frames=2,
+                challenge_max_step_px=500.0,
+                persistent_evidence_quorum=True,
+                merge_split_relative=True,
+            )
+
+            full_first = next(row for row in full if row["frame_index"] == 13)
+            fresh_first = fresh[0]
+            for key in (
+                "replay_point",
+                "replay_source",
+                "replay_hypothesis_rank",
+            ):
+                with self.subTest(key=key):
+                    self.assertEqual(full_first[key], fresh_first[key])
+            self.assertEqual(
+                full_first["challenge_guard"],
+                fresh_first["challenge_guard"],
+            )
+            self.assertEqual(
+                full_first["persistent_evidence_quorum"],
+                fresh_first["persistent_evidence_quorum"],
+            )
+
+    def test_opt_out_scoreless_frame_does_not_advance_guard_confirmation(self) -> None:
+        with TemporaryDirectory(prefix="studio-opt-out-scoreless-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            trace_path = root / "trace.jsonl"
+            _write_jsonl(
+                score_path,
+                [
+                    {
+                        "solver_frame_index": 2,
+                        "target_x": 20.0,
+                        "target_y": 50.0,
+                    }
+                ],
+            )
+            _write_jsonl(trace_path, _opt_out_scoreless_guard_trace())
+
+            details = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                width=2,
+                branch=2,
+                challenge_confirm_frames=2,
+                persistent_evidence_quorum=True,
+            )
+
+            self.assertEqual(len(details), 1)
+            row = details[0]
+            self.assertEqual(row["frame_index"], 2)
+            self.assertEqual(row["replay_point"], [20.0, 50.0])
+            self.assertFalse(row["challenge_guard"]["selected"])
+            self.assertEqual(row["challenge_guard"]["pending_frames"], 1)
+            self.assertEqual(
+                row["persistent_evidence_quorum"]["observation_count"],
+                1,
+            )
+
 
 def _trace_candidate(
     candidate_id: str,
@@ -1796,6 +1949,141 @@ def _trace_candidate(
         "score": 0.8,
         "source": "raw",
     }
+
+
+def _white_anchor_events(frame_index: int, x: float) -> list[dict[str, object]]:
+    return [
+        {
+            "type": "CANDIDATES",
+            "frame_index": frame_index,
+            "payload": {
+                "candidates": [
+                    _trace_candidate(
+                        f"anchor-{frame_index}",
+                        (x, 50.0),
+                        half_size=5.0,
+                    )
+                ]
+            },
+        },
+        {
+            "type": "TEMPORAL_SELECTOR",
+            "frame_index": frame_index,
+            "payload": {
+                "debug": {
+                    "kinematic_wide_beam_debug": {
+                        "reason": "white_anchor",
+                        "point": [x, 50.0],
+                    }
+                }
+            },
+        },
+    ]
+
+
+def _challenger_frame_events(frame_index: int) -> list[dict[str, object]]:
+    return [
+        {
+            "type": "CANDIDATES",
+            "frame_index": frame_index,
+            "payload": {
+                "candidates": [
+                    _trace_candidate(f"base-{frame_index}", (20.0, 50.0), half_size=5.0),
+                    _trace_candidate(f"target-{frame_index}", (60.0, 50.0), half_size=5.0),
+                ]
+            },
+        },
+        {
+            "type": "EVIDENCE",
+            "frame_index": frame_index,
+            "payload": {
+                "evidence": [
+                    {
+                        "candidate_id": f"base-{frame_index}",
+                        "texture_bg_score": 0.8,
+                        "color_residual": 0.2,
+                        "local_rigid_residual": 0.1,
+                    },
+                    {
+                        "candidate_id": f"target-{frame_index}",
+                        "texture_bg_score": 0.9,
+                        "color_residual": 0.2,
+                        "local_rigid_residual": 0.5,
+                    },
+                ]
+            },
+        },
+        {
+            "type": "IDENTITY_STATE",
+            "frame_index": frame_index,
+            "payload": {"state": "TRACK_CONFIDENT"},
+        },
+        {
+            "type": "TEMPORAL_SELECTOR",
+            "frame_index": frame_index,
+            "payload": {
+                "debug": {
+                    "kinematic_wide_beam_debug": {"reason": "tracking"}
+                }
+            },
+        },
+        {
+            "type": "TARGET_SELECTION",
+            "frame_index": frame_index,
+            "payload": {
+                "point": [20.0, 50.0],
+                "source": "kinematic_local_rigid",
+                "kinematic_wide_beam_gate": {"base_point": [20.0, 50.0]},
+            },
+        },
+    ]
+
+
+def _two_episode_reset_trace(*, include_history: bool) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = [
+        {
+            "type": "SESSION_START",
+            "frame_index": None,
+            "payload": {"board_roi": {"w": 400, "h": 100}},
+        }
+    ]
+    if include_history:
+        rows.extend(_white_anchor_events(0, -1400.0))
+        for frame_index in range(1, 11):
+            x = -1400.0 + 140.0 * frame_index
+            rows.append(
+                {
+                    "type": "CANDIDATES",
+                    "frame_index": frame_index,
+                    "payload": {
+                        "candidates": [
+                            _trace_candidate(
+                                f"velocity-{frame_index}",
+                                (x, 50.0),
+                                half_size=5.0,
+                            )
+                        ]
+                    },
+                }
+            )
+        rows.extend(_challenger_frame_events(11))
+    rows.extend(_white_anchor_events(12, 20.0))
+    rows.extend(_challenger_frame_events(13))
+    return rows
+
+
+def _opt_out_scoreless_guard_trace() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = [
+        {
+            "type": "SESSION_START",
+            "frame_index": None,
+            "payload": {"board_roi": {"w": 120, "h": 100}},
+        }
+    ]
+    rows.extend(_white_anchor_events(0, 20.0))
+    rows.extend(_challenger_frame_events(1))
+    rows.extend(_challenger_frame_events(2))
+    return rows
 
 
 def _cycle_candidates(
