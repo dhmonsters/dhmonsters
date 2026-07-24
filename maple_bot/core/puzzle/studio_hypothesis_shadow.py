@@ -7,7 +7,7 @@ import json
 from math import hypot, isfinite
 from pathlib import Path
 from statistics import median
-from typing import Any
+from typing import Any, Sequence
 
 from openpyxl import Workbook
 
@@ -159,13 +159,16 @@ def replay_hypothesis_selection(
         if merge_split_relative else None
     )
     frame_shape = _board_frame_shape(trace_rows)
-    catalog = BackgroundCatalog() if merge_split_relative else None
+    catalog: BackgroundCatalog | None = None
     catalog_period: int | None = None
     catalog_period_score: float | None = None
-    catalog_observation_frames: set[int] = set()
     cycle_evidence_reason = "not_started"
+    local_lag_evidence_reason = "period_unavailable"
+    period_recurrence_comparisons = 0
     cycle_observation_started = False
     was_white = False
+    episode_observations: dict[int, tuple[PuzzleCandidate, ...]] = {}
+    phase_observations: dict[int, tuple[PuzzleCandidate, ...]] = {}
     total_frames = 0
     recorded_passed_frames = 0
     replay_passed_frames = 0
@@ -191,8 +194,13 @@ def replay_hypothesis_selection(
             anchor_candidate = min(candidates, key=lambda candidate: _distance(candidate.center, anchor))
             anchor_shapes.append(_candidate_shape(anchor_candidate))
         phase_context: CyclePhaseContext | None = None
-        if catalog is not None:
-            catalog_candidates = list(candidates)
+        catalog_candidates = list(candidates)
+        if merge_split_relative:
+            if anchor is not None and not was_white:
+                catalog = BackgroundCatalog()
+                episode_observations = {}
+                phase_observations = {}
+                period_recurrence_comparisons = 0
             if anchor is not None and catalog_candidates:
                 white_candidate = min(
                     catalog_candidates,
@@ -203,53 +211,57 @@ def replay_hypothesis_selection(
                     for candidate in catalog_candidates
                     if candidate.candidate_id != white_candidate.candidate_id
                 ]
-            catalog.add_frame(
-                frame_index,
-                [
-                    PuzzleCandidate(
-                        cx=candidate.center[0],
-                        cy=candidate.center[1],
-                        score=candidate.score,
-                        w=max(1.0, candidate.bbox[2] - candidate.bbox[0]),
-                        h=max(1.0, candidate.bbox[3] - candidate.bbox[1]),
-                    )
-                    for candidate in catalog_candidates
-                ],
-            )
-            catalog_observation_frames.add(frame_index)
+            catalog_frame = _catalog_candidates(catalog_candidates)
             if anchor is not None:
+                assert catalog is not None
+                catalog.add_frame(frame_index, catalog_frame)
+                episode_observations[frame_index] = catalog_frame
+                phase_observations[frame_index] = catalog_frame
                 was_white = True
                 cycle_observation_started = True
                 cycle_evidence_reason = "preparing_white_anchor"
-            elif was_white and catalog_period is None:
-                observed_period, observed_score = catalog.estimate_period(
-                    prep_end=frame_index,
-                    min_lag=2,
-                    max_lag=frame_index,
+                local_lag_evidence_reason = "preparing_white_anchor"
+            elif was_white:
+                observed_period, observed_score, period_reason, comparison_count = (
+                    _observed_episode_period(catalog, episode_observations)
                 )
-                supporting_frames = {
-                    frame_index,
-                    frame_index - observed_period,
-                    frame_index - 2 * observed_period,
-                }
-                if (
-                    observed_period >= 2
-                    and isfinite(observed_score)
-                    and supporting_frames.issubset(catalog_observation_frames)
-                ):
+                period_recurrence_comparisons = comparison_count
+                if observed_period is not None:
                     catalog_period = observed_period
                     catalog_period_score = observed_score
                     cycle_evidence_reason = "observed_period"
+                elif catalog_period is not None:
+                    cycle_evidence_reason = f"retained_period_{period_reason}"
                 else:
-                    cycle_evidence_reason = "period_unavailable"
+                    cycle_evidence_reason = (
+                        period_reason
+                        if period_reason.startswith("period_association_")
+                        else "period_unavailable"
+                    )
                 was_white = False
+                assert catalog is not None
+                catalog.add_frame(frame_index, catalog_frame)
+                phase_observations[frame_index] = catalog_frame
+            elif catalog is not None:
+                catalog.add_frame(frame_index, catalog_frame)
+                phase_observations[frame_index] = catalog_frame
+
+            local_lag: int | None = None
+            if catalog is not None and catalog_period is not None:
+                candidate_lag = catalog.choose_local_lag(frame_index, catalog_period)
+                reference = phase_observations.get(frame_index - candidate_lag)
+                local_ok, _reason, _quality, _match_count = _associate_cycle_candidates(
+                    reference,
+                    phase_observations.get(frame_index),
+                )
+                if local_ok:
+                    local_lag = candidate_lag
+                    local_lag_evidence_reason = "observed_local_lag"
+                else:
+                    local_lag_evidence_reason = "insufficient_local_lag_evidence"
             phase_context = CyclePhaseContext(
                 period=catalog_period,
-                local_lag=(
-                    catalog.choose_local_lag(frame_index, catalog_period)
-                    if catalog_period is not None
-                    else None
-                ),
+                local_lag=local_lag,
                 period_score=catalog_period_score,
             )
         tracker.update(candidate_rows, white_anchor=anchor)
@@ -433,14 +445,18 @@ def replay_hypothesis_selection(
             }
             if merge_decision is not None:
                 merge_debug = merge_decision.debug
-                qualified_anchor_count = int(
-                    merge_debug.get(
-                        "qualified_anchor_count",
-                        merge_debug.get("anchor_count", 0),
-                    )
-                )
                 local_lag = (
                     phase_context.local_lag if phase_context is not None else None
+                )
+                phase_qualified = bool(
+                    phase_context is not None
+                    and phase_context.period is not None
+                    and phase_context.local_lag is not None
+                )
+                qualified_anchor_count = (
+                    merge_debug.get("qualified_anchor_count")
+                    if phase_qualified
+                    else None
                 )
                 detail["merge_split_relative"] = {
                     **merge_debug,
@@ -461,17 +477,15 @@ def replay_hypothesis_selection(
                         frame_index - local_lag if local_lag is not None else None
                     ),
                     "cycle_evidence_reason": cycle_evidence_reason,
+                    "local_lag_evidence_reason": local_lag_evidence_reason,
+                    "period_recurrence_comparisons": period_recurrence_comparisons,
                     "cycle_input": {
                         "frame_index": frame_index,
                         "candidate_count": len(candidates),
                         "catalog_candidate_count": len(catalog_candidates),
                         "white_anchor_observed": anchor is not None,
                     },
-                    "phase_qualified": bool(
-                        phase_context is not None
-                        and phase_context.period is not None
-                        and phase_context.local_lag is not None
-                    ),
+                    "phase_qualified": phase_qualified,
                     "qualified_anchor_count": qualified_anchor_count,
                     "merge_event_id": merge_debug.get("event_id"),
                     "merge_event_context": {
@@ -703,6 +717,136 @@ def _candidate_shape(candidate: Candidate) -> tuple[float, float]:
     width = max(1.0, candidate.bbox[2] - candidate.bbox[0])
     height = max(1.0, candidate.bbox[3] - candidate.bbox[1])
     return width * height, width / height
+
+
+_CYCLE_ASSOCIATION_QUALITY_LIMIT = 0.75
+_CYCLE_ASSOCIATION_AMBIGUITY_MARGIN = 0.15
+_MIN_CYCLE_ASSOCIATIONS = 2
+
+
+def _catalog_candidates(candidates: Sequence[Candidate]) -> tuple[PuzzleCandidate, ...]:
+    return tuple(
+        PuzzleCandidate(
+            cx=candidate.center[0],
+            cy=candidate.center[1],
+            score=candidate.score,
+            w=max(1.0, candidate.bbox[2] - candidate.bbox[0]),
+            h=max(1.0, candidate.bbox[3] - candidate.bbox[1]),
+        )
+        for candidate in candidates
+    )
+
+
+def _observed_episode_period(
+    catalog: BackgroundCatalog | None,
+    observations: dict[int, tuple[PuzzleCandidate, ...]],
+) -> tuple[int | None, float | None, str, int]:
+    observed_frames = sorted(observations)
+    if catalog is None or len(observed_frames) < 3:
+        return None, None, "insufficient_episode_evidence", 0
+    first_frame = observed_frames[0]
+    last_frame = observed_frames[-1]
+    if last_frame - first_frame < 2:
+        return None, None, "insufficient_episode_evidence", 0
+    period, score = catalog.estimate_period(
+        prep_end=last_frame,
+        min_lag=2,
+        max_lag=last_frame - first_frame,
+    )
+    if period < 2 or not isfinite(score):
+        return None, None, "insufficient_episode_evidence", 0
+    supported, reason, comparisons = _period_recurrence_support(
+        observations,
+        period,
+    )
+    if not supported:
+        return None, None, reason, comparisons
+    return period, score, "observed_period", comparisons
+
+
+def _period_recurrence_support(
+    observations: dict[int, tuple[PuzzleCandidate, ...]],
+    period: int,
+) -> tuple[bool, str, int]:
+    failures: list[str] = []
+    for middle_frame in sorted(observations):
+        previous = observations.get(middle_frame - period)
+        current = observations.get(middle_frame)
+        following = observations.get(middle_frame + period)
+        if previous is None or current is None or following is None:
+            continue
+        previous_ok, previous_reason, _previous_quality, _previous_count = (
+            _associate_cycle_candidates(previous, current)
+        )
+        following_ok, following_reason, _following_quality, _following_count = (
+            _associate_cycle_candidates(current, following)
+        )
+        if previous_ok and following_ok:
+            return True, "observed_period", 2
+        failures.extend((previous_reason, following_reason))
+    if "ambiguous" in failures:
+        return False, "period_association_ambiguous", 0
+    if "incomplete" in failures:
+        return False, "period_association_incomplete", 0
+    return False, "period_association_quality", 0
+
+
+def _associate_cycle_candidates(
+    reference: Sequence[PuzzleCandidate] | None,
+    current: Sequence[PuzzleCandidate] | None,
+) -> tuple[bool, str, float | None, int]:
+    if not reference or not current or len(reference) < _MIN_CYCLE_ASSOCIATIONS:
+        return False, "incomplete", None, 0
+    if len(current) < len(reference):
+        return False, "incomplete", None, 0
+    for left_index, left in enumerate(current):
+        if any(
+            _cycle_association_quality(left, right)
+            <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+            for right in current[left_index + 1 :]
+        ):
+            return False, "ambiguous", None, 0
+
+    selected_indices: list[int] = []
+    selected_qualities: list[float] = []
+    for candidate in reference:
+        qualities = sorted(
+            (
+                _cycle_association_quality(candidate, other),
+                index,
+            )
+            for index, other in enumerate(current)
+        )
+        best_quality, best_index = qualities[0]
+        if best_quality > _CYCLE_ASSOCIATION_QUALITY_LIMIT:
+            return False, "quality", best_quality, len(selected_indices)
+        if (
+            len(qualities) > 1
+            and qualities[1][0] <= _CYCLE_ASSOCIATION_QUALITY_LIMIT
+            and qualities[1][0] - best_quality
+            <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+        ):
+            return False, "ambiguous", best_quality, len(selected_indices)
+        selected_indices.append(best_index)
+        selected_qualities.append(best_quality)
+    if len(set(selected_indices)) != len(selected_indices):
+        return False, "ambiguous", max(selected_qualities), len(selected_indices)
+    return True, "observed", max(selected_qualities), len(selected_indices)
+
+
+def _cycle_association_quality(
+    reference: PuzzleCandidate,
+    current: PuzzleCandidate,
+) -> float:
+    reference_scale = hypot(reference.w, reference.h)
+    current_scale = hypot(current.w, current.h)
+    scale = max(1.0, reference_scale, current_scale)
+    position_residual = hypot(reference.cx - current.cx, reference.cy - current.cy) / scale
+    shape_residual = max(
+        abs(reference.w - current.w) / max(1.0, reference.w, current.w),
+        abs(reference.h - current.h) / max(1.0, reference.h, current.h),
+    )
+    return position_residual + shape_residual
 
 
 def _median_anchor_shape(

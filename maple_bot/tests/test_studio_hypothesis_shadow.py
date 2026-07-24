@@ -426,15 +426,15 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                     "payload": {"board_roi": {"w": 120, "h": 100}},
                 }
             ]
-            for frame_index in range(10):
+            for frame_index in range(12):
                 phase = frame_index % 3
                 anchor_a = (20.0 + phase * 2.0, 20.0)
                 anchor_b = (80.0 + phase * 2.0, 20.0)
                 background = (48.0 + phase * 2.0, 50.0)
                 target = (
                     (60.0, 50.0)
-                    if frame_index < 6
-                    else (58.0 + float(frame_index - 6), 50.0)
+                    if frame_index < 9
+                    else (58.0 + float(frame_index - 9), 50.0)
                 )
                 candidates = [
                     _trace_candidate(f"anchor-a-{frame_index}", anchor_a),
@@ -442,6 +442,7 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                     _trace_candidate(f"background-{frame_index}", background),
                     _trace_candidate(f"target-{frame_index}", target),
                 ]
+                candidates = candidates[phase:] + candidates[:phase]
                 scores.append(
                     {
                         "solver_frame_index": frame_index,
@@ -456,7 +457,7 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                         "payload": {"candidates": candidates},
                     }
                 )
-                if frame_index < 6:
+                if frame_index < 9:
                     trace.append(
                         {
                             "type": "TEMPORAL_SELECTOR",
@@ -521,8 +522,8 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             diagnostic = phased[-1]
             self.assertEqual(diagnostic["period"], 3)
             self.assertEqual(diagnostic["local_lag"], 3)
-            self.assertEqual(diagnostic["reference_frame"], 6)
-            self.assertGreaterEqual(diagnostic["qualified_anchor_count"], 2)
+            self.assertEqual(diagnostic["reference_frame"], 8)
+            self.assertGreaterEqual(diagnostic["period_recurrence_comparisons"], 2)
             self.assertIn("merge_event_id", diagnostic)
             self.assertIn("selected_split_child_ids", diagnostic)
             self.assertIn("hold_reason", diagnostic)
@@ -589,6 +590,120 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertIsNone(diagnostic["period"])
             self.assertIsNone(diagnostic["local_lag"])
             self.assertEqual(diagnostic["cycle_evidence_reason"], "period_unavailable")
+
+    def test_merge_split_shadow_rejects_finite_nonperiodic_episode(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-nonperiodic-") as tmp:
+            root = Path(tmp)
+            frames = [
+                [
+                    _trace_candidate(f"left-{frame_index}", (20.0 + frame_index * 12.0, 20.0)),
+                    _trace_candidate(f"right-{frame_index}", (80.0 + frame_index * 12.0, 20.0)),
+                    _trace_candidate(f"background-{frame_index}", (48.0 + frame_index * 12.0, 50.0)),
+                    _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+                ]
+                for frame_index in range(10)
+            ]
+            details = _replay_cycle_details(
+                root,
+                frames,
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertEqual(
+                diagnostic["cycle_evidence_reason"],
+                "period_association_quality",
+            )
+
+    def test_merge_split_shadow_rejects_unverified_local_lag(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-local-lag-") as tmp:
+            root = Path(tmp)
+            frames = _periodic_cycle_frames(total_frames=10, empty_frames={9})
+            details = _replay_cycle_details(
+                root,
+                frames,
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertEqual(diagnostic["period"], 3)
+            self.assertIsNone(diagnostic["local_lag"])
+            self.assertFalse(diagnostic["phase_qualified"])
+            self.assertEqual(
+                diagnostic["local_lag_evidence_reason"],
+                "insufficient_local_lag_evidence",
+            )
+
+    def test_merge_split_shadow_closes_second_white_episode(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-second-episode-") as tmp:
+            root = Path(tmp)
+            frames = _periodic_cycle_frames(total_frames=12)
+            details = _replay_cycle_details(
+                root,
+                frames,
+                white_frames=set(range(9)) | {10},
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertEqual(diagnostic["period"], 3)
+            self.assertEqual(
+                diagnostic["cycle_evidence_reason"],
+                "retained_period_insufficient_episode_evidence",
+            )
+            self.assertIsNone(diagnostic["local_lag"])
+            self.assertIn(
+                diagnostic["qualified_anchor_count"],
+                {0, None},
+            )
+
+    def test_merge_split_shadow_rejects_ambiguous_or_incomplete_cycle_association(self) -> None:
+        cases: dict[str, tuple[list[list[dict[str, object]]], set[int]]] = {}
+        crossing = _periodic_cycle_frames(total_frames=10)
+        for frame_index in range(3, 6):
+            phase = frame_index % 3
+            crossing[frame_index] = [
+                _trace_candidate(f"anchor-a-{frame_index}", (20.0 + phase * 2.0, 20.0)),
+                _trace_candidate(f"cross-a-{frame_index}", (20.0 + phase * 2.0, 20.0)),
+                _trace_candidate(f"anchor-b-{frame_index}", (80.0 + phase * 2.0, 20.0)),
+                _trace_candidate(f"background-{frame_index}", (48.0 + phase * 2.0, 50.0)),
+                _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+            ]
+        cases["crossing"] = (crossing, set(range(9)))
+        omitted: list[list[dict[str, object]]] = []
+        for frame_index in range(8):
+            if frame_index % 3 != 0:
+                omitted.append([_trace_candidate(f"target-{frame_index}", (60.0, 50.0))])
+                continue
+            rows = _periodic_cycle_frames(total_frames=frame_index + 1)[-1]
+            if frame_index == 3:
+                rows = [
+                    candidate
+                    for candidate in rows
+                    if not str(candidate["candidate_id"]).startswith("anchor-b-")
+                ]
+            omitted.append(rows)
+        cases["one_frame_omission"] = (omitted, set(range(7)))
+
+        for name, (frames, white_frames) in cases.items():
+            with self.subTest(name=name), TemporaryDirectory(
+                prefix=f"studio-cycle-{name}-"
+            ) as tmp:
+                details = _replay_cycle_details(
+                    Path(tmp),
+                    frames,
+                    white_frames=white_frames,
+                )
+
+                diagnostic = details[-1]["merge_split_relative"]
+                self.assertIsNone(diagnostic["period"])
+                self.assertIn(
+                    diagnostic["cycle_evidence_reason"],
+                    {
+                        "period_association_ambiguous",
+                        "period_association_incomplete",
+                    },
+                )
 
     def test_merge_split_relative_reports_relation_preserving_split_child(self) -> None:
         with TemporaryDirectory(prefix="studio-merge-split-trace-") as tmp:
@@ -698,6 +813,86 @@ def _trace_candidate(candidate_id: str, center: tuple[float, float]) -> dict[str
         "score": 0.8,
         "source": "raw",
     }
+
+
+def _periodic_cycle_frames(
+    *,
+    total_frames: int,
+    empty_frames: set[int] = set(),
+) -> list[list[dict[str, object]]]:
+    frames: list[list[dict[str, object]]] = []
+    for frame_index in range(total_frames):
+        if frame_index in empty_frames:
+            frames.append([])
+            continue
+        phase = frame_index % 3
+        rows = [
+            _trace_candidate(f"anchor-a-{frame_index}", (20.0 + phase * 2.0, 20.0)),
+            _trace_candidate(f"anchor-b-{frame_index}", (80.0 + phase * 2.0, 20.0)),
+            _trace_candidate(f"background-{frame_index}", (48.0 + phase * 2.0, 50.0)),
+            _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+        ]
+        frames.append(rows[phase:] + rows[:phase])
+    return frames
+
+
+def _replay_cycle_details(
+    root: Path,
+    frames: list[list[dict[str, object]]],
+    *,
+    white_frames: set[int],
+) -> list[dict[str, object]]:
+    score_path = root / "score.jsonl"
+    trace_path = root / "trace.jsonl"
+    scores = [
+        {"solver_frame_index": frame_index, "target_x": 60.0, "target_y": 50.0}
+        for frame_index in range(len(frames))
+    ]
+    trace: list[dict[str, object]] = [
+        {
+            "type": "SESSION_START",
+            "frame_index": None,
+            "payload": {"board_roi": {"w": 140, "h": 100}},
+        }
+    ]
+    for frame_index, candidates in enumerate(frames):
+        trace.extend(
+            [
+                {
+                    "type": "CANDIDATES",
+                    "frame_index": frame_index,
+                    "payload": {"candidates": candidates},
+                },
+                {
+                    "type": "TEMPORAL_SELECTOR",
+                    "frame_index": frame_index,
+                    "payload": {
+                        "debug": {
+                            "kinematic_wide_beam_debug": {
+                                "reason": (
+                                    "white_anchor"
+                                    if frame_index in white_frames
+                                    else "tracking"
+                                ),
+                                "point": [60.0, 50.0],
+                            }
+                        }
+                    },
+                },
+                {
+                    "type": "TARGET_SELECTION",
+                    "frame_index": frame_index,
+                    "payload": {"point": [60.0, 50.0], "source": "recorded"},
+                },
+            ]
+        )
+    _write_jsonl(score_path, scores)
+    _write_jsonl(trace_path, trace)
+    return replay_hypothesis_selection_details(
+        score_path,
+        trace_path,
+        merge_split_relative=True,
+    )
 
 
 if __name__ == "__main__":
