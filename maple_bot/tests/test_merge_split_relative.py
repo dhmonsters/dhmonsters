@@ -544,6 +544,103 @@ class SplitChildPairSelectionTest(unittest.TestCase):
 
 
 class SplitChildAssignmentTest(unittest.TestCase):
+    def test_conflicting_qualified_anchor_votes_hold(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        anchors = (
+            module.BackgroundAnchor("a", (0.0, 0.0), 9, qualified_cycle=True),
+            module.BackgroundAnchor("b", (10.0, 0.0), 9, qualified_cycle=True),
+            module.BackgroundAnchor("c", (0.0, 10.0), 9, qualified_cycle=True),
+        )
+        background = _center_candidate("background-child", (4.0, 3.0))
+        target = _center_candidate("target-child", (7.0, 7.0))
+        fingerprint = module.RelationFingerprint(
+            pair_coordinates=(
+                (
+                    "a",
+                    "b",
+                    module.relative_coordinate(
+                        background.center,
+                        anchors[0].point,
+                        anchors[1].point,
+                    ),
+                ),
+                (
+                    "a",
+                    "c",
+                    module.relative_coordinate(
+                        target.center,
+                        anchors[0].point,
+                        anchors[2].point,
+                    ),
+                ),
+            ),
+            jitter=0.02,
+        )
+
+        decision = module.assign_split_children(
+            children=(background, target),
+            anchors=anchors,
+            fingerprint=fingerprint,
+            predicted_target_point=target.center,
+        )
+
+        self.assertEqual(decision.reason, "ambiguous_phase_relation")
+        self.assertEqual(
+            {vote["supported_candidate_id"] for vote in decision.debug["anchor_votes"]},
+            {"background-child", "target-child"},
+        )
+
+    def test_affine_triplets_prefer_background_under_shear(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        reference_anchors = (
+            module.BackgroundAnchor("a", (0.0, 0.0), 9, qualified_cycle=True),
+            module.BackgroundAnchor("b", (10.0, 0.0), 9, qualified_cycle=True),
+            module.BackgroundAnchor("c", (0.0, 10.0), 9, qualified_cycle=True),
+        )
+        current_anchors = (
+            module.BackgroundAnchor("a", (0.0, 0.0), 10, qualified_cycle=True),
+            module.BackgroundAnchor("b", (20.0, 0.0), 10, qualified_cycle=True),
+            module.BackgroundAnchor("c", (5.0, 10.0), 10, qualified_cycle=True),
+        )
+        fingerprint = module.RelationFingerprint.from_observations(
+            background_point=(3.0, 4.0),
+            anchors=reference_anchors,
+            jitter=0.02,
+        )
+
+        self.assertTrue(hasattr(fingerprint, "triplet_coordinates"))
+        if not hasattr(fingerprint, "triplet_coordinates"):
+            return
+
+        true_background = _center_candidate("background-child", (8.0, 4.0))
+        pair_only_background = _center_candidate("pair-only-child", (6.0, 8.0))
+        pair_coordinate = module.relative_coordinate(
+            (3.0, 4.0),
+            reference_anchors[0].point,
+            reference_anchors[1].point,
+        )
+        pair_only = module.RelationFingerprint(
+            pair_coordinates=(("a", "b", pair_coordinate),),
+            jitter=0.02,
+        )
+
+        pair_decision = module.assign_split_children(
+            children=(true_background, pair_only_background),
+            anchors=current_anchors,
+            fingerprint=pair_only,
+            predicted_target_point=true_background.center,
+        )
+        affine_decision = module.assign_split_children(
+            children=(true_background, pair_only_background),
+            anchors=current_anchors,
+            fingerprint=fingerprint,
+            predicted_target_point=pair_only_background.center,
+        )
+
+        self.assertEqual(pair_decision.background_candidate_id, "pair-only-child")
+        self.assertEqual(affine_decision.background_candidate_id, "background-child")
+        self.assertEqual(affine_decision.debug["relation_basis"], "affine_triplet")
+
     def test_phase_conditioned_relation_survives_global_distortion(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         reference_anchors = (
@@ -1127,6 +1224,114 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
 
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
+    def test_phase_reference_snapshot_must_be_qualified_and_unclipped(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        target = _center_candidate("target", (34.0, 32.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+
+        for frame_index in range(4):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+
+        background_track_id = resolver._anchor_manager.track_id_for_candidate(
+            "background"
+        )
+        anchor_track_ids = tuple(
+            resolver._anchor_manager.track_id_for_candidate(candidate_id) or ""
+            for candidate_id in ("anchor-a", "anchor-b")
+        )
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target",
+            background_track_id=background_track_id or "",
+            anchor_track_ids=anchor_track_ids,
+            premerge_target_point=target.center,
+            premerge_target_bbox=target.bbox,
+            premerge_background_bbox=background.bbox,
+            merge_bbox=None,
+            opened_frame=0,
+            last_frame=3,
+        )
+
+        resolver._remember_phase_background_relation(
+            context=context,
+            frame_index=3,
+            phase_context=phase,
+        )
+
+        self.assertIsNone(resolver._fingerprint)
+
+    def test_phase_direct_merge_retains_background_track_for_split_recovery(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        target = _center_candidate("target", (34.0, 32.0))
+        background = _center_candidate("background", (30.0, 28.0))
+
+        for frame_index in range(6):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+
+        merged = _candidate("merged", (28.0, 26.0, 38.0, 36.0), frame_index=6)
+        merged_decision = resolver.update(
+            incumbent_point=target.center,
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=6,
+            phase_context=phase,
+        )
+        target_child = _center_candidate("target-child", (34.0, 32.0), frame_index=7)
+        background_child = _center_candidate(
+            "background-child",
+            (30.0, 28.0),
+            frame_index=7,
+        )
+        split_decision = resolver.update(
+            incumbent_point=target.center,
+            candidates=(target_child, background_child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=7,
+            phase_context=phase,
+        )
+
+        self.assertEqual(merged_decision.state, module.MergeState.MERGED)
+        self.assertIsNotNone(resolver._merge_context)
+        self.assertTrue(resolver._merge_context.background_track_id.startswith("anchor-"))
+        self.assertNotIn(
+            resolver._merge_context.background_track_id,
+            resolver._merge_context.anchor_track_ids,
+        )
+        self.assertIsNotNone(resolver._fingerprint)
+        self.assertEqual(split_decision.background_candidate_id, "background-child")
+        self.assertEqual(split_decision.target_candidate_id, "target-child")
+
     def test_partial_overlap_refreshes_visible_background_fingerprint(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         resolver = module.MergeSplitRelativeResolver(

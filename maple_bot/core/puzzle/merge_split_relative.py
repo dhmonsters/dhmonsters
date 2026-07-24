@@ -20,6 +20,13 @@ class RelativeCoordinate:
     v: float
 
 
+@dataclass(frozen=True)
+class AffineCoordinate:
+    a: float
+    b: float
+    c: float
+
+
 def relative_coordinate(
     point: Point,
     anchor_a: Point,
@@ -46,6 +53,45 @@ def relative_coordinate_residual(
     jitter: float,
 ) -> float:
     distance = hypot(current.u - expected.u, current.v - expected.v)
+    return distance / max(1e-6, float(jitter))
+
+
+def affine_coordinate(
+    point: Point,
+    anchor_a: Point,
+    anchor_b: Point,
+    anchor_c: Point,
+) -> AffineCoordinate | None:
+    bx = anchor_b[0] - anchor_a[0]
+    by = anchor_b[1] - anchor_a[1]
+    cx = anchor_c[0] - anchor_a[0]
+    cy = anchor_c[1] - anchor_a[1]
+    determinant = bx * cy - by * cx
+    scale_squared = max(
+        bx * bx + by * by,
+        cx * cx + cy * cy,
+        (anchor_c[0] - anchor_b[0]) ** 2 + (anchor_c[1] - anchor_b[1]) ** 2,
+    )
+    if abs(determinant) / max(1e-6, scale_squared) <= 0.05:
+        return None
+
+    px = point[0] - anchor_a[0]
+    py = point[1] - anchor_a[1]
+    b = (px * cy - py * cx) / determinant
+    c = (bx * py - by * px) / determinant
+    return AffineCoordinate(a=1.0 - b - c, b=b, c=c)
+
+
+def affine_coordinate_residual(
+    current: AffineCoordinate,
+    expected: AffineCoordinate,
+    jitter: float,
+) -> float:
+    distance = hypot(
+        current.a - expected.a,
+        current.b - expected.b,
+        current.c - expected.c,
+    )
     return distance / max(1e-6, float(jitter))
 
 
@@ -490,6 +536,9 @@ class BackgroundAnchorManager:
 class RelationFingerprint:
     pair_coordinates: tuple[tuple[str, str, RelativeCoordinate], ...]
     jitter: float
+    triplet_coordinates: tuple[
+        tuple[str, str, str, AffineCoordinate], ...
+    ] = ()
 
     @classmethod
     def from_observations(
@@ -500,12 +549,33 @@ class RelationFingerprint:
         jitter: float,
     ) -> "RelationFingerprint":
         rows: list[tuple[str, str, RelativeCoordinate]] = []
+        triplets: list[tuple[str, str, str, AffineCoordinate]] = []
         for left_index, left in enumerate(anchors):
             for right in anchors[left_index + 1 :]:
                 coordinate = relative_coordinate(background_point, left.point, right.point)
                 if coordinate is not None and not left.clipped and not right.clipped:
                     rows.append((left.track_id, right.track_id, coordinate))
-        return cls(pair_coordinates=tuple(rows), jitter=max(1e-6, float(jitter)))
+        for left, middle, right in combinations(anchors, 3):
+            coordinate = affine_coordinate(
+                background_point,
+                left.point,
+                middle.point,
+                right.point,
+            )
+            if (
+                coordinate is not None
+                and not left.clipped
+                and not middle.clipped
+                and not right.clipped
+            ):
+                triplets.append(
+                    (left.track_id, middle.track_id, right.track_id, coordinate)
+                )
+        return cls(
+            pair_coordinates=tuple(rows),
+            jitter=max(1e-6, float(jitter)),
+            triplet_coordinates=tuple(triplets),
+        )
 
 
 @dataclass(frozen=True)
@@ -537,29 +607,76 @@ def assign_split_children(
         for left_id, right_id, expected in fingerprint.pair_coordinates
         if left_id in usable and right_id in usable
     )
+    valid_triplets = tuple(
+        (left_id, middle_id, right_id, expected)
+        for left_id, middle_id, right_id, expected in fingerprint.triplet_coordinates
+        if left_id in usable and middle_id in usable and right_id in usable
+    )
+    relation_basis = "affine_triplet" if valid_triplets else "pair"
     debug = {
         "qualified_anchor_count": len(usable),
         "valid_anchor_pair_count": len(valid_pairs),
+        "valid_affine_triplet_count": len(valid_triplets),
+        "relation_basis": relation_basis,
         "usable_anchor_ids": tuple(usable),
     }
-    if len(valid_pairs) < 1:
+    if not valid_triplets and len(valid_pairs) < 1:
         return _hold_decision("insufficient_cycle_anchors", debug=debug)
 
     child_residuals: list[tuple[float, Candidate]] = []
+    basis_rows: list[tuple[str, tuple[str, ...], object]] = []
+    if valid_triplets:
+        basis_rows = [
+            (
+                "affine_triplet",
+                (left_id, middle_id, right_id),
+                expected,
+            )
+            for left_id, middle_id, right_id, expected in valid_triplets
+        ]
+    else:
+        basis_rows = [
+            ("pair", (left_id, right_id), expected)
+            for left_id, right_id, expected in valid_pairs
+        ]
+    residuals_by_child: dict[str, list[float]] = {}
     for child in children:
         residuals: list[float] = []
-        for left_id, right_id, expected in valid_pairs:
-            current = relative_coordinate(
-                child.center,
-                usable[left_id].point,
-                usable[right_id].point,
-            )
-            if current is not None:
-                residuals.append(
-                    relative_coordinate_residual(current, expected, fingerprint.jitter)
+        for basis, track_ids, expected in basis_rows:
+            if basis == "affine_triplet":
+                left_id, middle_id, right_id = track_ids
+                current = affine_coordinate(
+                    child.center,
+                    usable[left_id].point,
+                    usable[middle_id].point,
+                    usable[right_id].point,
                 )
+                if current is not None:
+                    residuals.append(
+                        affine_coordinate_residual(
+                            current,
+                            expected,
+                            fingerprint.jitter,
+                        )
+                    )
+            else:
+                left_id, right_id = track_ids
+                current = relative_coordinate(
+                    child.center,
+                    usable[left_id].point,
+                    usable[right_id].point,
+                )
+                if current is not None:
+                    residuals.append(
+                        relative_coordinate_residual(
+                            current,
+                            expected,
+                            fingerprint.jitter,
+                        )
+                    )
         if residuals:
             child_residuals.append((float(median(residuals)), child))
+            residuals_by_child[child.candidate_id] = residuals
 
     debug["child_residuals"] = tuple(
         (candidate.candidate_id, residual)
@@ -567,6 +684,44 @@ def assign_split_children(
     )
     if len(child_residuals) < 2:
         return _hold_decision("insufficient_cycle_anchors", debug=debug)
+
+    anchor_votes: list[dict[str, object]] = []
+    for basis_index, (basis, track_ids, _expected) in enumerate(basis_rows):
+        contenders = sorted(
+            (
+                (residuals_by_child[candidate.candidate_id][basis_index], candidate)
+                for _residual, candidate in child_residuals
+                if candidate.candidate_id in residuals_by_child
+                and len(residuals_by_child[candidate.candidate_id]) > basis_index
+            ),
+            key=lambda row: row[0],
+        )
+        if len(contenders) < 2:
+            continue
+        winner_residual, winner = contenders[0]
+        runner_residual, runner = contenders[1]
+        anchor_votes.append(
+            {
+                "basis": basis,
+                "anchor_track_ids": track_ids,
+                "supported_candidate_id": winner.candidate_id,
+                "supported_residual": winner_residual,
+                "runner_candidate_id": runner.candidate_id,
+                "runner_residual": runner_residual,
+            }
+        )
+    supported_ids = {
+        vote["supported_candidate_id"]
+        for vote in anchor_votes
+    }
+    debug["anchor_votes"] = tuple(anchor_votes)
+    debug["relation_vote_quorum"] = {
+        "support_count": len(supported_ids),
+        "basis_count": len(anchor_votes),
+        "conflicting": len(supported_ids) > 1,
+    }
+    if len(supported_ids) > 1:
+        return _hold_decision("ambiguous_phase_relation", debug=debug)
 
     child_residuals.sort(key=lambda row: row[0])
     background_residual, background = child_residuals[0]
@@ -652,6 +807,7 @@ class _VisiblePair:
     target: Candidate
     background: Candidate
     event_id: int
+    background_track_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1080,6 +1236,13 @@ class MergeSplitRelativeResolver:
                     target_candidate,
                     collision,
                     event_id=event.event_id,
+                    background_track_id=(
+                        self._anchor_manager.track_id_for_candidate(
+                            collision.candidate_id
+                        )
+                        if phase_context is not None and collision is not None
+                        else None
+                    ),
                 )
             self._merge_context = None
             self._merge_center = None
@@ -1146,7 +1309,12 @@ class MergeSplitRelativeResolver:
             if merged is not None:
                 self._merge_center = merged.center
                 self._merge_bbox = merged.bbox
-                self._ensure_merge_context_for_merged_event(event, merged)
+                self._ensure_merge_context_for_merged_event(
+                    event,
+                    merged,
+                    frame_index=frame_index,
+                    phase_context=phase_context,
+                )
             self._advance_latent_target(incumbent_point)
             return self._event_hold(event, "merged_identity_hold")
 
@@ -1233,6 +1401,13 @@ class MergeSplitRelativeResolver:
                     None,
                 ),
                 event_id=event.event_id,
+                background_track_id=(
+                    self._anchor_manager.track_id_for_candidate(
+                        decision.background_candidate_id
+                    )
+                    if phase_context is not None
+                    else None
+                ),
             )
             recovered = MergeSplitDecision(
                 state=event.state,
@@ -1328,20 +1503,39 @@ class MergeSplitRelativeResolver:
         self,
         event: MergeEvent,
         merged_candidate: Candidate,
+        *,
+        frame_index: int | None,
+        phase_context: CyclePhaseContext | None,
     ) -> None:
         if self._merge_context is not None and self._merge_context.event_id == event.event_id:
             self._merge_context.merge_bbox = merged_candidate.bbox
             self._merge_context.last_frame = merged_candidate.frame_index
+            if phase_context is not None and frame_index is not None:
+                self._fingerprint = None
+                self._remember_phase_background_relation(
+                    context=self._merge_context,
+                    frame_index=frame_index,
+                    phase_context=phase_context,
+                )
             return
         visible_pair = self._last_visible_pair
         if visible_pair is None or visible_pair.event_id != event.event_id - 1:
             self._merge_context = None
             return
+        background_track_id = (
+            visible_pair.background_track_id
+            if phase_context is not None
+            else None
+        ) or visible_pair.background.candidate_id
         self._merge_context = MergeEventContext(
             event_id=event.event_id,
             target_candidate_id=visible_pair.target.candidate_id,
-            background_track_id=visible_pair.background.candidate_id,
-            anchor_track_ids=tuple(anchor.track_id for anchor in self._current_anchors),
+            background_track_id=background_track_id,
+            anchor_track_ids=tuple(
+                anchor.track_id
+                for anchor in self._current_anchors
+                if anchor.track_id != background_track_id
+            ),
             premerge_target_point=visible_pair.target.center,
             premerge_target_bbox=visible_pair.target.bbox,
             premerge_background_bbox=visible_pair.background.bbox,
@@ -1349,6 +1543,13 @@ class MergeSplitRelativeResolver:
             opened_frame=visible_pair.target.frame_index,
             last_frame=merged_candidate.frame_index,
         )
+        if phase_context is not None and frame_index is not None:
+            self._fingerprint = None
+            self._remember_phase_background_relation(
+                context=self._merge_context,
+                frame_index=frame_index,
+                phase_context=phase_context,
+            )
 
     def _remember_visible_pair(
         self,
@@ -1356,6 +1557,7 @@ class MergeSplitRelativeResolver:
         background_candidate: Candidate | None,
         *,
         event_id: int,
+        background_track_id: str | None = None,
     ) -> None:
         if target_candidate is None or background_candidate is None:
             return
@@ -1363,6 +1565,7 @@ class MergeSplitRelativeResolver:
             target=target_candidate,
             background=background_candidate,
             event_id=event_id,
+            background_track_id=background_track_id,
         )
 
     def _unresolved_split_hold(
@@ -1474,6 +1677,15 @@ class MergeSplitRelativeResolver:
             if reference is not None
         )
         if reference_background is None or len(reference_anchors) < 2:
+            return
+        if (
+            not reference_background.qualified_cycle
+            or reference_background.clipped
+            or any(
+                not anchor.qualified_cycle or anchor.clipped
+                for anchor in reference_anchors
+            )
+        ):
             return
         self._fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
