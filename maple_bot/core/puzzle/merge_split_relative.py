@@ -644,6 +644,7 @@ class BackgroundAnchorManager:
     ) -> BackgroundAnchor:
         current = observation or track.latest_observation
         snapshot = track.qualification_by_frame.get(current.frame_index)
+        lifetime_disqualified_reason = track.lifetime_disqualified_reason
         return BackgroundAnchor(
             track_id=track.track_id,
             point=current.point,
@@ -655,9 +656,13 @@ class BackgroundAnchorManager:
             clipped=current.clipped,
             candidate_id=current.candidate_id,
             qualified_cycle=(
-                snapshot.qualified_cycle
-                if snapshot is not None
-                else track.qualified_cycle
+                False
+                if lifetime_disqualified_reason is not None
+                else (
+                    snapshot.qualified_cycle
+                    if snapshot is not None
+                    else track.qualified_cycle
+                )
             ),
             cycle_survival=(
                 snapshot.cycle_survival
@@ -670,9 +675,13 @@ class BackgroundAnchorManager:
                 else track.loop_residual
             ),
             disqualified_reason=(
-                snapshot.disqualified_reason
-                if snapshot is not None
-                else track.disqualified_reason
+                lifetime_disqualified_reason
+                if lifetime_disqualified_reason is not None
+                else (
+                    snapshot.disqualified_reason
+                    if snapshot is not None
+                    else track.disqualified_reason
+                )
             ),
         )
 
@@ -1603,11 +1612,17 @@ class MergeSplitRelativeResolver:
 
         if recovering_split:
             if phase_context is not None:
+                phase_refresh_reason: str | None = None
                 if frame_index is not None and self._merge_context is not None:
-                    self._remember_phase_background_relation(
+                    phase_refresh_reason = self._remember_phase_background_relation(
                         context=self._merge_context,
                         frame_index=frame_index,
                         phase_context=phase_context,
+                    )
+                if phase_refresh_reason is not None:
+                    return self._unresolved_split_hold(
+                        event,
+                        phase_refresh_reason,
                     )
                 if (
                     self._fingerprint_mode != "phase"
@@ -2016,6 +2031,8 @@ class MergeSplitRelativeResolver:
             anchors=nearby_anchors,
             jitter=max(0.02, normalized_jitter),
         )
+        if not fingerprint.pair_coordinates:
+            return
         self._fingerprint = fingerprint
         self._fingerprint_mode = "legacy"
         self._phase_reference_frame = None
@@ -2028,18 +2045,18 @@ class MergeSplitRelativeResolver:
         context: MergeEventContext,
         frame_index: int,
         phase_context: CyclePhaseContext,
-    ) -> None:
+    ) -> str | None:
         if phase_context.local_lag is None or int(phase_context.local_lag) <= 0:
-            return
+            return "insufficient_cycle_anchors"
         reference_frame = int(frame_index) - int(phase_context.local_lag)
         reference_background = self._anchor_manager.reference_anchor(
             context.background_track_id,
             reference_frame,
         )
         if reference_background is None:
-            return
+            return "insufficient_cycle_anchors"
         if not reference_background.qualified_cycle or reference_background.clipped:
-            return
+            return "insufficient_cycle_anchors"
         if context.phase_anchor_track_ids:
             reference_track_ids = context.phase_anchor_track_ids
         else:
@@ -2054,7 +2071,7 @@ class MergeSplitRelativeResolver:
                 and not reference.clipped
             )
             if len(eligible_reference_anchors) < 2:
-                return
+                return "insufficient_cycle_anchors"
             selected_reference_anchors, best_triangle_quality = (
                 _select_bounded_phase_reference_anchors(
                     background_point=reference_background.point,
@@ -2077,20 +2094,30 @@ class MergeSplitRelativeResolver:
                 or not reference.qualified_cycle
                 or reference.clipped
             ):
-                return
+                return "insufficient_cycle_anchors"
             reference_anchors.append(reference)
         if len(reference_anchors) < 2:
-            return
+            return "insufficient_cycle_anchors"
         fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
             anchors=reference_anchors,
             jitter=0.02,
         )
+        if not fingerprint.pair_coordinates:
+            return "ambiguous_phase_relation"
+        if (
+            self._fingerprint_mode == "phase"
+            and self._fingerprint is not None
+            and self._fingerprint.triplet_coordinates
+            and not fingerprint.triplet_coordinates
+        ):
+            return "ambiguous_phase_relation"
         self._fingerprint = fingerprint
         self._fingerprint_mode = "phase"
         self._phase_reference_frame = reference_frame
         self._phase_fingerprint_frame = frame_index
         self._fingerprint_event_id = context.event_id
+        return None
 
     def _advance_latent_target(self, fallback: Point | None) -> None:
         point = self._predicted_target_point(fallback, ())
