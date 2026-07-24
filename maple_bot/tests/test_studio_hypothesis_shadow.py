@@ -773,6 +773,79 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertEqual(diagnostic["period"], 3)
             self.assertEqual(diagnostic["local_lag"], 3)
             self.assertEqual(diagnostic["local_lag_evidence_reason"], "observed_local_lag")
+            self.assertNotIn(
+                "association_permutation",
+                diagnostic["stable_cycle_excluded_counts"],
+            )
+
+    def test_merge_split_shadow_rejects_distinct_destination_track_swap(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-track-swap-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _track_swap_cycle_frames(total_frames=10),
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertFalse(diagnostic["phase_qualified"])
+            self.assertGreaterEqual(
+                diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_permutation",
+                    0,
+                ),
+                2,
+            )
+
+    def test_merge_split_shadow_rejects_late_tracks_after_empty_white_start(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-empty-start-") as tmp:
+            frames = _periodic_cycle_frames(total_frames=10)
+            frames[0] = [_trace_candidate("target-0", (60.0, 50.0))]
+            details = _replay_cycle_details(
+                Path(tmp),
+                frames,
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertEqual(
+                diagnostic["stable_cycle_excluded_counts"].get("cycle_coverage"),
+                3,
+            )
+
+    def test_merge_split_shadow_counts_missing_candidate_frame_in_episode_coverage(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-missing-candidates-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _periodic_cycle_frames(total_frames=10),
+                white_frames=set(range(9)),
+                omit_candidate_frames={4},
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertEqual(
+                diagnostic["stable_cycle_excluded_counts"].get("association_missing"),
+                3,
+            )
+
+    def test_merge_split_shadow_rejects_cycle_when_frame_shape_is_unknown(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-frame-shape-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _periodic_cycle_frames(total_frames=10),
+                white_frames=set(range(9)),
+                include_frame_shape=False,
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertFalse(diagnostic["phase_qualified"])
+            self.assertEqual(
+                diagnostic["stable_cycle_frame_shape_reason"],
+                "frame_shape_unavailable",
+            )
 
     def test_merge_split_shadow_requires_three_stable_cycle_tracks(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-stable-minimum-") as tmp:
@@ -852,6 +925,10 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertIsNone(preparing["period"])
             self.assertIsNone(preparing["local_lag"])
             self.assertFalse(preparing["phase_qualified"])
+            self.assertEqual(preparing["stable_cycle_track_count"], 0)
+            self.assertEqual(preparing["stable_cycle_track_ids"], ())
+            self.assertEqual(preparing["stable_cycle_excluded_counts"], {})
+            self.assertEqual(preparing["stable_cycle_exclusion_reasons"], {})
 
             diagnostic = details[14]["merge_split_relative"]
             self.assertIsNone(diagnostic["period"])
@@ -1150,6 +1227,29 @@ def _volatile_periodic_cycle_frames(
     return frames
 
 
+def _track_swap_cycle_frames(*, total_frames: int) -> list[list[dict[str, object]]]:
+    frames = _periodic_cycle_frames(total_frames=total_frames)
+    frames[0] = [
+        _trace_candidate("swap-a-0", (20.0, 20.0), half_size=10.0),
+        _trace_candidate("swap-b-0", (80.0, 20.0), half_size=10.0),
+        _trace_candidate("swap-c-0", (50.0, 50.0), half_size=10.0),
+        _trace_candidate("target-0", (60.0, 50.0)),
+    ]
+    frames[1] = [
+        _trace_candidate("swap-a-1", (60.0, 20.0), half_size=10.0),
+        _trace_candidate("swap-b-1", (40.0, 20.0), half_size=10.0),
+        _trace_candidate("swap-c-1", (50.0, 50.0), half_size=10.0),
+        _trace_candidate("target-1", (60.0, 50.0)),
+    ]
+    frames[2] = [
+        _trace_candidate("swap-a-2", (60.0, 20.0), half_size=10.0),
+        _trace_candidate("swap-b-2", (40.0, 20.0), half_size=10.0),
+        _trace_candidate("swap-c-2", (52.0, 50.0), half_size=10.0),
+        _trace_candidate("target-2", (60.0, 50.0)),
+    ]
+    return frames
+
+
 def _temporal_chain_candidates(
     frame_index: int,
     positions: tuple[float, float],
@@ -1202,6 +1302,8 @@ def _replay_cycle_details(
     frames: list[list[dict[str, object]]],
     *,
     white_frames: set[int],
+    omit_candidate_frames: set[int] = set(),
+    include_frame_shape: bool = True,
 ) -> list[dict[str, object]]:
     score_path = root / "score.jsonl"
     trace_path = root / "trace.jsonl"
@@ -1209,21 +1311,18 @@ def _replay_cycle_details(
         {"solver_frame_index": frame_index, "target_x": 60.0, "target_y": 50.0}
         for frame_index in range(len(frames))
     ]
-    trace: list[dict[str, object]] = [
-        {
-            "type": "SESSION_START",
-            "frame_index": None,
-            "payload": {"board_roi": {"w": 140, "h": 100}},
-        }
-    ]
+    trace: list[dict[str, object]] = []
+    if include_frame_shape:
+        trace.append(
+            {
+                "type": "SESSION_START",
+                "frame_index": None,
+                "payload": {"board_roi": {"w": 140, "h": 100}},
+            }
+        )
     for frame_index, candidates in enumerate(frames):
         trace.extend(
             [
-                {
-                    "type": "CANDIDATES",
-                    "frame_index": frame_index,
-                    "payload": {"candidates": candidates},
-                },
                 {
                     "type": "TEMPORAL_SELECTOR",
                     "frame_index": frame_index,
@@ -1247,6 +1346,14 @@ def _replay_cycle_details(
                 },
             ]
         )
+        if frame_index not in omit_candidate_frames:
+            trace.append(
+                {
+                    "type": "CANDIDATES",
+                    "frame_index": frame_index,
+                    "payload": {"candidates": candidates},
+                }
+            )
     _write_jsonl(score_path, scores)
     _write_jsonl(trace_path, trace)
     return replay_hypothesis_selection_details(

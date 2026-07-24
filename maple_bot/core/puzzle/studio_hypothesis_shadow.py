@@ -122,9 +122,11 @@ def replay_hypothesis_selection(
     }
     events = _events_by_frame(trace_rows)
     candidate_frames = sorted(
-        frame_index
-        for frame_index, event_type in events
-        if event_type == "CANDIDATES"
+        {
+            frame_index
+            for frame_index, event_type in events
+            if event_type in {"CANDIDATES", "TEMPORAL_SELECTOR"}
+        }
     )
     tracker = TransparentKinematicBeamTracker(
         width=width,
@@ -176,6 +178,7 @@ def replay_hypothesis_selection(
     stable_cycle_track_ids: tuple[str, ...] = ()
     stable_cycle_excluded_counts: dict[str, int] = {}
     stable_cycle_exclusion_reasons: dict[str, str] = {}
+    stable_cycle_frame_shape_reason = "not_started"
     total_frames = 0
     recorded_passed_frames = 0
     replay_passed_frames = 0
@@ -187,7 +190,7 @@ def replay_hypothesis_selection(
     anchor_shapes: list[tuple[float, float]] = []
 
     for frame_index in candidate_frames:
-        candidate_payload = events[(frame_index, "CANDIDATES")]
+        candidate_payload = events.get((frame_index, "CANDIDATES"), {})
         temporal_payload = events.get((frame_index, "TEMPORAL_SELECTOR"), {})
         candidates = _candidate_models(frame_index, candidate_payload)
         candidate_rows = [
@@ -214,6 +217,11 @@ def replay_hypothesis_selection(
                 phase_observations = {}
                 period_recurrence_comparisons = 0
                 cycle_tracks = _StableCycleTracks(frame_shape=frame_shape)
+                stable_cycle_track_count = 0
+                stable_cycle_track_ids = ()
+                stable_cycle_excluded_counts = {}
+                stable_cycle_exclusion_reasons = {}
+                stable_cycle_frame_shape_reason = cycle_tracks.frame_shape_reason
             if anchor is not None and catalog_candidates:
                 white_candidate = min(
                     catalog_candidates,
@@ -231,6 +239,7 @@ def replay_hypothesis_selection(
                 stable_cycle_track_count = len(stable_cycle_track_ids)
                 stable_cycle_excluded_counts = cycle_tracks.excluded_counts
                 stable_cycle_exclusion_reasons = cycle_tracks.exclusion_reasons
+                stable_cycle_frame_shape_reason = cycle_tracks.frame_shape_reason
                 if stable_cycle_track_count >= _MIN_CYCLE_ASSOCIATIONS:
                     catalog = BackgroundCatalog()
                     for observed_frame, observed_candidates in episode_observations.items():
@@ -525,6 +534,7 @@ def replay_hypothesis_selection(
                     "stable_cycle_track_ids": stable_cycle_track_ids,
                     "stable_cycle_excluded_counts": stable_cycle_excluded_counts,
                     "stable_cycle_exclusion_reasons": stable_cycle_exclusion_reasons,
+                    "stable_cycle_frame_shape_reason": stable_cycle_frame_shape_reason,
                     "cycle_input": {
                         "frame_index": frame_index,
                         "candidate_count": len(candidates),
@@ -790,6 +800,12 @@ class _StableCycleTracks:
         self._frozen_track_ids: tuple[str, ...] = ()
         self._frozen = False
         self._next_track_number = 1
+        self._episode_start: int | None = None
+        self._episode_end: int | None = None
+
+    @property
+    def frame_shape_reason(self) -> str:
+        return "observed" if _valid_cycle_frame_shape(self._frame_shape) else "frame_shape_unavailable"
 
     @property
     def frozen_track_ids(self) -> tuple[str, ...]:
@@ -809,8 +825,18 @@ class _StableCycleTracks:
 
     @property
     def period_failure_reason(self) -> str:
+        if self.frame_shape_reason != "observed":
+            return self.frame_shape_reason
         reasons = tuple(self.exclusion_reasons.values())
-        if any(reason in {"association_ambiguous", "association_crossing"} for reason in reasons):
+        if any(
+            reason in {
+                "association_ambiguous",
+                "association_crossing",
+                "association_disagreement",
+                "association_permutation",
+            }
+            for reason in reasons
+        ):
             return "period_association_ambiguous"
         if "association_quality" in reasons:
             return "period_association_quality"
@@ -822,82 +848,101 @@ class _StableCycleTracks:
         return "insufficient_stable_cycle_tracks"
 
     def update(self, frame_index: int, candidates: Sequence[Candidate]) -> None:
+        self._record_episode_frame(frame_index)
+        if self.frame_shape_reason != "observed":
+            return
         if not self._tracks:
             for candidate in candidates:
                 self._start_track(frame_index, candidate)
             return
 
         candidate_rows = list(candidates)
-        candidate_models = [_catalog_candidate(candidate) for candidate in candidate_rows]
-        proposals: dict[str, int] = {}
-        for track_id, track in self._tracks.items():
-            if track.excluded_reason is not None:
-                continue
-            previous = track.observations[max(track.observations)]
-            qualities = sorted(
-                (_cycle_association_quality(_catalog_candidate(previous), candidate), index)
-                for index, candidate in enumerate(candidate_models)
+        active_tracks = {
+            track_id: track
+            for track_id, track in self._tracks.items()
+            if track.excluded_reason is None
+        }
+        assignments, rejected, blocked_indexes = _symmetric_track_assignment(
+            active_tracks,
+            candidate_rows,
+            _track_position_quality,
+        )
+        predicted_tracks = {
+            track_id: track
+            for track_id, track in active_tracks.items()
+            if len(track.observations) >= 2
+        }
+        if predicted_tracks:
+            predicted, _predicted_rejected, _predicted_blocked = _symmetric_track_assignment(
+                predicted_tracks,
+                candidate_rows,
+                _track_prediction_quality,
             )
-            if not qualities:
-                track.excluded_reason = "association_missing"
-                continue
-            if qualities[0][0] > _TRACK_ASSOCIATION_QUALITY_LIMIT:
-                track.excluded_reason = "association_quality"
-                continue
-            best_quality, candidate_index = qualities[0]
-            if (
-                len(qualities) > 1
-                and qualities[1][0] <= _TRACK_ASSOCIATION_QUALITY_LIMIT
-                and qualities[1][0] - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
-            ):
-                track.excluded_reason = "association_ambiguous"
-                continue
-            proposals[track_id] = candidate_index
+            for track_id, candidate_index in predicted.items():
+                current_index = assignments.get(track_id)
+                if current_index is not None and current_index != candidate_index:
+                    rejected[track_id] = "association_permutation"
+                    blocked_indexes.update((current_index, candidate_index))
+                    for other_track_id, other_index in assignments.items():
+                        if other_index == candidate_index:
+                            rejected[other_track_id] = "association_permutation"
+                            blocked_indexes.add(other_index)
+            for left_track_id, left_index in predicted.items():
+                for right_track_id, right_index in predicted.items():
+                    if left_track_id >= right_track_id:
+                        continue
+                    if (
+                        assignments.get(left_track_id) != left_index
+                        or assignments.get(right_track_id) != right_index
+                    ) and _track_segments_cross(
+                        predicted_tracks[left_track_id],
+                        candidate_rows[left_index],
+                        predicted_tracks[right_track_id],
+                        candidate_rows[right_index],
+                    ):
+                        rejected[left_track_id] = "association_crossing"
+                        rejected[right_track_id] = "association_crossing"
+                        blocked_indexes.update((left_index, right_index))
 
-        candidate_owners: dict[int, list[str]] = {}
-        for track_id, candidate_index in proposals.items():
-            candidate_owners.setdefault(candidate_index, []).append(track_id)
-        for track_ids in candidate_owners.values():
-            if len(track_ids) > 1:
-                for track_id in track_ids:
-                    self._tracks[track_id].excluded_reason = "association_crossing"
-
-        matched_indexes: set[int] = set()
-        for track_id, candidate_index in proposals.items():
-            track = self._tracks[track_id]
-            if track.excluded_reason is not None:
+        accepted_assignments = {
+            track_id: candidate_index
+            for track_id, candidate_index in assignments.items()
+            if track_id not in rejected
+            and not _cycle_candidate_clipped(candidate_rows[candidate_index], self._frame_shape)
+        }
+        for track_id, candidate_index in assignments.items():
+            if _cycle_candidate_clipped(candidate_rows[candidate_index], self._frame_shape):
+                rejected[track_id] = "cycle_clipped"
+                blocked_indexes.add(candidate_index)
+        for track_id, track in active_tracks.items():
+            if track_id in accepted_assignments:
                 continue
-            candidate = candidate_rows[candidate_index]
-            if _cycle_candidate_clipped(candidate, self._frame_shape):
-                track.excluded_reason = "cycle_clipped"
-                continue
-            track.observations[frame_index] = candidate
-            matched_indexes.add(candidate_index)
+            track.excluded_reason = rejected.get(track_id, "association_missing")
+        for track_id, candidate_index in accepted_assignments.items():
+            self._tracks[track_id].observations[frame_index] = candidate_rows[candidate_index]
 
-        for track in self._tracks.values():
-            if track.excluded_reason is None and frame_index not in track.observations:
-                track.excluded_reason = "association_missing"
-
+        matched_indexes = set(accepted_assignments.values())
         for candidate_index, candidate in enumerate(candidate_rows):
-            if candidate_index not in matched_indexes:
+            if candidate_index not in matched_indexes and candidate_index not in blocked_indexes:
                 self._start_track(frame_index, candidate)
 
     def freeze(self) -> dict[int, tuple[PuzzleCandidate, ...]]:
         if self._frozen:
             return self._frozen_observations()
-        observed_frames = sorted({
-            frame_index
-            for track in self._tracks.values()
-            for frame_index in track.observations
-        })
+        if self.frame_shape_reason != "observed":
+            self._frozen = True
+            return {}
+        episode_frames = self._episode_frames()
         for track in self._tracks.values():
             if track.excluded_reason is not None:
                 continue
-            coverage = len(track.observations) / max(1, len(observed_frames))
-            largest_gap = _largest_cycle_track_gap(observed_frames, track.observations)
+            coverage = sum(
+                frame_index in track.observations for frame_index in episode_frames
+            ) / max(1, len(episode_frames))
+            largest_gap = _largest_cycle_track_gap(episode_frames, track.observations)
             if coverage < _MIN_CYCLE_COVERAGE:
                 track.excluded_reason = "cycle_coverage"
-            elif largest_gap / max(1, len(observed_frames)) > _MAX_CYCLE_GAP_RATIO:
+            elif largest_gap / max(1, len(episode_frames)) > _MAX_CYCLE_GAP_RATIO:
                 track.excluded_reason = "cycle_gap"
         self._frozen_track_ids = tuple(
             track_id
@@ -906,6 +951,16 @@ class _StableCycleTracks:
         )
         self._frozen = True
         return self._frozen_observations()
+
+    def _record_episode_frame(self, frame_index: int) -> None:
+        if self._episode_start is None:
+            self._episode_start = frame_index
+        self._episode_end = frame_index
+
+    def _episode_frames(self) -> tuple[int, ...]:
+        if self._episode_start is None or self._episode_end is None:
+            return ()
+        return tuple(range(self._episode_start, self._episode_end + 1))
 
     def frozen_observation(
         self,
@@ -955,6 +1010,158 @@ class _StableCycleTracks:
             )
             for frame_index in shared_frames
         }
+
+
+def _symmetric_track_assignment(
+    tracks: dict[str, _StableCycleTrack],
+    candidates: Sequence[Candidate],
+    quality_for: Any,
+) -> tuple[dict[str, int], dict[str, str], set[int]]:
+    forward: dict[str, int] = {}
+    rejected: dict[str, str] = {}
+    blocked_indexes: set[int] = set()
+    for track_id, track in tracks.items():
+        ranked = sorted(
+            (quality_for(track, candidate), candidate_index)
+            for candidate_index, candidate in enumerate(candidates)
+        )
+        usable = [
+            item for item in ranked if item[0] <= _TRACK_ASSOCIATION_QUALITY_LIMIT
+        ]
+        if not usable:
+            rejected[track_id] = "association_quality" if candidates else "association_missing"
+            continue
+        best_quality, candidate_index = usable[0]
+        if (
+            len(usable) > 1
+            and usable[1][0] - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+        ):
+            rejected[track_id] = "association_ambiguous"
+            blocked_indexes.add(candidate_index)
+            continue
+        forward[track_id] = candidate_index
+
+    reverse: dict[int, str] = {}
+    for candidate_index in range(len(candidates)):
+        ranked = sorted(
+            (quality_for(track, candidates[candidate_index]), track_id)
+            for track_id, track in tracks.items()
+        )
+        usable = [
+            item for item in ranked if item[0] <= _TRACK_ASSOCIATION_QUALITY_LIMIT
+        ]
+        if not usable:
+            continue
+        best_quality, track_id = usable[0]
+        if (
+            len(usable) > 1
+            and usable[1][0] - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+        ):
+            blocked_indexes.add(candidate_index)
+            for _quality, tied_track_id in usable:
+                if _quality - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN:
+                    rejected[tied_track_id] = "association_ambiguous"
+            continue
+        reverse[candidate_index] = track_id
+
+    assignments: dict[str, int] = {}
+    owners: dict[int, list[str]] = {}
+    for track_id, candidate_index in forward.items():
+        owners.setdefault(candidate_index, []).append(track_id)
+    for candidate_index, track_ids in owners.items():
+        if len(track_ids) > 1:
+            blocked_indexes.add(candidate_index)
+            for track_id in track_ids:
+                rejected[track_id] = "association_duplicate"
+    for track_id, candidate_index in forward.items():
+        reverse_track_id = reverse.get(candidate_index)
+        if reverse_track_id != track_id:
+            rejected[track_id] = "association_disagreement"
+            blocked_indexes.add(candidate_index)
+            if reverse_track_id is not None:
+                rejected[reverse_track_id] = "association_disagreement"
+            continue
+        if track_id not in rejected:
+            assignments[track_id] = candidate_index
+    return assignments, rejected, blocked_indexes
+
+
+def _track_position_quality(track: _StableCycleTrack, candidate: Candidate) -> float:
+    previous = track.observations[max(track.observations)]
+    return _cycle_association_quality(
+        _catalog_candidate(previous),
+        _catalog_candidate(candidate),
+    )
+
+
+def _track_prediction_quality(track: _StableCycleTrack, candidate: Candidate) -> float:
+    observed_frames = sorted(track.observations)
+    previous = track.observations[observed_frames[-2]]
+    current = track.observations[observed_frames[-1]]
+    predicted = _predicted_cycle_position(
+        _catalog_candidate(previous),
+        _catalog_candidate(current),
+    )
+    current_model = _catalog_candidate(current)
+    candidate_model = _catalog_candidate(candidate)
+    scale = max(1.0, hypot(current_model.w, current_model.h, candidate_model.w, candidate_model.h))
+    position_residual = hypot(
+        predicted[0] - candidate_model.cx,
+        predicted[1] - candidate_model.cy,
+    ) / scale
+    shape_residual = max(
+        abs(current_model.w - candidate_model.w) / max(1.0, current_model.w, candidate_model.w),
+        abs(current_model.h - candidate_model.h) / max(1.0, current_model.h, candidate_model.h),
+    )
+    return position_residual + shape_residual
+
+
+def _track_segments_cross(
+    left_track: _StableCycleTrack,
+    left_candidate: Candidate,
+    right_track: _StableCycleTrack,
+    right_candidate: Candidate,
+) -> bool:
+    left_start = left_track.observations[max(left_track.observations)].center
+    right_start = right_track.observations[max(right_track.observations)].center
+    return _segments_properly_intersect(
+        left_start,
+        left_candidate.center,
+        right_start,
+        right_candidate.center,
+    )
+
+
+def _segments_properly_intersect(
+    first_start: tuple[float, float],
+    first_end: tuple[float, float],
+    second_start: tuple[float, float],
+    second_end: tuple[float, float],
+) -> bool:
+    def orientation(
+        origin: tuple[float, float],
+        left: tuple[float, float],
+        right: tuple[float, float],
+    ) -> float:
+        return (
+            (left[0] - origin[0]) * (right[1] - origin[1])
+            - (left[1] - origin[1]) * (right[0] - origin[0])
+        )
+
+    first_left = orientation(first_start, first_end, second_start)
+    first_right = orientation(first_start, first_end, second_end)
+    second_left = orientation(second_start, second_end, first_start)
+    second_right = orientation(second_start, second_end, first_end)
+    return first_left * first_right < 0.0 and second_left * second_right < 0.0
+
+
+def _valid_cycle_frame_shape(frame_shape: tuple[int, int] | None) -> bool:
+    return bool(
+        frame_shape is not None
+        and len(frame_shape) == 2
+        and int(frame_shape[0]) > 0
+        and int(frame_shape[1]) > 0
+    )
 
 
 def _catalog_candidate(candidate: Candidate) -> PuzzleCandidate:
