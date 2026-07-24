@@ -1407,6 +1407,38 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
 
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
+    def test_phase_anchor_selection_uses_global_affine_triple_over_collinear_outlier(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        anchors = tuple(
+            module.BackgroundAnchor(track_id, point, 9, qualified_cycle=True)
+            for track_id, point in (
+                ("near-0", (1.0, 0.0)),
+                ("near-1", (1.0, 0.0)),
+                ("near-2", (1.0, 0.0)),
+                ("near-3", (1.0, 0.0)),
+                ("near-4", (1.0, 0.0)),
+                ("far", (1000.0, 0.0)),
+                ("p", (10.0, 10.0)),
+                ("q", (20.0, 10.0)),
+                ("r", (15.0, 20.0)),
+            )
+        )
+
+        selected = module._bounded_phase_reference_anchors(
+            background_point=(0.0, 0.0),
+            anchors=anchors,
+            limit=6,
+        )
+        fingerprint = module.RelationFingerprint.from_observations(
+            background_point=(0.0, 0.0),
+            anchors=selected,
+            jitter=0.02,
+        )
+
+        self.assertTrue({"p", "q", "r"}.issubset({anchor.track_id for anchor in selected}))
+        self.assertLessEqual(len(selected), 6)
+        self.assertGreater(len(fingerprint.triplet_coordinates), 0)
+
     def test_phase_anchor_selection_avoids_duplicate_second_seed(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         anchors = tuple(
@@ -1647,6 +1679,8 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertLessEqual(len(resolver._fingerprint.pair_coordinates), 15)
         self.assertLessEqual(len(resolver._fingerprint.triplet_coordinates), 20)
         self.assertGreater(len(resolver._fingerprint.triplet_coordinates), 0)
+        self.assertLessEqual(context.phase_anchor_selection_count, 6)
+        self.assertIsNotNone(context.phase_anchor_best_triangle_quality)
 
     def test_phase_reference_snapshot_must_be_qualified_and_unclipped(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
@@ -1755,6 +1789,100 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertIsNotNone(resolver._fingerprint)
         self.assertEqual(split_decision.background_candidate_id, "background-child")
         self.assertEqual(split_decision.target_candidate_id, "target-child")
+
+    def test_phase_split_completion_clears_provenance_before_frameless_merge(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        phase = module.CyclePhaseContext(period=4, local_lag=4)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        target = _center_candidate("target", (34.0, 32.0))
+        background = _center_candidate("background", (30.0, 28.0))
+
+        for frame_index in range(8):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _candidate("merged", (28.0, 26.0, 38.0, 36.0), frame_index=8),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=8,
+            phase_context=phase,
+        )
+
+        for frame_index in range(9, 12):
+            recovered = resolver.update(
+                incumbent_point=target.center,
+                candidates=(
+                    _center_candidate("target-child", (34.0, 32.0), frame_index=frame_index),
+                    _center_candidate(
+                        "background-child", (30.0, 28.0), frame_index=frame_index
+                    ),
+                    anchor_a,
+                    anchor_b,
+                ),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+            self.assertEqual(
+                recovered.target_candidate_id,
+                "target-child",
+                recovered.debug,
+            )
+
+        self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
+        self.assertIsNone(resolver._merge_context)
+        self.assertIsNone(resolver._fingerprint)
+        self.assertIsNone(resolver._fingerprint_mode)
+        self.assertIsNone(resolver._fingerprint_event_id)
+
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _candidate("next-merged", (28.0, 26.0, 38.0, 36.0)),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            phase_context=phase,
+        )
+        held = resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _center_candidate("next-target", (34.0, 32.0)),
+                _center_candidate("next-background", (30.0, 28.0)),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            phase_context=phase,
+        )
+
+        self.assertEqual(held.reason, "insufficient_cycle_anchors")
+        self.assertIsNone(held.background_candidate_id)
 
     def test_phase_refresh_keeps_event_affine_basis_when_current_track_is_missing(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")

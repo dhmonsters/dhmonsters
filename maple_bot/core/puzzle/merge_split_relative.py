@@ -13,6 +13,7 @@ from .models import Candidate, CandidateEvidence
 
 Point = tuple[float, float]
 _MAX_PHASE_FINGERPRINT_ANCHORS = 6
+_MIN_AFFINE_TRIANGLE_QUALITY = 0.05
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,10 @@ def affine_coordinate(
         cx * cx + cy * cy,
         (anchor_c[0] - anchor_b[0]) ** 2 + (anchor_c[1] - anchor_b[1]) ** 2,
     )
-    if abs(determinant) / max(1e-6, scale_squared) <= 0.05:
+    if (
+        abs(determinant) / max(1e-6, scale_squared)
+        <= _MIN_AFFINE_TRIANGLE_QUALITY
+    ):
         return None
 
     px = point[0] - anchor_a[0]
@@ -150,6 +154,20 @@ def _bounded_phase_reference_anchors(
     anchors: Sequence[BackgroundAnchor],
     limit: int,
 ) -> tuple[BackgroundAnchor, ...]:
+    selected, _quality = _select_bounded_phase_reference_anchors(
+        background_point=background_point,
+        anchors=anchors,
+        limit=limit,
+    )
+    return selected
+
+
+def _select_bounded_phase_reference_anchors(
+    *,
+    background_point: Point,
+    anchors: Sequence[BackgroundAnchor],
+    limit: int,
+) -> tuple[tuple[BackgroundAnchor, ...], float | None]:
     ordered = tuple(
         sorted(
             anchors,
@@ -163,14 +181,31 @@ def _bounded_phase_reference_anchors(
         )
     )
     maximum = max(0, int(limit))
-    if len(ordered) <= 1 or maximum <= 1:
-        return ordered[:maximum]
+    if maximum <= 0:
+        return (), None
 
     def distance(anchor: BackgroundAnchor) -> float:
         return hypot(
             anchor.point[0] - background_point[0],
             anchor.point[1] - background_point[1],
         )
+
+    coordinate_scale = max(1.0, *(distance(anchor) for anchor in ordered))
+    duplicate_tolerance = 1e-6 * coordinate_scale
+    unique_anchors: list[BackgroundAnchor] = []
+    for anchor in ordered:
+        if any(
+            hypot(
+                anchor.point[0] - representative.point[0],
+                anchor.point[1] - representative.point[1],
+            )
+            <= duplicate_tolerance
+            for representative in unique_anchors
+        ):
+            continue
+        unique_anchors.append(anchor)
+    if len(unique_anchors) <= 1 or maximum <= 1:
+        return tuple(unique_anchors[:maximum]), None
 
     def triangle_quality(
         first: BackgroundAnchor,
@@ -197,56 +232,49 @@ def _bounded_phase_reference_anchors(
         )
         return determinant / max(1e-6, scale_squared)
 
-    nearest = ordered[0]
-    separated = tuple(
-        anchor
-        for anchor in ordered[1:]
-        if hypot(
-            anchor.point[0] - nearest.point[0],
-            anchor.point[1] - nearest.point[1],
-        )
-        > 1e-6
-    )
-    selected = [nearest]
-    if separated:
-        farthest = min(
-            separated,
+    best_triple: tuple[BackgroundAnchor, BackgroundAnchor, BackgroundAnchor] | None = None
+    best_quality: float | None = None
+    if maximum >= 3:
+        for triple in combinations(unique_anchors, 3):
+            quality = triangle_quality(*triple)
+            if quality <= _MIN_AFFINE_TRIANGLE_QUALITY:
+                continue
+            if best_triple is None or best_quality is None or (
+                -quality,
+                sum(distance(anchor) for anchor in triple),
+                tuple(anchor.track_id for anchor in triple),
+            ) < (
+                -best_quality,
+                sum(distance(anchor) for anchor in best_triple),
+                tuple(anchor.track_id for anchor in best_triple),
+            ):
+                best_triple = triple
+                best_quality = quality
+
+    selected: list[BackgroundAnchor] = []
+    if best_triple is not None:
+        first = min(best_triple, key=lambda anchor: (distance(anchor), anchor.track_id))
+        remaining = tuple(anchor for anchor in best_triple if anchor is not first)
+        second = min(
+            remaining,
             key=lambda anchor: (
                 -hypot(
-                    anchor.point[0] - nearest.point[0],
-                    anchor.point[1] - nearest.point[1],
+                    anchor.point[0] - first.point[0],
+                    anchor.point[1] - first.point[1],
                 ),
                 anchor.track_id,
             ),
         )
-        selected.append(farthest)
-    else:
-        farthest = None
-    if maximum >= 3 and farthest is not None:
-        remaining = tuple(
-            anchor
-            for anchor in ordered
-            if anchor.track_id not in {nearest.track_id, farthest.track_id}
-        )
-        if remaining:
-            third = min(
-                remaining,
-                key=lambda anchor: (
-                    -triangle_quality(nearest, farthest, anchor),
-                    distance(anchor),
-                    anchor.track_id,
-                ),
-            )
-            if triangle_quality(nearest, farthest, third) > 0.05:
-                selected.append(third)
+        third = next(anchor for anchor in remaining if anchor is not second)
+        selected.extend((first, second, third))
 
     selected_ids = {anchor.track_id for anchor in selected}
     selected.extend(
         anchor
-        for anchor in ordered
+        for anchor in unique_anchors
         if anchor.track_id not in selected_ids
     )
-    return tuple(selected[:maximum])
+    return tuple(selected[:maximum]), best_quality
 
 
 @dataclass
@@ -1029,6 +1057,8 @@ class MergeEventContext:
     opened_frame: int
     last_frame: int
     phase_anchor_track_ids: tuple[str, ...] = ()
+    phase_anchor_selection_count: int = 0
+    phase_anchor_best_triangle_quality: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1472,9 +1502,12 @@ class MergeSplitRelativeResolver:
                         else None
                     ),
                 )
-            self._merge_context = None
-            self._merge_center = None
-            self._merge_bbox = None
+            if phase_context is not None:
+                self._clear_merge_event_context()
+            else:
+                self._merge_context = None
+                self._merge_center = None
+                self._merge_bbox = None
             return self._event_hold(event, "separate")
 
         overlapping = (
@@ -1666,6 +1699,16 @@ class MergeSplitRelativeResolver:
                     "fingerprint_mode": self._fingerprint_mode,
                     "phase_reference_frame": self._phase_reference_frame,
                     "phase_fingerprint_frame": self._phase_fingerprint_frame,
+                    "phase_selected_anchor_count": (
+                        self._merge_context.phase_anchor_selection_count
+                        if self._merge_context is not None
+                        else 0
+                    ),
+                    "phase_best_triangle_quality": (
+                        self._merge_context.phase_anchor_best_triangle_quality
+                        if self._merge_context is not None
+                        else None
+                    ),
                     "merge_bbox": self._merge_bbox,
                     "predicted_target_point": predicted_target_point,
                     "local_child_ids": tuple(
@@ -1682,6 +1725,8 @@ class MergeSplitRelativeResolver:
             if self._split_recovery_success_count >= 3:
                 self._event_detector.complete_split_recovery()
                 self._clear_split_recovery()
+                if self._fingerprint_mode == "phase":
+                    self._clear_merge_event_context()
             return recovered
 
         return self._event_hold(event, "missing_fingerprint")
@@ -1727,6 +1772,8 @@ class MergeSplitRelativeResolver:
         phase_context: CyclePhaseContext | None,
     ) -> None:
         if self._merge_context is None or self._merge_context.event_id != event.event_id:
+            if phase_context is not None:
+                self._clear_relation_fingerprint()
             background_track_id = background_candidate.candidate_id
             if phase_context is not None:
                 background_track_id = (
@@ -1784,13 +1831,15 @@ class MergeSplitRelativeResolver:
             return
         visible_pair = self._last_visible_pair
         if visible_pair is None or visible_pair.event_id != event.event_id - 1:
-            self._merge_context = None
+            self._clear_merge_event_context()
             return
         background_track_id = (
             visible_pair.background_track_id
             if phase_context is not None
             else None
         ) or visible_pair.background.candidate_id
+        if phase_context is not None:
+            self._clear_relation_fingerprint()
         self._merge_context = MergeEventContext(
             event_id=event.event_id,
             target_candidate_id=visible_pair.target.candidate_id,
@@ -1952,14 +2001,18 @@ class MergeSplitRelativeResolver:
             )
             if len(eligible_reference_anchors) < 2:
                 return
-            selected_reference_anchors = _bounded_phase_reference_anchors(
-                background_point=reference_background.point,
-                anchors=eligible_reference_anchors,
-                limit=_MAX_PHASE_FINGERPRINT_ANCHORS,
+            selected_reference_anchors, best_triangle_quality = (
+                _select_bounded_phase_reference_anchors(
+                    background_point=reference_background.point,
+                    anchors=eligible_reference_anchors,
+                    limit=_MAX_PHASE_FINGERPRINT_ANCHORS,
+                )
             )
             context.phase_anchor_track_ids = tuple(
                 anchor.track_id for anchor in selected_reference_anchors
             )
+            context.phase_anchor_selection_count = len(selected_reference_anchors)
+            context.phase_anchor_best_triangle_quality = best_triangle_quality
             reference_track_ids = context.phase_anchor_track_ids
 
         reference_anchors: list[BackgroundAnchor] = []
@@ -2032,6 +2085,16 @@ class MergeSplitRelativeResolver:
                 "phase_reference_frame": self._phase_reference_frame,
                 "phase_fingerprint_frame": self._phase_fingerprint_frame,
                 "fingerprint_event_id": self._fingerprint_event_id,
+                "phase_selected_anchor_count": (
+                    self._merge_context.phase_anchor_selection_count
+                    if self._merge_context is not None
+                    else 0
+                ),
+                "phase_best_triangle_quality": (
+                    self._merge_context.phase_anchor_best_triangle_quality
+                    if self._merge_context is not None
+                    else None
+                ),
             },
         )
 
