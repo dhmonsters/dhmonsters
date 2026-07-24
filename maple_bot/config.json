@@ -7,15 +7,20 @@
       "shutdown_pc": false,
       "reconnect_after": false,
       "region": [
-        1126,
-        297,
-        296,
-        130
+        931,
+        391,
+        343,
+        350
       ],
+      "template_path": "templates\\lie_detector\\title.png",
+      "threshold": 0.65,
+      "check_interval_sec": 0.2,
+      "cooldown_sec": 10.0,
+      "alert_enabled": true,
       "tg_enabled": true,
-      "tg_prefix": "메인",
       "tg_token": "8992873788:AAHn_hg6_rfjgePxT6fXM1CXZBGQxA8dlAY",
       "tg_chat_id": "7451349217",
+      "tg_prefix": "메인",
       "yolo_model_path": "models/lie_detector.pt"
     },
     "transparent_shape": {
@@ -59,10 +64,47 @@
     "start": "f1",
     "stop": "f2"
   },
+  "world_map": {
+    "enabled": false,
+    "image_path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\maps\\minimap_world_map.png",
+    "image_width": 156,
+    "image_height": 99,
+    "calibration": {
+      "scale": 1.0,
+      "offset": [
+        0.0,
+        0.0
+      ]
+    },
+    "tracking_policy": "continue_estimated",
+    "migration_completed": true,
+    "legacy_backup_path": "config.pre_world_map_20260722_143955.json"
+  },
+  "navigation": {
+    "nodes": [],
+    "edges": [],
+    "routes": []
+  },
   "attack": {
-    "key": "ctrl",
+    "key": "end",
+    "sequences": [
+      {
+        "enabled": true,
+        "name": "연속기 1",
+        "keys": [
+          "end",
+          "x"
+        ],
+        "key_hold_sec": [
+          1.5,
+          0.1
+        ],
+        "key_interval_sec": 0.6,
+        "repeat_interval_sec": 1.0
+      }
+    ],
     "monster_template": "",
-    "monster_folder": "",
+    "monster_folder": "templates\\hunt_monsters\\빨코2",
     "jump_before_attack": false,
     "riding_on_rope": false,
     "range_px": 350,
@@ -79,504 +121,353 @@
     "deadzone_ratio": 0.0,
     "name_tag_threshold": 0.7,
     "name_tag_y_offset": 138,
+    "hits_to_kill": 1,
+    "skill_cast_sec": 0.6,
+    "delay_sec": 1.0,
+    "density_stay": 3,
+    "density_leave": 1,
+    "density_max_dwell_sec": 8.0,
+    "hunt_area": {
+      "x": 0,
+      "y": 251,
+      "w": 1278,
+      "h": 396
+    },
+    "image_trigger": {
+      "enabled": false,
+      "template_path": "",
+      "threshold": 0.8,
+      "check_interval_sec": 0.1,
+      "cooldown_sec": 2.0,
+      "action": {
+        "key": "space",
+        "hold_sec": 0.1,
+        "repeat": 1,
+        "repeat_interval_sec": 0.0,
+        "wait_after_sec": 0.0
+      }
+    },
     "normal_buffs": [
       {
         "enabled": true,
         "key": "f",
-        "interval_sec": 110
+        "interval_sec": 70.0,
+        "hold_sec": 0.7
       },
       {
         "enabled": true,
         "key": "s",
-        "interval_sec": 400
+        "interval_sec": 400.0,
+        "hold_sec": 0.8
       },
       {
         "enabled": true,
         "key": "d",
-        "interval_sec": 200
+        "interval_sec": 200,
+        "hold_sec": 0.5
       }
     ],
-    "toggle_buffs": []
+    "toggle_buffs": [],
+    "name_template": "templates/name_tag.png",
+    "atk_x_min": -285,
+    "atk_x_max": 299,
+    "atk_y_min": -330,
+    "atk_y_max": 14,
+    "monster_accuracy": 0.22,
+    "jump_while_move": false
   },
   "hunt_mode": "key",
   "hunt_grounds": {
-    "active": "초급 수련장",
+    "active": "빨코2",
     "presets": {
-      "헤네시스": {
+      "빨코2": {
         "minimap": {
-          "region_x": 15,
-          "region_y": 205,
-          "width": 365,
-          "height": 290,
-          "char_r": 255,
-          "char_g": 255,
-          "char_b": 255,
-          "tolerance": 30,
-          "jump_key": "alt",
-          "hotkey_region": "f11",
-          "hotkey_zone": "f12"
-        },
-        "zones": [],
-        "ropes": []
-      },
-      "안개 낀 숲": {
-        "minimap": {
-          "region_x": 21,
-          "region_y": 186,
-          "width": 299,
-          "height": 196,
+          "region_x": 38,
+          "region_y": 129,
+          "width": 172,
+          "height": 103,
           "char_r": 225,
           "char_g": 225,
           "char_b": 0,
           "tolerance": 30,
+          "attack_key": "ctrl",
+          "monster_template": "",
           "jump_key": "alt",
           "hotkey_region": "f11",
           "hotkey_zone": "f12",
-          "region_x_ratio": 0.008203125,
-          "region_y_ratio": 0.1358655953250548,
-          "width_ratio": 0.116796875,
-          "height_ratio": 0.14317019722425128
+          "region_x_ratio": 0.025520833333333333,
+          "region_y_ratio": 0.1377601585728444,
+          "width_ratio": 0.12708333333333333,
+          "height_ratio": 0.14271555996035679
+        },
+        "attack": {
+          "key": "end",
+          "sequences": [
+            {
+              "enabled": true,
+              "name": "연속기 1",
+              "keys": [
+                "end",
+                "x"
+              ],
+              "key_hold_sec": [
+                1.5,
+                0.1
+              ],
+              "key_interval_sec": 0.6,
+              "repeat_interval_sec": 1.0
+            }
+          ],
+          "monster_template": "",
+          "monster_folder": "templates\\hunt_monsters\\빨코2",
+          "jump_before_attack": false,
+          "riding_on_rope": false,
+          "range_px": 350,
+          "camera_w_ratio": 0.5,
+          "char_y_ratio": 0.6,
+          "char_offset_x": 0,
+          "char_offset_y": 0,
+          "floor_profiles": [],
+          "box_h": 250,
+          "monster_range_h": 450,
+          "monster_range_px": 650,
+          "monster_range_y_offset": -180,
+          "local_window_size": 80,
+          "deadzone_ratio": 0.0,
+          "name_tag_threshold": 0.7,
+          "name_tag_y_offset": 138,
+          "hits_to_kill": 1,
+          "skill_cast_sec": 0.6,
+          "delay_sec": 1.0,
+          "density_stay": 3,
+          "density_leave": 1,
+          "density_max_dwell_sec": 8.0,
+          "hunt_area": {
+            "x": 0,
+            "y": 251,
+            "w": 1278,
+            "h": 396
+          },
+          "image_trigger": {
+            "enabled": false,
+            "template_path": "",
+            "threshold": 0.8,
+            "check_interval_sec": 0.1,
+            "cooldown_sec": 2.0,
+            "action": {
+              "key": "space",
+              "hold_sec": 0.1,
+              "repeat": 1,
+              "repeat_interval_sec": 0.0,
+              "wait_after_sec": 0.0
+            }
+          },
+          "normal_buffs": [
+            {
+              "enabled": true,
+              "key": "f",
+              "interval_sec": 70.0,
+              "hold_sec": 0.7
+            },
+            {
+              "enabled": true,
+              "key": "s",
+              "interval_sec": 400.0,
+              "hold_sec": 0.8
+            },
+            {
+              "enabled": true,
+              "key": "d",
+              "interval_sec": 200,
+              "hold_sec": 0.5
+            }
+          ],
+          "toggle_buffs": [],
+          "name_template": "templates/name_tag.png",
+          "atk_x_min": -285,
+          "atk_x_max": 299,
+          "atk_y_min": -330,
+          "atk_y_max": 14,
+          "monster_accuracy": 0.22,
+          "jump_while_move": false
+        },
+        "hunt_mode": "key",
+        "world_map": {
+          "enabled": false,
+          "image_path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\maps\\minimap_world_map.png",
+          "image_width": 156,
+          "image_height": 99,
+          "calibration": {
+            "scale": 1.0,
+            "offset": [
+              0.0,
+              0.0
+            ]
+          },
+          "tracking_policy": "continue_estimated",
+          "migration_completed": true,
+          "legacy_backup_path": "config.pre_world_map_20260722_143955.json"
+        },
+        "navigation": {
+          "nodes": [],
+          "edges": [],
+          "routes": []
+        },
+        "map_exit": {
+          "enabled": true,
+          "action": "both",
+          "name_region": {
+            "x_ratio": 0.049479166666666664,
+            "y_ratio": 0.2983151635282458,
+            "w_ratio": 0.071875,
+            "h_ratio": 0.027750247770069375
+          },
+          "threshold": 0.75,
+          "grace_count": 1,
+          "region_x": 67,
+          "region_y": 90,
+          "width": 153,
+          "height": 21
         },
         "zones": [
           {
             "name": "1층",
-            "left_x": 97,
-            "right_x": 220,
-            "y_min": 137,
-            "y_max": 151,
+            "left_x": 69,
+            "right_x": 213,
+            "y_min": 105,
+            "y_max": 117,
             "rope_x": -1,
             "random_margin_min": 0,
-            "random_margin_max": 1,
+            "random_margin_max": 0,
             "sweeps": 1.0,
             "key_pattern": "",
-            "left_x_ratio": 0.32441471571906355,
-            "right_x_ratio": 0.7357859531772575,
-            "y_min_ratio": 0.6989795918367347,
-            "y_max_ratio": 0.7704081632653061,
+            "left_x_ratio": 0.2827868852459016,
+            "right_x_ratio": 0.8729508196721312,
+            "y_min_ratio": 0.7291666666666666,
+            "y_max_ratio": 0.8125,
             "rope_x_ratio": -1.0
           },
           {
             "name": "2층",
-            "left_x": 141,
-            "right_x": 208,
-            "y_min": 96,
-            "y_max": 111,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 1,
-            "sweeps": 1.0,
-            "key_pattern": "",
-            "left_x_ratio": 0.47157190635451507,
-            "right_x_ratio": 0.6956521739130435,
-            "y_min_ratio": 0.4897959183673469,
-            "y_max_ratio": 0.5663265306122449,
-            "rope_x_ratio": -1.0
-          },
-          {
-            "name": "3층",
-            "left_x": 158,
-            "right_x": 198,
-            "y_min": 63,
-            "y_max": 77,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 1,
-            "sweeps": 1.0,
-            "key_pattern": "제자리공격",
-            "left_x_ratio": 0.5284280936454849,
-            "right_x_ratio": 0.6622073578595318,
-            "y_min_ratio": 0.32142857142857145,
-            "y_max_ratio": 0.39285714285714285,
-            "rope_x_ratio": -1.0
-          },
-          {
-            "name": "4층",
-            "left_x": 166,
-            "right_x": 186,
-            "y_min": 24,
-            "y_max": 40,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 1,
-            "sweeps": 1.0,
-            "key_pattern": "제자리공격",
-            "left_x_ratio": 0.5551839464882943,
-            "right_x_ratio": 0.6220735785953178,
-            "y_min_ratio": 0.12244897959183673,
-            "y_max_ratio": 0.20408163265306123,
-            "rope_x_ratio": -1.0
-          }
-        ],
-        "ropes": [
-          {
-            "name": "밧줄1",
-            "x": 161,
-            "approach": "both",
-            "jump_offset": 9,
-            "climb_sec": 2.3,
-            "x_ratio": 0.5384615384615384
-          },
-          {
-            "name": "밧줄2",
-            "x": 133,
-            "approach": "both",
-            "jump_offset": 8,
-            "climb_sec": 2.1,
-            "x_ratio": 0.44481605351170567
-          },
-          {
-            "name": "밧줄3",
-            "x": 170,
-            "approach": "both",
-            "jump_offset": 7,
-            "climb_sec": 2.1,
-            "x_ratio": 0.568561872909699
-          }
-        ]
-      },
-      "헤네시스사냥터1": {
-        "minimap": {
-          "region_x": 15,
-          "region_y": 205,
-          "width": 365,
-          "height": 290,
-          "char_r": 255,
-          "char_g": 255,
-          "char_b": 0,
-          "tolerance": 30,
-          "jump_key": "alt",
-          "hotkey_region": "f11",
-          "hotkey_zone": "f12"
-        },
-        "zones": [
-          {
-            "name": "1층",
-            "left_x": 100,
-            "right_x": 264,
-            "y_min": 214,
-            "y_max": 237,
+            "left_x": 82,
+            "right_x": 190,
+            "y_min": 86,
+            "y_max": 95,
             "rope_x": -1,
             "random_margin_min": 0,
             "random_margin_max": 0,
-            "sweeps": 1.0,
-            "key_pattern": ""
-          },
-          {
-            "name": "2층",
-            "left_x": 114,
-            "right_x": 251,
-            "y_min": 172,
-            "y_max": 190,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 0,
-            "sweeps": 1.0,
-            "key_pattern": ""
-          },
-          {
-            "name": "3층",
-            "left_x": 120,
-            "right_x": 242,
-            "y_min": 137,
-            "y_max": 154,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 0,
-            "sweeps": 1.0,
-            "key_pattern": ""
-          },
-          {
-            "name": "4층",
-            "left_x": 136,
-            "right_x": 214,
-            "y_min": 96,
-            "y_max": 114,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 0,
-            "sweeps": 1.0,
-            "key_pattern": ""
-          }
-        ],
-        "ropes": [
-          {
-            "name": "밧줄1",
-            "x": 190,
-            "approach": "both",
-            "jump_offset": 15,
-            "climb_sec": 2.8
-          },
-          {
-            "name": "밧줄2",
-            "x": 137,
-            "approach": "both",
-            "jump_offset": 15,
-            "climb_sec": 2.5
-          },
-          {
-            "name": "밧줄3",
-            "x": 196,
-            "approach": "both",
-            "jump_offset": 15,
-            "climb_sec": 2.5
-          }
-        ]
-      },
-      "초급 수련장": {
-        "minimap": {
-          "region_x": 13,
-          "region_y": 136,
-          "width": 256,
-          "height": 104,
-          "char_r": 225,
-          "char_g": 225,
-          "char_b": 0,
-          "tolerance": 30,
-          "jump_key": "alt",
-          "hotkey_region": "f11",
-          "hotkey_zone": "f12",
-          "region_x_ratio": 0.0067708333333333336,
-          "region_y_ratio": 0.13478691774033696,
-          "width_ratio": 0.13333333333333333,
-          "height_ratio": 0.10307234886025768
-        },
-        "zones": [
-          {
-            "name": "1층",
-            "left_x": 60,
-            "right_x": 202,
-            "y_min": 66,
-            "y_max": 79,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 1,
-            "sweeps": 2.0,
-            "key_pattern": "",
-            "left_x_ratio": 0.234375,
-            "right_x_ratio": 0.7890625,
-            "y_min_ratio": 0.6346153846153846,
-            "y_max_ratio": 0.7596153846153846,
-            "rope_x_ratio": -1.0
-          }
-        ],
-        "ropes": []
-      },
-      "요괴의 숲 2": {
-        "minimap": {
-          "region_x": 24,
-          "region_y": 137,
-          "width": 221,
-          "height": 142,
-          "char_r": 225,
-          "char_g": 225,
-          "char_b": 0,
-          "tolerance": 30,
-          "jump_key": "alt",
-          "hotkey_region": "f11",
-          "hotkey_zone": "f12",
-          "region_x_ratio": 0.012890625,
-          "region_y_ratio": 0.1358655953250548,
-          "width_ratio": 0.115234375,
-          "height_ratio": 0.14170927684441198
-        },
-        "zones": [
-          {
-            "name": "1층",
-            "left_x": 73,
-            "right_x": 143,
-            "y_min": 83,
-            "y_max": 98,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 1,
-            "sweeps": 2.5,
+            "sweeps": 11.0,
             "key_pattern": "많이때리기 패턴",
-            "left_x_ratio": 0.33031674208144796,
-            "right_x_ratio": 0.6470588235294118,
-            "y_min_ratio": 0.5845070422535211,
-            "y_max_ratio": 0.6901408450704225,
+            "left_x_ratio": 0.3360655737704918,
+            "right_x_ratio": 0.7786885245901639,
+            "y_min_ratio": 0.5972222222222222,
+            "y_max_ratio": 0.6597222222222222,
             "rope_x_ratio": -1.0
+          }
+        ],
+        "floor_hunt": {
+          "enabled": true,
+          "route_mode": true,
+          "route": [
+            {
+              "type": "move",
+              "target_x": 0,
+              "move_type": "walk",
+              "direction": "right",
+              "pos_x": 19,
+              "pos_y": 72,
+              "start_x": 40,
+              "end_x": 125,
+              "mode": "count"
+            },
+            {
+              "type": "ladder",
+              "ladder_x": 60,
+              "y_top": 46,
+              "y_bot": 66,
+              "exit_side": "left"
+            },
+            {
+              "type": "move",
+              "target_x": 0,
+              "move_type": "walk",
+              "direction": "right",
+              "pos_x": 123,
+              "pos_y": 44,
+              "start_x": 60,
+              "end_x": 90
+            }
+          ]
+        },
+        "rednose2_v5": {
+          "enabled": true,
+          "use_fixed_minimap_region": true,
+          "fixed_minimap_region": {
+            "left": 38,
+            "top": 129,
+            "width": 172,
+            "height": 103
           },
-          {
-            "name": "2층",
-            "left_x": 88,
-            "right_x": 110,
-            "y_min": 47,
-            "y_max": 60,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 0,
-            "sweeps": 2.0,
-            "key_pattern": "많이때리기 패턴",
-            "left_x_ratio": 0.39819004524886875,
-            "right_x_ratio": 0.497737556561086,
-            "y_min_ratio": 0.33098591549295775,
-            "y_max_ratio": 0.4225352112676056,
-            "rope_x_ratio": -1.0
-          }
-        ],
-        "ropes": [
-          {
-            "name": "밧줄1",
-            "x": 81,
-            "approach": "both",
-            "jump_offset": 3,
-            "climb_sec": 3.1000000000000005,
-            "x_ratio": 0.3665158371040724
-          }
-        ]
-      },
-      "요괴의 숲 2 2층만": {
-        "minimap": {
-          "region_x": 32,
-          "region_y": 184,
-          "width": 298,
-          "height": 196,
-          "char_r": 225,
-          "char_g": 225,
-          "char_b": 0,
-          "tolerance": 30,
-          "jump_key": "alt",
-          "hotkey_region": "f11",
-          "hotkey_zone": "f12",
-          "region_x_ratio": 0.0125,
-          "region_y_ratio": 0.1344046749452155,
-          "width_ratio": 0.11640625,
-          "height_ratio": 0.14317019722425128
+          "attack_key": "end",
+          "teleport_key": "x",
+          "teleport_step_px": 13.0,
+          "teleport_interval_sec": 0.4,
+          "attack_to_teleport_sec": 0.05,
+          "floor2_hunt_teleport_interval_sec": 0.4,
+          "floor2_right_edge_teleport_interval_sec": 1.8,
+          "floor2_left_x": 55,
+          "floor2_right_x": 124,
+          "floor2_right_safe_x": 124,
+          "floor2_y_min": 58,
+          "floor2_y_max": 60,
+          "floor1_y_min": 75,
+          "floor1_y_max": 77,
+          "floor3_y_min": 47,
+          "floor3_y_max": 51,
+          "stair7_x": 41,
+          "stair7_x_min": 37,
+          "stair7_x_max": 45,
+          "stair7_right_bias_x": 45,
+          "stair7_right_bias_correct_sec": 0.02,
+          "stair7_right_teleport_hold_sec": 0.1,
+          "stair7_right_teleport_lead_sec": 0.02,
+          "platform24_approach_x": 43,
+          "platform24_x": 30,
+          "platform1415_16_approach_x": 95,
+          "platform1415_x_min": 94,
+          "platform1415_x_max": 96,
+          "platform27_approach_x": 91,
+          "platform27_bypass_approach_x": 80,
+          "platform27_bypass_x_min": 72,
+          "platform27_bypass_x_max": 89,
+          "base_minimap_width": 172,
+          "base_minimap_height": 103,
+          "minimap_width": 172,
+          "minimap_height": 103,
+          "pickup_route_enabled": true,
+          "hunt_cycle_min_sec": 92.83,
+          "hunt_cycle_max_sec": 102.483,
+          "platform1415_y_min": 54,
+          "platform1415_y_max": 55,
+          "platform16_y_min": 47,
+          "platform16_y_max": 48,
+          "platform27_y_min": 50,
+          "platform27_y_max": 50,
+          "platform24_y": 61,
+          "stair7_y": 62,
+          "teleport_hold_sec": 0.05,
+          "stair7_return_y_min": 61,
+          "stair7_return_y_max": 63
         },
-        "zones": [
-          {
-            "name": "2층",
-            "left_x": 116,
-            "right_x": 161,
-            "y_min": 71,
-            "y_max": 89,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 0,
-            "sweeps": 2.0,
-            "key_pattern": "제자리공격",
-            "left_x_ratio": 0.38926174496644295,
-            "right_x_ratio": 0.540268456375839,
-            "y_min_ratio": 0.3622448979591837,
-            "y_max_ratio": 0.45408163265306123,
-            "rope_x_ratio": -1.0
-          }
-        ],
-        "ropes": [
-          {
-            "name": "밧줄1",
-            "x": 111,
-            "approach": "both",
-            "jump_offset": 15,
-            "climb_sec": 3.1,
-            "x_ratio": 0.3724832214765101
-          }
-        ]
-      },
-      "202 제자리": {
-        "minimap": {
-          "region_x": 58,
-          "region_y": 191,
-          "width": 327,
-          "height": 127,
-          "char_r": 225,
-          "char_g": 225,
-          "char_b": 0,
-          "tolerance": 30,
-          "jump_key": "alt",
-          "hotkey_region": "f11",
-          "hotkey_zone": "f12",
-          "region_x_ratio": 0.02265625,
-          "region_y_ratio": 0.13951789627465302,
-          "width_ratio": 0.127734375,
-          "height_ratio": 0.09276844411979547
-        },
-        "zones": [
-          {
-            "name": "1층",
-            "left_x": 235,
-            "right_x": 245,
-            "y_min": 63,
-            "y_max": 78,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 0,
-            "sweeps": 2.0,
-            "key_pattern": "제자리공격",
-            "left_x_ratio": 0.7186544342507645,
-            "right_x_ratio": 0.7492354740061162,
-            "y_min_ratio": 0.49606299212598426,
-            "y_max_ratio": 0.6141732283464567,
-            "rope_x_ratio": -1.0
-          }
-        ],
-        "ropes": [
-          {
-            "name": "밧줄1",
-            "x": 111,
-            "approach": "both",
-            "jump_offset": 4,
-            "climb_sec": 3.1,
-            "x_ratio": 0.3394495412844037
-          }
-        ]
-      },
-      "관출": {
-        "minimap": {
-          "region_x": 120,
-          "region_y": 184,
-          "width": 209,
-          "height": 135,
-          "char_r": 225,
-          "char_g": 225,
-          "char_b": 0,
-          "tolerance": 30,
-          "jump_key": "alt",
-          "hotkey_region": "f11",
-          "hotkey_zone": "f12",
-          "region_x_ratio": 0.046875,
-          "region_y_ratio": 0.1344046749452155,
-          "width_ratio": 0.081640625,
-          "height_ratio": 0.09861212563915267
-        },
-        "zones": [
-          {
-            "name": "1층",
-            "left_x": 70,
-            "right_x": 140,
-            "y_min": 85,
-            "y_max": 102,
-            "rope_x": -1,
-            "random_margin_min": 0,
-            "random_margin_max": 1,
-            "sweeps": 2.0,
-            "key_pattern": "기본 패턴",
-            "left_x_ratio": 0.3349282296650718,
-            "right_x_ratio": 0.6698564593301436,
-            "y_min_ratio": 0.6296296296296297,
-            "y_max_ratio": 0.7555555555555555,
-            "rope_x_ratio": -1.0
-          }
-        ],
-        "ropes": [
-          {
-            "name": "밧줄1",
-            "x": 91,
-            "approach": "both",
-            "jump_offset": 15,
-            "climb_sec": 2.9000000000000004,
-            "x_ratio": 0.4354066985645933
-          }
-        ]
+        "mapping_completed": true
       }
     }
   },
   "minimap": {
-    "region_x": 13,
-    "region_y": 136,
-    "width": 256,
-    "height": 104,
+    "region_x": 38,
+    "region_y": 129,
+    "width": 172,
+    "height": 103,
     "char_r": 225,
     "char_g": 225,
     "char_b": 0,
@@ -586,27 +477,44 @@
     "jump_key": "alt",
     "hotkey_region": "f11",
     "hotkey_zone": "f12",
-    "region_x_ratio": 0.0067708333333333336,
-    "region_y_ratio": 0.13478691774033696,
-    "width_ratio": 0.13333333333333333,
-    "height_ratio": 0.10307234886025768
+    "region_x_ratio": 0.025520833333333333,
+    "region_y_ratio": 0.1377601585728444,
+    "width_ratio": 0.12708333333333333,
+    "height_ratio": 0.14271555996035679
   },
   "zones": [
     {
       "name": "1층",
-      "left_x": 60,
-      "right_x": 202,
-      "y_min": 66,
-      "y_max": 79,
+      "left_x": 69,
+      "right_x": 213,
+      "y_min": 105,
+      "y_max": 117,
       "rope_x": -1,
       "random_margin_min": 0,
-      "random_margin_max": 1,
-      "sweeps": 2.0,
+      "random_margin_max": 0,
+      "sweeps": 1.0,
       "key_pattern": "",
-      "left_x_ratio": 0.234375,
-      "right_x_ratio": 0.7890625,
-      "y_min_ratio": 0.6346153846153846,
-      "y_max_ratio": 0.7596153846153846,
+      "left_x_ratio": 0.2827868852459016,
+      "right_x_ratio": 0.8729508196721312,
+      "y_min_ratio": 0.7291666666666666,
+      "y_max_ratio": 0.8125,
+      "rope_x_ratio": -1.0
+    },
+    {
+      "name": "2층",
+      "left_x": 82,
+      "right_x": 190,
+      "y_min": 86,
+      "y_max": 95,
+      "rope_x": -1,
+      "random_margin_min": 0,
+      "random_margin_max": 0,
+      "sweeps": 11.0,
+      "key_pattern": "많이때리기 패턴",
+      "left_x_ratio": 0.3360655737704918,
+      "right_x_ratio": 0.7786885245901639,
+      "y_min_ratio": 0.5972222222222222,
+      "y_max_ratio": 0.6597222222222222,
       "rope_x_ratio": -1.0
     }
   ],
@@ -615,7 +523,7 @@
   },
   "key_patterns": {
     "active": {
-      "name": "많이때리기 패턴",
+      "name": "기본 패턴",
       "loop": true,
       "between_min": 0.05,
       "between_max": 0.2,
@@ -624,7 +532,7 @@
           "key": "end",
           "action": "combo",
           "min_sec": 0.5,
-          "max_sec": 1.0,
+          "max_sec": 1.5,
           "repeat_min": 1,
           "repeat_max": 1,
           "combo_keys": [
@@ -635,7 +543,7 @@
           "tap_hold_var": 0.01,
           "combo_holds": [
             [
-              2.0,
+              1.5,
               0.45
             ],
             [
@@ -730,6 +638,26 @@
             ]
           }
         ]
+      },
+      "매직클로": {
+        "name": "매직클로",
+        "loop": true,
+        "between_min": 1.5,
+        "between_max": 1.8,
+        "steps": [
+          {
+            "key": "end",
+            "action": "hold",
+            "min_sec": 0.8,
+            "max_sec": 1.1,
+            "repeat_min": 1,
+            "repeat_max": 1,
+            "combo_keys": [],
+            "tap_hold_base": 1.5,
+            "tap_hold_var": 0.45,
+            "combo_holds": []
+          }
+        ]
       }
     }
   },
@@ -738,30 +666,32 @@
       "x": 0,
       "y": 0,
       "width": 0,
-      "x_ratio": 0.2125,
-      "y_ratio": 1.1833498513379583,
-      "width_ratio": 0.10208333333333333
+      "x_ratio": 0.22734375,
+      "y_ratio": 0.96805556,
+      "width_ratio": 0.109375
     },
     "mp": {
       "x": 0,
       "y": 0,
       "width": 0,
-      "x_ratio": 0.3177083333333333,
-      "y_ratio": 1.184340931615461,
-      "width_ratio": 0.103125
+      "x_ratio": 0.3390625,
+      "y_ratio": 0.96805556,
+      "width_ratio": 0.109375
     }
   },
   "recovery": {
     "hp_potion": {
       "enabled": true,
-      "threshold": 65,
+      "threshold": 30,
       "key": "pgup",
+      "secondary_key": "",
       "cooldown_sec": 1.0
     },
     "mp_potion": {
       "enabled": true,
       "threshold": 50,
       "key": "pgdn",
+      "secondary_key": "",
       "cooldown_sec": 3.0
     },
     "potion_count": {
@@ -791,16 +721,20 @@
     }
   },
   "map_exit": {
-    "enabled": false,
+    "enabled": true,
     "action": "both",
     "name_region": {
-      "x_ratio": 0.049609375,
-      "y_ratio": 0.24324324324324326,
-      "w_ratio": 0.06796875,
-      "h_ratio": 0.031409788166544925
+      "x_ratio": 0.049479166666666664,
+      "y_ratio": 0.2983151635282458,
+      "w_ratio": 0.071875,
+      "h_ratio": 0.027750247770069375
     },
     "threshold": 0.75,
-    "grace_count": 1
+    "grace_count": 1,
+    "region_x": 67,
+    "region_y": 90,
+    "width": 153,
+    "height": 21
   },
   "anti_mob": {
     "enabled": false,
@@ -810,7 +744,21 @@
     "click_keys": "space,enter",
     "item_inv_tab": null,
     "item_slot": null,
-    "basic_count": 5
+    "basic_count": 5,
+    "image1_templates": [
+      "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\templates\\anti_mob\\beginner_training\\image1_001.png",
+      "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\templates\\anti_mob\\beginner_training\\image1_002.png",
+      "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\templates\\anti_mob\\beginner_training\\image1_003.png",
+      "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\templates\\anti_mob\\beginner_training\\image1_004.png",
+      "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\templates\\anti_mob\\beginner_training\\image1_005.png"
+    ],
+    "profile": "beginner_training",
+    "image2_templates": [
+      "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\templates\\anti_mob\\beginner_training\\image2_005.png"
+    ],
+    "image3_templates": [
+      "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\templates\\anti_mob\\beginner_training\\image3_001.png"
+    ]
   },
   "town_scroll": {
     "enabled": false,
@@ -828,7 +776,8 @@
     "interval_sec": 110,
     "pickup_key": "z",
     "key_hold_sec": 1.5,
-    "route": []
+    "route": [],
+    "always_enabled": true
   },
   "coord_mode": "relative",
   "settings2": {
@@ -908,12 +857,12 @@
         842
       ],
       "junk_sell_enabled": true,
-      "auto_sell_enabled": true,
+      "auto_sell_enabled": false,
       "auto_sell_interval_min": 50,
       "sell_on_start": false,
       "safe_zone_x": 122,
       "safe_zone_y": 39,
-      "departure_zone": "2층",
+      "departure_zone": "",
       "extra_rope": {
         "x": 112,
         "direction": "up",
@@ -966,15 +915,117 @@
     "lie_notify": true,
     "lie_solve": false
   },
-  "ropes": [],
+  "ropes": [
+    {
+      "name": "밧줄1",
+      "x": 200,
+      "approach": "both",
+      "jump_offset": 15,
+      "climb_sec": 2.5,
+      "x_ratio": 0.819672131147541
+    }
+  ],
   "floor_hunt": {
     "enabled": true,
-    "route_mode": false,
-    "route": []
+    "route_mode": true,
+    "route": [
+      {
+        "type": "move",
+        "target_x": 0,
+        "move_type": "walk",
+        "direction": "right",
+        "pos_x": 19,
+        "pos_y": 72,
+        "start_x": 40,
+        "end_x": 125,
+        "mode": "count"
+      },
+      {
+        "type": "ladder",
+        "ladder_x": 60,
+        "y_top": 46,
+        "y_bot": 66,
+        "exit_side": "left"
+      },
+      {
+        "type": "move",
+        "target_x": 0,
+        "move_type": "walk",
+        "direction": "right",
+        "pos_x": 123,
+        "pos_y": 44,
+        "start_x": 60,
+        "end_x": 90
+      }
+    ]
   },
   "yolo_capture": {
     "hotkey_start": "f9",
     "auto_interval_sec": 0.5,
     "hotkey_stop": "f10"
+  },
+  "coord_anchor": [
+    1,
+    31
+  ],
+  "rednose2_v5": {
+    "enabled": true,
+    "use_fixed_minimap_region": true,
+    "fixed_minimap_region": {
+      "left": 38,
+      "top": 129,
+      "width": 172,
+      "height": 103
+    },
+    "attack_key": "end",
+    "teleport_key": "x",
+    "teleport_step_px": 13.0,
+    "teleport_interval_sec": 0.4,
+    "attack_to_teleport_sec": 0.05,
+    "floor2_hunt_teleport_interval_sec": 0.4,
+    "floor2_right_edge_teleport_interval_sec": 1.8,
+    "floor2_left_x": 55,
+    "floor2_right_x": 124,
+    "floor2_right_safe_x": 124,
+    "floor2_y_min": 61,
+    "floor2_y_max": 63,
+    "floor1_y_min": 75,
+    "floor1_y_max": 77,
+    "floor3_y_min": 47,
+    "floor3_y_max": 51,
+    "stair7_x": 41,
+    "stair7_x_min": 37,
+    "stair7_x_max": 45,
+    "stair7_right_bias_x": 45,
+    "stair7_right_bias_correct_sec": 0.02,
+    "stair7_right_teleport_hold_sec": 0.1,
+    "stair7_right_teleport_lead_sec": 0.02,
+    "platform24_approach_x": 43,
+    "platform24_x": 30,
+    "platform1415_16_approach_x": 95,
+    "platform1415_x_min": 94,
+    "platform1415_x_max": 96,
+    "platform27_approach_x": 91,
+    "platform27_bypass_approach_x": 80,
+    "platform27_bypass_x_min": 72,
+    "platform27_bypass_x_max": 89,
+    "base_minimap_width": 172,
+    "base_minimap_height": 103,
+    "minimap_width": 172,
+    "minimap_height": 103,
+    "pickup_route_enabled": true,
+    "hunt_cycle_min_sec": 92.83,
+    "hunt_cycle_max_sec": 102.483,
+    "platform1415_y_min": 54,
+    "platform1415_y_max": 55,
+    "platform16_y_min": 47,
+    "platform16_y_max": 48,
+    "platform27_y_min": 50,
+    "platform27_y_max": 50,
+    "platform24_y": 61,
+    "stair7_y": 67,
+    "teleport_hold_sec": 0.05,
+    "stair7_return_y_min": 61,
+    "stair7_return_y_max": 63
   }
 }

@@ -3,11 +3,59 @@ from __future__ import annotations
 
 from core.runtime import RuntimeConfig
 from core.navigation.block import Block
+from core.navigation.route_state import RouteStep
 from core.navigation.floor_judge import Floor
 from core.acting.combat import PotionRule
+from core.acting.attack_sequence import AttackSequence
 from core.acting.buff import Buff
 from core.navigation.image_trigger import ImageTriggerSpec
 from core.navigation.world_map import ActionSpec, WorldMapModel
+
+
+class _DictConfigView:
+    """dict 설정을 ConfigManager.get 형태로 읽게 해주는 자동판매용 어댑터."""
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def get(self, *keys, default=None):
+        cur = self._data
+        for key in keys:
+            if not isinstance(cur, dict) or key not in cur:
+                return default
+            cur = cur[key]
+        return cur
+
+
+def _resolve_window_ratio_region(region_cfg: dict, window_title: str) -> dict | None:
+    """게임창 기준 비율 영역을 현재 게임창 화면 좌표로 변환한다."""
+    try:
+        from core.puzzle.game_window import (
+            find_game_hwnd,
+            find_window_hwnd_by_title,
+            get_game_client_rect_screen,
+        )
+
+        hwnd = None
+        if window_title:
+            hwnd = find_window_hwnd_by_title(window_title)
+        if not hwnd:
+            hwnd = find_game_hwnd()
+        if not hwnd:
+            return None
+
+        left, top, width, height = get_game_client_rect_screen(hwnd)
+        if width <= 0 or height <= 0:
+            return None
+
+        return {
+            "left": left + int(float(region_cfg["x_ratio"]) * width),
+            "top": top + int(float(region_cfg["y_ratio"]) * height),
+            "width": max(1, int(float(region_cfg["w_ratio"]) * width)),
+            "height": max(1, int(float(region_cfg["h_ratio"]) * height)),
+        }
+    except Exception:
+        return None
 
 
 def _potion_rule(cfg: dict) -> PotionRule:
@@ -15,10 +63,52 @@ def _potion_rule(cfg: dict) -> PotionRule:
     return PotionRule(
         enabled=bool(cfg.get("enabled", False)),
         key=cfg.get("key", ""),
+        secondary_key=cfg.get("secondary_key", ""),
         threshold=float(cfg.get("threshold", 70)) / 100.0,
-        cooldown=float(cfg.get("cooldown_sec", 3.0)),
+        cooldown=(
+            1.0 if float(cfg.get("cooldown_sec", 1.0)) == 3.0
+            else float(cfg.get("cooldown_sec", 1.0))
+        ),
+        verify_delay=float(cfg.get("verify_delay_sec", 0.2)),
+        min_recovery=float(cfg.get("min_recovery_percent", 1.0)) / 100.0,
     )
 
+
+def _attack_sequences(attack: dict) -> list[AttackSequence]:
+    return [
+        AttackSequence.from_dict(data)
+        for data in (attack.get("sequences") or [])
+        if isinstance(data, dict)
+    ]
+
+
+def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
+    """Build RedNose2 v5 runtime profile while preserving saved custom keys."""
+    saved = d.get("rednose2_v5", {}) or {}
+    mm = d.get("minimap", {}) or {}
+    attack_key = str(saved.get("attack_key") or "end").strip() or "end"
+    teleport_key = str(saved.get("teleport_key") or "x").strip() or "x"
+    profile = dict(saved)
+    profile.update({
+        "enabled": bool(saved.get("enabled", True)),
+        "attack_key": attack_key,
+        "teleport_key": teleport_key,
+        "attack_hold_sec": float(saved.get("attack_hold_sec", 0.08)),
+        "retry_attack_hold_sec": float(saved.get("retry_attack_hold_sec", 1.5)),
+        "teleport_hold_sec": float(saved.get("teleport_hold_sec", 0.05)),
+        "teleport_interval_sec": float(saved.get("teleport_interval_sec", 0.4)),
+        "attack_to_teleport_sec": float(saved.get("attack_to_teleport_sec", 0.05)),
+        "floor2_hunt_teleport_interval_sec": float(saved.get("floor2_hunt_teleport_interval_sec", 0.4)),
+        "floor2_right_edge_teleport_interval_sec": float(saved.get("floor2_right_edge_teleport_interval_sec", 1.8)),
+        "close_walk_px": int(saved.get("close_walk_px", 8)),
+        "arrival_tolerance": int(saved.get("arrival_tolerance", 3)),
+        "max_step_sec": float(saved.get("max_step_sec", 18.0)),
+        "base_minimap_width": int(saved.get("base_minimap_width", mm.get("width", 244))),
+        "base_minimap_height": int(saved.get("base_minimap_height", mm.get("height", 144))),
+        "minimap_width": int(mm.get("width", saved.get("base_minimap_width", 244))),
+        "minimap_height": int(mm.get("height", saved.get("base_minimap_height", 144))),
+    })
+    return profile
 
 def _buffs(attack: dict) -> list[Buff]:
     """attack.normal_buffs/toggle_buffs → Buff 리스트 (활성+키 있는 것만)."""
@@ -28,7 +118,11 @@ def _buffs(attack: dict) -> list[Buff]:
             key = (b.get("key") or "").strip()
             if not b.get("enabled") or not key:
                 continue
-            out.append(Buff(key=key, interval=float(b.get("interval_sec", 60))))
+            out.append(Buff(
+                key=key,
+                interval=float(b.get("interval_sec", 60)),
+                hold_sec=float(b.get("hold_sec", 0.8)),
+            ))
     return out
 
 
@@ -50,12 +144,27 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         "width": int(mm.get("width", 200)),
         "height": int(mm.get("height", 120)),
     }
+    raw_char_rgb = (
+        (int(mm["char_r"]), int(mm["char_g"]), int(mm["char_b"]))
+        if all(k in mm for k in ("char_r", "char_g", "char_b"))
+        else None
+    )
+    # 노란 캐릭터 점 기준: 빨강/흰색 등 잘못 저장된 색상은 노란색으로 보정한다.
+    char_rgb = (
+        raw_char_rgb
+        if raw_char_rgb is not None
+        and raw_char_rgb[0] >= 180
+        and raw_char_rgb[1] >= 180
+        and raw_char_rgb[2] <= 100
+        else (255, 255, 0)
+    )
 
     recovery = d.get("recovery", {})
     hp_rule = _potion_rule(recovery.get("hp_potion", {}))
     mp_rule = _potion_rule(recovery.get("mp_potion", {}))
 
     attack = d.get("attack", {})
+    ladder_profile = d.get("ladder_profile", {}) or {}
     attack_key = attack.get("key", "") or d.get("minimap", {}).get("attack_key", "")
 
     # 사냥 영역 (B training) — w>0이면 region dict, 아니면 None(전체화면)
@@ -88,6 +197,9 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
                 repeat=int(action_data.get("repeat", 1)),
                 repeat_interval_sec=float(action_data.get("repeat_interval_sec", 0.0)),
                 wait_after_sec=float(action_data.get("wait_after_sec", 0.0)),
+                action_type=str(action_data.get("action_type", "key")),
+                click_x=action_data.get("click_x"),
+                click_y=action_data.get("click_y"),
             ),
         )
 
@@ -116,19 +228,51 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
 
     lie = d.get("settings1", {}).get("lie_detector", {})
     user = d.get("settings1", {}).get("user_detected", {})
+    lie_region = lie.get("region")
+    lie_detect_region = None
+    game_window_title = str(d.get("settings2", {}).get("game_window_title", ""))
+    if isinstance(lie_region, dict) and lie_region.get("x_ratio") is not None:
+        lie_detect_region = _resolve_window_ratio_region(lie_region, game_window_title)
+    elif isinstance(lie_region, (list, tuple)) and len(lie_region) == 4:
+        lie_detect_region = {
+            "left": int(lie_region[0]), "top": int(lie_region[1]),
+            "width": int(lie_region[2]), "height": int(lie_region[3]),
+        }
+
+    rednose2_profile = _rednose2_v5_profile(d, attack)
+    fixed_rednose_mm = rednose2_profile.get("fixed_minimap_region")
+    if (
+        bool(rednose2_profile.get("enabled", True))
+        and bool(rednose2_profile.get("use_fixed_minimap_region", False))
+        and isinstance(fixed_rednose_mm, dict)
+    ):
+        minimap_region = {
+            "left": int(fixed_rednose_mm.get("left", minimap_region["left"])),
+            "top": int(fixed_rednose_mm.get("top", minimap_region["top"])),
+            "width": int(fixed_rednose_mm.get("width", minimap_region["width"])),
+            "height": int(fixed_rednose_mm.get("height", minimap_region["height"])),
+        }
+        rednose2_profile["minimap_width"] = minimap_region["width"]
+        rednose2_profile["minimap_height"] = minimap_region["height"]
+    junk_sell = d.get("settings2", {}).get("junk_sell", {}) or {}
 
     return RuntimeConfig(
         minimap_region=minimap_region,
         coord_mode=str(d.get("coord_mode", "relative")),
-        game_window_title=str(d.get("settings2", {}).get("game_window_title", "")),
+        game_window_title=game_window_title,
         coord_anchor=d.get("coord_anchor"),
-        char_rgb=((int(mm["char_r"]), int(mm["char_g"]), int(mm["char_b"]))
-                  if all(k in mm for k in ("char_r", "char_g", "char_b")) else None),
+        char_rgb=char_rgb,
         floors=_floors(zones),
         route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
                if isinstance(b, dict) and "type" in b],
+        route_steps=[RouteStep.from_dict(s) for s in
+                     (d.get("floor_hunt", {}).get("route_steps") or [])
+                     if isinstance(s, dict) and ("step_type" in s or "type" in s)],
         route_mode=bool(d.get("floor_hunt", {}).get("route_mode", False)),
+        hunt_ground_active=str(d.get("hunt_grounds", {}).get("active", "") or ""),
+        rednose2_v5=rednose2_profile,
         attack_key=attack_key,
+        attack_sequences=_attack_sequences(attack),
         hp_rule=hp_rule,
         mp_rule=mp_rule,
         buffs=_buffs(attack),
@@ -136,23 +280,56 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         patrol_left_x=patrol_left,
         patrol_right_x=patrol_right,
         patrol_margin=patrol_margin,
+        junk_config=_DictConfigView(d),
+        auto_sell_enabled=bool(junk_sell.get("auto_sell_enabled", False)),
+        auto_sell_interval_min=float(junk_sell.get("auto_sell_interval_min", 10)),
+        auto_sell_on_start=bool(junk_sell.get("sell_on_start", False)),
         pet_key=pet_key,
         pet_interval=pet_interval,
         pet_count=pet_count,
         attack_interval=float(attack.get("delay_sec") if attack.get("delay_sec") is not None else 0.4),
         jump_key=str(mm.get("jump_key", "alt") or "alt"),
         jump_while_move=bool(attack.get("jump_while_move", False)),
+        ladder_launch_distance=(
+            5.0 if float(ladder_profile.get("launch_distance", 5.0)) == 8.0
+            else float(ladder_profile.get("launch_distance", 5.0))
+        ),
+        ladder_launch_distance_right=float(
+            ladder_profile.get("launch_distance_right", 7.0)
+        ),
+        ladder_launch_distance_left=float(
+            ladder_profile.get("launch_distance_left", 2.0)
+        ),
+        ladder_jump_hold_sec=float(ladder_profile.get("jump_hold_sec", 0.10)),
+        ladder_up_delay_sec=(
+            0.125
+            if float(ladder_profile.get("up_delay_sec", 0.125)) in (0.01, 0.03, 0.15, 0.245, 0.30)
+            else float(ladder_profile.get("up_delay_sec", 0.125))
+        ),
+        ladder_direction_hold_sec=float(ladder_profile.get("direction_hold_sec", 0.08)),
+        ladder_stable_tolerance=int(ladder_profile.get("stable_tolerance", 2)),
+        ladder_stable_samples=int(ladder_profile.get("stable_samples", 3)),
+        ladder_position_max_age_sec=float(ladder_profile.get("position_max_age_sec", 0.60)),
+        ladder_grab_confirm_sec=(
+            1.00 if float(ladder_profile.get("grab_confirm_sec", 1.00)) == 0.60
+            else float(ladder_profile.get("grab_confirm_sec", 1.00))
+        ),
         hits_to_kill=int(attack.get("hits_to_kill", 1)),
         skill_cast_sec=float(attack.get("skill_cast_sec") if attack.get("skill_cast_sec") is not None else 0.6),
         hunt_stay_threshold=int(attack.get("density_stay", 3)),
         hunt_leave_threshold=int(attack.get("density_leave", 1)),
         hunt_max_dwell_sec=float(attack.get("density_max_dwell_sec", 8.0)),
         pickup_key=(d.get("pickup_timer", {}).get("pickup_key", "")
-                    if d.get("pickup_timer", {}).get("enabled") else ""),
+                    if (d.get("pickup_timer", {}).get("enabled")
+                        or d.get("pickup_timer", {}).get("always_enabled")) else ""),
         pickup_interval=float(d.get("pickup_timer", {}).get("interval_sec", 60)),
+        pickup_always=bool(d.get("pickup_timer", {}).get("always_enabled", False)),
         lie_enabled=bool(lie.get("enabled", True)),
         lie_alert=bool(lie.get("alert_enabled",
                                lie.get("play_alarm", False) or lie.get("tg_enabled", False))),
+        lie_title_template=str(lie.get("template_path") or "templates/transparent_shape_title.png"),
+        lie_threshold=float(lie.get("threshold", 0.65)),
+        lie_detect_region=lie_detect_region,
         board_roi=lie.get("board_roi"),
         transparent_enabled=bool(
             d.get("settings1", {}).get("transparent_shape", {}).get("enabled", True)),
@@ -164,7 +341,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         hunt_area_region=hunt_area_region,
         world_map=world_map,
         image_trigger_spec=image_trigger_spec,
-        hunt_mode=d.get("hunt_mode", "key"),
+        anti_mob_profile=d.get("anti_mob", {}) or {},
+        hunt_mode="image" if d.get("hunt_mode") == "image" else "key",
         name_template=attack.get("name_template", ""),
         monster_templates=monster_tpls,
         monster_accuracy=float(attack.get("monster_accuracy", 0.9)),

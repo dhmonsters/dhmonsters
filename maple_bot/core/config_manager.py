@@ -1,8 +1,9 @@
-# 봇 설정을 JSON 파일로 저장/로드하는 ConfigManager
+﻿# 봇 설정을 JSON 파일로 저장/로드하는 ConfigManager
 import json
 import os
 import sys
 import time
+import copy
 
 
 def _get_config_path() -> str:
@@ -43,6 +44,14 @@ DEFAULT_CONFIG = {
             "reconnect_after": False,
             # ── 고정 기본값: 거짓말탐지기 감지 영역 (절대좌표 — 항상 동일) ──
             "region": [1126, 297, 296, 130],
+            "template_path": "templates/transparent_shape_title.png",
+            "threshold": 0.65,
+            "check_interval_sec": 0.2,
+            "cooldown_sec": 10.0,
+            "alert_enabled": False,
+            "tg_enabled": False,
+            "tg_token": "",
+            "tg_chat_id": "",
         },
         "transparent_shape": {
             "enabled": False,
@@ -84,6 +93,7 @@ DEFAULT_CONFIG = {
     "navigation": {"nodes": [], "edges": [], "routes": []},
     "attack": {
         "key":               "ctrl",
+        "sequences":         [],
         "monster_template":  "",
         "monster_folder":    "",     # 몬스터 이미지 폴더 경로 (비우면 monsters/ 루트 사용)
         "jump_before_attack": False,
@@ -127,7 +137,7 @@ DEFAULT_CONFIG = {
             },
         },
     },
-    "hunt_mode": "key",   # "key" | "image" | "coordinate"
+    "hunt_mode": "key",   # "key" | "image"
     "hunt_grounds": {
         "active": "",       # 현재 활성 프리셋 이름
         "presets": {},      # name → {minimap, zones, ropes, attack_key, monster_template}
@@ -157,12 +167,14 @@ DEFAULT_CONFIG = {
             "enabled": False,
             "threshold": 70,
             "key": "9",
+            "secondary_key": "",
             "cooldown_sec": 3.0,
         },
         "mp_potion": {
             "enabled": False,
             "threshold": 50,
             "key": "0",
+            "secondary_key": "",
             "cooldown_sec": 3.0,
         },
         "potion_count": {
@@ -289,15 +301,65 @@ def _deep_merge(base: dict, override: dict) -> None:
             base[k] = v
 
 
+def _get_bundled_config_path() -> str:
+    """EXE 또는 개발 폴더에 포함된 기본 config.json 경로를 찾는다."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "config.json"))
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(os.path.join(meipass, "config.json"))
+    else:
+        candidates.append("config.json")
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return ""
+
+
+def _load_json_safe(path: str) -> dict:
+    """설정 파일을 읽되 실패하면 빈 dict를 돌려준다."""
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ensure_required_presets(data: dict) -> bool:
+    """기존 사용자 설정에 배포 필수 사냥터 프리셋을 보강한다."""
+    bundled = _load_json_safe(_get_bundled_config_path())
+    bundled_presets = ((bundled.get("hunt_grounds") or {}).get("presets") or {})
+    if not isinstance(bundled_presets, dict):
+        return False
+
+    changed = False
+    hunt_grounds = data.setdefault("hunt_grounds", {})
+    presets = hunt_grounds.setdefault("presets", {})
+    if not isinstance(presets, dict):
+        presets = {}
+        hunt_grounds["presets"] = presets
+        changed = True
+
+    if "rednose2_v5" in bundled and "rednose2_v5" not in data:
+        data["rednose2_v5"] = copy.deepcopy(bundled["rednose2_v5"])
+        changed = True
+
+    return changed
+
+
 class ConfigManager:
     def __init__(self):
         self._data = {}
         self.load()
 
     def load(self):
-        # 구버전 마이그레이션: exe 폴더 config.json → AppData (권한 문제 해결)
+        # 구버전 마이그레이션: exe 폴더 config.json -> AppData (권한 문제 해결)
         if getattr(sys, "frozen", False) and not os.path.exists(CONFIG_PATH):
-            old = "config.json"   # main.py의 os.chdir로 exe 폴더 = cwd
+            old = "config.json"
             if os.path.exists(old):
                 try:
                     import shutil
@@ -305,10 +367,10 @@ class ConfigManager:
                 except Exception:
                     pass
 
-        import copy
         self._data = copy.deepcopy(DEFAULT_CONFIG)
+        changed = False
         if os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
                 saved = json.load(f)
             world = saved.get("world_map", {})
             calibration_data = world.get("calibration")
@@ -333,9 +395,13 @@ class ConfigManager:
                 saved["world_map"]["legacy_backup_path"] = str(backup_path)
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                     json.dump(saved, f, ensure_ascii=False, indent=2)
-            # 저장된 값을 기본값 위에 덮어씌움 — 새 기본값 키는 자동으로 추가됨
+            # 저장된 값을 기본값 위에 덮어쓰며, 새 기본값은 자동으로 유지한다.
             _deep_merge(self._data, saved)
-
+            changed = _ensure_required_presets(self._data)
+        else:
+            changed = _ensure_required_presets(self._data)
+        if changed:
+            self.save()
     def save(self):
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2)
@@ -521,3 +587,5 @@ def get_game_window_rect(config: "ConfigManager") -> tuple[int, int, int, int]:
     except Exception:
         pass
     return (0, 0, 0, 0)
+
+
