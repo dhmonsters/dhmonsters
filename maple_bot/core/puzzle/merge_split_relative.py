@@ -983,10 +983,7 @@ class MergeSplitRelativeResolver:
             and self._event_detector.pending_merge_state is not None
         ):
             self._split_recovery_success_count = 0
-            if (
-                self._split_recovery_unresolved
-                and previous_detector_state is not MergeState.REACQUIRED
-            ):
+            if self._split_recovery_unresolved:
                 return self._unresolved_split_hold(
                     event,
                     "merge_confirmation_pending",

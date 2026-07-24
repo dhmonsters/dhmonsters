@@ -2068,7 +2068,71 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertIsNone(pending.target_candidate_id)
         self.assertIsNone(pending.background_candidate_id)
         self.assertEqual(resolver._split_recovery_success_count, 0)
-        self.assertEqual(resolver._split_recovery_remaining, remaining_before_pending)
+        self.assertEqual(
+            resolver._split_recovery_remaining,
+            remaining_before_pending - 1,
+        )
+
+    def test_alternating_pending_new_merges_expire_unresolved_recovery(self) -> None:
+        module, resolver, overlap, background, anchor_a, anchor_b = (
+            self._start_unresolved_split_recovery()
+        )
+        child = _center_candidate("child", (33.0, 31.0))
+        reacquired = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(reacquired.state, module.MergeState.REACQUIRED)
+        self.assertTrue(resolver._split_recovery_unresolved)
+        remaining = resolver._split_recovery_remaining
+        merged = _candidate("pending-merged", (25.0, 23.0, 40.0, 38.0))
+        pending_observations = (
+            (overlap, background, anchor_a, anchor_b),
+            (merged, anchor_a, anchor_b),
+        )
+        decisions = []
+        for index in range(remaining):
+            decisions.append(
+                resolver.update(
+                    incumbent_point=overlap.center,
+                    candidates=pending_observations[index % len(pending_observations)],
+                    evidence={},
+                    stable_area=4.0,
+                    frame_shape=(100, 100),
+                )
+            )
+
+        self.assertEqual(decisions[0].reason, "merge_confirmation_pending")
+        self.assertEqual(decisions[-1].reason, "split_recovery_expired")
+        self.assertEqual(decisions[-1].state, module.MergeState.SEPARATE)
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertIsNone(resolver._merge_context)
+        self.assertIsNone(resolver._last_visible_pair)
+        self.assertIsNone(resolver._merge_center)
+        self.assertIsNone(resolver._merge_bbox)
+
+        resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        next_merge = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(next_merge.state, module.MergeState.MERGED)
+        self.assertEqual(next_merge.debug["event_id"], 2)
+        self.assertIsNone(resolver._merge_context)
 
     def test_reacquired_merged_reconfirmation_opens_new_event_without_old_context(self) -> None:
         module, resolver, overlap, _background, anchor_a, anchor_b = (
