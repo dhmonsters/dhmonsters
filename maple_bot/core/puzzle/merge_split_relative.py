@@ -830,6 +830,8 @@ class MergeSplitEventDetector:
             if self._pending_count >= self.confirm_observations:
                 self._set_state(observed)
         elif self.state in (MergeState.SEPARATE, MergeState.REACQUIRED):
+            self._pending_state = None
+            self._pending_count = 0
             self._set_state(MergeState.SEPARATE, increment_event=False)
 
         return MergeEvent(
@@ -965,6 +967,18 @@ class MergeSplitRelativeResolver:
 
         if (
             recovering_split
+            and self._split_recovery_unresolved
+            and event.state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
+            and event.event_id != previous_event_id
+        ):
+            self._clear_split_recovery()
+            self._merge_context = None
+            self._merge_center = None
+            self._merge_bbox = None
+            recovering_split = False
+
+        if (
+            recovering_split
             and not self._split_recovery_unresolved
             and self._event_detector.pending_merge_state is not None
         ):
@@ -995,6 +1009,13 @@ class MergeSplitRelativeResolver:
             self._merge_center = None
             self._merge_bbox = None
             recovering_split = False
+
+        if (
+            event.state is MergeState.SEPARATE
+            and not recovering_split
+            and self._event_detector.pending_merge_state is not None
+        ):
+            return self._event_hold(event, "merge_confirmation_pending")
 
         if event.state is MergeState.SEPARATE and not recovering_split:
             collision = collision_candidate
