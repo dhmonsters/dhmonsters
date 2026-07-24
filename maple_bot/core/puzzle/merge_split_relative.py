@@ -781,6 +781,21 @@ class MergeSplitEventDetector:
     def complete_split_recovery(self) -> None:
         self._set_state(MergeState.SEPARATE, increment_event=False)
 
+    @property
+    def pending_merge_state(self) -> MergeState | None:
+        if (
+            self._pending_state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
+            and self._pending_count < self.confirm_observations
+        ):
+            return self._pending_state
+        return None
+
+    def open_confirmed_merge_event(self) -> int:
+        if self.state not in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED):
+            raise ValueError("confirmed merge event requires a merge state")
+        self.event_id += 1
+        return self.event_id
+
     def update(
         self,
         *,
@@ -928,6 +943,8 @@ class MergeSplitRelativeResolver:
                 else (target_candidate,)
             )
 
+        previous_detector_state = self._event_detector.state
+        previous_event_id = self._event_detector.event_id
         event = self._event_detector.update(
             target_candidate=target_candidate,
             candidates=event_candidates,
@@ -944,14 +961,36 @@ class MergeSplitRelativeResolver:
             self._split_recovery_unresolved = True
         recovering_split = self._split_recovery_remaining > 0
 
+        if (
+            recovering_split
+            and not self._split_recovery_unresolved
+            and self._event_detector.pending_merge_state is not None
+        ):
+            return self._event_hold(event, "merge_confirmation_pending")
+
         # A resolved split still needs a short stability quorum, but a new
-        # overlap starts a normal merge event instead of consuming its budget.
+        # confirmed merge starts its own event instead of consuming that budget.
         if (
             recovering_split
             and not self._split_recovery_unresolved
             and event.state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
         ):
+            if (
+                previous_detector_state is MergeState.SPLITTING
+                and event.event_id == previous_event_id
+            ):
+                event = MergeEvent(
+                    event_id=self._event_detector.open_confirmed_merge_event(),
+                    state=event.state,
+                    reason=event.reason,
+                    overlap_ratio=event.overlap_ratio,
+                    area_ratio=event.area_ratio,
+                    candidate_count=event.candidate_count,
+                )
             self._clear_split_recovery()
+            self._merge_context = None
+            self._merge_center = None
+            self._merge_bbox = None
             recovering_split = False
 
         if event.state is MergeState.SEPARATE and not recovering_split:

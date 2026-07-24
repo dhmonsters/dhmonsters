@@ -1228,6 +1228,137 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(next_decision.state, module.MergeState.SEPARATE)
         self.assertEqual(resolver._split_recovery_remaining, 0)
 
+    def _start_resolved_split_stabilization(
+        self,
+        *,
+        confirm_observations: int,
+    ):
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=confirm_observations,
+            minimum_anchor_observations=2,
+        )
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        target = _center_candidate("target", (34.0, 32.0))
+        for _ in range(2):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+            )
+
+        overlap = _center_candidate("overlap", (31.0, 29.0))
+        for _ in range(confirm_observations):
+            resolver.update(
+                incumbent_point=overlap.center,
+                candidates=(overlap, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+            )
+
+        target_child = _center_candidate("target-child", (33.0, 31.0))
+        background_child = _center_candidate("background-child", (30.0, 28.0))
+        first = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(target_child, background_child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(first.target_candidate_id, "target-child")
+        self.assertEqual(resolver._split_recovery_remaining, 2)
+        self.assertFalse(resolver._split_recovery_unresolved)
+        return module, resolver, anchor_a, anchor_b, target_child, background_child
+
+    def test_resolved_split_opens_new_event_for_confirmed_partial_overlap(self) -> None:
+        module, resolver, anchor_a, anchor_b, _target_child, _background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        old_context = resolver._merge_context
+        new_target = _center_candidate("new-target", (33.0, 31.0))
+        new_background = _center_candidate("new-background", (32.0, 30.0))
+
+        decision = resolver.update(
+            incumbent_point=new_target.center,
+            candidates=(new_target, new_background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(decision.state, module.MergeState.PARTIAL_OVERLAP)
+        self.assertEqual(decision.debug["event_id"], 2)
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertIsNot(resolver._merge_context, old_context)
+        self.assertEqual(resolver._merge_context.event_id, 2)
+        self.assertEqual(resolver._merge_context.target_candidate_id, "new-target")
+        self.assertEqual(resolver._merge_context.background_track_id, "new-background")
+
+    def test_pending_overlap_does_not_consume_resolved_stabilization_budget(self) -> None:
+        module, resolver, anchor_a, anchor_b, _target_child, _background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=2)
+        )
+        old_context = resolver._merge_context
+        new_target = _center_candidate("new-target", (33.0, 31.0))
+        new_background = _center_candidate("new-background", (32.0, 30.0))
+
+        pending = resolver.update(
+            incumbent_point=new_target.center,
+            candidates=(new_target, new_background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(pending.reason, "merge_confirmation_pending")
+        self.assertEqual(pending.state, module.MergeState.SPLITTING)
+        self.assertEqual(resolver._split_recovery_remaining, 2)
+        self.assertFalse(resolver._split_recovery_unresolved)
+        self.assertIs(resolver._merge_context, old_context)
+
+        confirmed = resolver.update(
+            incumbent_point=new_target.center,
+            candidates=(new_target, new_background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertIsNot(resolver._merge_context, old_context)
+        self.assertEqual(confirmed.state, module.MergeState.PARTIAL_OVERLAP)
+        self.assertEqual(confirmed.debug["event_id"], 2)
+        self.assertEqual(resolver._merge_context.target_candidate_id, "new-target")
+
+    def test_resolved_split_opens_new_event_for_confirmed_direct_merge(self) -> None:
+        module, resolver, anchor_a, anchor_b, _target_child, _background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        merged = _candidate("next-merged", (28.0, 26.0, 38.0, 36.0))
+
+        decision = resolver.update(
+            incumbent_point=(33.0, 31.0),
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(decision.state, module.MergeState.MERGED)
+        self.assertEqual(decision.debug["event_id"], 2)
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertIsNotNone(resolver._merge_context)
+        self.assertEqual(resolver._merge_context.event_id, 2)
+        self.assertEqual(resolver._merge_context.target_candidate_id, "target-child")
+        self.assertEqual(resolver._merge_context.background_track_id, "background-child")
+        self.assertEqual(resolver._merge_context.merge_bbox, merged.bbox)
+
     def test_direct_merge_creates_context_and_recovers_split_children(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         resolver = module.MergeSplitRelativeResolver(
