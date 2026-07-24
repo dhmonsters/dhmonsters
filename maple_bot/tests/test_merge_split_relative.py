@@ -1222,6 +1222,112 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(later.reason, "separate")
 
+    def test_missing_fingerprint_recovery_expires_after_first_split_hold(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=3,
+        )
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        target = _center_candidate("target", (34.0, 32.0))
+
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        overlap = _center_candidate("overlap", (31.0, 29.0))
+        resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(overlap, background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        child = _center_candidate("child", (33.0, 31.0))
+        first_hold = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(first_hold.reason, "missing_fingerprint")
+        self.assertEqual(resolver._split_recovery_remaining, 3)
+
+        later = first_hold
+        for _ in range(4):
+            later = resolver.update(
+                incumbent_point=overlap.center,
+                candidates=(child, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+            )
+
+        self.assertEqual(later.reason, "separate")
+
+    def test_unresolved_event_does_not_seed_next_direct_merge_context(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=2,
+        )
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        target = _center_candidate("target", (34.0, 32.0))
+
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        overlap = _center_candidate("overlap", (31.0, 29.0))
+        resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(overlap, background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        unresolved_child = _center_candidate("unresolved-child", (33.0, 31.0))
+        resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(unresolved_child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(unresolved_child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        next_merged = _candidate("next-merged", (26.0, 24.0, 40.0, 38.0))
+        next_decision = resolver.update(
+            incumbent_point=unresolved_child.center,
+            candidates=(next_merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(next_decision.state, module.MergeState.MERGED)
+        self.assertEqual(next_decision.debug["event_id"], 2)
+        self.assertIsNone(resolver._merge_context)
+
 
 if __name__ == "__main__":
     unittest.main()

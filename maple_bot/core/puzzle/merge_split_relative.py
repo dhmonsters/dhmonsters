@@ -636,6 +636,13 @@ class MergeEventContext:
 
 
 @dataclass(frozen=True)
+class _VisiblePair:
+    target: Candidate
+    background: Candidate
+    event_id: int
+
+
+@dataclass(frozen=True)
 class SplitChildPair:
     children: tuple[Candidate, Candidate]
     union_residual: float
@@ -849,8 +856,7 @@ class MergeSplitRelativeResolver:
         self._current_anchors: tuple[BackgroundAnchor, ...] = ()
         self._fingerprint: RelationFingerprint | None = None
         self._merge_context: MergeEventContext | None = None
-        self._last_visible_target: Candidate | None = None
-        self._last_visible_background: Candidate | None = None
+        self._last_visible_pair: _VisiblePair | None = None
         self._merge_center: Point | None = None
         self._merge_bbox: tuple[float, float, float, float] | None = None
         self._split_recovery_remaining = 0
@@ -914,7 +920,11 @@ class MergeSplitRelativeResolver:
             )
             self._remember_target(target_candidate)
             self._remember_background_relation(collision, evidence, scale)
-            self._remember_visible_pair(target_candidate, collision)
+            self._remember_visible_pair(
+                target_candidate,
+                collision,
+                event_id=event.event_id,
+            )
             self._merge_context = None
             self._merge_center = None
             self._merge_bbox = None
@@ -971,7 +981,10 @@ class MergeSplitRelativeResolver:
             self._advance_latent_target(incumbent_point)
             return self._event_hold(event, "merged_identity_hold")
 
-        if recovering_split and self._fingerprint is not None:
+        if recovering_split:
+            if self._fingerprint is None:
+                self._consume_unresolved_split_recovery(event)
+                return self._event_hold(event, "missing_fingerprint")
             child_center = self._merge_center or predicted
             local_children = tuple(
                 candidate
@@ -1002,8 +1015,7 @@ class MergeSplitRelativeResolver:
                 else None
             )
             if split_pair is None:
-                if event.state is not MergeState.SPLITTING:
-                    self._split_recovery_remaining -= 1
+                self._consume_unresolved_split_recovery(event)
                 return self._event_hold(event, "split_pair_ambiguous")
             decision = assign_split_children(
                 children=split_pair.children,
@@ -1034,6 +1046,7 @@ class MergeSplitRelativeResolver:
                     ),
                     None,
                 ),
+                event_id=event.event_id,
             )
             return MergeSplitDecision(
                 state=event.state,
@@ -1076,7 +1089,6 @@ class MergeSplitRelativeResolver:
         target_candidate: Candidate,
         background_candidate: Candidate,
     ) -> None:
-        self._remember_visible_pair(target_candidate, background_candidate)
         if self._merge_context is None or self._merge_context.event_id != event.event_id:
             self._merge_context = MergeEventContext(
                 event_id=event.event_id,
@@ -1105,22 +1117,20 @@ class MergeSplitRelativeResolver:
             self._merge_context.merge_bbox = merged_candidate.bbox
             self._merge_context.last_frame = merged_candidate.frame_index
             return
-        if (
-            self._last_visible_target is None
-            or self._last_visible_background is None
-        ):
+        visible_pair = self._last_visible_pair
+        if visible_pair is None or visible_pair.event_id != event.event_id - 1:
             self._merge_context = None
             return
         self._merge_context = MergeEventContext(
             event_id=event.event_id,
-            target_candidate_id=self._last_visible_target.candidate_id,
-            background_track_id=self._last_visible_background.candidate_id,
+            target_candidate_id=visible_pair.target.candidate_id,
+            background_track_id=visible_pair.background.candidate_id,
             anchor_track_ids=tuple(anchor.track_id for anchor in self._current_anchors),
-            premerge_target_point=self._last_visible_target.center,
-            premerge_target_bbox=self._last_visible_target.bbox,
-            premerge_background_bbox=self._last_visible_background.bbox,
+            premerge_target_point=visible_pair.target.center,
+            premerge_target_bbox=visible_pair.target.bbox,
+            premerge_background_bbox=visible_pair.background.bbox,
             merge_bbox=merged_candidate.bbox,
-            opened_frame=self._last_visible_target.frame_index,
+            opened_frame=visible_pair.target.frame_index,
             last_frame=merged_candidate.frame_index,
         )
 
@@ -1128,11 +1138,23 @@ class MergeSplitRelativeResolver:
         self,
         target_candidate: Candidate | None,
         background_candidate: Candidate | None,
+        *,
+        event_id: int,
     ) -> None:
-        if target_candidate is not None:
-            self._last_visible_target = target_candidate
-        if background_candidate is not None:
-            self._last_visible_background = background_candidate
+        if target_candidate is None or background_candidate is None:
+            return
+        self._last_visible_pair = _VisiblePair(
+            target=target_candidate,
+            background=background_candidate,
+            event_id=event_id,
+        )
+
+    def _consume_unresolved_split_recovery(self, event: MergeEvent) -> None:
+        if event.state is not MergeState.SPLITTING:
+            self._split_recovery_remaining = max(
+                0,
+                self._split_recovery_remaining - 1,
+            )
 
     def _remember_background_relation(
         self,
