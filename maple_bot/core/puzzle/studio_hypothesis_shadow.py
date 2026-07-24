@@ -1192,14 +1192,7 @@ def _track_prediction_quality(track: _StableCycleTrack, candidate: Candidate) ->
         abs(current_model.w - candidate_model.w) / max(1.0, current_model.w, candidate_model.w),
         abs(current_model.h - candidate_model.h) / max(1.0, current_model.h, candidate_model.h),
     )
-    prediction_quality = position_residual + shape_residual
-    position_quality = _track_position_quality(track, candidate)
-    if (
-        prediction_quality > _TRACK_ASSOCIATION_QUALITY_LIMIT
-        and position_quality <= _TRACK_ASSOCIATION_QUALITY_LIMIT
-    ):
-        return position_quality
-    return prediction_quality
+    return position_residual + shape_residual
 
 
 def _track_segments_cross(
@@ -1864,22 +1857,19 @@ def _evidence_models(payload: dict[str, Any]) -> dict[str, CandidateEvidence]:
 
 
 def _board_frame_shape(rows: list[dict[str, Any]]) -> tuple[int, int] | None:
-    values = _board_frame_shape_values(rows)
-    if values is None:
-        return None
-    height, width = values
-    height = _optional_int(height)
-    width = _optional_int(width)
-    if height is not None and width is not None and height > 0 and width > 0:
-        return (height, width)
+    for height, width in _board_frame_shape_values(rows):
+        height = _optional_int(height)
+        width = _optional_int(width)
+        if height is not None and width is not None and height > 0 and width > 0:
+            return (height, width)
     return None
 
 
 def _cycle_board_frame_shape(rows: list[dict[str, Any]]) -> tuple[int, int] | None:
     values = _board_frame_shape_values(rows)
-    if values is None:
+    if not values:
         return None
-    height, width = values
+    height, width = values[0]
     if type(height) is int and type(width) is int and height > 0 and width > 0:
         return (height, width)
     return None
@@ -1887,7 +1877,8 @@ def _cycle_board_frame_shape(rows: list[dict[str, Any]]) -> tuple[int, int] | No
 
 def _board_frame_shape_values(
     rows: list[dict[str, Any]],
-) -> tuple[object, object] | None:
+) -> tuple[tuple[object, object], ...]:
+    values: list[tuple[object, object]] = []
     for row in rows:
         if row.get("type") != "SESSION_START":
             continue
@@ -1897,8 +1888,8 @@ def _board_frame_shape_values(
         board_roi = payload.get("board_roi")
         if not isinstance(board_roi, dict):
             continue
-        return (board_roi.get("h"), board_roi.get("w"))
-    return None
+        values.append((board_roi.get("h"), board_roi.get("w")))
+    return tuple(values)
 
 
 def _wide_debug(payload: dict[str, Any]) -> dict[str, Any]:

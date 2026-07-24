@@ -385,6 +385,53 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                     )
                     self.assertTrue(details[0]["local_rigid_gate"]["selected"])
 
+    def test_wide_gate_skips_invalid_session_start_before_legacy_shape(self) -> None:
+        with TemporaryDirectory(prefix="studio-wide-multi-session-start-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            _write_jsonl(
+                score_path,
+                [{"solver_frame_index": 1, "target_x": 80.0, "target_y": 50.0}],
+            )
+            baseline_path = root / "baseline.jsonl"
+            _write_jsonl(baseline_path, _wide_gate_trace((100, 120)))
+            baseline = replay_hypothesis_selection_details(
+                score_path,
+                baseline_path,
+                width=2,
+                branch=2,
+            )
+
+            for label, frame_shape in (
+                ("strings", ("100", "120")),
+                ("whole_floats", (100.0, 120.0)),
+            ):
+                with self.subTest(label=label):
+                    trace_path = root / f"multi-{label}.jsonl"
+                    _write_jsonl(
+                        trace_path,
+                        [
+                            {
+                                "type": "SESSION_START",
+                                "frame_index": None,
+                                "payload": {"board_roi": {"w": "invalid", "h": "invalid"}},
+                            },
+                            *_wide_gate_trace(frame_shape),
+                        ],
+                    )
+                    details = replay_hypothesis_selection_details(
+                        score_path,
+                        trace_path,
+                        width=2,
+                        branch=2,
+                    )
+
+                    self.assertEqual(details, baseline)
+                    self.assertEqual(
+                        details[0]["wide_gate"]["beam_guard"]["bottom_margin"],
+                        45.0,
+                    )
+
     def test_merge_split_relative_is_opt_in_and_reports_state(self) -> None:
         with TemporaryDirectory(prefix="studio-merge-split-opt-in-") as tmp:
             root = Path(tmp)
@@ -1108,6 +1155,32 @@ class StudioHypothesisShadowTest(unittest.TestCase):
         observation, reason = tracks.frozen_observation(2)
         self.assertIsNone(observation)
         self.assertEqual(reason, "ambiguous")
+        self.assertEqual(tracks.freeze(), frozen_before)
+        self.assertEqual(
+            set(tracks._tracks["cycle-track-1"].observations),
+            {0, 1},
+        )
+
+    def test_frozen_tracks_reject_reverse_velocity_prediction_without_commit(self) -> None:
+        tracks = _StableCycleTracks(frame_shape=(300, 300))
+        tracks.update(
+            0,
+            _cycle_candidates(0, ((50.0, 20.0), (160.0, 20.0), (230.0, 20.0))),
+        )
+        tracks.update(
+            1,
+            _cycle_candidates(1, ((70.0, 20.0), (160.0, 20.0), (230.0, 20.0))),
+        )
+        frozen_before = tracks.freeze()
+
+        tracks.update(
+            2,
+            _cycle_candidates(2, ((29.0, 20.0), (160.0, 20.0), (230.0, 20.0))),
+        )
+
+        observation, reason = tracks.frozen_observation(2)
+        self.assertIsNone(observation)
+        self.assertEqual(reason, "missing")
         self.assertEqual(tracks.freeze(), frozen_before)
         self.assertEqual(
             set(tracks._tracks["cycle-track-1"].observations),
