@@ -132,6 +132,18 @@ class BackgroundCatalog:
         lag = self._choose_local_lag(int(frame_index), int(period), int(local_search))
         return list(self._frames.get(int(frame_index) - lag, []))
 
+    def choose_local_lag(
+        self,
+        frame_index: int,
+        period: int,
+        local_search: int = 8,
+    ) -> int:
+        return self._choose_local_lag(
+            int(frame_index),
+            int(period),
+            int(local_search),
+        )
+
     def _choose_local_lag(self, frame_index: int, period: int, search: int) -> int:
         lo = max(2, period - search)
         hi = min(frame_index, period + search)

@@ -39,6 +39,17 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
         self.assertEqual(period, 5)
         self.assertLess(score, 1.0)
 
+    def test_catalog_exposes_measured_local_lag(self):
+        catalog = BackgroundCatalog()
+        for frame in range(8):
+            x = float((frame % 3) * 10)
+            catalog.add_frame(frame, [PuzzleCandidate(x, 0.0, 1.0, 20.0, 20.0)])
+
+        self.assertEqual(
+            catalog.choose_local_lag(frame_index=7, period=3, local_search=1),
+            3,
+        )
+
     def test_engine_prefers_continuous_candidate(self):
         engine = TransparentPuzzleEngine()
         engine.update(PuzzleEngineInput(0, [], white_anchor=(100.0, 100.0)))
