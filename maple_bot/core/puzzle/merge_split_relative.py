@@ -779,6 +779,8 @@ class MergeSplitEventDetector:
         self._pending_count = 0
 
     def complete_split_recovery(self) -> None:
+        self._pending_state = None
+        self._pending_count = 0
         self._set_state(MergeState.SEPARATE, increment_event=False)
 
     @property
@@ -988,7 +990,10 @@ class MergeSplitRelativeResolver:
                     event,
                     "merge_confirmation_pending",
                 )
-            return self._event_hold(event, "merge_confirmation_pending")
+            return self._bounded_split_recovery_hold(
+                event,
+                "merge_confirmation_pending",
+            )
 
         # A resolved split still needs a short stability quorum, but a new
         # confirmed merge starts its own event instead of consuming that budget.
@@ -1319,6 +1324,24 @@ class MergeSplitRelativeResolver:
         if self._split_recovery_remaining > 0:
             return self._event_hold(event, reason)
 
+        return self._expire_split_recovery(event)
+
+    def _bounded_split_recovery_hold(
+        self,
+        event: MergeEvent,
+        reason: str,
+    ) -> MergeSplitDecision:
+        self._split_recovery_success_count = 0
+        self._split_recovery_remaining = max(
+            0,
+            self._split_recovery_remaining - 1,
+        )
+        if self._split_recovery_remaining > 0:
+            return self._event_hold(event, reason)
+
+        return self._expire_split_recovery(event)
+
+    def _expire_split_recovery(self, event: MergeEvent) -> MergeSplitDecision:
         self._event_detector.complete_split_recovery()
         self._clear_split_recovery()
         self._merge_context = None

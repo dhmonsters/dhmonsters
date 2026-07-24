@@ -81,6 +81,38 @@ class RelativeCoordinateGeometryTest(unittest.TestCase):
 
 
 class MergeSplitEventDetectorTest(unittest.TestCase):
+    def test_complete_split_recovery_clears_pending_confirmation_while_separate(
+        self,
+    ) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        detector = module.MergeSplitEventDetector(confirm_observations=2)
+        merged = _candidate("merged", (7.0, 7.0, 35.0, 35.0))
+
+        detector.update(
+            target_candidate=None,
+            candidates=(merged,),
+            stable_area=400.0,
+            predicted_target_point=(20.0, 20.0),
+        )
+        detector.complete_split_recovery()
+        first_after_expiry = detector.update(
+            target_candidate=None,
+            candidates=(merged,),
+            stable_area=400.0,
+            predicted_target_point=(20.0, 20.0),
+        )
+        confirmed = detector.update(
+            target_candidate=None,
+            candidates=(merged,),
+            stable_area=400.0,
+            predicted_target_point=(20.0, 20.0),
+        )
+
+        self.assertEqual(first_after_expiry.state, module.MergeState.SEPARATE)
+        self.assertEqual(first_after_expiry.event_id, 0)
+        self.assertEqual(confirmed.state, module.MergeState.MERGED)
+        self.assertEqual(confirmed.event_id, 1)
+
     def test_partial_overlap_requires_repeated_observation(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         detector = module.MergeSplitEventDetector(confirm_observations=2)
@@ -1301,7 +1333,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(resolver._merge_context.target_candidate_id, "new-target")
         self.assertEqual(resolver._merge_context.background_track_id, "new-background")
 
-    def test_pending_overlap_does_not_consume_resolved_stabilization_budget(self) -> None:
+    def test_pending_overlap_consumes_resolved_stabilization_budget(self) -> None:
         module, resolver, anchor_a, anchor_b, _target_child, _background_child = (
             self._start_resolved_split_stabilization(confirm_observations=2)
         )
@@ -1319,7 +1351,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(pending.reason, "merge_confirmation_pending")
         self.assertEqual(pending.state, module.MergeState.SPLITTING)
-        self.assertEqual(resolver._split_recovery_remaining, 3)
+        self.assertEqual(resolver._split_recovery_remaining, 2)
         self.assertEqual(resolver._split_recovery_success_count, 0)
         self.assertFalse(resolver._split_recovery_unresolved)
         self.assertIs(resolver._merge_context, old_context)
@@ -1354,7 +1386,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(pending.reason, "merge_confirmation_pending")
         self.assertEqual(resolver._split_recovery_success_count, 0)
-        self.assertEqual(resolver._split_recovery_remaining, 3)
+        self.assertEqual(resolver._split_recovery_remaining, 2)
 
         decisions = []
         for index in range(3):
@@ -1374,7 +1406,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             )
             if index < 2:
                 self.assertEqual(resolver._split_recovery_success_count, index + 1)
-                self.assertEqual(resolver._split_recovery_remaining, 3)
+                self.assertEqual(resolver._split_recovery_remaining, 2)
 
         self.assertEqual(
             [decision.target_candidate_id for decision in decisions],
@@ -1387,6 +1419,49 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(resolver._split_recovery_success_count, 0)
         self.assertEqual(resolver._split_recovery_remaining, 0)
         self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
+
+    def test_alternating_pending_merges_expire_resolved_split_stabilization(
+        self,
+    ) -> None:
+        module, resolver, anchor_a, anchor_b, target_child, _background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=2)
+        )
+        pending_partial_target = _center_candidate(
+            "pending-partial-target",
+            target_child.center,
+        )
+        pending_partial_background = _center_candidate(
+            "pending-partial-background",
+            (target_child.center[0] - 1.0, target_child.center[1] - 1.0),
+        )
+        pending_merged = _candidate("pending-merged", (28.0, 26.0, 38.0, 36.0))
+        pending_observations = (
+            (pending_partial_target, pending_partial_background, anchor_a, anchor_b),
+            (pending_merged, anchor_a, anchor_b),
+        )
+        remaining = resolver._split_recovery_remaining
+        decisions = []
+        for index in range(remaining):
+            decisions.append(
+                resolver.update(
+                    incumbent_point=target_child.center,
+                    candidates=pending_observations[index % len(pending_observations)],
+                    evidence={},
+                    stable_area=4.0,
+                    frame_shape=(100, 100),
+                )
+            )
+
+        self.assertEqual(decisions[0].reason, "merge_confirmation_pending")
+        self.assertEqual(decisions[-1].reason, "split_recovery_expired")
+        self.assertEqual(decisions[-1].state, module.MergeState.SEPARATE)
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertEqual(resolver._split_recovery_success_count, 0)
+        self.assertFalse(resolver._split_recovery_unresolved)
+        self.assertIsNone(resolver._merge_context)
+        self.assertIsNone(resolver._last_visible_pair)
+        self.assertIsNone(resolver._merge_center)
+        self.assertIsNone(resolver._merge_bbox)
 
     def test_resolved_split_opens_new_event_for_confirmed_direct_merge(self) -> None:
         module, resolver, anchor_a, anchor_b, _target_child, _background_child = (
