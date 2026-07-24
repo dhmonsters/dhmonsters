@@ -650,6 +650,38 @@ class SplitChildPair:
     score_margin: float
 
 
+def _duplicate_equivalence_representatives(
+    candidates: Sequence[Candidate],
+) -> tuple[Candidate, ...]:
+    def representative_key(candidate: Candidate) -> tuple[float, object, str]:
+        return (-float(candidate.score), candidate.bbox, candidate.candidate_id)
+
+    clusters: list[list[Candidate]] = []
+    for candidate in sorted(candidates, key=representative_key):
+        matching_indices = [
+            index
+            for index, cluster in enumerate(clusters)
+            if any(
+                _is_duplicate_observation(candidate, member)
+                or _is_duplicate_observation(member, candidate)
+                for member in cluster
+            )
+        ]
+        if not matching_indices:
+            clusters.append([candidate])
+            continue
+
+        primary_index = matching_indices[0]
+        clusters[primary_index].append(candidate)
+        for index in reversed(matching_indices[1:]):
+            clusters[primary_index].extend(clusters.pop(index))
+
+    return tuple(
+        min(cluster, key=representative_key)
+        for cluster in clusters
+    )
+
+
 def select_split_child_pair(
     *,
     context: MergeEventContext,
@@ -657,6 +689,7 @@ def select_split_child_pair(
     predicted_target_point: Point,
     stable_scale_px: float,
 ) -> SplitChildPair | None:
+    candidates = _duplicate_equivalence_representatives(candidates)
     if len(candidates) < 2:
         return None
 
@@ -671,8 +704,6 @@ def select_split_child_pair(
     )
     scored_pairs: list[tuple[float, float, float, tuple[Candidate, Candidate]]] = []
     for left, right in combinations(candidates, 2):
-        if _is_duplicate_observation(left, right):
-            continue
         child_union = _bbox_union(left.bbox, right.bbox)
         union_residual = _bbox_edge_residual(child_union, merge_bbox, scale)
         ancestry_residual = min(
@@ -913,8 +944,7 @@ class MergeSplitRelativeResolver:
             self._split_first_unresolved_held = False
         recovering_split = (
             self._split_recovery_remaining > 0
-            and event.state
-            in (MergeState.SPLITTING, MergeState.REACQUIRED, MergeState.SEPARATE)
+            and self._split_recovery_event_id == event.event_id
         )
 
         if event.state is MergeState.SEPARATE and not recovering_split:
@@ -985,6 +1015,8 @@ class MergeSplitRelativeResolver:
                 )
                 self._remember_target(target_candidate)
                 self._remember_background_relation(overlapping, evidence, scale)
+            if recovering_split:
+                return self._unresolved_split_hold(event, "partial_overlap")
             return self._event_hold(event, "partial_overlap")
 
         if event.state is MergeState.MERGED:
@@ -993,6 +1025,8 @@ class MergeSplitRelativeResolver:
                 self._merge_bbox = merged.bbox
                 self._ensure_merge_context_for_merged_event(event, merged)
             self._advance_latent_target(incumbent_point)
+            if recovering_split:
+                return self._unresolved_split_hold(event, "merged_identity_hold")
             return self._event_hold(event, "merged_identity_hold")
 
         if recovering_split:
