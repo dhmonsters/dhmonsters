@@ -913,6 +913,7 @@ class MergeSplitRelativeResolver:
         self._merge_center: Point | None = None
         self._merge_bbox: tuple[float, float, float, float] | None = None
         self._split_recovery_remaining = 0
+        self._split_recovery_success_count = 0
         self._split_first_unresolved_held = False
         self._split_recovery_unresolved = False
 
@@ -957,6 +958,7 @@ class MergeSplitRelativeResolver:
             and self._split_recovery_remaining <= 0
         ):
             self._split_recovery_remaining = 3
+            self._split_recovery_success_count = 0
             self._split_first_unresolved_held = False
             self._split_recovery_unresolved = True
         recovering_split = self._split_recovery_remaining > 0
@@ -1010,11 +1012,14 @@ class MergeSplitRelativeResolver:
             )
             self._remember_target(target_candidate)
             self._remember_background_relation(collision, evidence, scale)
-            self._remember_visible_pair(
-                target_candidate,
-                collision,
-                event_id=event.event_id,
-            )
+            if target_candidate is None or collision is None:
+                self._last_visible_pair = None
+            else:
+                self._remember_visible_pair(
+                    target_candidate,
+                    collision,
+                    event_id=event.event_id,
+                )
             self._merge_context = None
             self._merge_center = None
             self._merge_bbox = None
@@ -1126,7 +1131,7 @@ class MergeSplitRelativeResolver:
             ):
                 return self._unresolved_split_hold(event, decision.reason)
             self._split_recovery_unresolved = False
-            self._split_recovery_remaining -= 1
+            self._split_recovery_success_count += 1
             self._remember_visible_pair(
                 next(
                     (
@@ -1171,7 +1176,7 @@ class MergeSplitRelativeResolver:
                     "split_pair_score_margin": split_pair.score_margin,
                 },
             )
-            if self._split_recovery_remaining <= 0:
+            if self._split_recovery_success_count >= 3:
                 self._event_detector.complete_split_recovery()
                 self._clear_split_recovery()
             return recovered
@@ -1180,6 +1185,7 @@ class MergeSplitRelativeResolver:
 
     def _clear_split_recovery(self) -> None:
         self._split_recovery_remaining = 0
+        self._split_recovery_success_count = 0
         self._split_first_unresolved_held = False
         self._split_recovery_unresolved = False
 
@@ -1262,6 +1268,7 @@ class MergeSplitRelativeResolver:
         reason: str,
     ) -> MergeSplitDecision:
         self._split_recovery_unresolved = True
+        self._split_recovery_success_count = 0
         if (
             event.state is MergeState.SPLITTING
             and not self._split_first_unresolved_held

@@ -1272,7 +1272,8 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         )
 
         self.assertEqual(first.target_candidate_id, "target-child")
-        self.assertEqual(resolver._split_recovery_remaining, 2)
+        self.assertEqual(resolver._split_recovery_remaining, 3)
+        self.assertEqual(resolver._split_recovery_success_count, 1)
         self.assertFalse(resolver._split_recovery_unresolved)
         return module, resolver, anchor_a, anchor_b, target_child, background_child
 
@@ -1318,7 +1319,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(pending.reason, "merge_confirmation_pending")
         self.assertEqual(pending.state, module.MergeState.SPLITTING)
-        self.assertEqual(resolver._split_recovery_remaining, 2)
+        self.assertEqual(resolver._split_recovery_remaining, 3)
         self.assertFalse(resolver._split_recovery_unresolved)
         self.assertIs(resolver._merge_context, old_context)
 
@@ -1358,6 +1359,94 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(resolver._merge_context.target_candidate_id, "target-child")
         self.assertEqual(resolver._merge_context.background_track_id, "background-child")
         self.assertEqual(resolver._merge_context.merge_bbox, merged.bbox)
+
+    def test_unresolved_hold_resets_success_quorum_without_spending_successes(self) -> None:
+        module, resolver, anchor_a, anchor_b, target_child, _background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        unresolved_child = _center_candidate("unresolved-child", target_child.center)
+        hold = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(unresolved_child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(hold.reason, "split_pair_ambiguous")
+        self.assertEqual(resolver._split_recovery_success_count, 0)
+        self.assertEqual(resolver._split_recovery_remaining, 2)
+
+        decisions = []
+        for index in range(3):
+            target = _center_candidate(f"recovered-target-{index}", (33.0, 31.0))
+            background = _center_candidate(
+                f"recovered-background-{index}",
+                (30.0, 28.0),
+            )
+            decisions.append(
+                resolver.update(
+                    incumbent_point=target.center,
+                    candidates=(target, background, anchor_a, anchor_b),
+                    evidence={},
+                    stable_area=4.0,
+                    frame_shape=(100, 100),
+                )
+            )
+            if index < 2:
+                self.assertEqual(resolver._split_recovery_remaining, 2)
+                self.assertEqual(resolver._split_recovery_success_count, index + 1)
+
+        self.assertEqual(
+            [decision.target_candidate_id for decision in decisions],
+            ["recovered-target-0", "recovered-target-1", "recovered-target-2"],
+        )
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertEqual(resolver._split_recovery_success_count, 0)
+        self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
+
+    def test_direct_merge_rejects_visible_pair_stale_after_collision_free_observation(
+        self,
+    ) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=2,
+        )
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        pair_target = _center_candidate("pair-target", (34.0, 32.0))
+        pair_background = _center_candidate("pair-background", (30.0, 28.0))
+
+        resolver.update(
+            incumbent_point=pair_target.center,
+            candidates=(pair_target, pair_background, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        current_target = _center_candidate("current-target", (50.0, 50.0))
+        resolver.update(
+            incumbent_point=current_target.center,
+            candidates=(current_target,),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertIsNone(resolver._last_visible_pair)
+
+        merged = _candidate("current-merged", (56.0, 58.0, 76.0, 78.0))
+        decision = resolver.update(
+            incumbent_point=current_target.center,
+            candidates=(merged,),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(decision.state, module.MergeState.MERGED)
+        self.assertIsNone(resolver._merge_context)
 
     def test_direct_merge_creates_context_and_recovers_split_children(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
