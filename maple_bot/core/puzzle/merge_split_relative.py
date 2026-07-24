@@ -1079,6 +1079,8 @@ class MergeEventContext:
     phase_anchor_track_ids: tuple[str, ...] = ()
     phase_anchor_selection_count: int = 0
     phase_anchor_best_triangle_quality: float | None = None
+    phase_pair_basis_ids: tuple[tuple[str, str], ...] = ()
+    phase_triplet_basis_ids: tuple[tuple[str, str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2046,18 +2048,26 @@ class MergeSplitRelativeResolver:
         frame_index: int,
         phase_context: CyclePhaseContext,
     ) -> str | None:
+        frozen_basis = bool(context.phase_anchor_track_ids)
+        failure_reason = (
+            "ambiguous_phase_relation"
+            if frozen_basis
+            else "insufficient_cycle_anchors"
+        )
         if phase_context.local_lag is None or int(phase_context.local_lag) <= 0:
-            return "insufficient_cycle_anchors"
+            return failure_reason
         reference_frame = int(frame_index) - int(phase_context.local_lag)
         reference_background = self._anchor_manager.reference_anchor(
             context.background_track_id,
             reference_frame,
         )
         if reference_background is None:
-            return "insufficient_cycle_anchors"
+            return failure_reason
         if not reference_background.qualified_cycle or reference_background.clipped:
-            return "insufficient_cycle_anchors"
-        if context.phase_anchor_track_ids:
+            return failure_reason
+        selected_reference_anchors: tuple[BackgroundAnchor, ...] = ()
+        best_triangle_quality: float | None = None
+        if frozen_basis:
             reference_track_ids = context.phase_anchor_track_ids
         else:
             eligible_reference_anchors = tuple(
@@ -2079,12 +2089,9 @@ class MergeSplitRelativeResolver:
                     limit=_MAX_PHASE_FINGERPRINT_ANCHORS,
                 )
             )
-            context.phase_anchor_track_ids = tuple(
+            reference_track_ids = tuple(
                 anchor.track_id for anchor in selected_reference_anchors
             )
-            context.phase_anchor_selection_count = len(selected_reference_anchors)
-            context.phase_anchor_best_triangle_quality = best_triangle_quality
-            reference_track_ids = context.phase_anchor_track_ids
 
         reference_anchors: list[BackgroundAnchor] = []
         for track_id in reference_track_ids:
@@ -2094,25 +2101,59 @@ class MergeSplitRelativeResolver:
                 or not reference.qualified_cycle
                 or reference.clipped
             ):
-                return (
-                    "ambiguous_phase_relation"
-                    if context.phase_anchor_track_ids
-                    else "insufficient_cycle_anchors"
-                )
+                return failure_reason
             reference_anchors.append(reference)
         if len(reference_anchors) < 2:
-            return (
-                "ambiguous_phase_relation"
-                if context.phase_anchor_track_ids
-                else "insufficient_cycle_anchors"
-            )
+            return failure_reason
         fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
             anchors=reference_anchors,
             jitter=0.02,
         )
         if not fingerprint.pair_coordinates:
-            return "ambiguous_phase_relation"
+            return failure_reason
+        pair_basis_ids = tuple(
+            (left_id, right_id)
+            for left_id, right_id, _expected in fingerprint.pair_coordinates
+        )
+        triplet_basis_ids = tuple(
+            (left_id, middle_id, right_id)
+            for left_id, middle_id, right_id, _expected
+            in fingerprint.triplet_coordinates
+        )
+        if frozen_basis:
+            available_pairs = {
+                (left_id, right_id): expected
+                for left_id, right_id, expected in fingerprint.pair_coordinates
+            }
+            available_triplets = {
+                (left_id, middle_id, right_id): expected
+                for left_id, middle_id, right_id, expected
+                in fingerprint.triplet_coordinates
+            }
+            if (
+                any(
+                    basis_id not in available_pairs
+                    for basis_id in context.phase_pair_basis_ids
+                )
+                or any(
+                    basis_id not in available_triplets
+                    for basis_id in context.phase_triplet_basis_ids
+                )
+            ):
+                return "ambiguous_phase_relation"
+            if context.phase_pair_basis_ids or context.phase_triplet_basis_ids:
+                fingerprint = RelationFingerprint(
+                    pair_coordinates=tuple(
+                        (*basis_id, available_pairs[basis_id])
+                        for basis_id in context.phase_pair_basis_ids
+                    ),
+                    jitter=fingerprint.jitter,
+                    triplet_coordinates=tuple(
+                        (*basis_id, available_triplets[basis_id])
+                        for basis_id in context.phase_triplet_basis_ids
+                    ),
+                )
         if (
             self._fingerprint_mode == "phase"
             and self._fingerprint is not None
@@ -2120,6 +2161,12 @@ class MergeSplitRelativeResolver:
             and not fingerprint.triplet_coordinates
         ):
             return "ambiguous_phase_relation"
+        if not frozen_basis:
+            context.phase_anchor_track_ids = reference_track_ids
+            context.phase_anchor_selection_count = len(selected_reference_anchors)
+            context.phase_anchor_best_triangle_quality = best_triangle_quality
+            context.phase_pair_basis_ids = pair_basis_ids
+            context.phase_triplet_basis_ids = triplet_basis_ids
         self._fingerprint = fingerprint
         self._fingerprint_mode = "phase"
         self._phase_reference_frame = reference_frame
