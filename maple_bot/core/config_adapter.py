@@ -1,7 +1,36 @@
 # config_adapter — config.json 딕셔너리를 RuntimeConfig로 매핑 (기존 설정 ↔ 신규 런타임 다리)
 from __future__ import annotations
 
-from core.runtime import RuntimeConfig
+try:
+    from core.runtime import RuntimeConfig
+except ModuleNotFoundError:
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    def _load_runtime_config_fallback():
+        candidates = []
+        here = Path(__file__).resolve()
+        candidates.append(here.with_name("runtime.py"))
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "core" / "runtime.py")
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "core" / "runtime.py")
+        candidates.append(exe_dir / "_internal" / "core" / "runtime.py")
+
+        for path in candidates:
+            if not path.exists():
+                continue
+            spec = importlib.util.spec_from_file_location("core.runtime", path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                sys.modules["core.runtime"] = module
+                spec.loader.exec_module(module)
+                return module.RuntimeConfig
+        raise
+
+    RuntimeConfig = _load_runtime_config_fallback()
 from core.navigation.block import Block
 from core.navigation.route_state import RouteStep
 from core.navigation.floor_judge import Floor

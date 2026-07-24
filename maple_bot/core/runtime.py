@@ -187,7 +187,7 @@ class BotRuntime:
                     screen_capture, config.lie_title_template,
                     threshold=config.lie_threshold,
                     region=config.lie_detect_region,
-                    debug_log_fn=lambda m: self.log(m, "?덉쟾쨌?덊떚諛?),
+                    debug_log_fn=lambda m: self.log(m, "감지"),
                 )
         # ?ㅻⅨ ?좎? 媛먯? (鍮④컯 ?쎌?)
         self.user_scanner = None
@@ -218,7 +218,7 @@ class BotRuntime:
         self._junk_sell_stop = threading.Event()
         self._junk_sell_thread: threading.Thread | None = None
         self._auto_sell_on_start_done = False
-        self.log = lambda m, cat="?쒖뒪??: None  # UI 濡쒓렇 肄쒕갚(run_integrated 二쇱엯). (msg, 移댄뀒怨좊━)
+        self.log = lambda m, cat="시스템": None  # UI 로그 콜백(run_integrated 주입). (msg, 카테고리)
         # 痢??뺤쓽:
         #   - route_mode硫?route???ㅼ링 援ъ“(?щ떎由?釉붾줉 Y)?먯꽌 異붿텧 ???⑥씪 zone蹂대떎 ?곗꽑.
         #     (?⑥씪 zone "1痢? ?섎굹留??곕㈃ 紐⑤뱺 Y瑜?1痢듭쑝濡??ㅽ뙋 ???ㅻⅨ 痢듭뿉??1痢?醫뚰몴濡??吏곸엫)
@@ -342,7 +342,7 @@ class BotRuntime:
         self.buffs = BuffManager(self.humanizer, config.buffs,
                                  log_fn=lambda m: self.log(m, "踰꾪봽"))
         self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval,
-                             log_fn=lambda m: self.log(m, "?ヂ룹쨳湲?), label="??癒뱀씠",
+                             log_fn=lambda m: self.log(m, "펫먹이"), label="펫먹이",
                              count=config.pet_count)
         # ?쎌뾽 ??대㉧ ??PetFeeder ?⑦꽩 ?ъ궗??二쇨린 以띻린 ??
         self.pickup = None
@@ -684,15 +684,15 @@ class BotRuntime:
     def start_junk_sell(self, reason: str = "manual") -> bool:
         """?먮룞?먮ℓ瑜?蹂꾨룄 ?ㅻ젅?쒕줈 1???ㅽ뻾?쒕떎."""
         if self.junk_seller is None or self.auto_seller is None:
-            self.log("?먮룞?먮ℓ ?ㅼ젙 ?먮뒗 ?쒗뵆由??곌껐???놁뒿?덈떎.", "?먮룞??)
+            self.log("자동판매 설정 또는 템플릿 연결이 없습니다.", "자동판매")
             return False
         with self._junk_sell_lock:
             if self._junk_sell_thread and self._junk_sell_thread.is_alive():
-                self.log("?먮룞?먮ℓ媛 ?대? ?ㅽ뻾 以묒엯?덈떎.", "?먮룞??)
+                self.log("자동판매가 이미 실행 중입니다.", "자동판매")
                 return False
             self._junk_sell_stop.clear()
             if reason == "scheduled":
-                self.log("二쇨린 ?먮룞?먮ℓ ?ㅽ뻾 ?쒖젏?낅땲??", "?먮룞??)
+                self.log("주기 자동판매 실행 시점입니다.", "자동판매")
             self._junk_sell_thread = threading.Thread(
                 target=self._run_junk_sell_once,
                 daemon=True,
@@ -767,31 +767,31 @@ class BotRuntime:
                     config.lie_title_template,
                     threshold=config.lie_threshold,
                     region=config.lie_detect_region,
-                    debug_log_fn=lambda m: self.log(m, "?덉쟾쨌?덊떚諛?),
+                    debug_log_fn=lambda m: self.log(m, "감지"),
                 )
             else:
-                self.log(f"嫄고깘 ?쒗뵆由??놁쓬: {config.lie_title_template}", "?덉쟾쨌?덊떚諛?)
+                self.log(f"거탐 템플릿 없음: {config.lie_title_template}", "감지")
         if was_running and self.lie_scanner is not None:
             self.lie_scanner.start(self.event_queue)
         self.log_lie_scanner_status()
 
     def log_lie_scanner_status(self) -> None:
-        """?꾩옱 嫄고깘 媛먯? ?곹깭瑜?濡쒓렇???쒖떆?쒕떎."""
+        """현재 거탐 감지 상태를 로그에 표시한다."""
         if not self._cfg.lie_enabled:
-            self.log("嫄고깘 媛먯?: 爰쇱쭚", "?덉쟾쨌?덊떚諛?)
+            self.log("거탐 감지: 꺼짐", "감지")
             return
         if self.lie_scanner is None:
             self.log(
-                f"嫄고깘 媛먯?: ?ㅼ틦???놁쓬, template={self._cfg.lie_title_template}",
-                "?덉쟾쨌?덊떚諛?,
+                f"거탐 감지: 스캐너 없음, template={self._cfg.lie_title_template}",
+                "감지",
             )
             return
-        running = "?ㅽ뻾以? if self.lie_scanner.is_running() else "?湲곗쨷"
+        running = "실행중" if self.lie_scanner.is_running() else "대기중"
         self.log(
-            f"嫄고깘 媛먯?: {running}, threshold={self._cfg.lie_threshold:.3f}, "
-            f"region={self._cfg.lie_detect_region or '?꾩껜?붾㈃'}, "
+            f"거탐 감지: {running}, threshold={self._cfg.lie_threshold:.3f}, "
+            f"region={self._cfg.lie_detect_region or '전체화면'}, "
             f"template={self._cfg.lie_title_template}, alert={self._cfg.lie_alert}",
-            "?덉쟾쨌?덊떚諛?,
+            "감지",
         )
     def _check_anti_mob_profile(self) -> None:
         """珥덇툒 ?섎젴??諛⑹?紐??대?吏瑜?李얠븘 怨좎젙 ?댁젣 ?쒖꽌瑜??ㅽ뻾?쒕떎."""
@@ -857,11 +857,11 @@ class BotRuntime:
         self.humanizer.release_all()
         try:
             self.log(
-                f"?щ깷?곸뿭 諛⑹?紐??대?吏 1 媛먯?: score={first[0]:.3f} / "
+                f"사냥영역 방지몹 이미지1 감지: score={first[0]:.3f} / "
                 f"template={os.path.basename(str(first[1]))}",
-                "?덊떚諛?,
+                "안티밴",
             )
-            self.log("怨듦꺽쨌?대룞 ?낅젰 ?뺤?, ?쇱そ ???좎??섎ŉ ?대?吏 2 寃???쒖옉", "?덊떚諛?)
+            self.log("공격·이동 입력 정지, 왼쪽 이동하며 이미지2 검색 시작", "안티밴")
 
             second = None
             with self._movement_lock:
@@ -883,14 +883,14 @@ class BotRuntime:
                     self._anti_mob_moving = False
 
             if not self._bot_running:
-                self.log("遊??뺤?濡??대?吏 2 寃?됱쓣 以묐떒?섍퀬 ?쇱そ ?ㅻ? ?댁젣", "?덊떚諛?)
+                self.log("봇 정지로 이미지2 검색을 중단하고 왼쪽 이동을 해제했습니다.", "안티밴")
                 return
 
             if second is None:
                 self._anti_mob_failed = True
                 self.humanizer.release_all()
-                message = "諛⑹?紐??대?吏 2瑜?15珥??숈븞 李얠? 紐삵빐 ?쇱そ ?ㅻ? ?댁젣?섍퀬 怨듦꺽??以묒??⑸땲??"
-                self.log(message, "?덊떚諛?)
+                message = "방지몹 이미지2를 15초 동안 찾지 못해 왼쪽 이동을 해제하고 공격을 중지합니다."
+                self.log(message, "안티밴")
                 try:
                     self.telegram.send(message)
                 except Exception:
@@ -898,13 +898,13 @@ class BotRuntime:
                 return
 
             self.log(
-                f"?щ깷?곸뿭 ?대?吏 2 媛먯?: score={second[0]:.3f} / "
+                f"사냥영역 이미지2 감지: score={second[0]:.3f} / "
                 f"template={os.path.basename(str(second[1]))}",
-                "?덊떚諛?,
+                "안티밴",
             )
             click = getattr(self.humanizer._backend, "click", None)
             if click is None:
-                raise RuntimeError("留덉슦???대┃ 諛깆뿏?쒕? ?ъ슜?????놁뒿?덈떎.")
+                raise RuntimeError("마우스 클릭 백엔드를 사용할 수 없습니다.")
 
             def double_click_twice(match, label):
                 match_x, match_y = match[2]
@@ -912,9 +912,9 @@ class BotRuntime:
                 point_x = int(region["left"]) + random.randint(match_x, match_x + match_w - 1)
                 point_y = int(region["top"]) + random.randint(match_y, match_y + match_h - 1)
                 self.log(
-                    f"{label} 留ㅼ묶 ?곸뿭 ?대? ?쒕뜡 ?붾툝?대┃ 2?? x={point_x}, y={point_y} "
-                    f"(?곸뿭={match_w}x{match_h})",
-                    "?덊떚諛?,
+                    f"{label} 매칭 영역 안에서 랜덤 더블클릭 2회: x={point_x}, y={point_y} "
+                    f"(영역={match_w}x{match_h})",
+                    "안티밴",
                 )
                 for double_index in range(2):
                     click(point_x, point_y)
@@ -923,7 +923,7 @@ class BotRuntime:
                     if double_index == 0:
                         time.sleep(0.08)
 
-            double_click_twice(second, "?대?吏 2")
+            double_click_twice(second, "이미지2")
             time.sleep(0.5)
 
             def wait_for_match(paths, label):
@@ -937,19 +937,19 @@ class BotRuntime:
                         if candidate[0] >= threshold:
                             return candidate
                     time.sleep(0.05)
-                self.log(f"{label}??瑜? 李얠? 紐삵빐 諛⑹?紐??댁젣瑜?痍⑥냼?섍퀬 怨듦꺽 ?ш컻", "?덊떚諛?)
+                self.log(f"{label}을 찾지 못해 방지몹 해제를 취소하고 공격을 재개합니다.", "안티밴")
                 return None
 
-            third = wait_for_match(paths3, "?대?吏 3")
+            third = wait_for_match(paths3, "이미지3")
             if third is None:
                 return
-            double_click_twice(third, "?대?吏 3")
+            double_click_twice(third, "이미지3")
             self._anti_mob_last = time.monotonic()
             time.sleep(0.5)
 
-            self.log("諛⑹?紐??댁젣 ?꾨즺, 怨듦꺽 ?ㅻ젅???ш컻", "?덊떚諛?)
+            self.log("방지몹 해제 완료, 공격 스레드 재개", "안티밴")
         except Exception as exc:
-            self.log(f"諛⑹?紐??댁젣 ?ㅻ쪟: {exc}", "?덊떚諛?)
+            self.log(f"방지몹 해제 오류: {exc}", "안티밴")
         finally:
             self._anti_mob_busy = False
 
@@ -1220,18 +1220,18 @@ class BotRuntime:
 
     # ?? ?대? ??????????????????????????????????????????????????????????
     def _handle_lie(self, ev) -> None:
-        """嫄고깘 媛먯? ???뚮┝(?뚮━+?붾젅洹몃옩) ?듯빀 諛쒕룞. lie_alert 耳쒖죱???뚮쭔."""
+        """거탐 감지 시 알림을 처리한다."""
         score = (getattr(ev, "data", {}) or {}).get("score")
         self.log(
-            f"嫄고깘 ?쒗뵆由?媛먯?: score={float(score):.3f}"
-            if score is not None else "嫄고깘 ?쒗뵆由?媛먯?",
-            "?덉쟾쨌?덊떚諛?,
+            f"거탐 템플릿 감지: score={float(score):.3f}"
+            if score is not None else "거탐 템플릿 감지",
+            "감지",
         )
         if self._junk_selling:
             self.stop_junk_sell()
-            self.log("嫄고깘 媛먯?濡??먮룞?먮ℓ瑜?以묐떒 ?붿껌?덉뒿?덈떎.", "?먮룞??)
+            self.log("거탐 감지로 자동판매 중단을 요청했습니다.", "자동판매")
             try:
-                self.telegram.send("嫄고깘 媛먯??????먮룞?먮ℓ 以묐떒")
+                self.telegram.send("거탐 감지: 자동판매 중단")
             except Exception:
                 pass
         if not self._cfg.lie_alert:
@@ -1288,7 +1288,7 @@ class BotRuntime:
 
     def _handle_user_detected(self, ev) -> None:
         """?ㅻⅨ ?좎? 媛먯? ???붾젅洹몃옩 ?뚮┝ + ?먮룞?묐떟 梨꾪똿(硫붿떆吏 ?쒗솚)."""
-        self.telegram.send("?ㅻⅨ ?좎? 媛먯???)
+        self.telegram.send("다른 유저 감지")
         msgs = self._cfg.auto_reply_messages
         if not msgs:
             return
