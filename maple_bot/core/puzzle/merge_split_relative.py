@@ -1,7 +1,7 @@
 # 병합된 투명도형의 배경 상대 좌표와 분리 신분을 복원합니다.
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from enum import Enum
 from itertools import combinations
 from math import hypot
@@ -12,6 +12,7 @@ from .models import Candidate, CandidateEvidence
 
 
 Point = tuple[float, float]
+_MAX_PHASE_FINGERPRINT_ANCHORS = 6
 
 
 @dataclass(frozen=True)
@@ -141,6 +142,55 @@ def nearest_background_anchors(
         )
     )
     return tuple(usable[: max(0, int(limit))])
+
+
+def _bounded_phase_reference_anchors(
+    *,
+    background_point: Point,
+    anchors: Sequence[BackgroundAnchor],
+    limit: int,
+) -> tuple[BackgroundAnchor, ...]:
+    ordered = tuple(
+        sorted(
+            anchors,
+            key=lambda anchor: (
+                hypot(
+                    anchor.point[0] - background_point[0],
+                    anchor.point[1] - background_point[1],
+                ),
+                anchor.track_id,
+            ),
+        )
+    )
+    selected = list(ordered[: max(0, int(limit))])
+    if len(selected) < 3 or any(
+        affine_coordinate(
+            background_point,
+            left.point,
+            middle.point,
+            right.point,
+        )
+        is not None
+        for left, middle, right in combinations(selected, 3)
+    ):
+        return tuple(selected)
+
+    for candidate in ordered[len(selected) :]:
+        for replace_index in range(len(selected) - 1, -1, -1):
+            trial = [*selected]
+            trial[replace_index] = candidate
+            if any(
+                affine_coordinate(
+                    background_point,
+                    left.point,
+                    middle.point,
+                    right.point,
+                )
+                is not None
+                for left, middle, right in combinations(trial, 3)
+            ):
+                return tuple(trial)
+    return tuple(selected)
 
 
 @dataclass
@@ -596,7 +646,84 @@ def assign_split_children(
     fingerprint: RelationFingerprint,
     predicted_target_point: Point,
     incumbent_candidate_id: str | None = None,
+    phase_conditioned: bool = False,
 ) -> MergeSplitDecision:
+    if not phase_conditioned:
+        usable = {anchor.track_id: anchor for anchor in anchors if not anchor.clipped}
+        child_residuals: list[tuple[float, Candidate]] = []
+        for child in children:
+            residuals: list[float] = []
+            for left_id, right_id, expected in fingerprint.pair_coordinates:
+                if left_id not in usable or right_id not in usable:
+                    continue
+                current = relative_coordinate(
+                    child.center,
+                    usable[left_id].point,
+                    usable[right_id].point,
+                )
+                if current is not None:
+                    residuals.append(
+                        relative_coordinate_residual(
+                            current,
+                            expected,
+                            fingerprint.jitter,
+                        )
+                    )
+            if residuals:
+                child_residuals.append((float(median(residuals)), child))
+
+        debug = {
+            "child_residuals": tuple(
+                (candidate.candidate_id, residual)
+                for residual, candidate in sorted(
+                    child_residuals,
+                    key=lambda row: row[0],
+                )
+            ),
+            "usable_anchor_ids": tuple(usable),
+        }
+        if len(child_residuals) < 2:
+            return _hold_decision("insufficient_anchors", debug=debug)
+
+        child_residuals.sort(key=lambda row: row[0])
+        background_residual, background = child_residuals[0]
+        relative_margin = child_residuals[1][0] - background_residual
+        if relative_margin <= 1.0:
+            return _hold_decision(
+                "ambiguous_relation",
+                relative_margin=relative_margin,
+                debug=debug,
+            )
+
+        remaining = [row[1] for row in child_residuals[1:]]
+        incumbent = next(
+            (
+                candidate
+                for candidate in remaining
+                if candidate.candidate_id == incumbent_candidate_id
+            ),
+            None,
+        )
+        target = incumbent or min(
+            remaining,
+            key=lambda candidate: hypot(
+                candidate.center[0] - predicted_target_point[0],
+                candidate.center[1] - predicted_target_point[1],
+            ),
+        )
+        debug["target_selection_basis"] = (
+            "incumbent_identity" if incumbent is not None else "motion_prediction"
+        )
+        return MergeSplitDecision(
+            state=MergeState.SPLITTING,
+            background_candidate_id=background.candidate_id,
+            target_candidate_id=target.candidate_id,
+            target_point=target.center,
+            relative_margin=relative_margin,
+            reason="background_relation_assigned",
+            debug=debug,
+        )
+
     usable = {
         anchor.track_id: anchor
         for anchor in anchors
@@ -1390,18 +1517,17 @@ class MergeSplitRelativeResolver:
                 else None
             )
             if split_pair is None:
-                return self._unresolved_split_hold(event, "missing_split_pair")
-            assignment_anchors = (
-                self._current_anchors
-                if phase_context is not None
-                else tuple(
-                    replace(anchor, qualified_cycle=True)
-                    for anchor in self._current_anchors
+                return self._unresolved_split_hold(
+                    event,
+                    (
+                        "missing_split_pair"
+                        if phase_context is not None
+                        else "split_pair_ambiguous"
+                    ),
                 )
-            )
             decision = assign_split_children(
                 children=split_pair.children,
-                anchors=assignment_anchors,
+                anchors=self._current_anchors,
                 fingerprint=self._fingerprint,
                 predicted_target_point=predicted_target_point,
                 incumbent_candidate_id=(
@@ -1409,6 +1535,7 @@ class MergeSplitRelativeResolver:
                     if target_candidate is not None
                     else None
                 ),
+                phase_conditioned=phase_context is not None,
             )
             if (
                 decision.target_candidate_id is None
@@ -1703,6 +1830,7 @@ class MergeSplitRelativeResolver:
             anchor.track_id: anchor
             for anchor in self._current_anchors
             if anchor.qualified_cycle
+            and not anchor.clipped
             and anchor.track_id != context.background_track_id
         }
         reference_anchors = tuple(
@@ -1713,6 +1841,8 @@ class MergeSplitRelativeResolver:
                 self._anchor_manager.reference_anchor(track_id, reference_frame),
             )
             if reference is not None
+            and reference.qualified_cycle
+            and not reference.clipped
         )
         if reference_background is None or len(reference_anchors) < 2:
             return
@@ -1725,6 +1855,11 @@ class MergeSplitRelativeResolver:
             )
         ):
             return
+        reference_anchors = _bounded_phase_reference_anchors(
+            background_point=reference_background.point,
+            anchors=reference_anchors,
+            limit=_MAX_PHASE_FINGERPRINT_ANCHORS,
+        )
         self._fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
             anchors=reference_anchors,
