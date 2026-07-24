@@ -265,10 +265,10 @@ def replay_hypothesis_selection(
 
             if catalog is not None and catalog_period is not None:
                 candidate_lag = catalog.choose_local_lag(frame_index, catalog_period)
-                reference = phase_observations.get(frame_index - candidate_lag)
-                local_ok, local_reason, _quality, _assignment = _cycle_candidate_assignment(
-                    reference,
-                    phase_observations.get(frame_index),
+                local_ok, local_reason = _local_lag_temporal_support(
+                    phase_observations,
+                    frame_index,
+                    candidate_lag,
                 )
                 if local_ok:
                     observed_local_lag = candidate_lag
@@ -276,10 +276,10 @@ def replay_hypothesis_selection(
                 else:
                     local_lag_evidence_reason = (
                         "local_lag_cardinality"
-                        if local_reason == "cardinality"
+                        if local_reason == "association_cardinality"
                         else (
-                            f"local_lag_association_{local_reason}"
-                            if local_reason in ("ambiguous", "quality")
+                            f"local_lag_temporal_{local_reason}"
+                            if local_reason != "association_incomplete"
                             else "insufficient_local_lag_evidence"
                         )
                     )
@@ -841,6 +841,38 @@ def _period_recurrence_support(
     if "permutation" in failures:
         return False, "period_association_permutation", 0
     return False, "period_association_quality", 0
+
+
+def _local_lag_temporal_support(
+    observations: dict[int, tuple[PuzzleCandidate, ...]],
+    frame_index: int,
+    lag: int,
+) -> tuple[bool, str]:
+    previous = observations.get(frame_index - 2 * lag)
+    current = observations.get(frame_index - lag)
+    following = observations.get(frame_index)
+    following_ok, following_reason, _quality, following_assignment = (
+        _cycle_candidate_assignment(current, following)
+    )
+    if not following_ok:
+        return False, f"association_{following_reason}"
+    if not previous:
+        return False, "history_unavailable"
+    previous_ok, previous_reason, _quality, previous_assignment = (
+        _cycle_candidate_assignment(previous, current)
+    )
+    if not previous_ok:
+        return False, f"association_{previous_reason}"
+    temporal_ok, temporal_reason = _temporal_assignment_consistent(
+        previous,
+        current,
+        following,
+        previous_assignment,
+        following_assignment,
+    )
+    if not temporal_ok:
+        return False, temporal_reason
+    return True, "observed"
 
 
 def _cycle_candidate_assignment(

@@ -696,6 +696,72 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                         "local_lag_cardinality",
                     )
 
+    def test_merge_split_shadow_local_lag_requires_temporal_consistency(self) -> None:
+        cases: dict[str, tuple[list[list[dict[str, object]]], bool, str | None]] = {}
+        swap = _periodic_cycle_frames(total_frames=10)
+        swap[3] = _temporal_chain_candidates(3, (13.0, 47.0), include_anchor=True)
+        swap[6] = _temporal_chain_candidates(6, (28.0, 32.0), include_anchor=True)
+        swap[9] = _temporal_chain_candidates(9, (24.0, 36.0), include_anchor=False)
+        cases["temporal_swap"] = (swap, False, "local_lag_temporal_permutation")
+
+        missing_history = _periodic_cycle_frames(total_frames=10)
+        missing_history[3] = []
+        missing_history[9] = [
+            candidate
+            for candidate in missing_history[9]
+            if not str(candidate["candidate_id"]).startswith("target-")
+        ]
+        cases["missing_history"] = (
+            missing_history,
+            False,
+            "local_lag_temporal_history_unavailable",
+        )
+
+        stable = _periodic_cycle_frames(total_frames=10)
+        stable[3] = _temporal_chain_candidates(3, (20.0, 50.0), include_anchor=True)
+        stable[6] = _temporal_chain_candidates(
+            6,
+            (24.0, 54.0),
+            include_anchor=True,
+            reverse=True,
+        )
+        stable[9] = _temporal_chain_candidates(
+            9,
+            (28.0, 58.0),
+            include_anchor=False,
+            reverse=True,
+        )
+        cases["stable_reordered_chain"] = (stable, True, "observed_local_lag")
+
+        for name, (frames, expected_qualified, expected_reason) in cases.items():
+            with self.subTest(name=name), TemporaryDirectory(
+                prefix=f"studio-local-temporal-{name}-"
+            ) as tmp:
+                details = _replay_cycle_details(
+                    Path(tmp),
+                    frames,
+                    white_frames=set(range(9)),
+                )
+
+                diagnostic = details[-1]["merge_split_relative"]
+                self.assertEqual(diagnostic["period"], 3)
+                self.assertEqual(
+                    diagnostic["phase_qualified"],
+                    expected_qualified,
+                )
+                self.assertEqual(
+                    diagnostic["phase_context_active"],
+                    expected_qualified,
+                )
+                self.assertEqual(
+                    diagnostic["local_lag_evidence_reason"],
+                    expected_reason,
+                )
+                if expected_qualified:
+                    self.assertEqual(diagnostic["local_lag"], 3)
+                else:
+                    self.assertIsNone(diagnostic["local_lag"])
+
     def test_merge_split_shadow_closes_second_white_episode(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-second-episode-") as tmp:
             root = Path(tmp)
@@ -956,6 +1022,32 @@ def _periodic_cycle_frames(
         ]
         frames.append(rows[phase:] + rows[:phase])
     return frames
+
+
+def _temporal_chain_candidates(
+    frame_index: int,
+    positions: tuple[float, float],
+    *,
+    include_anchor: bool,
+    reverse: bool = False,
+) -> list[dict[str, object]]:
+    rows = [
+        _trace_candidate(
+            f"chain-{frame_index}-{index}",
+            (position, 20.0),
+            half_size=8.0,
+        )
+        for index, position in enumerate(positions)
+    ]
+    if include_anchor:
+        rows.append(
+            _trace_candidate(
+                f"anchor-{frame_index}",
+                (60.0, 50.0),
+                half_size=8.0,
+            )
+        )
+    return list(reversed(rows)) if reverse else rows
 
 
 def _sparse_cycle_chain_frames(
