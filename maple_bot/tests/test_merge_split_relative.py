@@ -544,6 +544,79 @@ class SplitChildPairSelectionTest(unittest.TestCase):
 
 
 class SplitChildAssignmentTest(unittest.TestCase):
+    def test_current_degenerate_affine_basis_holds_without_pair_fallback(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        reference_anchors = (
+            module.BackgroundAnchor("a", (0.0, 0.0), 9, qualified_cycle=True),
+            module.BackgroundAnchor("b", (10.0, 0.0), 9, qualified_cycle=True),
+            module.BackgroundAnchor("c", (0.0, 10.0), 9, qualified_cycle=True),
+        )
+        current_anchors = (
+            module.BackgroundAnchor("a", (0.0, 0.0), 10, qualified_cycle=True),
+            module.BackgroundAnchor("b", (10.0, 0.0), 10, qualified_cycle=True),
+            module.BackgroundAnchor("c", (20.0, 0.0), 10, qualified_cycle=True),
+        )
+        fingerprint = module.RelationFingerprint.from_observations(
+            background_point=(3.0, 4.0),
+            anchors=reference_anchors,
+            jitter=0.02,
+        )
+
+        decision = module.assign_split_children(
+            children=(
+                _center_candidate("background-child", (3.0, 4.0)),
+                _center_candidate("target-child", (7.0, 7.0)),
+            ),
+            anchors=current_anchors,
+            fingerprint=fingerprint,
+            predicted_target_point=(7.0, 7.0),
+        )
+
+        self.assertEqual(decision.reason, "ambiguous_phase_relation")
+        self.assertEqual(decision.debug["missing_basis_count"], 1)
+        self.assertEqual(decision.debug["missing_basis_ids"], ("affine_triplet:a,b,c",))
+
+    def test_exact_basis_tie_holds_regardless_of_child_order(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        anchors = (
+            module.BackgroundAnchor("a", (0.0, 0.0), 9, qualified_cycle=True),
+            module.BackgroundAnchor("b", (10.0, 0.0), 9, qualified_cycle=True),
+        )
+        fingerprint = module.RelationFingerprint.from_observations(
+            background_point=(5.0, 4.0),
+            anchors=anchors,
+            jitter=0.02,
+        )
+        left = _center_candidate("left-child", (5.0, 4.0))
+        right = _center_candidate("right-child", (5.0, 4.0))
+
+        decisions = tuple(
+            module.assign_split_children(
+                children=children,
+                anchors=anchors,
+                fingerprint=fingerprint,
+                predicted_target_point=(5.0, 4.0),
+            )
+            for children in ((left, right), (right, left))
+        )
+
+        self.assertTrue(
+            all(decision.reason == "ambiguous_phase_relation" for decision in decisions)
+        )
+        self.assertEqual(
+            tuple(
+                decision.debug["relation_vote_quorum"]["ambiguous_basis_count"]
+                for decision in decisions
+            ),
+            (1, 1),
+        )
+        self.assertTrue(
+            all(
+                decision.debug["anchor_votes"][0]["ambiguous"]
+                for decision in decisions
+            )
+        )
+
     def test_conflicting_qualified_anchor_votes_hold(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         anchors = (
@@ -1228,7 +1301,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         module = importlib.import_module("core.puzzle.merge_split_relative")
         resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=1)
         phase = module.CyclePhaseContext(period=3, local_lag=3)
-        target = _center_candidate("target", (34.0, 32.0))
+        target = _center_candidate("target", (32.0, 30.0))
         background = _center_candidate("background", (30.0, 28.0))
         anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
         anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
@@ -1331,6 +1404,77 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertIsNotNone(resolver._fingerprint)
         self.assertEqual(split_decision.background_candidate_id, "background-child")
         self.assertEqual(split_decision.target_candidate_id, "target-child")
+
+    def test_phase_split_refreshes_fingerprint_for_its_local_lag_frame(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        target = _center_candidate("target", (32.0, 30.0))
+        background_points = ((30.0, 28.0), (32.0, 28.0), (34.0, 28.0))
+
+        for frame_index in range(6):
+            background = _center_candidate(
+                "background",
+                background_points[frame_index % len(background_points)],
+                frame_index=frame_index,
+            )
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _candidate("merged", (29.0, 27.0, 33.0, 29.0), frame_index=6),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=6,
+            phase_context=phase,
+        )
+        split_decision = resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _center_candidate(
+                    "target-child",
+                    (30.0, 28.0),
+                    frame_index=7,
+                ),
+                _center_candidate(
+                    "background-child",
+                    (32.0, 28.0),
+                    frame_index=7,
+                ),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=7,
+            phase_context=phase,
+        )
+
+        self.assertEqual(split_decision.background_candidate_id, "background-child")
+        self.assertEqual(split_decision.target_candidate_id, "target-child")
+        self.assertEqual(
+            split_decision.debug["phase_reference_frame"],
+            4,
+        )
 
     def test_partial_overlap_refreshes_visible_background_fingerprint(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")

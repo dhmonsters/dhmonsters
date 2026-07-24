@@ -624,10 +624,11 @@ def assign_split_children(
         return _hold_decision("insufficient_cycle_anchors", debug=debug)
 
     child_residuals: list[tuple[float, Candidate]] = []
-    basis_rows: list[tuple[str, tuple[str, ...], object]] = []
+    basis_rows: list[tuple[str, str, tuple[str, ...], object]] = []
     if valid_triplets:
         basis_rows = [
             (
+                f"affine_triplet:{left_id},{middle_id},{right_id}",
                 "affine_triplet",
                 (left_id, middle_id, right_id),
                 expected,
@@ -636,13 +637,13 @@ def assign_split_children(
         ]
     else:
         basis_rows = [
-            ("pair", (left_id, right_id), expected)
+            (f"pair:{left_id},{right_id}", "pair", (left_id, right_id), expected)
             for left_id, right_id, expected in valid_pairs
         ]
-    residuals_by_child: dict[str, list[float]] = {}
+    residuals_by_child: dict[str, dict[str, float]] = {}
     for child in children:
-        residuals: list[float] = []
-        for basis, track_ids, expected in basis_rows:
+        residuals: dict[str, float] = {}
+        for basis_id, basis, track_ids, expected in basis_rows:
             if basis == "affine_triplet":
                 left_id, middle_id, right_id = track_ids
                 current = affine_coordinate(
@@ -652,12 +653,10 @@ def assign_split_children(
                     usable[right_id].point,
                 )
                 if current is not None:
-                    residuals.append(
-                        affine_coordinate_residual(
+                    residuals[basis_id] = affine_coordinate_residual(
                             current,
                             expected,
                             fingerprint.jitter,
-                        )
                     )
             else:
                 left_id, right_id = track_ids
@@ -667,32 +666,43 @@ def assign_split_children(
                     usable[right_id].point,
                 )
                 if current is not None:
-                    residuals.append(
-                        relative_coordinate_residual(
+                    residuals[basis_id] = relative_coordinate_residual(
                             current,
                             expected,
                             fingerprint.jitter,
-                        )
                     )
         if residuals:
-            child_residuals.append((float(median(residuals)), child))
+            child_residuals.append((float(median(residuals.values())), child))
             residuals_by_child[child.candidate_id] = residuals
 
+    missing_basis_ids = tuple(
+        basis_id
+        for basis_id, _basis, _track_ids, _expected in basis_rows
+        if any(
+            basis_id not in residuals_by_child.get(child.candidate_id, {})
+            for child in children
+        )
+    )
     debug["child_residuals"] = tuple(
         (candidate.candidate_id, residual)
         for residual, candidate in sorted(child_residuals, key=lambda row: row[0])
     )
+    debug["missing_basis_ids"] = missing_basis_ids
+    debug["missing_basis_count"] = len(missing_basis_ids)
+    if missing_basis_ids:
+        return _hold_decision("ambiguous_phase_relation", debug=debug)
     if len(child_residuals) < 2:
         return _hold_decision("insufficient_cycle_anchors", debug=debug)
 
     anchor_votes: list[dict[str, object]] = []
-    for basis_index, (basis, track_ids, _expected) in enumerate(basis_rows):
+    ambiguous_basis_ids: list[str] = []
+    for basis_id, basis, track_ids, _expected in basis_rows:
         contenders = sorted(
             (
-                (residuals_by_child[candidate.candidate_id][basis_index], candidate)
+                (residuals_by_child[candidate.candidate_id][basis_id], candidate)
                 for _residual, candidate in child_residuals
                 if candidate.candidate_id in residuals_by_child
-                and len(residuals_by_child[candidate.candidate_id]) > basis_index
+                and basis_id in residuals_by_child[candidate.candidate_id]
             ),
             key=lambda row: row[0],
         )
@@ -700,27 +710,38 @@ def assign_split_children(
             continue
         winner_residual, winner = contenders[0]
         runner_residual, runner = contenders[1]
+        ambiguous = runner_residual - winner_residual <= 1.0
+        if ambiguous:
+            ambiguous_basis_ids.append(basis_id)
         anchor_votes.append(
             {
+                "basis_id": basis_id,
                 "basis": basis,
                 "anchor_track_ids": track_ids,
-                "supported_candidate_id": winner.candidate_id,
+                "supported_candidate_id": (
+                    None if ambiguous else winner.candidate_id
+                ),
                 "supported_residual": winner_residual,
                 "runner_candidate_id": runner.candidate_id,
                 "runner_residual": runner_residual,
+                "residual_margin": runner_residual - winner_residual,
+                "ambiguous": ambiguous,
             }
         )
     supported_ids = {
         vote["supported_candidate_id"]
         for vote in anchor_votes
+        if vote["supported_candidate_id"] is not None
     }
     debug["anchor_votes"] = tuple(anchor_votes)
+    debug["ambiguous_basis_ids"] = tuple(ambiguous_basis_ids)
     debug["relation_vote_quorum"] = {
         "support_count": len(supported_ids),
         "basis_count": len(anchor_votes),
+        "ambiguous_basis_count": len(ambiguous_basis_ids),
         "conflicting": len(supported_ids) > 1,
     }
-    if len(supported_ids) > 1:
+    if ambiguous_basis_ids or len(supported_ids) > 1:
         return _hold_decision("ambiguous_phase_relation", debug=debug)
 
     child_residuals.sort(key=lambda row: row[0])
@@ -1080,6 +1101,7 @@ class MergeSplitRelativeResolver:
         self._target_points: list[Point] = []
         self._current_anchors: tuple[BackgroundAnchor, ...] = ()
         self._fingerprint: RelationFingerprint | None = None
+        self._phase_reference_frame: int | None = None
         self._merge_context: MergeEventContext | None = None
         self._last_visible_pair: _VisiblePair | None = None
         self._merge_center: Point | None = None
@@ -1319,6 +1341,18 @@ class MergeSplitRelativeResolver:
             return self._event_hold(event, "merged_identity_hold")
 
         if recovering_split:
+            if (
+                phase_context is not None
+                and frame_index is not None
+                and self._merge_context is not None
+            ):
+                self._fingerprint = None
+                self._phase_reference_frame = None
+                self._remember_phase_background_relation(
+                    context=self._merge_context,
+                    frame_index=frame_index,
+                    phase_context=phase_context,
+                )
             if self._fingerprint is None:
                 reason = (
                     "insufficient_cycle_anchors"
@@ -1421,6 +1455,7 @@ class MergeSplitRelativeResolver:
                     "event_id": event.event_id,
                     "anchor_count": len(self._current_anchors),
                     "fingerprint_pair_count": len(self._fingerprint.pair_coordinates),
+                    "phase_reference_frame": self._phase_reference_frame,
                     "merge_bbox": self._merge_bbox,
                     "predicted_target_point": predicted_target_point,
                     "local_child_ids": tuple(
@@ -1493,6 +1528,7 @@ class MergeSplitRelativeResolver:
 
         if phase_context is not None and frame_index is not None:
             self._fingerprint = None
+            self._phase_reference_frame = None
             self._remember_phase_background_relation(
                 context=self._merge_context,
                 frame_index=frame_index,
@@ -1512,6 +1548,7 @@ class MergeSplitRelativeResolver:
             self._merge_context.last_frame = merged_candidate.frame_index
             if phase_context is not None and frame_index is not None:
                 self._fingerprint = None
+                self._phase_reference_frame = None
                 self._remember_phase_background_relation(
                     context=self._merge_context,
                     frame_index=frame_index,
@@ -1545,6 +1582,7 @@ class MergeSplitRelativeResolver:
         )
         if phase_context is not None and frame_index is not None:
             self._fingerprint = None
+            self._phase_reference_frame = None
             self._remember_phase_background_relation(
                 context=self._merge_context,
                 frame_index=frame_index,
@@ -1692,6 +1730,7 @@ class MergeSplitRelativeResolver:
             anchors=reference_anchors,
             jitter=0.02,
         )
+        self._phase_reference_frame = reference_frame
 
     def _advance_latent_target(self, fallback: Point | None) -> None:
         point = self._predicted_target_point(fallback, ())
