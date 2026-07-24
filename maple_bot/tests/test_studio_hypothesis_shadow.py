@@ -633,13 +633,13 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertFalse(diagnostic["phase_qualified"])
             self.assertEqual(
                 diagnostic["local_lag_evidence_reason"],
-                "insufficient_local_lag_evidence",
+                "frozen_survivor_missing",
             )
 
     def test_merge_split_shadow_local_lag_requires_strict_bijection(self) -> None:
         cases: dict[str, tuple[list[dict[str, object]], bool]] = {}
         extra = _periodic_cycle_frames(total_frames=10)
-        cases["extra_current_candidate"] = (extra[-1], False)
+        cases["extra_current_candidate"] = (extra[-1], True)
         missing = _periodic_cycle_frames(total_frames=10)
         missing[-1] = [
             candidate
@@ -693,16 +693,16 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                     self.assertIsNone(diagnostic["local_lag"])
                     self.assertEqual(
                         diagnostic["local_lag_evidence_reason"],
-                        "local_lag_cardinality",
+                        "frozen_survivor_missing",
                     )
 
     def test_merge_split_shadow_local_lag_requires_temporal_consistency(self) -> None:
-        cases: dict[str, tuple[list[list[dict[str, object]]], bool, str | None]] = {}
+        cases: dict[str, list[list[dict[str, object]]]] = {}
         swap = _periodic_cycle_frames(total_frames=10)
         swap[3] = _temporal_chain_candidates(3, (13.0, 47.0), include_anchor=True)
         swap[6] = _temporal_chain_candidates(6, (28.0, 32.0), include_anchor=True)
         swap[9] = _temporal_chain_candidates(9, (24.0, 36.0), include_anchor=False)
-        cases["temporal_swap"] = (swap, False, "local_lag_temporal_permutation")
+        cases["temporal_swap"] = swap
 
         missing_history = _periodic_cycle_frames(total_frames=10)
         missing_history[3] = []
@@ -711,11 +711,7 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             for candidate in missing_history[9]
             if not str(candidate["candidate_id"]).startswith("target-")
         ]
-        cases["missing_history"] = (
-            missing_history,
-            False,
-            "local_lag_temporal_history_unavailable",
-        )
+        cases["missing_history"] = missing_history
 
         stable = _periodic_cycle_frames(total_frames=10)
         stable[3] = _temporal_chain_candidates(3, (20.0, 50.0), include_anchor=True)
@@ -731,9 +727,9 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             include_anchor=False,
             reverse=True,
         )
-        cases["stable_reordered_chain"] = (stable, True, "observed_local_lag")
+        cases["stable_reordered_chain"] = stable
 
-        for name, (frames, expected_qualified, expected_reason) in cases.items():
+        for name, frames in cases.items():
             with self.subTest(name=name), TemporaryDirectory(
                 prefix=f"studio-local-temporal-{name}-"
             ) as tmp:
@@ -744,23 +740,102 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 )
 
                 diagnostic = details[-1]["merge_split_relative"]
-                self.assertEqual(diagnostic["period"], 3)
-                self.assertEqual(
-                    diagnostic["phase_qualified"],
-                    expected_qualified,
+                self.assertIsNone(diagnostic["period"])
+                self.assertFalse(diagnostic["phase_qualified"])
+                self.assertTrue(diagnostic["stable_cycle_exclusion_reasons"])
+
+    def test_merge_split_shadow_uses_stable_tracks_when_raw_cardinality_varies(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-stable-subset-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _volatile_periodic_cycle_frames(total_frames=10),
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertEqual(diagnostic["period"], 3)
+            self.assertEqual(diagnostic["local_lag"], 3)
+            self.assertTrue(diagnostic["phase_qualified"])
+            self.assertEqual(diagnostic["stable_cycle_track_count"], 3)
+            self.assertEqual(len(diagnostic["stable_cycle_track_ids"]), 3)
+            self.assertGreater(diagnostic["raw_candidate_count"], 3)
+            self.assertTrue(diagnostic["stable_cycle_excluded_counts"])
+
+    def test_merge_split_shadow_stable_tracks_ignore_reordered_volatile_extras(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-stable-reordered-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _volatile_periodic_cycle_frames(total_frames=10, reorder_extras=True),
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertEqual(diagnostic["period"], 3)
+            self.assertEqual(diagnostic["local_lag"], 3)
+            self.assertEqual(diagnostic["local_lag_evidence_reason"], "observed_local_lag")
+
+    def test_merge_split_shadow_requires_three_stable_cycle_tracks(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-stable-minimum-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _volatile_periodic_cycle_frames(total_frames=10, stable_count=2),
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertFalse(diagnostic["phase_qualified"])
+            self.assertEqual(diagnostic["stable_cycle_track_count"], 2)
+
+    def test_merge_split_shadow_rejects_invalid_frozen_stable_survivor(self) -> None:
+        cases = {
+            "missing": _volatile_periodic_cycle_frames(
+                total_frames=10,
+                missing_stable_frame=5,
+            ),
+            "clipped": _volatile_periodic_cycle_frames(
+                total_frames=10,
+                clipped_stable_frame=5,
+            ),
+            "crossing": _volatile_periodic_cycle_frames(
+                total_frames=10,
+                crossing_frame=5,
+            ),
+        }
+        for name, frames in cases.items():
+            with self.subTest(name=name), TemporaryDirectory(
+                prefix=f"studio-cycle-stable-{name}-"
+            ) as tmp:
+                details = _replay_cycle_details(
+                    Path(tmp),
+                    frames,
+                    white_frames=set(range(9)),
                 )
-                self.assertEqual(
-                    diagnostic["phase_context_active"],
-                    expected_qualified,
-                )
-                self.assertEqual(
-                    diagnostic["local_lag_evidence_reason"],
-                    expected_reason,
-                )
-                if expected_qualified:
-                    self.assertEqual(diagnostic["local_lag"], 3)
-                else:
-                    self.assertIsNone(diagnostic["local_lag"])
+
+                diagnostic = details[-1]["merge_split_relative"]
+                self.assertIsNone(diagnostic["period"])
+                self.assertFalse(diagnostic["phase_qualified"])
+                self.assertTrue(diagnostic["stable_cycle_exclusion_reasons"])
+
+    def test_merge_split_shadow_local_lag_rejects_missing_frozen_survivor(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-frozen-local-lag-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _volatile_periodic_cycle_frames(
+                    total_frames=10,
+                    missing_post_episode_stable=True,
+                ),
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertEqual(diagnostic["period"], 3)
+            self.assertIsNone(diagnostic["local_lag"])
+            self.assertFalse(diagnostic["phase_qualified"])
+            self.assertEqual(
+                diagnostic["local_lag_evidence_reason"],
+                "frozen_survivor_missing",
+            )
 
     def test_merge_split_shadow_closes_second_white_episode(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-second-episode-") as tmp:
@@ -1019,6 +1094,57 @@ def _periodic_cycle_frames(
             _trace_candidate(f"anchor-b-{frame_index}", (80.0 + phase * 2.0, 20.0)),
             _trace_candidate(f"background-{frame_index}", (48.0 + phase * 2.0, 50.0)),
             _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+        ]
+        frames.append(rows[phase:] + rows[:phase])
+    return frames
+
+
+def _volatile_periodic_cycle_frames(
+    *,
+    total_frames: int,
+    stable_count: int = 3,
+    reorder_extras: bool = False,
+    missing_stable_frame: int | None = None,
+    clipped_stable_frame: int | None = None,
+    crossing_frame: int | None = None,
+    missing_post_episode_stable: bool = False,
+) -> list[list[dict[str, object]]]:
+    base_positions = ((20.0, 20.0), (80.0, 20.0), (48.0, 50.0))
+    frames: list[list[dict[str, object]]] = []
+    for frame_index in range(total_frames):
+        phase = frame_index % 3
+        stable_rows = [
+            _trace_candidate(
+                f"stable-{stable_index}-{frame_index}",
+                (position[0] + phase * 2.0, position[1]),
+            )
+            for stable_index, position in enumerate(base_positions[:stable_count])
+        ]
+        if missing_stable_frame == frame_index or (
+            missing_post_episode_stable and frame_index == total_frames - 1
+        ):
+            stable_rows.pop()
+        if clipped_stable_frame == frame_index and stable_rows:
+            stable_rows[0] = _trace_candidate(
+                f"stable-clipped-{frame_index}",
+                (1.0, 20.0),
+            )
+        if crossing_frame == frame_index and len(stable_rows) >= 2:
+            stable_rows[1] = _trace_candidate(
+                f"stable-crossing-{frame_index}",
+                tuple(stable_rows[0]["center"]),
+            )
+        volatile_rows = [
+            _trace_candidate(
+                f"volatile-{frame_index}-{extra_index}",
+                (110.0 + extra_index * 4.0, 10.0 + frame_index * 8.0),
+            )
+            for extra_index in range((frame_index % 5) + 1)
+        ]
+        if reorder_extras and frame_index % 2:
+            volatile_rows.reverse()
+        rows = stable_rows + volatile_rows + [
+            _trace_candidate(f"target-{frame_index}", (60.0, 50.0))
         ]
         frames.append(rows[phase:] + rows[:phase])
     return frames

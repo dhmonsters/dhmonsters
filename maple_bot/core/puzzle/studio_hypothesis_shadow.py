@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from dataclasses import asdict, dataclass
 import json
 from math import hypot, isfinite
@@ -170,6 +171,11 @@ def replay_hypothesis_selection(
     was_white = False
     episode_observations: dict[int, tuple[PuzzleCandidate, ...]] = {}
     phase_observations: dict[int, tuple[PuzzleCandidate, ...]] = {}
+    cycle_tracks: _StableCycleTracks | None = None
+    stable_cycle_track_count = 0
+    stable_cycle_track_ids: tuple[str, ...] = ()
+    stable_cycle_excluded_counts: dict[str, int] = {}
+    stable_cycle_exclusion_reasons: dict[str, str] = {}
     total_frames = 0
     recorded_passed_frames = 0
     replay_passed_frames = 0
@@ -203,10 +209,11 @@ def replay_hypothesis_selection(
                     prior_period = catalog_period
                 catalog_period = None
                 catalog_period_score = None
-                catalog = BackgroundCatalog()
+                catalog = None
                 episode_observations = {}
                 phase_observations = {}
                 period_recurrence_comparisons = 0
+                cycle_tracks = _StableCycleTracks(frame_shape=frame_shape)
             if anchor is not None and catalog_candidates:
                 white_candidate = min(
                     catalog_candidates,
@@ -217,20 +224,25 @@ def replay_hypothesis_selection(
                     for candidate in catalog_candidates
                     if candidate.candidate_id != white_candidate.candidate_id
                 ]
-            catalog_frame = _catalog_candidates(catalog_candidates)
-            if anchor is not None:
-                assert catalog is not None
-                catalog.add_frame(frame_index, catalog_frame)
-                episode_observations[frame_index] = catalog_frame
-                phase_observations[frame_index] = catalog_frame
-                was_white = True
-                cycle_observation_started = True
-                cycle_evidence_reason = "preparing_white_anchor"
-                local_lag_evidence_reason = "preparing_white_anchor"
-            elif was_white:
-                observed_period, observed_score, period_reason, comparison_count = (
-                    _observed_episode_period(catalog, episode_observations)
-                )
+            if was_white and anchor is None and cycle_tracks is not None:
+                episode_observations = cycle_tracks.freeze()
+                phase_observations = dict(episode_observations)
+                stable_cycle_track_ids = cycle_tracks.frozen_track_ids
+                stable_cycle_track_count = len(stable_cycle_track_ids)
+                stable_cycle_excluded_counts = cycle_tracks.excluded_counts
+                stable_cycle_exclusion_reasons = cycle_tracks.exclusion_reasons
+                if stable_cycle_track_count >= _MIN_CYCLE_ASSOCIATIONS:
+                    catalog = BackgroundCatalog()
+                    for observed_frame, observed_candidates in episode_observations.items():
+                        catalog.add_frame(observed_frame, observed_candidates)
+                    observed_period, observed_score, period_reason, comparison_count = (
+                        _observed_episode_period(catalog, episode_observations)
+                    )
+                else:
+                    observed_period = None
+                    observed_score = None
+                    period_reason = cycle_tracks.period_failure_reason
+                    comparison_count = 0
                 period_recurrence_comparisons = comparison_count
                 if observed_period is not None:
                     catalog_period = observed_period
@@ -256,33 +268,47 @@ def replay_hypothesis_selection(
                         else period_reason
                     )
                 was_white = False
-                assert catalog is not None
-                catalog.add_frame(frame_index, catalog_frame)
-                phase_observations[frame_index] = catalog_frame
-            elif catalog is not None:
-                catalog.add_frame(frame_index, catalog_frame)
-                phase_observations[frame_index] = catalog_frame
+            if cycle_tracks is not None:
+                cycle_tracks.update(frame_index, catalog_candidates)
+                stable_cycle_excluded_counts = cycle_tracks.excluded_counts
+                stable_cycle_exclusion_reasons = cycle_tracks.exclusion_reasons
+            if anchor is not None:
+                was_white = True
+                cycle_observation_started = True
+                cycle_evidence_reason = "preparing_white_anchor"
+                local_lag_evidence_reason = "preparing_white_anchor"
+            elif catalog is not None and cycle_tracks is not None:
+                phase_frame, frozen_failure = cycle_tracks.frozen_observation(frame_index)
+                if phase_frame is None:
+                    local_lag_evidence_reason = f"frozen_survivor_{frozen_failure}"
+                else:
+                    catalog.add_frame(frame_index, phase_frame)
+                    phase_observations[frame_index] = phase_frame
 
             if catalog is not None and catalog_period is not None:
-                candidate_lag = catalog.choose_local_lag(frame_index, catalog_period)
-                local_ok, local_reason = _local_lag_temporal_support(
-                    phase_observations,
-                    frame_index,
-                    candidate_lag,
-                )
-                if local_ok:
-                    observed_local_lag = candidate_lag
-                    local_lag_evidence_reason = "observed_local_lag"
+                phase_frame, frozen_failure = cycle_tracks.frozen_observation(frame_index) if cycle_tracks is not None else (None, "missing")
+                if phase_frame is None:
+                    local_lag_evidence_reason = f"frozen_survivor_{frozen_failure}"
                 else:
-                    local_lag_evidence_reason = (
-                        "local_lag_cardinality"
-                        if local_reason == "association_cardinality"
-                        else (
-                            f"local_lag_temporal_{local_reason}"
-                            if local_reason != "association_incomplete"
-                            else "insufficient_local_lag_evidence"
-                        )
+                    candidate_lag = catalog.choose_local_lag(frame_index, catalog_period)
+                    local_ok, local_reason = _local_lag_temporal_support(
+                        phase_observations,
+                        frame_index,
+                        candidate_lag,
                     )
+                    if local_ok:
+                        observed_local_lag = candidate_lag
+                        local_lag_evidence_reason = "observed_local_lag"
+                    else:
+                        local_lag_evidence_reason = (
+                            "local_lag_cardinality"
+                            if local_reason == "association_cardinality"
+                            else (
+                                f"local_lag_temporal_{local_reason}"
+                                if local_reason != "association_incomplete"
+                                else "insufficient_local_lag_evidence"
+                            )
+                        )
             if catalog_period is not None and observed_local_lag is not None:
                 phase_context = CyclePhaseContext(
                     period=catalog_period,
@@ -494,6 +520,11 @@ def replay_hypothesis_selection(
                     "cycle_evidence_reason": cycle_evidence_reason,
                     "local_lag_evidence_reason": local_lag_evidence_reason,
                     "period_recurrence_comparisons": period_recurrence_comparisons,
+                    "raw_candidate_count": len(candidates),
+                    "stable_cycle_track_count": stable_cycle_track_count,
+                    "stable_cycle_track_ids": stable_cycle_track_ids,
+                    "stable_cycle_excluded_counts": stable_cycle_excluded_counts,
+                    "stable_cycle_exclusion_reasons": stable_cycle_exclusion_reasons,
                     "cycle_input": {
                         "frame_index": frame_index,
                         "candidate_count": len(candidates),
@@ -737,20 +768,241 @@ def _candidate_shape(candidate: Candidate) -> tuple[float, float]:
 
 _CYCLE_ASSOCIATION_QUALITY_LIMIT = 0.75
 _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN = 0.15
-_MIN_CYCLE_ASSOCIATIONS = 2
+_TRACK_ASSOCIATION_QUALITY_LIMIT = 1.5
+_MIN_CYCLE_ASSOCIATIONS = 3
+_MIN_CYCLE_COVERAGE = 0.95
+_MAX_CYCLE_GAP_RATIO = 0.05
+
+
+@dataclass
+class _StableCycleTrack:
+    track_id: str
+    observations: dict[int, Candidate]
+    excluded_reason: str | None = None
+
+
+class _StableCycleTracks:
+    """백색 준비 구간에서만 안정 배경 후보를 고정하는 좁은 증거 수집기."""
+
+    def __init__(self, *, frame_shape: tuple[int, int] | None) -> None:
+        self._frame_shape = frame_shape
+        self._tracks: dict[str, _StableCycleTrack] = {}
+        self._frozen_track_ids: tuple[str, ...] = ()
+        self._frozen = False
+        self._next_track_number = 1
+
+    @property
+    def frozen_track_ids(self) -> tuple[str, ...]:
+        return self._frozen_track_ids
+
+    @property
+    def exclusion_reasons(self) -> dict[str, str]:
+        return {
+            track_id: track.excluded_reason
+            for track_id, track in self._tracks.items()
+            if track.excluded_reason is not None
+        }
+
+    @property
+    def excluded_counts(self) -> dict[str, int]:
+        return dict(Counter(self.exclusion_reasons.values()))
+
+    @property
+    def period_failure_reason(self) -> str:
+        reasons = tuple(self.exclusion_reasons.values())
+        if any(reason in {"association_ambiguous", "association_crossing"} for reason in reasons):
+            return "period_association_ambiguous"
+        if "association_quality" in reasons:
+            return "period_association_quality"
+        if any(
+            reason in {"association_missing", "cycle_clipped", "cycle_coverage", "cycle_gap"}
+            for reason in reasons
+        ):
+            return "period_association_incomplete"
+        return "insufficient_stable_cycle_tracks"
+
+    def update(self, frame_index: int, candidates: Sequence[Candidate]) -> None:
+        if not self._tracks:
+            for candidate in candidates:
+                self._start_track(frame_index, candidate)
+            return
+
+        candidate_rows = list(candidates)
+        candidate_models = [_catalog_candidate(candidate) for candidate in candidate_rows]
+        proposals: dict[str, int] = {}
+        for track_id, track in self._tracks.items():
+            if track.excluded_reason is not None:
+                continue
+            previous = track.observations[max(track.observations)]
+            qualities = sorted(
+                (_cycle_association_quality(_catalog_candidate(previous), candidate), index)
+                for index, candidate in enumerate(candidate_models)
+            )
+            if not qualities:
+                track.excluded_reason = "association_missing"
+                continue
+            if qualities[0][0] > _TRACK_ASSOCIATION_QUALITY_LIMIT:
+                track.excluded_reason = "association_quality"
+                continue
+            best_quality, candidate_index = qualities[0]
+            if (
+                len(qualities) > 1
+                and qualities[1][0] <= _TRACK_ASSOCIATION_QUALITY_LIMIT
+                and qualities[1][0] - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+            ):
+                track.excluded_reason = "association_ambiguous"
+                continue
+            proposals[track_id] = candidate_index
+
+        candidate_owners: dict[int, list[str]] = {}
+        for track_id, candidate_index in proposals.items():
+            candidate_owners.setdefault(candidate_index, []).append(track_id)
+        for track_ids in candidate_owners.values():
+            if len(track_ids) > 1:
+                for track_id in track_ids:
+                    self._tracks[track_id].excluded_reason = "association_crossing"
+
+        matched_indexes: set[int] = set()
+        for track_id, candidate_index in proposals.items():
+            track = self._tracks[track_id]
+            if track.excluded_reason is not None:
+                continue
+            candidate = candidate_rows[candidate_index]
+            if _cycle_candidate_clipped(candidate, self._frame_shape):
+                track.excluded_reason = "cycle_clipped"
+                continue
+            track.observations[frame_index] = candidate
+            matched_indexes.add(candidate_index)
+
+        for track in self._tracks.values():
+            if track.excluded_reason is None and frame_index not in track.observations:
+                track.excluded_reason = "association_missing"
+
+        for candidate_index, candidate in enumerate(candidate_rows):
+            if candidate_index not in matched_indexes:
+                self._start_track(frame_index, candidate)
+
+    def freeze(self) -> dict[int, tuple[PuzzleCandidate, ...]]:
+        if self._frozen:
+            return self._frozen_observations()
+        observed_frames = sorted({
+            frame_index
+            for track in self._tracks.values()
+            for frame_index in track.observations
+        })
+        for track in self._tracks.values():
+            if track.excluded_reason is not None:
+                continue
+            coverage = len(track.observations) / max(1, len(observed_frames))
+            largest_gap = _largest_cycle_track_gap(observed_frames, track.observations)
+            if coverage < _MIN_CYCLE_COVERAGE:
+                track.excluded_reason = "cycle_coverage"
+            elif largest_gap / max(1, len(observed_frames)) > _MAX_CYCLE_GAP_RATIO:
+                track.excluded_reason = "cycle_gap"
+        self._frozen_track_ids = tuple(
+            track_id
+            for track_id, track in self._tracks.items()
+            if track.excluded_reason is None
+        )
+        self._frozen = True
+        return self._frozen_observations()
+
+    def frozen_observation(
+        self,
+        frame_index: int,
+    ) -> tuple[tuple[PuzzleCandidate, ...] | None, str]:
+        if not self._frozen_track_ids:
+            return None, "missing"
+        observations: list[PuzzleCandidate] = []
+        for track_id in self._frozen_track_ids:
+            track = self._tracks[track_id]
+            if track.excluded_reason is not None:
+                return None, _frozen_failure_reason(track.excluded_reason)
+            candidate = track.observations.get(frame_index)
+            if candidate is None:
+                return None, "missing"
+            observations.append(_catalog_candidate(candidate))
+        return tuple(observations), "observed"
+
+    def _start_track(self, frame_index: int, candidate: Candidate) -> None:
+        track_id = f"cycle-track-{self._next_track_number}"
+        self._next_track_number += 1
+        self._tracks[track_id] = _StableCycleTrack(
+            track_id=track_id,
+            observations={frame_index: candidate},
+            excluded_reason=(
+                "cycle_clipped"
+                if _cycle_candidate_clipped(candidate, self._frame_shape)
+                else None
+            ),
+        )
+
+    def _frozen_observations(self) -> dict[int, tuple[PuzzleCandidate, ...]]:
+        if not self._frozen_track_ids:
+            return {}
+        shared_frames = sorted(
+            set.intersection(
+                *[
+                    set(self._tracks[track_id].observations)
+                    for track_id in self._frozen_track_ids
+                ]
+            )
+        )
+        return {
+            frame_index: tuple(
+                _catalog_candidate(self._tracks[track_id].observations[frame_index])
+                for track_id in self._frozen_track_ids
+            )
+            for frame_index in shared_frames
+        }
+
+
+def _catalog_candidate(candidate: Candidate) -> PuzzleCandidate:
+    return PuzzleCandidate(
+        cx=candidate.center[0],
+        cy=candidate.center[1],
+        score=candidate.score,
+        w=max(1.0, candidate.bbox[2] - candidate.bbox[0]),
+        h=max(1.0, candidate.bbox[3] - candidate.bbox[1]),
+    )
+
+
+def _cycle_candidate_clipped(
+    candidate: Candidate,
+    frame_shape: tuple[int, int] | None,
+) -> bool:
+    if frame_shape is None:
+        return False
+    height, width = frame_shape
+    x1, y1, x2, y2 = candidate.bbox
+    return x1 <= 0.0 or y1 <= 0.0 or x2 >= float(width) or y2 >= float(height)
+
+
+def _largest_cycle_track_gap(
+    observed_frames: Sequence[int],
+    observations: dict[int, Candidate],
+) -> int:
+    largest_gap = 0
+    current_gap = 0
+    for frame_index in observed_frames:
+        if frame_index in observations:
+            largest_gap = max(largest_gap, current_gap)
+            current_gap = 0
+        else:
+            current_gap += 1
+    return max(largest_gap, current_gap)
+
+
+def _frozen_failure_reason(excluded_reason: str) -> str:
+    if excluded_reason == "cycle_clipped":
+        return "clipped"
+    if excluded_reason in {"association_ambiguous", "association_crossing"}:
+        return "ambiguous"
+    return "missing"
 
 
 def _catalog_candidates(candidates: Sequence[Candidate]) -> tuple[PuzzleCandidate, ...]:
-    return tuple(
-        PuzzleCandidate(
-            cx=candidate.center[0],
-            cy=candidate.center[1],
-            score=candidate.score,
-            w=max(1.0, candidate.bbox[2] - candidate.bbox[0]),
-            h=max(1.0, candidate.bbox[3] - candidate.bbox[1]),
-        )
-        for candidate in candidates
-    )
+    return tuple(_catalog_candidate(candidate) for candidate in candidates)
 
 
 def _observed_episode_period(
