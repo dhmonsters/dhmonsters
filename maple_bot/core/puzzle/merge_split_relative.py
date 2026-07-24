@@ -162,12 +162,11 @@ def _bounded_phase_reference_anchors(
     return selected
 
 
-def _select_bounded_phase_reference_anchors(
+def _deduplicate_phase_reference_anchors(
     *,
     background_point: Point,
     anchors: Sequence[BackgroundAnchor],
-    limit: int,
-) -> tuple[tuple[BackgroundAnchor, ...], float | None]:
+) -> tuple[BackgroundAnchor, ...]:
     ordered = tuple(
         sorted(
             anchors,
@@ -180,17 +179,16 @@ def _select_bounded_phase_reference_anchors(
             ),
         )
     )
-    maximum = max(0, int(limit))
-    if maximum <= 0:
-        return (), None
-
-    def distance(anchor: BackgroundAnchor) -> float:
-        return hypot(
-            anchor.point[0] - background_point[0],
-            anchor.point[1] - background_point[1],
-        )
-
-    coordinate_scale = max(1.0, *(distance(anchor) for anchor in ordered))
+    coordinate_scale = max(
+        1.0,
+        *(
+            hypot(
+                anchor.point[0] - background_point[0],
+                anchor.point[1] - background_point[1],
+            )
+            for anchor in ordered
+        ),
+    )
     duplicate_tolerance = 1e-6 * coordinate_scale
     unique_anchors: list[BackgroundAnchor] = []
     for anchor in ordered:
@@ -204,6 +202,29 @@ def _select_bounded_phase_reference_anchors(
         ):
             continue
         unique_anchors.append(anchor)
+    return tuple(unique_anchors)
+
+
+def _select_bounded_phase_reference_anchors(
+    *,
+    background_point: Point,
+    anchors: Sequence[BackgroundAnchor],
+    limit: int,
+) -> tuple[tuple[BackgroundAnchor, ...], float | None]:
+    maximum = max(0, int(limit))
+    if maximum <= 0:
+        return (), None
+
+    def distance(anchor: BackgroundAnchor) -> float:
+        return hypot(
+            anchor.point[0] - background_point[0],
+            anchor.point[1] - background_point[1],
+        )
+
+    unique_anchors = _deduplicate_phase_reference_anchors(
+        background_point=background_point,
+        anchors=anchors,
+    )
     if len(unique_anchors) <= 1 or maximum <= 1:
         return tuple(unique_anchors[:maximum]), None
 
@@ -1585,13 +1606,19 @@ class MergeSplitRelativeResolver:
                     target_candidate.bbox,
                     overlapping.bbox,
                 )
-                self._refresh_merge_context(
+                phase_refresh_reason = self._refresh_merge_context(
                     event=event,
                     target_candidate=target_candidate,
                     background_candidate=overlapping,
                     frame_index=frame_index,
                     phase_context=phase_context,
                 )
+                if phase_refresh_reason is not None:
+                    return self._event_hold(
+                        event,
+                        phase_refresh_reason,
+                        phase_refresh_reason=phase_refresh_reason,
+                    )
                 self._remember_target(target_candidate)
                 if phase_context is None:
                     self._remember_background_relation(overlapping, evidence, scale)
@@ -1603,19 +1630,25 @@ class MergeSplitRelativeResolver:
             if merged is not None:
                 self._merge_center = merged.center
                 self._merge_bbox = merged.bbox
-                self._ensure_merge_context_for_merged_event(
+                phase_refresh_reason = self._ensure_merge_context_for_merged_event(
                     event,
                     merged,
                     frame_index=frame_index,
                     phase_context=phase_context,
                 )
+                if phase_refresh_reason is not None:
+                    return self._event_hold(
+                        event,
+                        phase_refresh_reason,
+                        phase_refresh_reason=phase_refresh_reason,
+                    )
             self._advance_latent_target(incumbent_point)
             return self._event_hold(event, "merged_identity_hold")
 
         if recovering_split:
             if phase_context is not None:
                 phase_refresh_reason: str | None = None
-                if frame_index is not None and self._merge_context is not None:
+                if self._merge_context is not None:
                     phase_refresh_reason = self._remember_phase_background_relation(
                         context=self._merge_context,
                         frame_index=frame_index,
@@ -1833,7 +1866,7 @@ class MergeSplitRelativeResolver:
         background_candidate: Candidate,
         frame_index: int | None,
         phase_context: CyclePhaseContext | None,
-    ) -> None:
+    ) -> str | None:
         if self._merge_context is None or self._merge_context.event_id != event.event_id:
             background_track_id = background_candidate.candidate_id
             if phase_context is not None:
@@ -1871,12 +1904,13 @@ class MergeSplitRelativeResolver:
             self._merge_context.merge_bbox = self._merge_bbox
             self._merge_context.last_frame = target_candidate.frame_index
 
-        if phase_context is not None and frame_index is not None:
-            self._remember_phase_background_relation(
+        if phase_context is not None:
+            return self._remember_phase_background_relation(
                 context=self._merge_context,
                 frame_index=frame_index,
                 phase_context=phase_context,
             )
+        return None
 
     def _ensure_merge_context_for_merged_event(
         self,
@@ -1885,23 +1919,23 @@ class MergeSplitRelativeResolver:
         *,
         frame_index: int | None,
         phase_context: CyclePhaseContext | None,
-    ) -> None:
+    ) -> str | None:
         if self._merge_context is not None and self._merge_context.event_id == event.event_id:
             self._merge_context.merge_bbox = merged_candidate.bbox
             self._merge_context.last_frame = merged_candidate.frame_index
-            if phase_context is not None and frame_index is not None:
-                self._remember_phase_background_relation(
+            if phase_context is not None:
+                return self._remember_phase_background_relation(
                     context=self._merge_context,
                     frame_index=frame_index,
                     phase_context=phase_context,
                 )
-            return
+            return None
         visible_pair = self._last_visible_pair
         if visible_pair is None or visible_pair.event_id != event.event_id - 1:
             self._clear_merge_event_context(
                 clear_relation_fingerprint=self._fingerprint_mode == "phase",
             )
-            return
+            return None
         background_track_id = (
             visible_pair.background_track_id
             if phase_context is not None
@@ -1931,12 +1965,13 @@ class MergeSplitRelativeResolver:
             opened_frame=visible_pair.target.frame_index,
             last_frame=merged_candidate.frame_index,
         )
-        if phase_context is not None and frame_index is not None:
-            self._remember_phase_background_relation(
+        if phase_context is not None:
+            return self._remember_phase_background_relation(
                 context=self._merge_context,
                 frame_index=frame_index,
                 phase_context=phase_context,
             )
+        return None
 
     def _remember_visible_pair(
         self,
@@ -2045,7 +2080,7 @@ class MergeSplitRelativeResolver:
         self,
         *,
         context: MergeEventContext,
-        frame_index: int,
+        frame_index: int | None,
         phase_context: CyclePhaseContext,
     ) -> str | None:
         frozen_basis = bool(context.phase_anchor_track_ids)
@@ -2055,6 +2090,8 @@ class MergeSplitRelativeResolver:
             else "insufficient_cycle_anchors"
         )
         if phase_context.local_lag is None or int(phase_context.local_lag) <= 0:
+            return failure_reason
+        if frame_index is None:
             return failure_reason
         reference_frame = int(frame_index) - int(phase_context.local_lag)
         reference_background = self._anchor_manager.reference_anchor(
@@ -2105,6 +2142,13 @@ class MergeSplitRelativeResolver:
             reference_anchors.append(reference)
         if len(reference_anchors) < 2:
             return failure_reason
+        if frozen_basis and len(
+            _deduplicate_phase_reference_anchors(
+                background_point=reference_background.point,
+                anchors=reference_anchors,
+            )
+        ) != len(reference_anchors):
+            return "ambiguous_phase_relation"
         fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
             anchors=reference_anchors,
@@ -2199,7 +2243,41 @@ class MergeSplitRelativeResolver:
             return candidates[0].center
         return (0.0, 0.0)
 
-    def _event_hold(self, event: MergeEvent, reason: str) -> MergeSplitDecision:
+    def _event_hold(
+        self,
+        event: MergeEvent,
+        reason: str,
+        *,
+        phase_refresh_reason: str | None = None,
+    ) -> MergeSplitDecision:
+        debug = {
+            "event_id": event.event_id,
+            "event_reason": event.reason,
+            "overlap_ratio": event.overlap_ratio,
+            "area_ratio": event.area_ratio,
+            "anchor_count": len(self._current_anchors),
+            "fingerprint_pair_count": (
+                len(self._fingerprint.pair_coordinates)
+                if self._fingerprint is not None
+                else 0
+            ),
+            "fingerprint_mode": self._fingerprint_mode,
+            "phase_reference_frame": self._phase_reference_frame,
+            "phase_fingerprint_frame": self._phase_fingerprint_frame,
+            "fingerprint_event_id": self._fingerprint_event_id,
+            "phase_selected_anchor_count": (
+                self._merge_context.phase_anchor_selection_count
+                if self._merge_context is not None
+                else 0
+            ),
+            "phase_best_triangle_quality": (
+                self._merge_context.phase_anchor_best_triangle_quality
+                if self._merge_context is not None
+                else None
+            ),
+        }
+        if phase_refresh_reason is not None:
+            debug["phase_refresh_reason"] = phase_refresh_reason
         return MergeSplitDecision(
             state=event.state,
             background_candidate_id=None,
@@ -2207,32 +2285,7 @@ class MergeSplitRelativeResolver:
             target_point=None,
             relative_margin=None,
             reason=reason,
-            debug={
-                "event_id": event.event_id,
-                "event_reason": event.reason,
-                "overlap_ratio": event.overlap_ratio,
-                "area_ratio": event.area_ratio,
-                "anchor_count": len(self._current_anchors),
-                "fingerprint_pair_count": (
-                    len(self._fingerprint.pair_coordinates)
-                    if self._fingerprint is not None
-                    else 0
-                ),
-                "fingerprint_mode": self._fingerprint_mode,
-                "phase_reference_frame": self._phase_reference_frame,
-                "phase_fingerprint_frame": self._phase_fingerprint_frame,
-                "fingerprint_event_id": self._fingerprint_event_id,
-                "phase_selected_anchor_count": (
-                    self._merge_context.phase_anchor_selection_count
-                    if self._merge_context is not None
-                    else 0
-                ),
-                "phase_best_triangle_quality": (
-                    self._merge_context.phase_anchor_best_triangle_quality
-                    if self._merge_context is not None
-                    else None
-                ),
-            },
+            debug=debug,
         )
 
 

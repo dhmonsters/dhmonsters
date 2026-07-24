@@ -1443,6 +1443,244 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
 
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
+    def _frozen_phase_context_with_transient_reference_damage(self):
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        background = _center_candidate("background", (30.0, 28.0))
+        anchors = (
+            _center_candidate("anchor-a", (20.0, 20.0)),
+            _center_candidate("anchor-b", (40.0, 20.0)),
+            _center_candidate("anchor-c", (20.0, 40.0)),
+        )
+        for frame_index in range(7):
+            anchor_d = _center_candidate(
+                "anchor-d",
+                (40.0, 40.0) if frame_index != 4 else (20.0, 40.0),
+                frame_index=frame_index,
+            )
+            resolver._current_anchors = resolver._anchor_manager.update(
+                candidates=(background, *anchors, anchor_d),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=50.0,
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target",
+            background_track_id=(
+                resolver._anchor_manager.track_id_for_candidate("background") or ""
+            ),
+            anchor_track_ids=tuple(
+                resolver._anchor_manager.track_id_for_candidate(candidate_id) or ""
+                for candidate_id in ("anchor-a", "anchor-b", "anchor-c", "anchor-d")
+            ),
+            premerge_target_point=(50.0, 50.0),
+            premerge_target_bbox=(45.0, 45.0, 55.0, 55.0),
+            premerge_background_bbox=background.bbox,
+            merge_bbox=None,
+            opened_frame=0,
+            last_frame=6,
+        )
+        self.assertIsNone(
+            resolver._remember_phase_background_relation(
+                context=context,
+                frame_index=6,
+                phase_context=phase,
+            )
+        )
+        return module, resolver, phase, context, anchors
+
+    def test_phase_partial_overlap_holds_refresh_failure_and_recovers(self) -> None:
+        module, resolver, phase, context, anchors = (
+            self._frozen_phase_context_with_transient_reference_damage()
+        )
+        previous_fingerprint = resolver._fingerprint
+        frozen_track_ids = context.phase_anchor_track_ids
+        resolver._merge_context = context
+        resolver._event_detector.state = module.MergeState.PARTIAL_OVERLAP
+        resolver._event_detector.event_id = context.event_id
+        target = _center_candidate("target", (50.0, 50.0), size=10.0)
+        overlapping = _center_candidate("background", (57.0, 50.0), size=10.0)
+
+        damaged = resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, overlapping, *anchors),
+            evidence={},
+            stable_area=2500.0,
+            frame_shape=(100, 100),
+            frame_index=7,
+            phase_context=phase,
+        )
+        self.assertEqual(damaged.state, module.MergeState.PARTIAL_OVERLAP)
+        self.assertEqual(damaged.reason, "ambiguous_phase_relation")
+        self.assertEqual(damaged.debug["phase_refresh_reason"], damaged.reason)
+        self.assertIs(resolver._merge_context, context)
+        self.assertEqual(context.phase_anchor_track_ids, frozen_track_ids)
+        self.assertIs(resolver._fingerprint, previous_fingerprint)
+
+        recovered = resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, overlapping, *anchors),
+            evidence={},
+            stable_area=2500.0,
+            frame_shape=(100, 100),
+            frame_index=8,
+            phase_context=phase,
+        )
+
+        self.assertEqual(recovered.reason, "partial_overlap")
+
+    def test_phase_merged_hold_propagates_refresh_failure_and_recovers(self) -> None:
+        module, resolver, phase, context, anchors = (
+            self._frozen_phase_context_with_transient_reference_damage()
+        )
+        previous_fingerprint = resolver._fingerprint
+        frozen_track_ids = context.phase_anchor_track_ids
+        resolver._merge_context = context
+        resolver._event_detector.state = module.MergeState.MERGED
+        resolver._event_detector.event_id = context.event_id
+        target = _center_candidate("target", (50.0, 50.0), size=10.0)
+        merged = _candidate("merged", (56.0, -150.0, 64.0, 250.0))
+
+        damaged = resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, merged, *anchors),
+            evidence={},
+            stable_area=2500.0,
+            frame_shape=(500, 500),
+            frame_index=7,
+            phase_context=phase,
+        )
+        self.assertEqual(damaged.state, module.MergeState.MERGED)
+        self.assertEqual(damaged.reason, "ambiguous_phase_relation")
+        self.assertEqual(damaged.debug["phase_refresh_reason"], damaged.reason)
+        self.assertIs(resolver._merge_context, context)
+        self.assertEqual(context.phase_anchor_track_ids, frozen_track_ids)
+        self.assertIs(resolver._fingerprint, previous_fingerprint)
+
+        recovered = resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, merged, *anchors),
+            evidence={},
+            stable_area=2500.0,
+            frame_shape=(500, 500),
+            frame_index=8,
+            phase_context=phase,
+        )
+
+        self.assertEqual(recovered.reason, "merged_identity_hold")
+
+    def test_frozen_phase_split_without_frame_holds_ambiguous(self) -> None:
+        module, resolver, phase, context, anchors = (
+            self._frozen_phase_context_with_transient_reference_damage()
+        )
+        previous_fingerprint = resolver._fingerprint
+        resolver._merge_context = context
+        resolver._merge_bbox = (45.0, 45.0, 55.0, 55.0)
+        resolver._event_detector.state = module.MergeState.SPLITTING
+        resolver._event_detector.event_id = context.event_id
+        resolver._split_recovery_remaining = 3
+        target_child = _center_candidate("target-child", (50.0, 50.0), size=10.0)
+        background_child = _center_candidate(
+            "background-child",
+            (30.0, 28.0),
+            size=10.0,
+        )
+
+        decision = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(target_child, background_child, *anchors),
+            evidence={},
+            stable_area=2500.0,
+            frame_shape=(100, 100),
+            phase_context=phase,
+        )
+
+        self.assertEqual(decision.reason, "ambiguous_phase_relation")
+        self.assertIs(resolver._fingerprint, previous_fingerprint)
+        self.assertEqual(resolver._fingerprint_mode, "phase")
+
+    def test_phase_frozen_reconstruction_rejects_scale_normalized_near_duplicates(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        for coordinate_scale in (1.0, 100.0):
+            with self.subTest(coordinate_scale=coordinate_scale):
+                resolver = module.MergeSplitRelativeResolver(
+                    minimum_anchor_observations=1
+                )
+                origin = (1000.0, 1000.0)
+                background = _center_candidate("background", origin)
+                anchor_a = _center_candidate(
+                    "anchor-a",
+                    (origin[0] + coordinate_scale, origin[1]),
+                )
+                for frame_index in range(8):
+                    anchor_b = _center_candidate(
+                        "anchor-b",
+                        (
+                            origin[0]
+                            + (
+                                2.0 * coordinate_scale
+                                if frame_index <= 3
+                                else coordinate_scale * (1.0 + 0.5e-6)
+                            ),
+                            origin[1],
+                        ),
+                        frame_index=frame_index,
+                    )
+                    resolver._current_anchors = resolver._anchor_manager.update(
+                        candidates=(background, anchor_a, anchor_b),
+                        target_candidate=None,
+                        evidence={},
+                        frame_shape=(5000, 5000),
+                        stable_scale_px=2.0 * coordinate_scale,
+                        frame_index=frame_index,
+                        phase_context=phase,
+                    )
+                context = module.MergeEventContext(
+                    event_id=1,
+                    target_candidate_id="target",
+                    background_track_id=(
+                        resolver._anchor_manager.track_id_for_candidate("background")
+                        or ""
+                    ),
+                    anchor_track_ids=tuple(
+                        resolver._anchor_manager.track_id_for_candidate(candidate_id)
+                        or ""
+                        for candidate_id in ("anchor-a", "anchor-b")
+                    ),
+                    premerge_target_point=(origin[0], origin[1]),
+                    premerge_target_bbox=(999.0, 999.0, 1001.0, 1001.0),
+                    premerge_background_bbox=background.bbox,
+                    merge_bbox=None,
+                    opened_frame=0,
+                    last_frame=6,
+                )
+                self.assertIsNone(
+                    resolver._remember_phase_background_relation(
+                        context=context,
+                        frame_index=6,
+                        phase_context=phase,
+                    )
+                )
+                previous_fingerprint = resolver._fingerprint
+
+                reason = resolver._remember_phase_background_relation(
+                    context=context,
+                    frame_index=7,
+                    phase_context=phase,
+                )
+
+                self.assertEqual(reason, "ambiguous_phase_relation")
+                self.assertIs(resolver._fingerprint, previous_fingerprint)
+
     def test_phase_anchor_selection_uses_global_affine_triple_over_collinear_outlier(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         anchors = tuple(
