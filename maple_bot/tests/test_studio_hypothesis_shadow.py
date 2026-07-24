@@ -440,8 +440,9 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                     _trace_candidate(f"anchor-a-{frame_index}", anchor_a),
                     _trace_candidate(f"anchor-b-{frame_index}", anchor_b),
                     _trace_candidate(f"background-{frame_index}", background),
-                    _trace_candidate(f"target-{frame_index}", target),
                 ]
+                if frame_index < 9:
+                    candidates.append(_trace_candidate(f"target-{frame_index}", target))
                 candidates = candidates[phase:] + candidates[:phase]
                 scores.append(
                     {
@@ -634,6 +635,66 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 diagnostic["local_lag_evidence_reason"],
                 "insufficient_local_lag_evidence",
             )
+
+    def test_merge_split_shadow_local_lag_requires_strict_bijection(self) -> None:
+        cases: dict[str, tuple[list[dict[str, object]], bool]] = {}
+        extra = _periodic_cycle_frames(total_frames=10)
+        cases["extra_current_candidate"] = (extra[-1], False)
+        missing = _periodic_cycle_frames(total_frames=10)
+        missing[-1] = [
+            candidate
+            for candidate in missing[-1]
+            if not str(candidate["candidate_id"]).startswith(("anchor-b-", "target-"))
+        ]
+        cases["missing_current_candidate"] = (missing[-1], False)
+        reordered = _periodic_cycle_frames(total_frames=10)
+        reordered[-1] = [
+            {
+                **candidate,
+                "candidate_id": f"reordered-{index}",
+            }
+            for index, candidate in enumerate(
+                reversed(
+                    [
+                        candidate
+                        for candidate in reordered[-1]
+                        if not str(candidate["candidate_id"]).startswith("target-")
+                    ]
+                )
+            )
+        ]
+        cases["reordered_equal_cardinality"] = (reordered[-1], True)
+
+        for name, (last_frame, expected_qualified) in cases.items():
+            with self.subTest(name=name), TemporaryDirectory(
+                prefix=f"studio-local-bijection-{name}-"
+            ) as tmp:
+                frames = _periodic_cycle_frames(total_frames=10)
+                frames[-1] = last_frame
+                details = _replay_cycle_details(
+                    Path(tmp),
+                    frames,
+                    white_frames=set(range(9)),
+                )
+
+                diagnostic = details[-1]["merge_split_relative"]
+                self.assertEqual(diagnostic["period"], 3)
+                self.assertEqual(
+                    diagnostic["phase_qualified"],
+                    expected_qualified,
+                )
+                self.assertEqual(
+                    diagnostic["phase_context_active"],
+                    expected_qualified,
+                )
+                if expected_qualified:
+                    self.assertEqual(diagnostic["local_lag"], 3)
+                else:
+                    self.assertIsNone(diagnostic["local_lag"])
+                    self.assertEqual(
+                        diagnostic["local_lag_evidence_reason"],
+                        "local_lag_cardinality",
+                    )
 
     def test_merge_split_shadow_closes_second_white_episode(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-second-episode-") as tmp:

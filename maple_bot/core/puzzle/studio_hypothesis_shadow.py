@@ -195,6 +195,7 @@ def replay_hypothesis_selection(
             anchor_candidate = min(candidates, key=lambda candidate: _distance(candidate.center, anchor))
             anchor_shapes.append(_candidate_shape(anchor_candidate))
         phase_context: CyclePhaseContext | None = None
+        observed_local_lag: int | None = None
         catalog_candidates = list(candidates)
         if merge_split_relative:
             if anchor is not None and not was_white:
@@ -262,23 +263,30 @@ def replay_hypothesis_selection(
                 catalog.add_frame(frame_index, catalog_frame)
                 phase_observations[frame_index] = catalog_frame
 
-            local_lag: int | None = None
             if catalog is not None and catalog_period is not None:
                 candidate_lag = catalog.choose_local_lag(frame_index, catalog_period)
                 reference = phase_observations.get(frame_index - candidate_lag)
-                local_ok, _reason, _quality, _match_count = _associate_cycle_candidates(
+                local_ok, local_reason, _quality, _assignment = _cycle_candidate_assignment(
                     reference,
                     phase_observations.get(frame_index),
                 )
                 if local_ok:
-                    local_lag = candidate_lag
+                    observed_local_lag = candidate_lag
                     local_lag_evidence_reason = "observed_local_lag"
                 else:
-                    local_lag_evidence_reason = "insufficient_local_lag_evidence"
-            if catalog_period is not None:
+                    local_lag_evidence_reason = (
+                        "local_lag_cardinality"
+                        if local_reason == "cardinality"
+                        else (
+                            f"local_lag_association_{local_reason}"
+                            if local_reason in ("ambiguous", "quality")
+                            else "insufficient_local_lag_evidence"
+                        )
+                    )
+            if catalog_period is not None and observed_local_lag is not None:
                 phase_context = CyclePhaseContext(
                     period=catalog_period,
-                    local_lag=local_lag,
+                    local_lag=observed_local_lag,
                     period_score=catalog_period_score,
                 )
         tracker.update(candidate_rows, white_anchor=anchor)
@@ -462,14 +470,8 @@ def replay_hypothesis_selection(
             }
             if merge_decision is not None:
                 merge_debug = merge_decision.debug
-                local_lag = (
-                    phase_context.local_lag if phase_context is not None else None
-                )
-                phase_qualified = bool(
-                    phase_context is not None
-                    and phase_context.period is not None
-                    and phase_context.local_lag is not None
-                )
+                local_lag = observed_local_lag
+                phase_qualified = phase_context is not None
                 qualified_anchor_count = (
                     merge_debug.get("qualified_anchor_count")
                     if phase_qualified
@@ -483,12 +485,8 @@ def replay_hypothesis_selection(
                     "target_candidate_id": merge_decision.target_candidate_id,
                     "relative_margin": merge_decision.relative_margin,
                     "quorum": dict(merge_quorum_debug),
-                    "period": (
-                        phase_context.period if phase_context is not None else None
-                    ),
-                    "period_score": (
-                        phase_context.period_score if phase_context is not None else None
-                    ),
+                    "period": catalog_period,
+                    "period_score": catalog_period_score,
                     "local_lag": local_lag,
                     "reference_frame": (
                         frame_index - local_lag if local_lag is not None else None
@@ -503,6 +501,7 @@ def replay_hypothesis_selection(
                         "white_anchor_observed": anchor is not None,
                     },
                     "phase_qualified": phase_qualified,
+                    "phase_context_active": phase_context is not None,
                     "qualified_anchor_count": qualified_anchor_count,
                     "merge_event_id": merge_debug.get("event_id"),
                     "merge_event_context": {
@@ -835,23 +834,13 @@ def _period_recurrence_support(
         return False, "period_association_incomplete", 0
     if "ambiguous" in failures:
         return False, "period_association_ambiguous", 0
+    if "cardinality" in failures:
+        return False, "period_association_incomplete", 0
     if "incomplete" in failures:
         return False, "period_association_incomplete", 0
     if "permutation" in failures:
         return False, "period_association_permutation", 0
     return False, "period_association_quality", 0
-
-
-def _associate_cycle_candidates(
-    reference: Sequence[PuzzleCandidate] | None,
-    current: Sequence[PuzzleCandidate] | None,
-) -> tuple[bool, str, float | None, int]:
-    ok, reason, quality, assignment = _cycle_candidate_assignment(
-        reference,
-        current,
-        require_equal_cardinality=False,
-    )
-    return ok, reason, quality, len(assignment)
 
 
 def _cycle_candidate_assignment(
@@ -863,7 +852,7 @@ def _cycle_candidate_assignment(
     if not reference or not current or len(reference) < _MIN_CYCLE_ASSOCIATIONS:
         return False, "incomplete", None, ()
     if require_equal_cardinality and len(reference) != len(current):
-        return False, "incomplete", None, ()
+        return False, "cardinality", None, ()
     if not require_equal_cardinality and len(current) < len(reference):
         return False, "incomplete", None, ()
     if _has_ambiguous_cycle_candidates(reference) or _has_ambiguous_cycle_candidates(
