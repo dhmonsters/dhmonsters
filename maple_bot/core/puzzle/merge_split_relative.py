@@ -671,6 +671,8 @@ def select_split_child_pair(
     )
     scored_pairs: list[tuple[float, float, float, tuple[Candidate, Candidate]]] = []
     for left, right in combinations(candidates, 2):
+        if _is_duplicate_observation(left, right):
+            continue
         child_union = _bbox_union(left.bbox, right.bbox)
         union_residual = _bbox_edge_residual(child_union, merge_bbox, scale)
         ancestry_residual = min(
@@ -701,6 +703,8 @@ def select_split_child_pair(
         )
         scored_pairs.append((cost, union_residual, ancestry_residual, (left, right)))
 
+    if not scored_pairs:
+        return None
     scored_pairs.sort(key=lambda row: row[0])
     best_cost, union_residual, ancestry_residual, children = scored_pairs[0]
     runner_up_cost = scored_pairs[1][0] if len(scored_pairs) > 1 else None
@@ -1036,6 +1040,11 @@ class MergeSplitRelativeResolver:
                     else None
                 ),
             )
+            if (
+                decision.target_candidate_id is None
+                or decision.background_candidate_id is None
+            ):
+                return self._unresolved_split_hold(event, decision.reason)
             self._split_recovery_remaining -= 1
             self._remember_visible_pair(
                 next(

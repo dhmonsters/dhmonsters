@@ -409,6 +409,65 @@ class SplitChildPairSelectionTest(unittest.TestCase):
 
         self.assertIsNone(pair)
 
+    def test_split_pair_rejects_two_near_duplicate_candidates(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target-before-merge",
+            background_track_id="background-track",
+            anchor_track_ids=("anchor-a", "anchor-b"),
+            premerge_target_point=(35.0, 45.0),
+            premerge_target_bbox=(30.0, 40.0, 40.0, 50.0),
+            premerge_background_bbox=(38.0, 40.0, 48.0, 50.0),
+            merge_bbox=(30.0, 40.0, 48.0, 50.0),
+            opened_frame=12,
+            last_frame=14,
+        )
+
+        pair = module.select_split_child_pair(
+            context=context,
+            candidates=(
+                _candidate("duplicate-a", (32.0, 40.0, 42.0, 50.0)),
+                _candidate("duplicate-b", (32.2, 40.0, 42.2, 50.0)),
+            ),
+            predicted_target_point=(38.0, 45.0),
+            stable_scale_px=10.0,
+        )
+
+        self.assertIsNone(pair)
+
+    def test_split_pair_prefers_real_children_over_near_duplicate_distractor(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target-before-merge",
+            background_track_id="background-track",
+            anchor_track_ids=("anchor-a", "anchor-b"),
+            premerge_target_point=(35.0, 45.0),
+            premerge_target_bbox=(30.0, 40.0, 40.0, 50.0),
+            premerge_background_bbox=(38.0, 40.0, 48.0, 50.0),
+            merge_bbox=(30.0, 40.0, 48.0, 50.0),
+            opened_frame=12,
+            last_frame=14,
+        )
+
+        pair = module.select_split_child_pair(
+            context=context,
+            candidates=(
+                _candidate("target-child", (32.0, 40.0, 42.0, 50.0)),
+                _candidate("background-child", (40.0, 40.0, 50.0, 50.0)),
+                _candidate("background-duplicate", (42.4, 40.0, 52.4, 50.0)),
+            ),
+            predicted_target_point=(38.0, 45.0),
+            stable_scale_px=2.0,
+        )
+
+        self.assertIsNotNone(pair)
+        self.assertEqual(
+            {candidate.candidate_id for candidate in pair.children},
+            {"target-child", "background-child"},
+        )
+
 
 class SplitChildAssignmentTest(unittest.TestCase):
     def test_non_background_incumbent_is_preserved_over_closer_prediction(self) -> None:
@@ -1391,6 +1450,62 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(partial_hold.state, module.MergeState.SPLITTING)
         self.assertEqual(merged_hold.state, module.MergeState.SPLITTING)
+        self.assertEqual(final_hold.reason, "split_recovery_expired")
+        self.assertEqual(final_hold.state, module.MergeState.SEPARATE)
+        self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
+
+    def test_assignment_ambiguity_uses_bounded_split_recovery(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=2)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (220.0, 20.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        target = _center_candidate("target", (34.0, 32.0))
+
+        for _ in range(2):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 300),
+            )
+
+        overlap = _center_candidate("overlap", (31.0, 29.0))
+        for _ in range(2):
+            resolver.update(
+                incumbent_point=overlap.center,
+                candidates=(overlap, background, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 300),
+            )
+
+        ambiguous_left = _center_candidate("ambiguous-left", (30.0, 28.0))
+        ambiguous_right = _center_candidate("ambiguous-right", (32.1, 28.0))
+        first_hold = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(ambiguous_left, ambiguous_right, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 300),
+        )
+
+        self.assertEqual(first_hold.state, module.MergeState.SPLITTING)
+        self.assertEqual(first_hold.reason, "ambiguous_relation")
+        self.assertEqual(resolver._split_recovery_remaining, 3)
+
+        final_hold = first_hold
+        for _ in range(3):
+            final_hold = resolver.update(
+                incumbent_point=overlap.center,
+                candidates=(ambiguous_left, ambiguous_right, anchor_a, anchor_b),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 300),
+            )
+
         self.assertEqual(final_hold.reason, "split_recovery_expired")
         self.assertEqual(final_hold.state, module.MergeState.SEPARATE)
         self.assertEqual(resolver._split_recovery_remaining, 0)
