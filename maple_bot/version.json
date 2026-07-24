@@ -1,5 +1,5 @@
 ﻿{
-    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.3/Claude_v2.2.3_Setup.exe",
-    "version":  "2.2.3",
-    "notes":  "2.2.2 EXE에서 core.runtime 모듈이 누락되어 실행되지 않던 문제를 수정했습니다."
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.4/Claude_v2.2.4_Setup.exe",
+    "version":  "2.2.4",
+    "notes":  "설치 PC에서 core.runtime 모듈을 찾지 못해 실행되지 않던 문제를 수정했습니다."
 }
