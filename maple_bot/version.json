@@ -1,6 +1,5 @@
 {
-    "version":  "2.1.10",
-    "notes":  "라이선스 v2 발급·관리 서버 연동, 자동판매 상태기계 보강, 기존 사용자 설정에 빨코2 프리셋이 누락된 경우 자동 보강하도록 수정",
-    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.10/Claude_v2.1.10_Setup.exe"
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.11/Claude_v2.1.11_Setup.exe",
+    "version":  "2.1.11",
+    "notes":  "빨코2 프리셋 자동 보강 중 누락된 copy import로 EXE가 시작되지 않던 문제 수정"
 }
-
