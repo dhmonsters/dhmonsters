@@ -162,6 +162,7 @@ def replay_hypothesis_selection(
     catalog: BackgroundCatalog | None = None
     catalog_period: int | None = None
     catalog_period_score: float | None = None
+    prior_period: int | None = None
     cycle_evidence_reason = "not_started"
     local_lag_evidence_reason = "period_unavailable"
     period_recurrence_comparisons = 0
@@ -197,6 +198,10 @@ def replay_hypothesis_selection(
         catalog_candidates = list(candidates)
         if merge_split_relative:
             if anchor is not None and not was_white:
+                if catalog_period is not None:
+                    prior_period = catalog_period
+                catalog_period = None
+                catalog_period_score = None
                 catalog = BackgroundCatalog()
                 episode_observations = {}
                 phase_observations = {}
@@ -230,13 +235,24 @@ def replay_hypothesis_selection(
                     catalog_period = observed_period
                     catalog_period_score = observed_score
                     cycle_evidence_reason = "observed_period"
-                elif catalog_period is not None:
-                    cycle_evidence_reason = f"retained_period_{period_reason}"
+                    prior_period = None
+                elif prior_period is not None:
+                    cycle_evidence_reason = (
+                        "inactive_prior_period_insufficient_episode_evidence"
+                        if period_reason == "period_association_incomplete"
+                        else f"inactive_prior_period_{period_reason}"
+                    )
                 else:
                     cycle_evidence_reason = (
                         period_reason
                         if period_reason.startswith("period_association_")
                         else "period_unavailable"
+                    )
+                if observed_period is None:
+                    local_lag_evidence_reason = (
+                        "insufficient_episode_evidence"
+                        if period_reason == "period_association_incomplete"
+                        else period_reason
                     )
                 was_white = False
                 assert catalog is not None
@@ -259,11 +275,12 @@ def replay_hypothesis_selection(
                     local_lag_evidence_reason = "observed_local_lag"
                 else:
                     local_lag_evidence_reason = "insufficient_local_lag_evidence"
-            phase_context = CyclePhaseContext(
-                period=catalog_period,
-                local_lag=local_lag,
-                period_score=catalog_period_score,
-            )
+            if catalog_period is not None:
+                phase_context = CyclePhaseContext(
+                    period=catalog_period,
+                    local_lag=local_lag,
+                    period_score=catalog_period_score,
+                )
         tracker.update(candidate_rows, white_anchor=anchor)
         hypothesis_points = tracker.hypothesis_points
         if judge_hypothesis_limit is not None:
@@ -748,20 +765,38 @@ def _observed_episode_period(
     last_frame = observed_frames[-1]
     if last_frame - first_frame < 2:
         return None, None, "insufficient_episode_evidence", 0
-    period, score = catalog.estimate_period(
-        prep_end=last_frame,
-        min_lag=2,
-        max_lag=last_frame - first_frame,
-    )
-    if period < 2 or not isfinite(score):
-        return None, None, "insufficient_episode_evidence", 0
-    supported, reason, comparisons = _period_recurrence_support(
-        observations,
-        period,
-    )
-    if not supported:
-        return None, None, reason, comparisons
-    return period, score, "observed_period", comparisons
+    accepted: list[tuple[float, int, int]] = []
+    failures: list[str] = []
+    for period in range(2, last_frame - first_frame + 1):
+        observed_period, score = catalog.estimate_period(
+            prep_end=last_frame,
+            min_lag=period,
+            max_lag=period,
+        )
+        if observed_period != period or not isfinite(score):
+            continue
+        supported, reason, comparisons = _period_recurrence_support(
+            observations,
+            period,
+        )
+        if supported:
+            accepted.append((score, period, comparisons))
+        else:
+            failures.append(reason)
+    if accepted:
+        score, period, comparisons = min(accepted)
+        return period, score, "observed_period", comparisons
+    if "period_association_ambiguous" in failures:
+        return None, None, "period_association_ambiguous", 0
+    if "period_association_permutation" in failures:
+        return None, None, "period_association_permutation", 0
+    if "period_association_quality" in failures:
+        return None, None, "period_association_quality", 0
+    if "period_association_incomplete" in failures:
+        return None, None, "period_association_incomplete", 0
+    if failures:
+        return None, None, "period_association_quality", 0
+    return None, None, "insufficient_episode_evidence", 0
 
 
 def _period_recurrence_support(
@@ -769,25 +804,41 @@ def _period_recurrence_support(
     period: int,
 ) -> tuple[bool, str, int]:
     failures: list[str] = []
+    observed_chain = False
     for middle_frame in sorted(observations):
         previous = observations.get(middle_frame - period)
         current = observations.get(middle_frame)
         following = observations.get(middle_frame + period)
         if previous is None or current is None or following is None:
             continue
-        previous_ok, previous_reason, _previous_quality, _previous_count = (
-            _associate_cycle_candidates(previous, current)
+        observed_chain = True
+        previous_ok, previous_reason, _previous_quality, previous_assignment = (
+            _cycle_candidate_assignment(previous, current)
         )
-        following_ok, following_reason, _following_quality, _following_count = (
-            _associate_cycle_candidates(current, following)
+        following_ok, following_reason, _following_quality, following_assignment = (
+            _cycle_candidate_assignment(current, following)
         )
         if previous_ok and following_ok:
-            return True, "observed_period", 2
-        failures.extend((previous_reason, following_reason))
+            temporal_ok, temporal_reason = _temporal_assignment_consistent(
+                previous,
+                current,
+                following,
+                previous_assignment,
+                following_assignment,
+            )
+            if temporal_ok:
+                return True, "observed_period", 2
+            failures.append(temporal_reason)
+        else:
+            failures.extend((previous_reason, following_reason))
+    if not observed_chain:
+        return False, "period_association_incomplete", 0
     if "ambiguous" in failures:
         return False, "period_association_ambiguous", 0
     if "incomplete" in failures:
         return False, "period_association_incomplete", 0
+    if "permutation" in failures:
+        return False, "period_association_permutation", 0
     return False, "period_association_quality", 0
 
 
@@ -795,43 +846,149 @@ def _associate_cycle_candidates(
     reference: Sequence[PuzzleCandidate] | None,
     current: Sequence[PuzzleCandidate] | None,
 ) -> tuple[bool, str, float | None, int]:
-    if not reference or not current or len(reference) < _MIN_CYCLE_ASSOCIATIONS:
-        return False, "incomplete", None, 0
-    if len(current) < len(reference):
-        return False, "incomplete", None, 0
-    for left_index, left in enumerate(current):
-        if any(
-            _cycle_association_quality(left, right)
-            <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
-            for right in current[left_index + 1 :]
-        ):
-            return False, "ambiguous", None, 0
+    ok, reason, quality, assignment = _cycle_candidate_assignment(
+        reference,
+        current,
+        require_equal_cardinality=False,
+    )
+    return ok, reason, quality, len(assignment)
 
-    selected_indices: list[int] = []
-    selected_qualities: list[float] = []
+
+def _cycle_candidate_assignment(
+    reference: Sequence[PuzzleCandidate] | None,
+    current: Sequence[PuzzleCandidate] | None,
+    *,
+    require_equal_cardinality: bool = True,
+) -> tuple[bool, str, float | None, tuple[int, ...]]:
+    if not reference or not current or len(reference) < _MIN_CYCLE_ASSOCIATIONS:
+        return False, "incomplete", None, ()
+    if require_equal_cardinality and len(reference) != len(current):
+        return False, "incomplete", None, ()
+    if not require_equal_cardinality and len(current) < len(reference):
+        return False, "incomplete", None, ()
+    if _has_ambiguous_cycle_candidates(reference) or _has_ambiguous_cycle_candidates(
+        current
+    ):
+        return False, "ambiguous", None, ()
+
+    forward: list[int] = []
+    forward_qualities: list[float] = []
     for candidate in reference:
-        qualities = sorted(
-            (
-                _cycle_association_quality(candidate, other),
-                index,
-            )
-            for index, other in enumerate(current)
+        quality, index, ambiguous = _unique_cycle_match(candidate, current)
+        if quality is None:
+            return False, "quality", None, ()
+        if ambiguous:
+            return False, "ambiguous", quality, ()
+        forward.append(index)
+        forward_qualities.append(quality)
+    if len(set(forward)) != len(forward):
+        return False, "ambiguous", max(forward_qualities), ()
+
+    reverse: list[int] = []
+    for candidate in current:
+        quality, index, ambiguous = _unique_cycle_match(candidate, reference)
+        if quality is None:
+            if require_equal_cardinality:
+                return False, "quality", None, ()
+            reverse.append(-1)
+            continue
+        if ambiguous:
+            return False, "ambiguous", quality, ()
+        reverse.append(index)
+    if any(reverse[current_index] != reference_index for reference_index, current_index in enumerate(forward)):
+        return False, "ambiguous", max(forward_qualities), ()
+    return True, "observed", max(forward_qualities), tuple(forward)
+
+
+def _has_ambiguous_cycle_candidates(candidates: Sequence[PuzzleCandidate]) -> bool:
+    return any(
+        _cycle_association_quality(left, right)
+        <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+        for left_index, left in enumerate(candidates)
+        for right in candidates[left_index + 1 :]
+    )
+
+
+def _unique_cycle_match(
+    reference: PuzzleCandidate,
+    candidates: Sequence[PuzzleCandidate],
+) -> tuple[float | None, int, bool]:
+    qualities = sorted(
+        (_cycle_association_quality(reference, candidate), index)
+        for index, candidate in enumerate(candidates)
+    )
+    best_quality, best_index = qualities[0]
+    if best_quality > _CYCLE_ASSOCIATION_QUALITY_LIMIT:
+        return None, best_index, False
+    ambiguous = (
+        len(qualities) > 1
+        and qualities[1][0] <= _CYCLE_ASSOCIATION_QUALITY_LIMIT
+        and qualities[1][0] - best_quality
+        <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+    )
+    return best_quality, best_index, ambiguous
+
+
+def _temporal_assignment_consistent(
+    previous: Sequence[PuzzleCandidate],
+    current: Sequence[PuzzleCandidate],
+    following: Sequence[PuzzleCandidate],
+    previous_assignment: Sequence[int],
+    following_assignment: Sequence[int],
+) -> tuple[bool, str]:
+    for previous_index, current_index in enumerate(previous_assignment):
+        following_index = following_assignment[current_index]
+        predicted = _predicted_cycle_position(
+            previous[previous_index],
+            current[current_index],
         )
-        best_quality, best_index = qualities[0]
-        if best_quality > _CYCLE_ASSOCIATION_QUALITY_LIMIT:
-            return False, "quality", best_quality, len(selected_indices)
-        if (
-            len(qualities) > 1
-            and qualities[1][0] <= _CYCLE_ASSOCIATION_QUALITY_LIMIT
-            and qualities[1][0] - best_quality
-            <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
-        ):
-            return False, "ambiguous", best_quality, len(selected_indices)
-        selected_indices.append(best_index)
-        selected_qualities.append(best_quality)
-    if len(set(selected_indices)) != len(selected_indices):
-        return False, "ambiguous", max(selected_qualities), len(selected_indices)
-    return True, "observed", max(selected_qualities), len(selected_indices)
+        quality, predicted_index, ambiguous = _unique_predicted_match(
+            predicted,
+            current[current_index],
+            following,
+        )
+        if quality is None:
+            return False, "quality"
+        if ambiguous:
+            return False, "ambiguous"
+        if predicted_index != following_index:
+            return False, "permutation"
+    return True, "observed"
+
+
+def _predicted_cycle_position(
+    previous: PuzzleCandidate,
+    current: PuzzleCandidate,
+) -> tuple[float, float]:
+    return (
+        2.0 * current.cx - previous.cx,
+        2.0 * current.cy - previous.cy,
+    )
+
+
+def _unique_predicted_match(
+    predicted: tuple[float, float],
+    current: PuzzleCandidate,
+    candidates: Sequence[PuzzleCandidate],
+) -> tuple[float | None, int, bool]:
+    scale = max(1.0, hypot(current.w, current.h))
+    qualities = sorted(
+        (
+            hypot(predicted[0] - candidate.cx, predicted[1] - candidate.cy) / scale,
+            index,
+        )
+        for index, candidate in enumerate(candidates)
+    )
+    best_quality, best_index = qualities[0]
+    if best_quality > _CYCLE_ASSOCIATION_QUALITY_LIMIT:
+        return None, best_index, False
+    ambiguous = (
+        len(qualities) > 1
+        and qualities[1][0] <= _CYCLE_ASSOCIATION_QUALITY_LIMIT
+        and qualities[1][0] - best_quality
+        <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+    )
+    return best_quality, best_index, ambiguous
 
 
 def _cycle_association_quality(

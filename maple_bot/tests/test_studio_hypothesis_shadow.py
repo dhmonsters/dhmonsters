@@ -638,24 +638,75 @@ class StudioHypothesisShadowTest(unittest.TestCase):
     def test_merge_split_shadow_closes_second_white_episode(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-second-episode-") as tmp:
             root = Path(tmp)
-            frames = _periodic_cycle_frames(total_frames=12)
+            frames = _periodic_cycle_frames(total_frames=15)
             details = _replay_cycle_details(
                 root,
                 frames,
-                white_frames=set(range(9)) | {10},
+                white_frames=set(range(9)) | set(range(10, 14)),
             )
 
-            diagnostic = details[-1]["merge_split_relative"]
-            self.assertEqual(diagnostic["period"], 3)
+            self.assertEqual(details[9]["merge_split_relative"]["period"], 3)
+            preparing = details[13]["merge_split_relative"]
+            self.assertIsNone(preparing["period"])
+            self.assertIsNone(preparing["local_lag"])
+            self.assertFalse(preparing["phase_qualified"])
+
+            diagnostic = details[14]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertFalse(diagnostic["phase_qualified"])
             self.assertEqual(
                 diagnostic["cycle_evidence_reason"],
-                "retained_period_insufficient_episode_evidence",
+                "inactive_prior_period_insufficient_episode_evidence",
             )
             self.assertIsNone(diagnostic["local_lag"])
+            self.assertEqual(
+                diagnostic["local_lag_evidence_reason"],
+                "insufficient_episode_evidence",
+            )
             self.assertIn(
                 diagnostic["qualified_anchor_count"],
                 {0, None},
             )
+
+    def test_merge_split_shadow_rejects_cardinality_and_temporal_swap(self) -> None:
+        cases = {
+            "first_occurrence_missing": (
+                ((20.0, 40.0), (20.0, 40.0, 60.0), (20.0, 40.0, 60.0)),
+                1.0,
+            ),
+            "last_occurrence_missing": (
+                ((20.0, 40.0, 60.0), (20.0, 40.0, 60.0), (20.0, 40.0)),
+                1.0,
+            ),
+            "temporal_swap": (
+                ((20.0, 40.0), (28.0, 32.0), (40.0, 20.0)),
+                8.0,
+            ),
+        }
+        for name, (occurrences, half_size) in cases.items():
+            with self.subTest(name=name), TemporaryDirectory(
+                prefix=f"studio-cycle-{name}-"
+            ) as tmp:
+                frames = _sparse_cycle_chain_frames(
+                    occurrences,
+                    half_size=half_size,
+                )
+                details = _replay_cycle_details(
+                    Path(tmp),
+                    frames,
+                    white_frames=set(range(7)),
+                )
+
+                diagnostic = details[-1]["merge_split_relative"]
+                self.assertIsNone(diagnostic["period"])
+                self.assertFalse(diagnostic["phase_qualified"])
+                self.assertIn(
+                    diagnostic["cycle_evidence_reason"],
+                    {
+                        "period_association_incomplete",
+                        "period_association_permutation",
+                    },
+                )
 
     def test_merge_split_shadow_rejects_ambiguous_or_incomplete_cycle_association(self) -> None:
         cases: dict[str, tuple[list[list[dict[str, object]]], set[int]]] = {}
@@ -805,11 +856,21 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertTrue(details[7]["replay_passed"])
 
 
-def _trace_candidate(candidate_id: str, center: tuple[float, float]) -> dict[str, object]:
+def _trace_candidate(
+    candidate_id: str,
+    center: tuple[float, float],
+    *,
+    half_size: float = 1.0,
+) -> dict[str, object]:
     return {
         "candidate_id": candidate_id,
         "center": [center[0], center[1]],
-        "bbox": [center[0] - 1.0, center[1] - 1.0, center[0] + 1.0, center[1] + 1.0],
+        "bbox": [
+            center[0] - half_size,
+            center[1] - half_size,
+            center[0] + half_size,
+            center[1] + half_size,
+        ],
         "score": 0.8,
         "source": "raw",
     }
@@ -833,6 +894,27 @@ def _periodic_cycle_frames(
             _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
         ]
         frames.append(rows[phase:] + rows[:phase])
+    return frames
+
+
+def _sparse_cycle_chain_frames(
+    occurrences: tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]],
+    *,
+    half_size: float,
+) -> list[list[dict[str, object]]]:
+    frames = [
+        [_trace_candidate(f"target-{frame_index}", (60.0, 50.0))]
+        for frame_index in range(8)
+    ]
+    for frame_index, positions in zip((0, 3, 6), occurrences):
+        frames[frame_index] = [
+            _trace_candidate(
+                f"background-{frame_index}-{index}",
+                (position, 20.0),
+                half_size=half_size,
+            )
+            for index, position in enumerate(positions)
+        ] + [_trace_candidate(f"target-{frame_index}", (60.0, 50.0))]
     return frames
 
 
