@@ -1,7 +1,7 @@
 ﻿@echo off
 chcp 65001 > nul
 echo ========================================
-echo  Claude v2.2.1 Build (PyArmor + PyInstaller)
+echo  Claude v2.2.2 Build (PyArmor + PyInstaller)
 echo ========================================
 
 set PYTHON=C:\Users\PC\AppData\Local\Programs\Python\Python314\python.exe
@@ -55,6 +55,7 @@ echo ========================================
 echo  Done! dist\Claude\Claude.exe
 echo ========================================
 pause
+
 
 
 
