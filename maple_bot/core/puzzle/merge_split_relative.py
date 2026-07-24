@@ -898,8 +898,8 @@ class MergeSplitRelativeResolver:
         self._merge_center: Point | None = None
         self._merge_bbox: tuple[float, float, float, float] | None = None
         self._split_recovery_remaining = 0
-        self._split_recovery_event_id: int | None = None
         self._split_first_unresolved_held = False
+        self._split_recovery_unresolved = False
 
     def update(
         self,
@@ -940,9 +940,19 @@ class MergeSplitRelativeResolver:
             and self._split_recovery_remaining <= 0
         ):
             self._split_recovery_remaining = 3
-            self._split_recovery_event_id = event.event_id
             self._split_first_unresolved_held = False
+            self._split_recovery_unresolved = True
         recovering_split = self._split_recovery_remaining > 0
+
+        # A resolved split still needs a short stability quorum, but a new
+        # overlap starts a normal merge event instead of consuming its budget.
+        if (
+            recovering_split
+            and not self._split_recovery_unresolved
+            and event.state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
+        ):
+            self._clear_split_recovery()
+            recovering_split = False
 
         if event.state is MergeState.SEPARATE and not recovering_split:
             collision = collision_candidate
@@ -996,7 +1006,7 @@ class MergeSplitRelativeResolver:
         )
 
         if event.state is MergeState.PARTIAL_OVERLAP:
-            if recovering_split:
+            if recovering_split and self._split_recovery_unresolved:
                 return self._unresolved_split_hold(event, "partial_overlap")
             if target_candidate is not None and overlapping is not None:
                 self._merge_center = (
@@ -1017,7 +1027,7 @@ class MergeSplitRelativeResolver:
             return self._event_hold(event, "partial_overlap")
 
         if event.state is MergeState.MERGED:
-            if recovering_split:
+            if recovering_split and self._split_recovery_unresolved:
                 return self._unresolved_split_hold(event, "merged_identity_hold")
             if merged is not None:
                 self._merge_center = merged.center
@@ -1076,6 +1086,7 @@ class MergeSplitRelativeResolver:
                 or decision.background_candidate_id is None
             ):
                 return self._unresolved_split_hold(event, decision.reason)
+            self._split_recovery_unresolved = False
             self._split_recovery_remaining -= 1
             self._remember_visible_pair(
                 next(
@@ -1096,8 +1107,7 @@ class MergeSplitRelativeResolver:
                 ),
                 event_id=event.event_id,
             )
-            self._clear_split_recovery()
-            return MergeSplitDecision(
+            recovered = MergeSplitDecision(
                 state=event.state,
                 background_candidate_id=decision.background_candidate_id,
                 target_candidate_id=decision.target_candidate_id,
@@ -1122,13 +1132,17 @@ class MergeSplitRelativeResolver:
                     "split_pair_score_margin": split_pair.score_margin,
                 },
             )
+            if self._split_recovery_remaining <= 0:
+                self._event_detector.complete_split_recovery()
+                self._clear_split_recovery()
+            return recovered
 
         return self._event_hold(event, "missing_fingerprint")
 
     def _clear_split_recovery(self) -> None:
         self._split_recovery_remaining = 0
-        self._split_recovery_event_id = None
         self._split_first_unresolved_held = False
+        self._split_recovery_unresolved = False
 
     def _remember_target(self, candidate: Candidate | None) -> None:
         if candidate is None:
@@ -1208,6 +1222,7 @@ class MergeSplitRelativeResolver:
         event: MergeEvent,
         reason: str,
     ) -> MergeSplitDecision:
+        self._split_recovery_unresolved = True
         if (
             event.state is MergeState.SPLITTING
             and not self._split_first_unresolved_held
