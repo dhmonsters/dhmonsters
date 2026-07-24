@@ -544,6 +544,39 @@ class SplitChildPairSelectionTest(unittest.TestCase):
 
 
 class SplitChildAssignmentTest(unittest.TestCase):
+    def test_reference_pair_quorum_holds_when_current_anchor_track_is_missing(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        fingerprint = module.RelationFingerprint.from_observations(
+            background_point=(3.0, 4.0),
+            anchors=(
+                module.BackgroundAnchor("a", (0.0, 0.0), 9, qualified_cycle=True),
+                module.BackgroundAnchor("b", (10.0, 0.0), 9, qualified_cycle=True),
+                module.BackgroundAnchor("c", (20.0, 0.0), 9, qualified_cycle=True),
+            ),
+            jitter=0.02,
+        )
+
+        decision = module.assign_split_children(
+            children=(
+                _center_candidate("background-child", (3.0, 4.0)),
+                _center_candidate("target-child", (7.0, 7.0)),
+            ),
+            anchors=(
+                module.BackgroundAnchor("a", (0.0, 0.0), 10, qualified_cycle=True),
+                module.BackgroundAnchor("b", (10.0, 0.0), 10, qualified_cycle=True),
+            ),
+            fingerprint=fingerprint,
+            predicted_target_point=(7.0, 7.0),
+            phase_conditioned=True,
+        )
+
+        self.assertEqual(decision.reason, "ambiguous_phase_relation")
+        self.assertEqual(decision.debug["relation_basis"], "pair")
+        self.assertEqual(
+            decision.debug["missing_current_anchor_ids"],
+            ("c",),
+        )
+
     def test_reference_affine_mode_holds_when_current_anchor_track_is_missing(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         fingerprint = module.RelationFingerprint.from_observations(
@@ -875,7 +908,7 @@ class SplitChildAssignmentTest(unittest.TestCase):
             phase_conditioned=True,
         )
 
-        self.assertEqual(decision.reason, "insufficient_cycle_anchors")
+        self.assertEqual(decision.reason, "ambiguous_phase_relation")
         self.assertIsNone(decision.target_candidate_id)
 
     def test_small_phase_relation_margin_holds(self) -> None:
@@ -1374,6 +1407,40 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
 
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
+    def test_phase_anchor_selection_avoids_duplicate_second_seed(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        anchors = tuple(
+            module.BackgroundAnchor(track_id, point, 9, qualified_cycle=True)
+            for track_id, point in (
+                ("a", (1.0, 0.0)),
+                ("b", (1.0, 0.0)),
+                ("c", (1.0, 0.0)),
+                ("d", (1.0, 0.0)),
+                ("e", (1.0, 0.0)),
+                ("f", (1.0, 0.0)),
+                ("g", (0.0, 1.0)),
+                ("h", (-1.0, 0.0)),
+            )
+        )
+
+        selected = module._bounded_phase_reference_anchors(
+            background_point=(0.0, 0.0),
+            anchors=anchors,
+            limit=6,
+        )
+        fingerprint = module.RelationFingerprint.from_observations(
+            background_point=(0.0, 0.0),
+            anchors=selected,
+            jitter=0.02,
+        )
+
+        self.assertEqual(
+            tuple(anchor.track_id for anchor in selected[:3]),
+            ("a", "h", "g"),
+        )
+        self.assertLessEqual(len(selected), 6)
+        self.assertGreater(len(fingerprint.triplet_coordinates), 0)
+
     def test_legacy_split_holds_when_only_phase_fingerprint_is_available(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=1)
@@ -1688,6 +1755,62 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertIsNotNone(resolver._fingerprint)
         self.assertEqual(split_decision.background_candidate_id, "background-child")
         self.assertEqual(split_decision.target_candidate_id, "target-child")
+
+    def test_phase_refresh_keeps_event_affine_basis_when_current_track_is_missing(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        anchor_c = _center_candidate("anchor-c", (20.0, 40.0))
+        target = _center_candidate("target", (34.0, 32.0))
+        background = _center_candidate("background", (30.0, 28.0))
+
+        for frame_index in range(6):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b, anchor_c),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _candidate("merged", (28.0, 26.0, 38.0, 36.0), frame_index=6),
+                anchor_a,
+                anchor_b,
+                anchor_c,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=6,
+            phase_context=phase,
+        )
+        split_decision = resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _center_candidate("target-child", (34.0, 32.0), frame_index=7),
+                _center_candidate("background-child", (30.0, 28.0), frame_index=7),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=7,
+            phase_context=phase,
+        )
+
+        self.assertEqual(split_decision.reason, "ambiguous_phase_relation")
+        self.assertIsNone(split_decision.background_candidate_id)
 
     def test_phase_split_refreshes_fingerprint_for_its_local_lag_frame(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
@@ -2302,6 +2425,30 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(resolver._merge_context.background_track_id, "background-child")
         self.assertEqual(resolver._merge_context.merge_bbox, merged.bbox)
 
+    def test_superseding_direct_merge_clears_old_relation_before_split(self) -> None:
+        module, resolver, anchor_a, anchor_b, target_child, background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        merged = _candidate("next-merged", (28.0, 26.0, 38.0, 36.0))
+        resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        decision = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(target_child, background_child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(decision.reason, "missing_fingerprint")
+        self.assertIsNone(decision.background_candidate_id)
+
     def test_unresolved_hold_resets_success_quorum_without_spending_successes(self) -> None:
         module, resolver, anchor_a, anchor_b, target_child, _background_child = (
             self._start_resolved_split_stabilization(confirm_observations=1)
@@ -2819,7 +2966,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(child_decision.state, module.MergeState.SPLITTING)
         self.assertEqual(child_decision.debug["event_id"], 2)
-        self.assertEqual(child_decision.reason, "split_pair_ambiguous")
+        self.assertEqual(child_decision.reason, "missing_fingerprint")
         self.assertIsNone(resolver._merge_context)
 
     def _start_unresolved_split_recovery(self):

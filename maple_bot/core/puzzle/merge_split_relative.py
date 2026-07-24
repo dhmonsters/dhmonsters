@@ -198,12 +198,31 @@ def _bounded_phase_reference_anchors(
         return determinant / max(1e-6, scale_squared)
 
     nearest = ordered[0]
-    farthest = min(
-        ordered[1:],
-        key=lambda anchor: (-distance(anchor), anchor.track_id),
+    separated = tuple(
+        anchor
+        for anchor in ordered[1:]
+        if hypot(
+            anchor.point[0] - nearest.point[0],
+            anchor.point[1] - nearest.point[1],
+        )
+        > 1e-6
     )
-    selected = [nearest, farthest]
-    if maximum >= 3:
+    selected = [nearest]
+    if separated:
+        farthest = min(
+            separated,
+            key=lambda anchor: (
+                -hypot(
+                    anchor.point[0] - nearest.point[0],
+                    anchor.point[1] - nearest.point[1],
+                ),
+                anchor.track_id,
+            ),
+        )
+        selected.append(farthest)
+    else:
+        farthest = None
+    if maximum >= 3 and farthest is not None:
         remaining = tuple(
             anchor
             for anchor in ordered
@@ -777,16 +796,18 @@ def assign_split_children(
         if left_id in usable and middle_id in usable and right_id in usable
     )
     reference_affine_triplets = fingerprint.triplet_coordinates
+    reference_pairs = fingerprint.pair_coordinates
     relation_basis = "affine_triplet" if reference_affine_triplets else "pair"
     debug = {
         "qualified_anchor_count": len(usable),
         "valid_anchor_pair_count": len(valid_pairs),
         "valid_affine_triplet_count": len(valid_triplets),
         "reference_affine_triplet_count": len(reference_affine_triplets),
+        "reference_anchor_pair_count": len(reference_pairs),
         "relation_basis": relation_basis,
         "usable_anchor_ids": tuple(usable),
     }
-    if not reference_affine_triplets and len(valid_pairs) < 1:
+    if not reference_affine_triplets and not reference_pairs:
         return _hold_decision("insufficient_cycle_anchors", debug=debug)
 
     child_residuals: list[tuple[float, Candidate]] = []
@@ -804,7 +825,7 @@ def assign_split_children(
     else:
         basis_rows = [
             (f"pair:{left_id},{right_id}", "pair", (left_id, right_id), expected)
-            for left_id, right_id, expected in valid_pairs
+            for left_id, right_id, expected in reference_pairs
         ]
     residuals_by_child: dict[str, dict[str, float]] = {}
     for child in children:
@@ -834,10 +855,14 @@ def assign_split_children(
                     )
             else:
                 left_id, right_id = track_ids
-                current = relative_coordinate(
-                    child.center,
-                    usable[left_id].point,
-                    usable[right_id].point,
+                current = (
+                    relative_coordinate(
+                        child.center,
+                        usable[left_id].point,
+                        usable[right_id].point,
+                    )
+                    if left_id in usable and right_id in usable
+                    else None
                 )
                 if current is not None:
                     residuals[basis_id] = relative_coordinate_residual(
@@ -1003,6 +1028,7 @@ class MergeEventContext:
     merge_bbox: tuple[float, float, float, float] | None
     opened_frame: int
     last_frame: int
+    phase_anchor_track_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1286,6 +1312,7 @@ class MergeSplitRelativeResolver:
         self._fingerprint_mode: str | None = None
         self._phase_reference_frame: int | None = None
         self._phase_fingerprint_frame: int | None = None
+        self._fingerprint_event_id: int | None = None
         self._merge_context: MergeEventContext | None = None
         self._last_visible_pair: _VisiblePair | None = None
         self._merge_center: Point | None = None
@@ -1350,10 +1377,7 @@ class MergeSplitRelativeResolver:
             and event.event_id != previous_event_id
         ):
             self._clear_split_recovery()
-            self._merge_context = None
-            self._last_visible_pair = None
-            self._merge_center = None
-            self._merge_bbox = None
+            self._clear_merge_event_context(clear_visible_pair=True)
             recovering_split = False
 
         if (
@@ -1391,9 +1415,7 @@ class MergeSplitRelativeResolver:
                     candidate_count=event.candidate_count,
                 )
             self._clear_split_recovery()
-            self._merge_context = None
-            self._merge_center = None
-            self._merge_bbox = None
+            self._clear_merge_event_context()
             recovering_split = False
 
         if (
@@ -1536,6 +1558,9 @@ class MergeSplitRelativeResolver:
                 if (
                     self._fingerprint_mode != "phase"
                     or self._phase_fingerprint_frame != frame_index
+                    or self._merge_context is None
+                    or self._fingerprint_event_id
+                    != self._merge_context.event_id
                 ):
                     return self._unresolved_split_hold(
                         event,
@@ -1672,6 +1697,19 @@ class MergeSplitRelativeResolver:
         self._fingerprint_mode = None
         self._phase_reference_frame = None
         self._phase_fingerprint_frame = None
+        self._fingerprint_event_id = None
+
+    def _clear_merge_event_context(
+        self,
+        *,
+        clear_visible_pair: bool = False,
+    ) -> None:
+        self._merge_context = None
+        if clear_visible_pair:
+            self._last_visible_pair = None
+        self._clear_relation_fingerprint()
+        self._merge_center = None
+        self._merge_bbox = None
 
     def _remember_target(self, candidate: Candidate | None) -> None:
         if candidate is None:
@@ -1836,11 +1874,7 @@ class MergeSplitRelativeResolver:
     def _expire_split_recovery(self, event: MergeEvent) -> MergeSplitDecision:
         self._event_detector.complete_split_recovery()
         self._clear_split_recovery()
-        self._merge_context = None
-        self._last_visible_pair = None
-        self._clear_relation_fingerprint()
-        self._merge_center = None
-        self._merge_bbox = None
+        self._clear_merge_event_context(clear_visible_pair=True)
         expired_event = MergeEvent(
             event_id=event.event_id,
             state=MergeState.SEPARATE,
@@ -1898,33 +1932,48 @@ class MergeSplitRelativeResolver:
             and not anchor.clipped
             and anchor.track_id != context.background_track_id
         }
-        reference_anchors = tuple(
-            reference
-            for track_id in context.anchor_track_ids
-            if track_id in current_anchors
-            for reference in (
-                self._anchor_manager.reference_anchor(track_id, reference_frame),
-            )
-            if reference is not None
-            and reference.qualified_cycle
-            and not reference.clipped
-        )
-        if reference_background is None or len(reference_anchors) < 2:
+        if reference_background is None:
             return
-        if (
-            not reference_background.qualified_cycle
-            or reference_background.clipped
-            or any(
-                not anchor.qualified_cycle or anchor.clipped
-                for anchor in reference_anchors
-            )
-        ):
+        if not reference_background.qualified_cycle or reference_background.clipped:
             return
-        reference_anchors = _bounded_phase_reference_anchors(
-            background_point=reference_background.point,
-            anchors=reference_anchors,
-            limit=_MAX_PHASE_FINGERPRINT_ANCHORS,
-        )
+        if context.phase_anchor_track_ids:
+            reference_track_ids = context.phase_anchor_track_ids
+        else:
+            eligible_reference_anchors = tuple(
+                reference
+                for track_id in context.anchor_track_ids
+                if track_id in current_anchors
+                for reference in (
+                    self._anchor_manager.reference_anchor(track_id, reference_frame),
+                )
+                if reference is not None
+                and reference.qualified_cycle
+                and not reference.clipped
+            )
+            if len(eligible_reference_anchors) < 2:
+                return
+            selected_reference_anchors = _bounded_phase_reference_anchors(
+                background_point=reference_background.point,
+                anchors=eligible_reference_anchors,
+                limit=_MAX_PHASE_FINGERPRINT_ANCHORS,
+            )
+            context.phase_anchor_track_ids = tuple(
+                anchor.track_id for anchor in selected_reference_anchors
+            )
+            reference_track_ids = context.phase_anchor_track_ids
+
+        reference_anchors: list[BackgroundAnchor] = []
+        for track_id in reference_track_ids:
+            reference = self._anchor_manager.reference_anchor(track_id, reference_frame)
+            if (
+                reference is None
+                or not reference.qualified_cycle
+                or reference.clipped
+            ):
+                return
+            reference_anchors.append(reference)
+        if len(reference_anchors) < 2:
+            return
         self._fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
             anchors=reference_anchors,
@@ -1933,6 +1982,7 @@ class MergeSplitRelativeResolver:
         self._fingerprint_mode = "phase"
         self._phase_reference_frame = reference_frame
         self._phase_fingerprint_frame = frame_index
+        self._fingerprint_event_id = context.event_id
 
     def _advance_latent_target(self, fallback: Point | None) -> None:
         point = self._predicted_target_point(fallback, ())
@@ -1981,6 +2031,7 @@ class MergeSplitRelativeResolver:
                 "fingerprint_mode": self._fingerprint_mode,
                 "phase_reference_frame": self._phase_reference_frame,
                 "phase_fingerprint_frame": self._phase_fingerprint_frame,
+                "fingerprint_event_id": self._fingerprint_event_id,
             },
         )
 
