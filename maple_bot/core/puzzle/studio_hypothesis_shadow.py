@@ -163,6 +163,7 @@ def replay_hypothesis_selection(
         if merge_split_relative else None
     )
     frame_shape = _board_frame_shape(trace_rows)
+    cycle_frame_shape = _cycle_board_frame_shape(trace_rows)
     catalog: BackgroundCatalog | None = None
     catalog_period: int | None = None
     catalog_period_score: float | None = None
@@ -217,7 +218,7 @@ def replay_hypothesis_selection(
                 episode_observations = {}
                 phase_observations = {}
                 period_recurrence_comparisons = 0
-                cycle_tracks = _StableCycleTracks(frame_shape=frame_shape)
+                cycle_tracks = _StableCycleTracks(frame_shape=cycle_frame_shape)
                 stable_cycle_track_count = 0
                 stable_cycle_track_ids = ()
                 stable_cycle_excluded_counts = {}
@@ -1127,6 +1128,14 @@ def _symmetric_track_assignment(
             continue
         reverse[candidate_index] = track_id
 
+    reverse_owners: dict[str, list[int]] = {}
+    for candidate_index, track_id in reverse.items():
+        reverse_owners.setdefault(track_id, []).append(candidate_index)
+    for track_id, candidate_indexes in reverse_owners.items():
+        if len(candidate_indexes) > 1 and track_id not in rejected:
+            rejected[track_id] = "association_duplicate"
+            blocked_indexes.update(candidate_indexes)
+
     assignments: dict[str, int] = {}
     owners: dict[int, list[str]] = {}
     for track_id, candidate_index in forward.items():
@@ -1855,6 +1864,30 @@ def _evidence_models(payload: dict[str, Any]) -> dict[str, CandidateEvidence]:
 
 
 def _board_frame_shape(rows: list[dict[str, Any]]) -> tuple[int, int] | None:
+    values = _board_frame_shape_values(rows)
+    if values is None:
+        return None
+    height, width = values
+    height = _optional_int(height)
+    width = _optional_int(width)
+    if height is not None and width is not None and height > 0 and width > 0:
+        return (height, width)
+    return None
+
+
+def _cycle_board_frame_shape(rows: list[dict[str, Any]]) -> tuple[int, int] | None:
+    values = _board_frame_shape_values(rows)
+    if values is None:
+        return None
+    height, width = values
+    if type(height) is int and type(width) is int and height > 0 and width > 0:
+        return (height, width)
+    return None
+
+
+def _board_frame_shape_values(
+    rows: list[dict[str, Any]],
+) -> tuple[object, object] | None:
     for row in rows:
         if row.get("type") != "SESSION_START":
             continue
@@ -1864,15 +1897,7 @@ def _board_frame_shape(rows: list[dict[str, Any]]) -> tuple[int, int] | None:
         board_roi = payload.get("board_roi")
         if not isinstance(board_roi, dict):
             continue
-        width = board_roi.get("w")
-        height = board_roi.get("h")
-        if (
-            type(width) is int
-            and type(height) is int
-            and width > 0
-            and height > 0
-        ):
-            return (height, width)
+        return (board_roi.get("h"), board_roi.get("w"))
     return None
 
 
@@ -1906,7 +1931,7 @@ def _distance(left: tuple[float, float], right: tuple[float, float]) -> float:
 def _optional_int(value: object) -> int | None:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return None
 
 

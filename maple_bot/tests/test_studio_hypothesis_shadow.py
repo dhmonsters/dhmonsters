@@ -346,6 +346,45 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 ["challenger"]["group_margins"]["anchor_shape_identity"]
             )
 
+    def test_wide_gate_accepts_legacy_numeric_frame_shapes_when_opted_out(self) -> None:
+        with TemporaryDirectory(prefix="studio-wide-frame-shape-opt-out-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            _write_jsonl(
+                score_path,
+                [{"solver_frame_index": 1, "target_x": 80.0, "target_y": 50.0}],
+            )
+            baseline_path = root / "baseline.jsonl"
+            _write_jsonl(baseline_path, _wide_gate_trace((100, 120)))
+            baseline = replay_hypothesis_selection_details(
+                score_path,
+                baseline_path,
+                width=2,
+                branch=2,
+            )
+
+            for label, frame_shape in (
+                ("strings", ("100", "120")),
+                ("whole_floats", (100.0, 120.0)),
+            ):
+                with self.subTest(label=label):
+                    trace_path = root / f"{label}.jsonl"
+                    _write_jsonl(trace_path, _wide_gate_trace(frame_shape))
+                    details = replay_hypothesis_selection_details(
+                        score_path,
+                        trace_path,
+                        width=2,
+                        branch=2,
+                    )
+
+                    self.assertEqual(details, baseline)
+                    self.assertTrue(details[0]["wide_gate"]["available"])
+                    self.assertEqual(
+                        details[0]["wide_gate"]["beam_guard"]["bottom_margin"],
+                        45.0,
+                    )
+                    self.assertTrue(details[0]["local_rigid_gate"]["selected"])
+
     def test_merge_split_relative_is_opt_in_and_reports_state(self) -> None:
         with TemporaryDirectory(prefix="studio-merge-split-opt-in-") as tmp:
             root = Path(tmp)
@@ -938,7 +977,13 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 self.assertFalse(_valid_cycle_frame_shape(frame_shape))
 
     def test_merge_split_shadow_rejects_noninteger_frame_shapes(self) -> None:
-        for frame_shape in ((True, 100), (100.5, 80), (100, float("inf"))):
+        for frame_shape in (
+            (True, 100),
+            (100.5, 80),
+            (100, float("inf")),
+            ("100", "140"),
+            (100.0, 140.0),
+        ):
             with self.subTest(frame_shape=frame_shape), TemporaryDirectory(
                 prefix="studio-cycle-invalid-frame-shape-",
             ) as tmp:
@@ -1016,6 +1061,28 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                     0,
                 ),
                 2,
+            )
+
+    def test_merge_split_shadow_does_not_freeze_reverse_only_candidates(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-reverse-only-atomic-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _long_reverse_only_candidate_cycle_frames(total_frames=30),
+                white_frames=set(range(29)),
+                frame_shape=(300, 300),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertEqual(
+                diagnostic["stable_cycle_track_ids"],
+                ("cycle-track-2", "cycle-track-3"),
+            )
+            self.assertGreaterEqual(
+                diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_duplicate",
+                    0,
+                ),
+                1,
             )
 
     def test_frozen_tracks_reject_predicted_assignment_without_committing_state(self) -> None:
@@ -1422,6 +1489,58 @@ def _cycle_candidates(
     ]
 
 
+def _wide_gate_trace(frame_shape: tuple[object, object]) -> list[dict[str, object]]:
+    height, width = frame_shape
+    return [
+        {
+            "type": "SESSION_START",
+            "frame_index": None,
+            "payload": {"board_roi": {"w": width, "h": height}},
+        },
+        {
+            "type": "CANDIDATES",
+            "frame_index": 0,
+            "payload": {"candidates": [_trace_candidate("anchor", (20.0, 50.0), half_size=5.0)]},
+        },
+        {
+            "type": "TEMPORAL_SELECTOR",
+            "frame_index": 0,
+            "payload": {"debug": {"kinematic_wide_beam_debug": {"reason": "white_anchor", "point": [20.0, 50.0]}}},
+        },
+        {
+            "type": "CANDIDATES",
+            "frame_index": 1,
+            "payload": {
+                "candidates": [
+                    _trace_candidate("base", (20.0, 50.0), half_size=5.0),
+                    _trace_candidate("target", (80.0, 50.0), half_size=5.0),
+                ]
+            },
+        },
+        {
+            "type": "EVIDENCE",
+            "frame_index": 1,
+            "payload": {
+                "evidence": [
+                    {"candidate_id": "base", "texture_bg_score": 0.8, "color_residual": 0.2, "local_rigid_residual": 0.1},
+                    {"candidate_id": "target", "texture_bg_score": 0.9, "color_residual": 0.2, "local_rigid_residual": 0.5},
+                ]
+            },
+        },
+        {"type": "IDENTITY_STATE", "frame_index": 1, "payload": {"state": "TRACK_CONFIDENT"}},
+        {
+            "type": "TEMPORAL_SELECTOR",
+            "frame_index": 1,
+            "payload": {"debug": {"kinematic_wide_beam_debug": {"reason": "tracking"}}},
+        },
+        {
+            "type": "TARGET_SELECTION",
+            "frame_index": 1,
+            "payload": {"point": [20.0, 50.0], "source": "kinematic_local_rigid", "kinematic_wide_beam_gate": {"base_point": [20.0, 50.0]}},
+        },
+    ]
+
+
 def _periodic_cycle_frames(
     *,
     total_frames: int,
@@ -1631,6 +1750,31 @@ def _long_duplicate_candidate_cycle_frames(
                 _trace_candidate(f"duplicate-shared-{frame_index}", (86.0, 20.0), half_size=10.0),
                 _trace_candidate(f"duplicate-extra-{frame_index}", (60.0, 20.0), half_size=10.0),
                 _trace_candidate(f"duplicate-c-{frame_index}", (150.0, 20.0), half_size=10.0),
+                _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+            ]
+        )
+    return frames
+
+
+def _long_reverse_only_candidate_cycle_frames(
+    *,
+    total_frames: int,
+) -> list[list[dict[str, object]]]:
+    frames = [
+        [
+            _trace_candidate("reverse-a-0", (80.0, 20.0), half_size=10.0),
+            _trace_candidate("reverse-b-0", (160.0, 20.0), half_size=10.0),
+            _trace_candidate("reverse-c-0", (230.0, 20.0), half_size=10.0),
+            _trace_candidate("target-0", (60.0, 50.0)),
+        ]
+    ]
+    for frame_index in range(1, total_frames):
+        frames.append(
+            [
+                _trace_candidate(f"reverse-near-{frame_index}", (80.0, 20.0), half_size=10.0),
+                _trace_candidate(f"reverse-only-{frame_index}", (90.0, 20.0), half_size=10.0),
+                _trace_candidate(f"reverse-b-{frame_index}", (160.0, 20.0), half_size=10.0),
+                _trace_candidate(f"reverse-c-{frame_index}", (230.0, 20.0), half_size=10.0),
                 _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
             ]
         )
