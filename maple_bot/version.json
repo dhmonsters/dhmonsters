@@ -1,5 +1,5 @@
 {
-    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.2/Claude_v2.2.2_Setup.exe",
-    "version":  "2.2.2",
-    "notes":  "빨코2 자동판매 진입 전 2층 X=123~136 정렬 후 윗텔포하고, 판매 종료 후 아랫텔포로 2층 복귀하도록 분리했습니다."
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.3/Claude_v2.2.3_Setup.exe",
+    "version":  "2.2.3",
+    "notes":  "2.2.2 EXE에서 core.runtime 모듈이 누락되어 실행되지 않던 문제를 수정했습니다."
 }
