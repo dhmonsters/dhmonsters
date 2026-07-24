@@ -23,3 +23,29 @@ anchor 자격, split pair, 상대좌표 quorum이 불충분하면 HOLD한다. YO
 검증은 이론과 단위 테스트 후 대표 1판만 먼저 수행한다. 대표 1판에서 순개선이 없거나 손실이 생기면 횟수를 늘리지 않는다. 원인을 `period`, `anchor`, `event`, `pair`, `relation`, `quorum`, `candidate oracle` 단계로 분해한다.
 
 첫 구현은 opt-in shadow에만 연결한다. 마우스는 OFF로 유지하고 표적 시각화와 로그로 확인한다.
+## 2026-07-24 대표 1판 첫 게이트 결과
+
+- 관련 테스트는 133 passed, 13 subtests passed였다.
+- 대표 세션 1,392프레임 전체 replay 결과는 baseline 1,021, replay 1,045, improved 66, regressed 42였다.
+- 확대 조건인 `improved_frames >= 1`은 만족했지만 `regressed_frames == 0`을 만족하지 못해 보존판 이후 검증은 중단한다.
+- 관찰 period, local lag, phase-qualified 프레임이 모두 0이었다. 따라서 새 전체주기 계보 판별기는 대표 세션에서 활성화되지 않았다.
+- 흰색 준비 구간의 raw 후보 수는 한 episode 안에서도 크게 변했다. 예를 들어 첫 구간은 23~42개, 다음 구간은 26~60개였다.
+- 일반 원인은 raw 후보 전체에 동일 cardinality와 완전 bijection을 요구한 것이다. 검출기의 일시 후보와 잘린 후보 때문에 안전 장치가 항상 닫혔다.
+- 다음 가설은 raw 후보 전체가 아니라, 흰색 준비 구간 동안 지속적으로 연결되고 화면 밖으로 나가지 않은 안정 배경 트랙 집합만 period/local-lag 증거로 사용하는 것이다.
+- 안정 트랙 집합 내부에서는 동일 cardinality, 양방향 bijection, 시간 순열 일관성, 교차 모호성 거부 규칙을 유지한다.
+- 특정 좌표, 방향, 절대 프레임, GT는 사용하지 않는다.
+
+## 2026-07-24 안정 트랙 보완과 두 번째 대표 게이트 결과
+
+- raw 후보 전체를 비교하는 대신 준비 구간 전체에서 연결된 안정 배경 트랙만 동결하도록 구현했다.
+- 후보가 0개이거나 payload가 빠진 프레임도 준비 구간 분모에 포함한다. 화면 형상, 생존률, 최대 공백, 전역 대칭 일대일 대응, 트랙 교차와 순열을 fail-closed로 판정한다.
+- period와 local lag는 같은 안정 트랙 ID 집합과 순서를 유지해야 한다. 앞쪽 반복만 정상이고 뒤쪽에서 ID가 바뀌는 경우도 전체 주기 증거를 거부한다.
+- 거부된 대칭 배정의 후보는 새 트랙으로 다시 만들어지지 않으며, 동결 뒤에도 실제 위치와 정의된 예측 위치 검증을 모두 통과해야 관측을 커밋한다.
+- 엄격한 화면 형상 검증은 opt-in cycle shadow에만 적용한다. `merge_split_relative=False`인 기존 replay와 wide-beam 입력 관용성은 유지한다.
+- 관련 최종 검증은 157 passed, 30 subtests passed였다. 독립 누적 diff 검토에서 Critical, Important, Minor가 모두 없었다.
+- 같은 대표 세션 1,392프레임을 보완 후 정확히 한 번 다시 replay했다. 결과는 baseline 1,021, replay 1,045, improved 66, regressed 42, changed 202였다.
+- 안정 트랙은 455프레임에서 존재했고 한 프레임 최대 37개까지 생성됐다. 즉 안정 트랙 생성 단계는 실제 데이터에서 활성화됐다.
+- period, local lag, phase-qualified 프레임은 다시 모두 0이었다. cycle reason은 `preparing_white_anchor` 668, `period_association_ambiguous` 416, `period_unavailable` 308이었다.
+- 첫 실패의 원인이던 raw 후보 cardinality 문제는 안정 트랙 생성으로 넘어갔다. 현재 병목은 안정 트랙 ID들의 주기 재등장 대응이 모호하여 period hard gate가 열리지 않는 것이다.
+- 회귀 42가 남았으므로 게이트는 실패했다. 계획에 따라 보존판, 혼합 3판, seed 10판, 16GT 확대 검증은 실행하지 않았다.
+- 다음 가설은 임계값 완화가 아니다. 준비 구간 안에서 안정 트랙의 위상 순서를 식별할 수 있는 추가 관측 신호가 있어야 한다. 새 신호가 없으면 HOLD를 유지한다.
