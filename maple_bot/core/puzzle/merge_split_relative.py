@@ -2094,10 +2094,18 @@ class MergeSplitRelativeResolver:
                 or not reference.qualified_cycle
                 or reference.clipped
             ):
-                return "insufficient_cycle_anchors"
+                return (
+                    "ambiguous_phase_relation"
+                    if context.phase_anchor_track_ids
+                    else "insufficient_cycle_anchors"
+                )
             reference_anchors.append(reference)
         if len(reference_anchors) < 2:
-            return "insufficient_cycle_anchors"
+            return (
+                "ambiguous_phase_relation"
+                if context.phase_anchor_track_ids
+                else "insufficient_cycle_anchors"
+            )
         fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
             anchors=reference_anchors,

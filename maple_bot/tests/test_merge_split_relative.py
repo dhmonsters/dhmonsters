@@ -2221,6 +2221,83 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(split_decision.reason, "ambiguous_phase_relation")
         self.assertIsNone(split_decision.background_candidate_id)
 
+    def test_phase_frozen_reference_anchor_disqualification_holds_ambiguous(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        background = _center_candidate("background", (30.0, 28.0))
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        anchor_c = _center_candidate("anchor-c", (20.0, 40.0))
+        for frame_index in range(7):
+            resolver._current_anchors = resolver._anchor_manager.update(
+                candidates=(background, anchor_a, anchor_b, anchor_c),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=2.0,
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target",
+            background_track_id=(
+                resolver._anchor_manager.track_id_for_candidate("background") or ""
+            ),
+            anchor_track_ids=tuple(
+                resolver._anchor_manager.track_id_for_candidate(candidate_id) or ""
+                for candidate_id in ("anchor-a", "anchor-b", "anchor-c")
+            ),
+            premerge_target_point=(34.0, 32.0),
+            premerge_target_bbox=(33.0, 31.0, 35.0, 33.0),
+            premerge_background_bbox=background.bbox,
+            merge_bbox=(29.0, 27.0, 35.0, 33.0),
+            opened_frame=0,
+            last_frame=6,
+        )
+        self.assertIsNone(
+            resolver._remember_phase_background_relation(
+                context=context,
+                frame_index=6,
+                phase_context=phase,
+            )
+        )
+        frozen_track_ids = context.phase_anchor_track_ids
+        previous_fingerprint = resolver._fingerprint
+        resolver._event_detector.state = module.MergeState.SPLITTING
+        resolver._event_detector.event_id = context.event_id
+        resolver._split_recovery_remaining = 3
+        resolver._merge_context = context
+        resolver._merge_bbox = context.merge_bbox
+
+        decision = resolver.update(
+            incumbent_point=(34.0, 32.0),
+            candidates=(
+                _center_candidate("target-child", (34.0, 32.0), frame_index=7),
+                _center_candidate("background-child", (30.0, 28.0), frame_index=7),
+                anchor_a,
+                anchor_b,
+                anchor_c,
+            ),
+            evidence={
+                "anchor-c": CandidateEvidence(
+                    candidate_id="anchor-c",
+                    merge_likelihood=1.0,
+                )
+            },
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=7,
+            phase_context=phase,
+        )
+
+        self.assertEqual(decision.reason, "ambiguous_phase_relation")
+        self.assertEqual(context.phase_anchor_track_ids, frozen_track_ids)
+        self.assertIs(resolver._fingerprint, previous_fingerprint)
+        self.assertEqual(resolver._fingerprint_mode, "phase")
+
     def test_phase_initial_fingerprint_uses_reference_catalog_when_anchor_is_hidden(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         resolver = module.MergeSplitRelativeResolver(
