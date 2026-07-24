@@ -979,10 +979,17 @@ class MergeSplitRelativeResolver:
 
         if (
             recovering_split
-            and not self._split_recovery_unresolved
             and self._event_detector.pending_merge_state is not None
         ):
             self._split_recovery_success_count = 0
+            if (
+                self._split_recovery_unresolved
+                and previous_detector_state is not MergeState.REACQUIRED
+            ):
+                return self._unresolved_split_hold(
+                    event,
+                    "merge_confirmation_pending",
+                )
             return self._event_hold(event, "merge_confirmation_pending")
 
         # A resolved split still needs a short stability quorum, but a new
