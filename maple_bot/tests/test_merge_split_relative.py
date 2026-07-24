@@ -1940,6 +1940,103 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(split_decision.reason, "ambiguous_phase_relation")
         self.assertIsNone(split_decision.background_candidate_id)
 
+    def test_phase_initial_fingerprint_uses_reference_catalog_when_anchor_is_hidden(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(
+            event_confirm_observations=1,
+            minimum_anchor_observations=1,
+        )
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        anchor_c = _center_candidate("anchor-c", (20.0, 40.0))
+        target = _center_candidate("target", (34.0, 32.0))
+        background = _center_candidate("background", (30.0, 28.0))
+
+        for frame_index in range(6):
+            resolver.update(
+                incumbent_point=target.center,
+                candidates=(target, background, anchor_a, anchor_b, anchor_c),
+                evidence={},
+                stable_area=4.0,
+                frame_shape=(100, 100),
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _candidate("merged", (28.0, 26.0, 38.0, 36.0), frame_index=6),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=6,
+            phase_context=phase,
+        )
+
+        self.assertIsNotNone(resolver._merge_context)
+        self.assertIsNotNone(resolver._fingerprint)
+        if resolver._merge_context is None or resolver._fingerprint is None:
+            return
+        anchor_c_track_id = resolver._anchor_manager.track_id_for_candidate(
+            anchor_c.candidate_id
+        )
+        self.assertIn(anchor_c_track_id, resolver._merge_context.phase_anchor_track_ids)
+        self.assertGreater(len(resolver._fingerprint.triplet_coordinates), 0)
+
+        split_decision = resolver.update(
+            incumbent_point=target.center,
+            candidates=(
+                _center_candidate("target-child", (34.0, 32.0), frame_index=7),
+                _center_candidate("background-child", (30.0, 28.0), frame_index=7),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=7,
+            phase_context=phase,
+        )
+
+        self.assertEqual(split_decision.reason, "ambiguous_phase_relation")
+
+    def test_legacy_direct_merge_during_stabilization_keeps_fingerprint(self) -> None:
+        module, resolver, anchor_a, anchor_b, target_child, background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        previous_fingerprint = resolver._fingerprint
+        resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(
+                _candidate("next-merged", (28.0, 26.0, 38.0, 36.0)),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        split_decision = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(
+                _center_candidate("next-target", target_child.center),
+                _center_candidate("next-background", background_child.center),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertIs(resolver._fingerprint, previous_fingerprint)
+        self.assertNotEqual(split_decision.reason, "missing_fingerprint")
+
     def test_phase_split_refreshes_fingerprint_for_its_local_lag_frame(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
         resolver = module.MergeSplitRelativeResolver(
@@ -2553,7 +2650,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(resolver._merge_context.background_track_id, "background-child")
         self.assertEqual(resolver._merge_context.merge_bbox, merged.bbox)
 
-    def test_superseding_direct_merge_clears_old_relation_before_split(self) -> None:
+    def test_superseding_legacy_direct_merge_keeps_relation_before_split(self) -> None:
         module, resolver, anchor_a, anchor_b, target_child, background_child = (
             self._start_resolved_split_stabilization(confirm_observations=1)
         )
@@ -2574,8 +2671,8 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             frame_shape=(100, 100),
         )
 
-        self.assertEqual(decision.reason, "missing_fingerprint")
-        self.assertIsNone(decision.background_candidate_id)
+        self.assertEqual(resolver._fingerprint_mode, "legacy")
+        self.assertNotEqual(decision.reason, "missing_fingerprint")
 
     def test_unresolved_hold_resets_success_quorum_without_spending_successes(self) -> None:
         module, resolver, anchor_a, anchor_b, target_child, _background_child = (

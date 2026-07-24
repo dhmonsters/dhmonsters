@@ -435,6 +435,17 @@ class BackgroundAnchorManager:
             return None
         return self._anchor_for_track(track, observation)
 
+    def qualified_reference_anchors(
+        self,
+        frame_index: int,
+    ) -> tuple[BackgroundAnchor, ...]:
+        anchors: list[BackgroundAnchor] = []
+        for track_id in sorted(self._tracks):
+            anchor = self.reference_anchor(track_id, frame_index)
+            if anchor is not None and anchor.qualified_cycle and not anchor.clipped:
+                anchors.append(anchor)
+        return tuple(anchors)
+
     def _resolve_frame_index(self, frame_index: int | None) -> int:
         if frame_index is None:
             self._implicit_frame_index += 1
@@ -1445,7 +1456,9 @@ class MergeSplitRelativeResolver:
                     candidate_count=event.candidate_count,
                 )
             self._clear_split_recovery()
-            self._clear_merge_event_context()
+            self._clear_merge_event_context(
+                clear_relation_fingerprint=phase_context is not None,
+            )
             recovering_split = False
 
         if (
@@ -1748,13 +1761,38 @@ class MergeSplitRelativeResolver:
         self,
         *,
         clear_visible_pair: bool = False,
+        clear_relation_fingerprint: bool = True,
     ) -> None:
         self._merge_context = None
         if clear_visible_pair:
             self._last_visible_pair = None
-        self._clear_relation_fingerprint()
+        if clear_relation_fingerprint:
+            self._clear_relation_fingerprint()
         self._merge_center = None
         self._merge_bbox = None
+
+    def _phase_reference_catalog_track_ids(
+        self,
+        *,
+        background_track_id: str,
+        frame_index: int | None,
+        phase_context: CyclePhaseContext | None,
+    ) -> tuple[str, ...]:
+        if (
+            frame_index is None
+            or phase_context is None
+            or phase_context.local_lag is None
+            or int(phase_context.local_lag) <= 0
+        ):
+            return ()
+        reference_frame = int(frame_index) - int(phase_context.local_lag)
+        return tuple(
+            anchor.track_id
+            for anchor in self._anchor_manager.qualified_reference_anchors(
+                reference_frame
+            )
+            if anchor.track_id != background_track_id
+        )
 
     def _remember_target(self, candidate: Candidate | None) -> None:
         if candidate is None:
@@ -1786,10 +1824,18 @@ class MergeSplitRelativeResolver:
                 event_id=event.event_id,
                 target_candidate_id=target_candidate.candidate_id,
                 background_track_id=background_track_id,
-                anchor_track_ids=tuple(
-                    anchor.track_id
-                    for anchor in self._current_anchors
-                    if anchor.track_id != background_track_id
+                anchor_track_ids=(
+                    self._phase_reference_catalog_track_ids(
+                        background_track_id=background_track_id,
+                        frame_index=frame_index,
+                        phase_context=phase_context,
+                    )
+                    if phase_context is not None
+                    else tuple(
+                        anchor.track_id
+                        for anchor in self._current_anchors
+                        if anchor.track_id != background_track_id
+                    )
                 ),
                 premerge_target_point=target_candidate.center,
                 premerge_target_bbox=target_candidate.bbox,
@@ -1844,10 +1890,18 @@ class MergeSplitRelativeResolver:
             event_id=event.event_id,
             target_candidate_id=visible_pair.target.candidate_id,
             background_track_id=background_track_id,
-            anchor_track_ids=tuple(
-                anchor.track_id
-                for anchor in self._current_anchors
-                if anchor.track_id != background_track_id
+            anchor_track_ids=(
+                self._phase_reference_catalog_track_ids(
+                    background_track_id=background_track_id,
+                    frame_index=frame_index,
+                    phase_context=phase_context,
+                )
+                if phase_context is not None
+                else tuple(
+                    anchor.track_id
+                    for anchor in self._current_anchors
+                    if anchor.track_id != background_track_id
+                )
             ),
             premerge_target_point=visible_pair.target.center,
             premerge_target_bbox=visible_pair.target.bbox,
@@ -1974,13 +2028,6 @@ class MergeSplitRelativeResolver:
             context.background_track_id,
             reference_frame,
         )
-        current_anchors = {
-            anchor.track_id: anchor
-            for anchor in self._current_anchors
-            if anchor.qualified_cycle
-            and not anchor.clipped
-            and anchor.track_id != context.background_track_id
-        }
         if reference_background is None:
             return
         if not reference_background.qualified_cycle or reference_background.clipped:
@@ -1991,7 +2038,6 @@ class MergeSplitRelativeResolver:
             eligible_reference_anchors = tuple(
                 reference
                 for track_id in context.anchor_track_ids
-                if track_id in current_anchors
                 for reference in (
                     self._anchor_manager.reference_anchor(track_id, reference_frame),
                 )
