@@ -1,5 +1,1 @@
-{
-    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.13/Claude_v2.1.13_Setup.exe",
-    "version":  "2.1.13",
-    "notes":  "라이선스 인증을 먼저 진행한 뒤 업데이트를 확인하고, 같은 버전 업데이트가 반복 표시되지 않도록 버전 비교를 보강"
-}
+{"version":"2.2.0","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.0/Claude_v2.2.0_Setup.exe","notes":"빨코2 전용 동작값을 하드코딩 설정 한 군데로 통일하고, 버프와 물약은 기존 공용 설정을 사용하도록 분리했습니다."}
