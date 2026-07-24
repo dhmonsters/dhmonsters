@@ -171,8 +171,8 @@ def replay_hypothesis_selection(
     period_recurrence_comparisons = 0
     cycle_observation_started = False
     was_white = False
-    episode_observations: dict[int, tuple[PuzzleCandidate, ...]] = {}
-    phase_observations: dict[int, tuple[PuzzleCandidate, ...]] = {}
+    episode_observations: dict[int, tuple[_FrozenCycleObservation, ...]] = {}
+    phase_observations: dict[int, tuple[_FrozenCycleObservation, ...]] = {}
     cycle_tracks: _StableCycleTracks | None = None
     stable_cycle_track_count = 0
     stable_cycle_track_ids: tuple[str, ...] = ()
@@ -243,7 +243,10 @@ def replay_hypothesis_selection(
                 if stable_cycle_track_count >= _MIN_CYCLE_ASSOCIATIONS:
                     catalog = BackgroundCatalog()
                     for observed_frame, observed_candidates in episode_observations.items():
-                        catalog.add_frame(observed_frame, observed_candidates)
+                        catalog.add_frame(
+                            observed_frame,
+                            _frozen_catalog_candidates(observed_candidates),
+                        )
                     observed_period, observed_score, period_reason, comparison_count = (
                         _observed_episode_period(catalog, episode_observations)
                     )
@@ -291,7 +294,10 @@ def replay_hypothesis_selection(
                 if phase_frame is None:
                     local_lag_evidence_reason = f"frozen_survivor_{frozen_failure}"
                 else:
-                    catalog.add_frame(frame_index, phase_frame)
+                    catalog.add_frame(
+                        frame_index,
+                        _frozen_catalog_candidates(phase_frame),
+                    )
                     phase_observations[frame_index] = phase_frame
 
             if catalog is not None and catalog_period is not None:
@@ -791,6 +797,12 @@ class _StableCycleTrack:
     excluded_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class _FrozenCycleObservation:
+    track_id: str
+    candidate: PuzzleCandidate
+
+
 class _StableCycleTracks:
     """백색 준비 구간에서만 안정 배경 후보를 고정하는 좁은 증거 수집기."""
 
@@ -867,17 +879,33 @@ class _StableCycleTracks:
             candidate_rows,
             _track_position_quality,
         )
+        predicted: dict[str, int] = {}
+        for left_track_id, left_index in assignments.items():
+            for right_track_id, right_index in assignments.items():
+                if left_track_id >= right_track_id:
+                    continue
+                if _track_segments_cross(
+                    active_tracks[left_track_id],
+                    candidate_rows[left_index],
+                    active_tracks[right_track_id],
+                    candidate_rows[right_index],
+                ):
+                    rejected[left_track_id] = "association_crossing"
+                    rejected[right_track_id] = "association_crossing"
+                    blocked_indexes.update((left_index, right_index))
         predicted_tracks = {
             track_id: track
             for track_id, track in active_tracks.items()
             if len(track.observations) >= 2
         }
-        if predicted_tracks:
-            predicted, _predicted_rejected, _predicted_blocked = _symmetric_track_assignment(
+        if predicted_tracks and not self._frozen:
+            predicted, predicted_rejected, predicted_blocked = _symmetric_track_assignment(
                 predicted_tracks,
                 candidate_rows,
                 _track_prediction_quality,
             )
+            rejected.update(predicted_rejected)
+            blocked_indexes.update(predicted_blocked)
             for track_id, candidate_index in predicted.items():
                 current_index = assignments.get(track_id)
                 if current_index is not None and current_index != candidate_index:
@@ -891,18 +919,23 @@ class _StableCycleTracks:
                 for right_track_id, right_index in predicted.items():
                     if left_track_id >= right_track_id:
                         continue
-                    if (
-                        assignments.get(left_track_id) != left_index
-                        or assignments.get(right_track_id) != right_index
-                    ) and _track_segments_cross(
+                    if _track_segments_cross(
                         predicted_tracks[left_track_id],
                         candidate_rows[left_index],
                         predicted_tracks[right_track_id],
                         candidate_rows[right_index],
                     ):
-                        rejected[left_track_id] = "association_crossing"
-                        rejected[right_track_id] = "association_crossing"
+                        rejected.setdefault(left_track_id, "association_crossing")
+                        rejected.setdefault(right_track_id, "association_crossing")
                         blocked_indexes.update((left_index, right_index))
+
+        for track_id in rejected:
+            candidate_index = assignments.get(track_id)
+            if candidate_index is not None:
+                blocked_indexes.add(candidate_index)
+            candidate_index = predicted.get(track_id)
+            if candidate_index is not None:
+                blocked_indexes.add(candidate_index)
 
         accepted_assignments = {
             track_id: candidate_index
@@ -926,7 +959,7 @@ class _StableCycleTracks:
             if candidate_index not in matched_indexes and candidate_index not in blocked_indexes:
                 self._start_track(frame_index, candidate)
 
-    def freeze(self) -> dict[int, tuple[PuzzleCandidate, ...]]:
+    def freeze(self) -> dict[int, tuple[_FrozenCycleObservation, ...]]:
         if self._frozen:
             return self._frozen_observations()
         if self.frame_shape_reason != "observed":
@@ -965,10 +998,10 @@ class _StableCycleTracks:
     def frozen_observation(
         self,
         frame_index: int,
-    ) -> tuple[tuple[PuzzleCandidate, ...] | None, str]:
+    ) -> tuple[tuple[_FrozenCycleObservation, ...] | None, str]:
         if not self._frozen_track_ids:
             return None, "missing"
-        observations: list[PuzzleCandidate] = []
+        observations: list[_FrozenCycleObservation] = []
         for track_id in self._frozen_track_ids:
             track = self._tracks[track_id]
             if track.excluded_reason is not None:
@@ -976,7 +1009,9 @@ class _StableCycleTracks:
             candidate = track.observations.get(frame_index)
             if candidate is None:
                 return None, "missing"
-            observations.append(_catalog_candidate(candidate))
+            observations.append(
+                _FrozenCycleObservation(track_id, _catalog_candidate(candidate))
+            )
         return tuple(observations), "observed"
 
     def _start_track(self, frame_index: int, candidate: Candidate) -> None:
@@ -992,7 +1027,7 @@ class _StableCycleTracks:
             ),
         )
 
-    def _frozen_observations(self) -> dict[int, tuple[PuzzleCandidate, ...]]:
+    def _frozen_observations(self) -> dict[int, tuple[_FrozenCycleObservation, ...]]:
         if not self._frozen_track_ids:
             return {}
         shared_frames = sorted(
@@ -1005,7 +1040,10 @@ class _StableCycleTracks:
         )
         return {
             frame_index: tuple(
-                _catalog_candidate(self._tracks[track_id].observations[frame_index])
+                _FrozenCycleObservation(
+                    track_id,
+                    _catalog_candidate(self._tracks[track_id].observations[frame_index]),
+                )
                 for track_id in self._frozen_track_ids
             )
             for frame_index in shared_frames
@@ -1037,7 +1075,7 @@ def _symmetric_track_assignment(
             and usable[1][0] - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
         ):
             rejected[track_id] = "association_ambiguous"
-            blocked_indexes.add(candidate_index)
+            blocked_indexes.update(index for _quality, index in usable)
             continue
         forward[track_id] = candidate_index
 
@@ -1113,7 +1151,14 @@ def _track_prediction_quality(track: _StableCycleTrack, candidate: Candidate) ->
         abs(current_model.w - candidate_model.w) / max(1.0, current_model.w, candidate_model.w),
         abs(current_model.h - candidate_model.h) / max(1.0, current_model.h, candidate_model.h),
     )
-    return position_residual + shape_residual
+    prediction_quality = position_residual + shape_residual
+    position_quality = _track_position_quality(track, candidate)
+    if (
+        prediction_quality > _TRACK_ASSOCIATION_QUALITY_LIMIT
+        and position_quality <= _TRACK_ASSOCIATION_QUALITY_LIMIT
+    ):
+        return position_quality
+    return prediction_quality
 
 
 def _track_segments_cross(
@@ -1152,15 +1197,35 @@ def _segments_properly_intersect(
     first_right = orientation(first_start, first_end, second_end)
     second_left = orientation(second_start, second_end, first_start)
     second_right = orientation(second_start, second_end, first_end)
-    return first_left * first_right < 0.0 and second_left * second_right < 0.0
+    if first_left * first_right < 0.0 and second_left * second_right < 0.0:
+        return True
+
+    def on_segment(
+        start: tuple[float, float],
+        end: tuple[float, float],
+        point: tuple[float, float],
+    ) -> bool:
+        return (
+            min(start[0], end[0]) <= point[0] <= max(start[0], end[0])
+            and min(start[1], end[1]) <= point[1] <= max(start[1], end[1])
+        )
+
+    return bool(
+        (first_left == 0.0 and on_segment(first_start, first_end, second_start))
+        or (first_right == 0.0 and on_segment(first_start, first_end, second_end))
+        or (second_left == 0.0 and on_segment(second_start, second_end, first_start))
+        or (second_right == 0.0 and on_segment(second_start, second_end, first_end))
+    )
 
 
 def _valid_cycle_frame_shape(frame_shape: tuple[int, int] | None) -> bool:
     return bool(
-        frame_shape is not None
+        isinstance(frame_shape, tuple)
         and len(frame_shape) == 2
-        and int(frame_shape[0]) > 0
-        and int(frame_shape[1]) > 0
+        and type(frame_shape[0]) is int
+        and type(frame_shape[1]) is int
+        and frame_shape[0] > 0
+        and frame_shape[1] > 0
     )
 
 
@@ -1172,6 +1237,12 @@ def _catalog_candidate(candidate: Candidate) -> PuzzleCandidate:
         w=max(1.0, candidate.bbox[2] - candidate.bbox[0]),
         h=max(1.0, candidate.bbox[3] - candidate.bbox[1]),
     )
+
+
+def _frozen_catalog_candidates(
+    observations: Sequence[_FrozenCycleObservation],
+) -> tuple[PuzzleCandidate, ...]:
+    return tuple(observation.candidate for observation in observations)
 
 
 def _cycle_candidate_clipped(
@@ -1214,7 +1285,7 @@ def _catalog_candidates(candidates: Sequence[Candidate]) -> tuple[PuzzleCandidat
 
 def _observed_episode_period(
     catalog: BackgroundCatalog | None,
-    observations: dict[int, tuple[PuzzleCandidate, ...]],
+    observations: dict[int, tuple[_FrozenCycleObservation, ...]],
 ) -> tuple[int | None, float | None, str, int]:
     observed_frames = sorted(observations)
     if catalog is None or len(observed_frames) < 3:
@@ -1258,7 +1329,7 @@ def _observed_episode_period(
 
 
 def _period_recurrence_support(
-    observations: dict[int, tuple[PuzzleCandidate, ...]],
+    observations: dict[int, tuple[_FrozenCycleObservation, ...]],
     period: int,
 ) -> tuple[bool, str, int]:
     failures: list[str] = []
@@ -1270,17 +1341,19 @@ def _period_recurrence_support(
         if previous is None or current is None or following is None:
             continue
         observed_chain = True
-        previous_ok, previous_reason, _previous_quality, previous_assignment = (
-            _cycle_candidate_assignment(previous, current)
+        previous_ok, previous_reason, previous_assignment = _frozen_track_assignment(
+            previous,
+            current,
         )
-        following_ok, following_reason, _following_quality, following_assignment = (
-            _cycle_candidate_assignment(current, following)
+        following_ok, following_reason, following_assignment = _frozen_track_assignment(
+            current,
+            following,
         )
         if previous_ok and following_ok:
             temporal_ok, temporal_reason = _temporal_assignment_consistent(
-                previous,
-                current,
-                following,
+                _frozen_catalog_candidates(previous),
+                _frozen_catalog_candidates(current),
+                _frozen_catalog_candidates(following),
                 previous_assignment,
                 following_assignment,
             )
@@ -1303,35 +1376,67 @@ def _period_recurrence_support(
 
 
 def _local_lag_temporal_support(
-    observations: dict[int, tuple[PuzzleCandidate, ...]],
+    observations: dict[int, tuple[_FrozenCycleObservation, ...]],
     frame_index: int,
     lag: int,
 ) -> tuple[bool, str]:
     previous = observations.get(frame_index - 2 * lag)
     current = observations.get(frame_index - lag)
     following = observations.get(frame_index)
-    following_ok, following_reason, _quality, following_assignment = (
-        _cycle_candidate_assignment(current, following)
+    following_ok, following_reason, following_assignment = _frozen_track_assignment(
+        current,
+        following,
     )
     if not following_ok:
         return False, f"association_{following_reason}"
     if not previous:
         return False, "history_unavailable"
-    previous_ok, previous_reason, _quality, previous_assignment = (
-        _cycle_candidate_assignment(previous, current)
+    previous_ok, previous_reason, previous_assignment = _frozen_track_assignment(
+        previous,
+        current,
     )
     if not previous_ok:
         return False, f"association_{previous_reason}"
     temporal_ok, temporal_reason = _temporal_assignment_consistent(
-        previous,
-        current,
-        following,
+        _frozen_catalog_candidates(previous),
+        _frozen_catalog_candidates(current),
+        _frozen_catalog_candidates(following),
         previous_assignment,
         following_assignment,
     )
     if not temporal_ok:
         return False, temporal_reason
     return True, "observed"
+
+
+def _frozen_track_assignment(
+    reference: Sequence[_FrozenCycleObservation] | None,
+    current: Sequence[_FrozenCycleObservation] | None,
+) -> tuple[bool, str, tuple[int, ...]]:
+    if (
+        not reference
+        or not current
+        or len(reference) < _MIN_CYCLE_ASSOCIATIONS
+        or len(reference) != len(current)
+    ):
+        return False, "incomplete", ()
+    reference_by_id = {observation.track_id: observation.candidate for observation in reference}
+    current_by_id = {observation.track_id: observation.candidate for observation in current}
+    if len(reference_by_id) != len(reference) or set(reference_by_id) != set(current_by_id):
+        return False, "permutation", ()
+    track_ids = tuple(observation.track_id for observation in reference)
+    if tuple(observation.track_id for observation in current) != track_ids:
+        return False, "permutation", ()
+    for track_id in track_ids:
+        if (
+            _cycle_association_quality(
+                reference_by_id[track_id],
+                current_by_id[track_id],
+            )
+            > _CYCLE_ASSOCIATION_QUALITY_LIMIT
+        ):
+            return False, "quality", ()
+    return True, "observed", tuple(range(len(track_ids)))
 
 
 def _cycle_candidate_assignment(
@@ -1723,9 +1828,14 @@ def _board_frame_shape(rows: list[dict[str, Any]]) -> tuple[int, int] | None:
         board_roi = payload.get("board_roi")
         if not isinstance(board_roi, dict):
             continue
-        width = _optional_int(board_roi.get("w"))
-        height = _optional_int(board_roi.get("h"))
-        if width is not None and height is not None and width > 0 and height > 0:
+        width = board_roi.get("w")
+        height = board_roi.get("h")
+        if (
+            type(width) is int
+            and type(height) is int
+            and width > 0
+            and height > 0
+        ):
             return (height, width)
     return None
 

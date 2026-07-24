@@ -9,11 +9,15 @@ import unittest
 from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
 from core.puzzle.models import Candidate
 from core.puzzle.studio_hypothesis_shadow import (
+    _FrozenCycleObservation,
+    _period_recurrence_support,
+    _valid_cycle_frame_shape,
     _stable_target_area,
     replay_hypothesis_selection,
     replay_hypothesis_selection_details,
     replay_hypothesis_tracker,
 )
+from core.vision.transparent_puzzle_engine import PuzzleCandidate
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -797,6 +801,136 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 2,
             )
 
+    def test_merge_split_shadow_rejects_same_assignment_path_crossing(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-path-crossing-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _same_assignment_crossing_cycle_frames(total_frames=10),
+                white_frames=set(range(9)),
+                frame_shape=(200, 200),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertGreaterEqual(
+                diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_crossing",
+                    0,
+                ),
+                2,
+            )
+
+    def test_merge_split_shadow_rejects_initial_actual_path_crossing(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-initial-path-crossing-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _initial_actual_crossing_cycle_frames(total_frames=10),
+                white_frames=set(range(9)),
+                frame_shape=(200, 200),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertGreaterEqual(
+                diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_crossing",
+                    0,
+                ),
+                2,
+            )
+
+    def test_merge_split_shadow_rejects_predicted_assignment_failure(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-prediction-reject-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _predicted_rejection_cycle_frames(total_frames=10),
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertTrue(
+                diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_ambiguous",
+                    0,
+                )
+                or diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_disagreement",
+                    0,
+                )
+            )
+
+    def test_merge_split_shadow_does_not_freeze_ambiguous_rejected_candidates(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-ambiguous-atomic-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _long_ambiguous_candidate_cycle_frames(total_frames=30),
+                white_frames=set(range(29)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertIsNone(diagnostic["period"])
+            self.assertEqual(diagnostic["stable_cycle_track_count"], 0)
+            self.assertGreaterEqual(
+                diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_ambiguous",
+                    0,
+                ),
+                3,
+            )
+
+    def test_cycle_frame_shape_requires_finite_positive_integers(self) -> None:
+        for frame_shape in (
+            (True, 100),
+            (100, False),
+            (100.5, 80),
+            (100, float("inf")),
+            (100, -1),
+        ):
+            with self.subTest(frame_shape=frame_shape):
+                self.assertFalse(_valid_cycle_frame_shape(frame_shape))
+
+    def test_merge_split_shadow_rejects_noninteger_frame_shapes(self) -> None:
+        for frame_shape in ((True, 100), (100.5, 80), (100, float("inf"))):
+            with self.subTest(frame_shape=frame_shape), TemporaryDirectory(
+                prefix="studio-cycle-invalid-frame-shape-",
+            ) as tmp:
+                details = _replay_cycle_details(
+                    Path(tmp),
+                    _periodic_cycle_frames(total_frames=10),
+                    white_frames=set(range(9)),
+                    frame_shape=frame_shape,
+                )
+
+                diagnostic = details[-1]["merge_split_relative"]
+                self.assertIsNone(diagnostic["period"])
+                self.assertFalse(diagnostic["phase_qualified"])
+                self.assertEqual(
+                    diagnostic["stable_cycle_frame_shape_reason"],
+                    "frame_shape_unavailable",
+                )
+
+    def test_period_recurrence_rejects_frozen_track_position_permutation(self) -> None:
+        positions = ((20.0, 20.0), (80.0, 20.0), (50.0, 50.0))
+        observations = {
+            frame_index: tuple(
+                _FrozenCycleObservation(
+                    f"cycle-track-{track_index}",
+                    PuzzleCandidate(cx, cy, 0.8, 10.0, 10.0),
+                )
+                for track_index, (cx, cy) in enumerate(
+                    positions if frame_index != 3 else positions[1:] + positions[:1]
+                )
+            )
+            for frame_index in (0, 3, 6)
+        }
+
+        supported, reason, comparisons = _period_recurrence_support(observations, 3)
+
+        self.assertFalse(supported)
+        self.assertEqual(reason, "period_association_quality")
+        self.assertEqual(comparisons, 0)
+
     def test_merge_split_shadow_rejects_late_tracks_after_empty_white_start(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-empty-start-") as tmp:
             frames = _periodic_cycle_frames(total_frames=10)
@@ -1250,6 +1384,102 @@ def _track_swap_cycle_frames(*, total_frames: int) -> list[list[dict[str, object
     return frames
 
 
+def _same_assignment_crossing_cycle_frames(
+    *,
+    total_frames: int,
+) -> list[list[dict[str, object]]]:
+    frames = _periodic_cycle_frames(total_frames=total_frames)
+    for frame_index, positions in enumerate(
+        (
+            ((70.0, 70.0), (110.0, 130.0)),
+            ((80.0, 80.0), (100.0, 100.0)),
+            ((95.0, 100.0), (75.0, 80.0)),
+        )
+    ):
+        frames[frame_index] = [
+            _trace_candidate(
+                f"same-cross-a-{frame_index}",
+                positions[0],
+                half_size=60.0,
+            ),
+            _trace_candidate(
+                f"same-cross-b-{frame_index}",
+                positions[1],
+                half_size=26.0,
+            ),
+            _trace_candidate(f"same-cross-c-{frame_index}", (150.0, 30.0)),
+            _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+        ]
+    return frames
+
+
+def _initial_actual_crossing_cycle_frames(
+    *,
+    total_frames: int,
+) -> list[list[dict[str, object]]]:
+    frames = _periodic_cycle_frames(total_frames=total_frames)
+    for frame_index, positions in enumerate(
+        (
+            ((80.0, 80.0), (100.0, 100.0)),
+            ((100.0, 100.0), (80.0, 80.0)),
+        )
+    ):
+        frames[frame_index] = [
+            _trace_candidate(
+                f"initial-cross-a-{frame_index}",
+                positions[0],
+                half_size=60.0,
+            ),
+            _trace_candidate(
+                f"initial-cross-b-{frame_index}",
+                positions[1],
+                half_size=20.0,
+            ),
+            _trace_candidate(f"initial-cross-c-{frame_index}", (150.0, 30.0)),
+            _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+        ]
+    return frames
+
+
+def _predicted_rejection_cycle_frames(*, total_frames: int) -> list[list[dict[str, object]]]:
+    frames = _periodic_cycle_frames(total_frames=total_frames)
+    frames[1] = [
+        _trace_candidate("pred-a-1", (30.0, 20.0), half_size=10.0),
+        _trace_candidate("pred-b-1", (80.0, 20.0), half_size=10.0),
+        _trace_candidate("pred-c-1", (48.0, 50.0), half_size=10.0),
+        _trace_candidate("target-1", (60.0, 50.0)),
+    ]
+    frames[2] = [
+        _trace_candidate("pred-a-near-2", (30.0, 20.0), half_size=10.0),
+        _trace_candidate("pred-a-tied-2", (50.0, 20.0), half_size=10.0),
+        _trace_candidate("pred-b-2", (80.0, 20.0), half_size=10.0),
+        _trace_candidate("pred-c-2", (48.0, 50.0), half_size=10.0),
+        _trace_candidate("target-2", (60.0, 50.0)),
+    ]
+    return frames
+
+
+def _long_ambiguous_candidate_cycle_frames(
+    *,
+    total_frames: int,
+) -> list[list[dict[str, object]]]:
+    frames = _periodic_cycle_frames(total_frames=total_frames)
+    phase = 1
+    stable = [
+        (20.0 + phase * 2.0, 20.0),
+        (80.0 + phase * 2.0, 20.0),
+        (48.0 + phase * 2.0, 50.0),
+    ]
+    frames[1] = [
+        _trace_candidate(f"ambiguous-{index}-a", point)
+        for index, point in enumerate(stable)
+    ] + [
+        _trace_candidate(f"ambiguous-{index}-b", point)
+        for index, point in enumerate(stable)
+    ] + [_trace_candidate("target-1", (60.0, 50.0))]
+    return frames
+
+
 def _temporal_chain_candidates(
     frame_index: int,
     positions: tuple[float, float],
@@ -1304,6 +1534,7 @@ def _replay_cycle_details(
     white_frames: set[int],
     omit_candidate_frames: set[int] = set(),
     include_frame_shape: bool = True,
+    frame_shape: tuple[object, object] = (100, 140),
 ) -> list[dict[str, object]]:
     score_path = root / "score.jsonl"
     trace_path = root / "trace.jsonl"
@@ -1317,7 +1548,7 @@ def _replay_cycle_details(
             {
                 "type": "SESSION_START",
                 "frame_index": None,
-                "payload": {"board_roi": {"w": 140, "h": 100}},
+                "payload": {"board_roi": {"w": frame_shape[1], "h": frame_shape[0]}},
             }
         )
     for frame_index, candidates in enumerate(frames):
