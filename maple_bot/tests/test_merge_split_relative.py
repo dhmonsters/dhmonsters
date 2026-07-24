@@ -1553,6 +1553,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             jitter=0.02,
         )
         resolver._fingerprint_mode = "legacy"
+        legacy_fingerprint = resolver._fingerprint
         resolver._event_detector.state = module.MergeState.SPLITTING
         resolver._event_detector.event_id = 1
         resolver._split_recovery_remaining = 3
@@ -1583,6 +1584,76 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(decision.reason, "insufficient_cycle_anchors")
         self.assertIsNone(decision.background_candidate_id)
+        self.assertIs(resolver._fingerprint, legacy_fingerprint)
+        self.assertEqual(resolver._fingerprint_mode, "legacy")
+
+    def test_phase_unqualified_reference_preserves_legacy_fingerprint(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        anchor_a = _center_candidate("anchor-a", (20.0, 20.0))
+        anchor_b = _center_candidate("anchor-b", (40.0, 20.0))
+        background = _center_candidate("background", (30.0, 28.0))
+        for frame_index in range(4):
+            resolver._current_anchors = resolver._anchor_manager.update(
+                candidates=(anchor_a, anchor_b, background),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=2.0,
+                frame_index=frame_index,
+                phase_context=phase,
+            )
+
+        legacy_anchors = tuple(
+            anchor
+            for anchor in resolver._current_anchors
+            if anchor.candidate_id in {"anchor-a", "anchor-b"}
+        )
+        legacy_fingerprint = module.RelationFingerprint.from_observations(
+            background_point=background.center,
+            anchors=legacy_anchors,
+            jitter=0.02,
+        )
+        resolver._fingerprint = legacy_fingerprint
+        resolver._fingerprint_mode = "legacy"
+        resolver._event_detector.state = module.MergeState.SPLITTING
+        resolver._event_detector.event_id = 1
+        resolver._split_recovery_remaining = 3
+        resolver._merge_bbox = (29.0, 27.0, 35.0, 33.0)
+        resolver._merge_context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target",
+            background_track_id=(
+                resolver._anchor_manager.track_id_for_candidate("background") or ""
+            ),
+            anchor_track_ids=tuple(anchor.track_id for anchor in legacy_anchors),
+            premerge_target_point=(34.0, 32.0),
+            premerge_target_bbox=(33.0, 31.0, 35.0, 33.0),
+            premerge_background_bbox=background.bbox,
+            merge_bbox=resolver._merge_bbox,
+            opened_frame=0,
+            last_frame=3,
+        )
+
+        decision = resolver.update(
+            incumbent_point=(34.0, 32.0),
+            candidates=(
+                _center_candidate("target-child", (34.0, 32.0), frame_index=3),
+                _center_candidate("background-child", (30.0, 28.0), frame_index=3),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            frame_index=3,
+            phase_context=phase,
+        )
+
+        self.assertEqual(decision.reason, "insufficient_cycle_anchors")
+        self.assertIs(resolver._fingerprint, legacy_fingerprint)
+        self.assertEqual(resolver._fingerprint_mode, "legacy")
 
     def test_phase_anchor_selection_seeds_diverse_outer_basis_deterministically(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
@@ -2035,6 +2106,31 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         )
 
         self.assertIs(resolver._fingerprint, previous_fingerprint)
+        self.assertNotEqual(split_decision.reason, "missing_fingerprint")
+
+    def test_legacy_refresh_keeps_fingerprint_when_collision_is_missing(self) -> None:
+        module, resolver, anchor_a, anchor_b, target_child, background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        previous_fingerprint = resolver._fingerprint
+        resolver._current_anchors = ()
+        resolver._remember_background_relation(None, {}, 2.0)
+
+        split_decision = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(
+                _center_candidate("next-target", target_child.center),
+                _center_candidate("next-background", background_child.center),
+                anchor_a,
+                anchor_b,
+            ),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertIs(resolver._fingerprint, previous_fingerprint)
+        self.assertEqual(resolver._fingerprint_mode, "legacy")
         self.assertNotEqual(split_decision.reason, "missing_fingerprint")
 
     def test_phase_split_refreshes_fingerprint_for_its_local_lag_frame(self) -> None:
@@ -2761,6 +2857,7 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         module, resolver, anchor_a, anchor_b, target_child, background_child = (
             self._start_resolved_split_stabilization(confirm_observations=1)
         )
+        previous_fingerprint = resolver._fingerprint
         ambiguous_child = _center_candidate("ambiguous-child", target_child.center)
         holds = []
         for _ in range(3):
@@ -2776,6 +2873,8 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(holds[-1].reason, "split_recovery_expired")
         self.assertIsNone(resolver._last_visible_pair)
+        self.assertIs(resolver._fingerprint, previous_fingerprint)
+        self.assertEqual(resolver._fingerprint_mode, "legacy")
 
         merged = _candidate("new-merged", (28.0, 26.0, 38.0, 36.0))
         decision = resolver.update(
@@ -3191,7 +3290,8 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(child_decision.state, module.MergeState.SPLITTING)
         self.assertEqual(child_decision.debug["event_id"], 2)
-        self.assertEqual(child_decision.reason, "missing_fingerprint")
+        self.assertEqual(child_decision.reason, "split_pair_ambiguous")
+        self.assertEqual(resolver._fingerprint_mode, "legacy")
         self.assertIsNone(resolver._merge_context)
 
     def _start_unresolved_split_recovery(self):

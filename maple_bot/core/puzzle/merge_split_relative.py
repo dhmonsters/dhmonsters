@@ -1418,7 +1418,12 @@ class MergeSplitRelativeResolver:
             and event.event_id != previous_event_id
         ):
             self._clear_split_recovery()
-            self._clear_merge_event_context(clear_visible_pair=True)
+            self._clear_merge_event_context(
+                clear_visible_pair=True,
+                clear_relation_fingerprint=(
+                    phase_context is not None and self._fingerprint_mode == "phase"
+                ),
+            )
             recovering_split = False
 
         if (
@@ -1457,7 +1462,9 @@ class MergeSplitRelativeResolver:
                 )
             self._clear_split_recovery()
             self._clear_merge_event_context(
-                clear_relation_fingerprint=phase_context is not None,
+                clear_relation_fingerprint=(
+                    phase_context is not None and self._fingerprint_mode == "phase"
+                ),
             )
             recovering_split = False
 
@@ -1516,7 +1523,9 @@ class MergeSplitRelativeResolver:
                     ),
                 )
             if phase_context is not None:
-                self._clear_merge_event_context()
+                self._clear_merge_event_context(
+                    clear_relation_fingerprint=self._fingerprint_mode == "phase",
+                )
             else:
                 self._merge_context = None
                 self._merge_center = None
@@ -1594,7 +1603,6 @@ class MergeSplitRelativeResolver:
 
         if recovering_split:
             if phase_context is not None:
-                self._clear_relation_fingerprint()
                 if frame_index is not None and self._merge_context is not None:
                     self._remember_phase_background_relation(
                         context=self._merge_context,
@@ -1810,8 +1818,6 @@ class MergeSplitRelativeResolver:
         phase_context: CyclePhaseContext | None,
     ) -> None:
         if self._merge_context is None or self._merge_context.event_id != event.event_id:
-            if phase_context is not None:
-                self._clear_relation_fingerprint()
             background_track_id = background_candidate.candidate_id
             if phase_context is not None:
                 background_track_id = (
@@ -1849,7 +1855,6 @@ class MergeSplitRelativeResolver:
             self._merge_context.last_frame = target_candidate.frame_index
 
         if phase_context is not None and frame_index is not None:
-            self._clear_relation_fingerprint()
             self._remember_phase_background_relation(
                 context=self._merge_context,
                 frame_index=frame_index,
@@ -1868,7 +1873,6 @@ class MergeSplitRelativeResolver:
             self._merge_context.merge_bbox = merged_candidate.bbox
             self._merge_context.last_frame = merged_candidate.frame_index
             if phase_context is not None and frame_index is not None:
-                self._clear_relation_fingerprint()
                 self._remember_phase_background_relation(
                     context=self._merge_context,
                     frame_index=frame_index,
@@ -1877,15 +1881,15 @@ class MergeSplitRelativeResolver:
             return
         visible_pair = self._last_visible_pair
         if visible_pair is None or visible_pair.event_id != event.event_id - 1:
-            self._clear_merge_event_context()
+            self._clear_merge_event_context(
+                clear_relation_fingerprint=self._fingerprint_mode == "phase",
+            )
             return
         background_track_id = (
             visible_pair.background_track_id
             if phase_context is not None
             else None
         ) or visible_pair.background.candidate_id
-        if phase_context is not None:
-            self._clear_relation_fingerprint()
         self._merge_context = MergeEventContext(
             event_id=event.event_id,
             target_candidate_id=visible_pair.target.candidate_id,
@@ -1911,7 +1915,6 @@ class MergeSplitRelativeResolver:
             last_frame=merged_candidate.frame_index,
         )
         if phase_context is not None and frame_index is not None:
-            self._clear_relation_fingerprint()
             self._remember_phase_background_relation(
                 context=self._merge_context,
                 frame_index=frame_index,
@@ -1977,7 +1980,10 @@ class MergeSplitRelativeResolver:
     def _expire_split_recovery(self, event: MergeEvent) -> MergeSplitDecision:
         self._event_detector.complete_split_recovery()
         self._clear_split_recovery()
-        self._clear_merge_event_context(clear_visible_pair=True)
+        self._clear_merge_event_context(
+            clear_visible_pair=True,
+            clear_relation_fingerprint=self._fingerprint_mode == "phase",
+        )
         expired_event = MergeEvent(
             event_id=event.event_id,
             state=MergeState.SEPARATE,
@@ -1994,7 +2000,6 @@ class MergeSplitRelativeResolver:
         evidence: Mapping[str, CandidateEvidence],
         scale: float,
     ) -> None:
-        self._clear_relation_fingerprint()
         if candidate is None or len(self._current_anchors) < 2:
             return
         candidate_evidence = evidence.get(candidate.candidate_id)
@@ -2006,12 +2011,16 @@ class MergeSplitRelativeResolver:
             anchors=self._current_anchors,
             limit=3,
         )
-        self._fingerprint = RelationFingerprint.from_observations(
+        fingerprint = RelationFingerprint.from_observations(
             background_point=candidate.center,
             anchors=nearby_anchors,
             jitter=max(0.02, normalized_jitter),
         )
+        self._fingerprint = fingerprint
         self._fingerprint_mode = "legacy"
+        self._phase_reference_frame = None
+        self._phase_fingerprint_frame = None
+        self._fingerprint_event_id = None
 
     def _remember_phase_background_relation(
         self,
@@ -2020,7 +2029,6 @@ class MergeSplitRelativeResolver:
         frame_index: int,
         phase_context: CyclePhaseContext,
     ) -> None:
-        self._clear_relation_fingerprint()
         if phase_context.local_lag is None or int(phase_context.local_lag) <= 0:
             return
         reference_frame = int(frame_index) - int(phase_context.local_lag)
@@ -2073,11 +2081,12 @@ class MergeSplitRelativeResolver:
             reference_anchors.append(reference)
         if len(reference_anchors) < 2:
             return
-        self._fingerprint = RelationFingerprint.from_observations(
+        fingerprint = RelationFingerprint.from_observations(
             background_point=reference_background.point,
             anchors=reference_anchors,
             jitter=0.02,
         )
+        self._fingerprint = fingerprint
         self._fingerprint_mode = "phase"
         self._phase_reference_frame = reference_frame
         self._phase_fingerprint_frame = frame_index
