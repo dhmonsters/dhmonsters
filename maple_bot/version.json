@@ -1,5 +1,5 @@
 {
-    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.12/Claude_v2.1.12_Setup.exe",
-    "version":  "2.1.12",
-    "notes":  "메인 런타임 로딩 전에 업데이트를 먼저 확인하고, 라이선스 확인을 시작 게이트로 적용"
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.13/Claude_v2.1.13_Setup.exe",
+    "version":  "2.1.13",
+    "notes":  "라이선스 인증을 먼저 진행한 뒤 업데이트를 확인하고, 같은 버전 업데이트가 반복 표시되지 않도록 버전 비교를 보강"
 }
