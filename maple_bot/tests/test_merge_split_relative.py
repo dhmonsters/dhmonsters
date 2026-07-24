@@ -1456,6 +1456,42 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(resolver._split_recovery_success_count, 0)
         self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
 
+    def test_new_direct_merge_after_ambiguous_hold_drops_old_visible_pair(self) -> None:
+        module, resolver, anchor_a, anchor_b, target_child, background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        ambiguous_child = _center_candidate("ambiguous-child", target_child.center)
+        hold = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(ambiguous_child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(hold.reason, "split_pair_ambiguous")
+        self.assertTrue(resolver._split_recovery_unresolved)
+        self.assertIsNotNone(resolver._last_visible_pair)
+        self.assertEqual(resolver._last_visible_pair.target.candidate_id, target_child.candidate_id)
+        self.assertEqual(
+            resolver._last_visible_pair.background.candidate_id,
+            background_child.candidate_id,
+        )
+
+        merged = _candidate("new-merged", (28.0, 26.0, 38.0, 36.0))
+        decision = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(decision.state, module.MergeState.MERGED)
+        self.assertEqual(decision.debug["event_id"], 2)
+        self.assertIsNone(resolver._merge_context)
+        self.assertIsNone(resolver._last_visible_pair)
+
     def test_direct_merge_rejects_visible_pair_stale_after_collision_free_observation(
         self,
     ) -> None:
