@@ -968,6 +968,7 @@ class MergeSplitRelativeResolver:
             and not self._split_recovery_unresolved
             and self._event_detector.pending_merge_state is not None
         ):
+            self._split_recovery_success_count = 0
             return self._event_hold(event, "merge_confirmation_pending")
 
         # A resolved split still needs a short stability quorum, but a new
@@ -1012,7 +1013,15 @@ class MergeSplitRelativeResolver:
             )
             self._remember_target(target_candidate)
             self._remember_background_relation(collision, evidence, scale)
-            if target_candidate is None or collision is None:
+            if (
+                target_candidate is None
+                or collision is None
+                or not _is_local_visible_pair(
+                    target_candidate,
+                    collision,
+                    stable_scale_px=scale,
+                )
+            ):
                 self._last_visible_pair = None
             else:
                 self._remember_visible_pair(
@@ -1418,6 +1427,31 @@ def _nearest_other_candidate(
         and not _is_duplicate_observation(target_candidate, candidate)
     ]
     return _nearest_candidate(others, target_candidate.center)
+
+
+def _is_local_visible_pair(
+    target_candidate: Candidate,
+    collision_candidate: Candidate,
+    *,
+    stable_scale_px: float,
+) -> bool:
+    target_bbox = target_candidate.bbox
+    collision_bbox = collision_candidate.bbox
+    horizontal_gap = max(
+        target_bbox[0] - collision_bbox[2],
+        collision_bbox[0] - target_bbox[2],
+        0.0,
+    )
+    vertical_gap = max(
+        target_bbox[1] - collision_bbox[3],
+        collision_bbox[1] - target_bbox[3],
+        0.0,
+    )
+    normalized_gap = hypot(horizontal_gap, vertical_gap) / max(
+        1.0,
+        stable_scale_px,
+    )
+    return normalized_gap <= 1.5
 
 
 def _most_overlapping_candidate(
