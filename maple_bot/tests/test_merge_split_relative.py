@@ -212,6 +212,113 @@ class MergeSplitEventDetectorTest(unittest.TestCase):
         self.assertEqual(partial_split.state, module.MergeState.SPLITTING)
         self.assertEqual(merged_split.state, module.MergeState.SPLITTING)
 
+    def test_one_merge_lifecycle_keeps_one_event_id(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        detector = module.MergeSplitEventDetector(confirm_observations=1)
+        target = _center_candidate("target", (40.0, 50.0), size=10.0)
+        background = _center_candidate("background", (46.0, 50.0), size=10.0)
+
+        partial = detector.update(
+            target_candidate=target,
+            candidates=(target, background),
+            stable_area=100.0,
+            predicted_target_point=target.center,
+        )
+        merged_box = _center_candidate("merged", (45.0, 50.0), size=15.0)
+        merged = detector.update(
+            target_candidate=None,
+            candidates=(merged_box,),
+            stable_area=100.0,
+            predicted_target_point=(42.0, 50.0),
+        )
+        separated_background = _center_candidate(
+            "separated-background", (60.0, 50.0), size=10.0
+        )
+        split = detector.update(
+            target_candidate=target,
+            candidates=(target, separated_background),
+            stable_area=100.0,
+            predicted_target_point=(44.0, 50.0),
+        )
+        reacquired = detector.update(
+            target_candidate=target,
+            candidates=(target, separated_background),
+            stable_area=100.0,
+            predicted_target_point=(44.0, 50.0),
+        )
+
+        self.assertEqual(
+            (partial.state, merged.state, split.state, reacquired.state),
+            (
+                module.MergeState.PARTIAL_OVERLAP,
+                module.MergeState.MERGED,
+                module.MergeState.SPLITTING,
+                module.MergeState.REACQUIRED,
+            ),
+        )
+        self.assertEqual(
+            {partial.event_id, merged.event_id, split.event_id, reacquired.event_id},
+            {1},
+        )
+
+    def test_merge_event_context_exposes_participant_lineage_contract(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target",
+            background_track_id="anchor-1",
+            anchor_track_ids=("anchor-1", "anchor-2"),
+            premerge_target_point=(40.0, 50.0),
+            premerge_target_bbox=(35.0, 45.0, 45.0, 55.0),
+            premerge_background_bbox=(41.0, 45.0, 51.0, 55.0),
+            merge_bbox=None,
+            opened_frame=4,
+            last_frame=6,
+        )
+
+        self.assertEqual(context.anchor_track_ids, ("anchor-1", "anchor-2"))
+        self.assertEqual(context.opened_frame, 4)
+
+    def test_unrelated_candidate_does_not_reopen_completed_event(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        detector = module.MergeSplitEventDetector(confirm_observations=1)
+        target = _center_candidate("target", (40.0, 50.0), size=10.0)
+        background = _center_candidate("background", (46.0, 50.0), size=10.0)
+        separated_background = _center_candidate(
+            "separated-background", (60.0, 50.0), size=10.0
+        )
+
+        detector.update(
+            target_candidate=target,
+            candidates=(target, background),
+            stable_area=100.0,
+            predicted_target_point=target.center,
+        )
+        detector.update(
+            target_candidate=target,
+            candidates=(target, separated_background),
+            stable_area=100.0,
+            predicted_target_point=(44.0, 50.0),
+        )
+        completed = detector.update(
+            target_candidate=target,
+            candidates=(target, separated_background),
+            stable_area=100.0,
+            predicted_target_point=(44.0, 50.0),
+        )
+        unrelated = _center_candidate("unrelated", (200.0, 200.0), size=20.0)
+        later = detector.update(
+            target_candidate=None,
+            candidates=(unrelated,),
+            stable_area=100.0,
+            predicted_target_point=(44.0, 50.0),
+        )
+
+        self.assertEqual(completed.state, module.MergeState.REACQUIRED)
+        self.assertEqual(later.state, module.MergeState.SEPARATE)
+        self.assertEqual(later.event_id, completed.event_id)
+
 
 class SplitChildAssignmentTest(unittest.TestCase):
     def test_non_background_incumbent_is_preserved_over_closer_prediction(self) -> None:

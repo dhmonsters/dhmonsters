@@ -620,6 +620,20 @@ class MergeState(str, Enum):
     REACQUIRED = "reacquired"
 
 
+@dataclass
+class MergeEventContext:
+    event_id: int
+    target_candidate_id: str
+    background_track_id: str
+    anchor_track_ids: tuple[str, ...]
+    premerge_target_point: Point
+    premerge_target_bbox: tuple[float, float, float, float]
+    premerge_background_bbox: tuple[float, float, float, float]
+    merge_bbox: tuple[float, float, float, float] | None
+    opened_frame: int
+    last_frame: int
+
+
 @dataclass(frozen=True)
 class MergeEvent:
     event_id: int
@@ -726,10 +740,10 @@ class MergeSplitEventDetector:
     def _set_state(self, state: MergeState, *, increment_event: bool = True) -> None:
         if state is self.state:
             return
-        if increment_event and state in (
-            MergeState.PARTIAL_OVERLAP,
-            MergeState.MERGED,
-            MergeState.SPLITTING,
+        if (
+            increment_event
+            and self.state in (MergeState.SEPARATE, MergeState.REACQUIRED)
+            and state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
         ):
             self.event_id += 1
         self.state = state
