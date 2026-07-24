@@ -15,7 +15,7 @@
 
 ## 구현
 
-- [ ] Task 1. catalog local lag public API와 테스트를 추가한다.
+- [x] Task 1. catalog local lag public API와 테스트를 추가한다.
 - [ ] Task 2. 전체 주기 생존 anchor hard gate와 테스트를 추가한다.
 - [ ] Task 3. 하나의 병합 사건 ID와 참가자 계보를 고정한다.
 - [ ] Task 4. 같은 사건의 분리 자식 두 개만 선별한다.
@@ -40,4 +40,3 @@
 - [ ] 사건별 anchor 자격, 두 자식, 상대좌표, HOLD 이유가 로그에 남는다.
 - [ ] 불필요한 대용량 영상 없이 검증 보고서가 남는다.
 - [ ] 논리 단위별 커밋이 완료된다.
-
