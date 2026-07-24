@@ -49,11 +49,35 @@ def relative_coordinate_residual(
 
 
 @dataclass(frozen=True)
+class CyclePhaseContext:
+    period: int | None
+    local_lag: int | None
+    period_score: float | None = None
+
+
+@dataclass(frozen=True)
+class AnchorObservation:
+    frame_index: int
+    candidate_id: str
+    point: Point
+    bbox: tuple[float, float, float, float]
+    area: float
+    aspect: float
+    clipped: bool
+    merge_like: bool
+
+
+@dataclass(frozen=True)
 class BackgroundAnchor:
     track_id: str
     point: Point
     stable_observations: int
     clipped: bool = False
+    candidate_id: str | None = None
+    qualified_cycle: bool = False
+    cycle_survival: float = 0.0
+    loop_residual: float | None = None
+    disqualified_reason: str | None = None
 
 
 def nearest_background_anchors(
@@ -72,14 +96,45 @@ def nearest_background_anchors(
     return tuple(usable[: max(0, int(limit))])
 
 
+@dataclass
+class _BackgroundAnchorTrack:
+    track_id: str
+    observations: dict[int, AnchorObservation]
+    qualified_cycle: bool = False
+    cycle_survival: float = 0.0
+    loop_residual: float | None = None
+    disqualified_reason: str | None = None
+
+    @property
+    def latest_observation(self) -> AnchorObservation:
+        return self.observations[max(self.observations)]
+
+
 class BackgroundAnchorManager:
-    def __init__(self, *, minimum_stable_observations: int = 3) -> None:
+    def __init__(
+        self,
+        *,
+        minimum_stable_observations: int = 3,
+        minimum_cycle_survival: float = 0.95,
+        maximum_cycle_gap_ratio: float = 0.05,
+        loop_position_tolerance: float = 0.75,
+        loop_shape_tolerance: float = 0.25,
+    ) -> None:
         self.minimum_stable_observations = max(1, int(minimum_stable_observations))
+        self.minimum_cycle_survival = min(1.0, max(0.0, float(minimum_cycle_survival)))
+        self.maximum_cycle_gap_ratio = min(
+            1.0, max(0.0, float(maximum_cycle_gap_ratio))
+        )
+        self.loop_position_tolerance = max(0.0, float(loop_position_tolerance))
+        self.loop_shape_tolerance = max(0.0, float(loop_shape_tolerance))
         self.reset()
 
     def reset(self) -> None:
-        self._tracks: dict[str, BackgroundAnchor] = {}
+        self._tracks: dict[str, _BackgroundAnchorTrack] = {}
+        self._active_track_ids: set[str] = set()
+        self._candidate_track_ids: dict[str, str] = {}
         self._next_track_number = 1
+        self._implicit_frame_index = -1
 
     def update(
         self,
@@ -90,8 +145,10 @@ class BackgroundAnchorManager:
         frame_shape: tuple[int, int] | None,
         stable_scale_px: float,
         excluded_candidate_ids: Sequence[str] = (),
+        frame_index: int | None = None,
+        phase_context: CyclePhaseContext | None = None,
     ) -> tuple[BackgroundAnchor, ...]:
-        del evidence
+        current_frame = self._resolve_frame_index(frame_index)
         excluded_ids = set(excluded_candidate_ids)
         eligible = [
             candidate
@@ -103,48 +160,252 @@ class BackgroundAnchorManager:
             )
         ]
         remaining = list(eligible)
-        updated: dict[str, BackgroundAnchor] = {}
         association_limit = max(1.0, float(stable_scale_px))
 
-        for track_id, previous in self._tracks.items():
+        for track_id in self._tracks:
+            if track_id not in self._active_track_ids:
+                continue
             if not remaining:
                 break
+            track = self._tracks[track_id]
             candidate = min(
                 remaining,
-                key=lambda row: hypot(
-                    row.center[0] - previous.point[0],
-                    row.center[1] - previous.point[1],
+                key=lambda row: self._track_distance(
+                    track, row, current_frame, phase_context
                 ),
             )
-            distance = hypot(
-                candidate.center[0] - previous.point[0],
-                candidate.center[1] - previous.point[1],
+            distance = self._track_distance(
+                track, candidate, current_frame, phase_context
             )
             if distance > association_limit:
                 continue
             remaining.remove(candidate)
-            updated[track_id] = BackgroundAnchor(
-                track_id=track_id,
-                point=candidate.center,
-                stable_observations=previous.stable_observations + 1,
-                clipped=_candidate_is_clipped(candidate, frame_shape),
+            track.observations[current_frame] = self._observation(
+                candidate, current_frame, evidence, frame_shape
             )
+            self._candidate_track_ids[candidate.candidate_id] = track_id
+            self._refresh_cycle_status(
+                track, current_frame, phase_context, stable_scale_px
+            )
+
+        matched_track_ids = {
+            track_id
+            for track_id in self._tracks
+            if track_id in self._active_track_ids
+            and current_frame in self._tracks[track_id].observations
+        }
+        self._active_track_ids = matched_track_ids
 
         for candidate in remaining:
             track_id = f"anchor-{self._next_track_number}"
             self._next_track_number += 1
-            updated[track_id] = BackgroundAnchor(
+            track = _BackgroundAnchorTrack(
                 track_id=track_id,
-                point=candidate.center,
-                stable_observations=1,
-                clipped=_candidate_is_clipped(candidate, frame_shape),
+                observations={
+                    current_frame: self._observation(
+                        candidate, current_frame, evidence, frame_shape
+                    )
+                },
+            )
+            self._tracks[track_id] = track
+            self._active_track_ids.add(track_id)
+            self._candidate_track_ids[candidate.candidate_id] = track_id
+            self._refresh_cycle_status(
+                track, current_frame, phase_context, stable_scale_px
             )
 
-        self._tracks = updated
         return tuple(
-            anchor
-            for anchor in self._tracks.values()
-            if anchor.stable_observations >= self.minimum_stable_observations
+            self._anchor_for_track(track)
+            for track_id, track in self._tracks.items()
+            if track_id in self._active_track_ids
+            and len(track.observations) >= self.minimum_stable_observations
+            and (
+                not self._has_cycle_gate(phase_context)
+                or track.qualified_cycle
+            )
+        )
+
+    def track_id_for_candidate(self, candidate_id: str) -> str | None:
+        return self._candidate_track_ids.get(str(candidate_id))
+
+    def reference_anchor(
+        self,
+        track_id: str,
+        frame_index: int,
+    ) -> BackgroundAnchor | None:
+        track = self._tracks.get(str(track_id))
+        if track is None:
+            return None
+        observation = track.observations.get(int(frame_index))
+        if observation is None:
+            return None
+        return self._anchor_for_track(track, observation)
+
+    def _resolve_frame_index(self, frame_index: int | None) -> int:
+        if frame_index is None:
+            self._implicit_frame_index += 1
+            return self._implicit_frame_index
+        current_frame = int(frame_index)
+        self._implicit_frame_index = max(self._implicit_frame_index, current_frame)
+        return current_frame
+
+    def _observation(
+        self,
+        candidate: Candidate,
+        frame_index: int,
+        evidence: Mapping[str, CandidateEvidence],
+        frame_shape: tuple[int, int] | None,
+    ) -> AnchorObservation:
+        x1, y1, x2, y2 = candidate.bbox
+        width = max(1e-6, float(x2) - float(x1))
+        height = max(1e-6, float(y2) - float(y1))
+        candidate_evidence = evidence.get(candidate.candidate_id)
+        return AnchorObservation(
+            frame_index=frame_index,
+            candidate_id=candidate.candidate_id,
+            point=candidate.center,
+            bbox=candidate.bbox,
+            area=width * height,
+            aspect=width / height,
+            clipped=_candidate_is_clipped(candidate, frame_shape),
+            merge_like=(
+                candidate_evidence is not None
+                and candidate_evidence.merge_likelihood > 0.0
+            ),
+        )
+
+    def _track_distance(
+        self,
+        track: _BackgroundAnchorTrack,
+        candidate: Candidate,
+        frame_index: int,
+        phase_context: CyclePhaseContext | None,
+    ) -> float:
+        points = [track.latest_observation.point]
+        if self._has_cycle_gate(phase_context):
+            assert phase_context is not None
+            reference = track.observations.get(
+                frame_index - int(phase_context.local_lag)
+            )
+            if reference is not None:
+                points.append(reference.point)
+        return min(
+            hypot(candidate.center[0] - point[0], candidate.center[1] - point[1])
+            for point in points
+        )
+
+    def _refresh_cycle_status(
+        self,
+        track: _BackgroundAnchorTrack,
+        frame_index: int,
+        phase_context: CyclePhaseContext | None,
+        stable_scale_px: float,
+    ) -> None:
+        track.qualified_cycle = False
+        track.cycle_survival = 0.0
+        track.loop_residual = None
+        track.disqualified_reason = None
+        if not self._has_cycle_gate(phase_context):
+            return
+
+        assert phase_context is not None
+        reference_frame = frame_index - int(phase_context.local_lag)
+        if reference_frame not in track.observations:
+            track.disqualified_reason = "cycle_incomplete"
+            return
+
+        cycle_frames = range(reference_frame, frame_index + 1)
+        observed_frames = [
+            observed_frame
+            for observed_frame in cycle_frames
+            if observed_frame in track.observations
+        ]
+        total_frames = len(cycle_frames)
+        track.cycle_survival = len(observed_frames) / max(1, total_frames)
+        largest_gap = self._largest_cycle_gap(cycle_frames, track.observations)
+        if track.cycle_survival < self.minimum_cycle_survival:
+            track.disqualified_reason = "cycle_survival"
+            return
+        if largest_gap / max(1, total_frames) > self.maximum_cycle_gap_ratio:
+            track.disqualified_reason = "cycle_gap"
+            return
+
+        reference = track.observations[reference_frame]
+        current = track.observations[frame_index]
+        scale = max(1e-6, float(stable_scale_px))
+        track.loop_residual = hypot(
+            current.point[0] - reference.point[0],
+            current.point[1] - reference.point[1],
+        ) / scale
+        if (
+            phase_context.period_score is not None
+            and float(phase_context.period_score) / scale
+            > self.loop_position_tolerance
+        ):
+            track.disqualified_reason = "period_score"
+            return
+        if track.loop_residual > self.loop_position_tolerance:
+            track.disqualified_reason = "loop_position"
+            return
+        if self._shape_residual(reference, current) > self.loop_shape_tolerance:
+            track.disqualified_reason = "loop_shape"
+            return
+        track.qualified_cycle = True
+
+    @staticmethod
+    def _largest_cycle_gap(
+        cycle_frames: range,
+        observations: Mapping[int, AnchorObservation],
+    ) -> int:
+        largest_gap = 0
+        current_gap = 0
+        for frame_index in cycle_frames:
+            if frame_index in observations:
+                largest_gap = max(largest_gap, current_gap)
+                current_gap = 0
+            else:
+                current_gap += 1
+        return max(largest_gap, current_gap)
+
+    @staticmethod
+    def _shape_residual(
+        reference: AnchorObservation,
+        current: AnchorObservation,
+    ) -> float:
+        area_residual = abs(reference.area - current.area) / max(
+            1e-6, reference.area, current.area
+        )
+        aspect_residual = abs(reference.aspect - current.aspect) / max(
+            1e-6, reference.aspect, current.aspect
+        )
+        return max(area_residual, aspect_residual)
+
+    @staticmethod
+    def _has_cycle_gate(phase_context: CyclePhaseContext | None) -> bool:
+        return bool(
+            phase_context is not None
+            and phase_context.period is not None
+            and phase_context.local_lag is not None
+            and int(phase_context.period) > 0
+            and int(phase_context.local_lag) > 0
+        )
+
+    @staticmethod
+    def _anchor_for_track(
+        track: _BackgroundAnchorTrack,
+        observation: AnchorObservation | None = None,
+    ) -> BackgroundAnchor:
+        current = observation or track.latest_observation
+        return BackgroundAnchor(
+            track_id=track.track_id,
+            point=current.point,
+            stable_observations=len(track.observations),
+            clipped=current.clipped,
+            candidate_id=current.candidate_id,
+            qualified_cycle=track.qualified_cycle,
+            cycle_survival=track.cycle_survival,
+            loop_residual=track.loop_residual,
+            disqualified_reason=track.disqualified_reason,
         )
 
 

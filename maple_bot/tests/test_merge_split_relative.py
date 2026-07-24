@@ -453,6 +453,70 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
         self.assertEqual(len(anchors), 1)
         self.assertTrue(anchors[0].clipped)
 
+    def test_anchor_requires_full_cycle_survival_and_loop_closure(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(
+            minimum_stable_observations=1,
+            minimum_cycle_survival=0.95,
+        )
+        for frame, x in enumerate((20.0, 30.0, 40.0, 20.0)):
+            anchors = manager.update(
+                frame_index=frame,
+                candidates=(_center_candidate(f"a-{frame}", (x, 40.0)),),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=10.0,
+                phase_context=module.CyclePhaseContext(period=3, local_lag=3),
+            )
+
+        self.assertEqual(len(anchors), 1)
+        self.assertTrue(anchors[0].qualified_cycle)
+        self.assertGreaterEqual(anchors[0].cycle_survival, 0.95)
+
+    def test_anchor_that_leaves_frame_cannot_requalify_on_reentry(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        manager.update(
+            frame_index=0,
+            candidates=(_center_candidate("a0", (20.0, 40.0)),),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=10.0,
+            phase_context=phase,
+        )
+        manager.update(
+            frame_index=1,
+            candidates=(),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=10.0,
+            phase_context=phase,
+        )
+        manager.update(
+            frame_index=2,
+            candidates=(_center_candidate("a2", (40.0, 40.0)),),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=10.0,
+            phase_context=phase,
+        )
+        anchors = manager.update(
+            frame_index=3,
+            candidates=(_center_candidate("a3", (20.0, 40.0)),),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=10.0,
+            phase_context=phase,
+        )
+
+        self.assertFalse(any(anchor.qualified_cycle for anchor in anchors))
+
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
     def test_partial_overlap_refreshes_visible_background_fingerprint(self) -> None:
