@@ -1,5 +1,5 @@
 ﻿{
-    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.0/Claude_v2.2.0_Setup.exe",
-    "version":  "2.2.0",
-    "notes":  "빨코2 전용 동작값을 하드코딩 설정 한 군데로 통일하고, 버프와 물약은 기존 공용 설정을 사용하도록 분리했습니다."
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.1/Claude_v2.2.1_Setup.exe",
+    "version":  "2.2.1",
+    "notes":  "기존 저장 설정에 남아 있던 빨코2 좌표값을 무시하고, 빨코2 전용 이동·층판정 값을 코드의 단일 고정값으로 사용하도록 수정했습니다."
 }

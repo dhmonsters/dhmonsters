@@ -83,32 +83,69 @@ def _attack_sequences(attack: dict) -> list[AttackSequence]:
 
 
 def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
-    """Build RedNose2 v5 runtime profile while preserving saved custom keys."""
-    saved = d.get("rednose2_v5", {}) or {}
+    """Build RedNose2 v5 runtime profile from one fixed source."""
     mm = d.get("minimap", {}) or {}
-    attack_key = str(saved.get("attack_key") or "end").strip() or "end"
-    teleport_key = str(saved.get("teleport_key") or "x").strip() or "x"
-    profile = dict(saved)
-    profile.update({
-        "enabled": bool(saved.get("enabled", True)),
-        "attack_key": attack_key,
-        "teleport_key": teleport_key,
-        "attack_hold_sec": float(saved.get("attack_hold_sec", 0.08)),
-        "retry_attack_hold_sec": float(saved.get("retry_attack_hold_sec", 1.5)),
-        "teleport_hold_sec": float(saved.get("teleport_hold_sec", 0.05)),
-        "teleport_interval_sec": float(saved.get("teleport_interval_sec", 0.4)),
-        "attack_to_teleport_sec": float(saved.get("attack_to_teleport_sec", 0.05)),
-        "floor2_hunt_teleport_interval_sec": float(saved.get("floor2_hunt_teleport_interval_sec", 0.4)),
-        "floor2_right_edge_teleport_interval_sec": float(saved.get("floor2_right_edge_teleport_interval_sec", 1.8)),
-        "close_walk_px": int(saved.get("close_walk_px", 8)),
-        "arrival_tolerance": int(saved.get("arrival_tolerance", 3)),
-        "max_step_sec": float(saved.get("max_step_sec", 18.0)),
-        "base_minimap_width": int(saved.get("base_minimap_width", mm.get("width", 244))),
-        "base_minimap_height": int(saved.get("base_minimap_height", mm.get("height", 144))),
-        "minimap_width": int(mm.get("width", saved.get("base_minimap_width", 244))),
-        "minimap_height": int(mm.get("height", saved.get("base_minimap_height", 144))),
-    })
-    return profile
+    forced = {
+        "enabled": True,
+        "use_fixed_minimap_region": True,
+        "fixed_minimap_region": {"left": 38, "top": 129, "width": 172, "height": 103},
+        "attack_key": "end",
+        "teleport_key": "x",
+        "attack_hold_sec": 0.08,
+        "retry_attack_hold_sec": 1.5,
+        "teleport_hold_sec": 0.05,
+        "teleport_step_px": 13.0,
+        "teleport_interval_sec": 0.4,
+        "attack_to_teleport_sec": 0.05,
+        "floor2_hunt_teleport_interval_sec": 0.4,
+        "floor2_right_edge_teleport_interval_sec": 1.8,
+        "close_walk_px": 8,
+        "arrival_tolerance": 3,
+        "max_step_sec": 18.0,
+        "floor2_left_x": 55,
+        "floor2_right_x": 124,
+        "floor2_right_safe_x": 124,
+        "floor2_y_min": 61,
+        "floor2_y_max": 63,
+        "floor1_y_min": 75,
+        "floor1_y_max": 77,
+        "floor3_y_min": 47,
+        "floor3_y_max": 51,
+        "stair7_x": 41,
+        "stair7_x_min": 37,
+        "stair7_x_max": 45,
+        "stair7_y": 67,
+        "stair7_return_y_min": 61,
+        "stair7_return_y_max": 63,
+        "stair7_right_bias_x": 45,
+        "stair7_right_bias_correct_sec": 0.02,
+        "stair7_right_teleport_hold_sec": 0.1,
+        "stair7_right_teleport_lead_sec": 0.02,
+        "platform24_approach_x": 43,
+        "platform24_x": 30,
+        "platform24_y": 61,
+        "platform1415_16_approach_x": 95,
+        "platform1415_x_min": 94,
+        "platform1415_x_max": 96,
+        "platform1415_y_min": 54,
+        "platform1415_y_max": 55,
+        "platform16_y_min": 47,
+        "platform16_y_max": 48,
+        "platform27_approach_x": 91,
+        "platform27_bypass_approach_x": 80,
+        "platform27_bypass_x_min": 72,
+        "platform27_bypass_x_max": 89,
+        "platform27_y_min": 50,
+        "platform27_y_max": 50,
+        "pickup_route_enabled": True,
+        "hunt_cycle_min_sec": 92.83,
+        "hunt_cycle_max_sec": 102.483,
+        "base_minimap_width": 172,
+        "base_minimap_height": 103,
+    }
+    forced["minimap_width"] = int(mm.get("width", forced["base_minimap_width"]))
+    forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
+    return forced
 
 def _buffs(attack: dict) -> list[Buff]:
     """attack.normal_buffs/toggle_buffs → Buff 리스트 (활성+키 있는 것만)."""

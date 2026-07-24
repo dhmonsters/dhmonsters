@@ -2,7 +2,7 @@
 ; ISCC.exe installer.iss 嚥???슢諭?
 
 #define AppName    "Claude"
-#define AppVersion "2.2.0"
+#define AppVersion "2.2.1"
 #define AppExe     "Claude.exe"
 #define AppPublisher "Claude"
 #define SourceDir  "dist\Claude"
@@ -71,6 +71,7 @@ begin
       mbInformation, MB_OK
     );
 end;
+
 
 
 
