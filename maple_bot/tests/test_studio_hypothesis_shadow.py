@@ -10,6 +10,7 @@ from core.puzzle.hypothesis_challenge import HypothesisChallengeGuard
 from core.puzzle.models import Candidate
 from core.puzzle.studio_hypothesis_shadow import (
     _FrozenCycleObservation,
+    _StableCycleTracks,
     _period_recurrence_support,
     _valid_cycle_frame_shape,
     _stable_target_area,
@@ -416,6 +417,52 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 enabled[0]["merge_split_relative"]["quorum"]["reason"],
                 "protected_incumbent",
             )
+
+    def test_temporal_only_frames_do_not_change_non_opt_in_replay(self) -> None:
+        with TemporaryDirectory(prefix="studio-temporal-only-opt-out-") as tmp:
+            root = Path(tmp)
+            score_path = root / "score.jsonl"
+            baseline_trace_path = root / "baseline.jsonl"
+            temporal_only_trace_path = root / "temporal-only.jsonl"
+            scores = [
+                {"solver_frame_index": frame_index, "target_x": 20.0, "target_y": 20.0}
+                for frame_index in (0, 1, 2)
+            ]
+            candidate_rows = [
+                {
+                    "type": "CANDIDATES",
+                    "frame_index": frame_index,
+                    "payload": {"candidates": [_trace_candidate(f"target-{frame_index}", (20.0, 20.0))]},
+                }
+                for frame_index in (0, 2)
+            ]
+            target_rows = [
+                {
+                    "type": "TARGET_SELECTION",
+                    "frame_index": frame_index,
+                    "payload": {"point": [20.0, 20.0], "source": "recorded"},
+                }
+                for frame_index in (0, 1, 2)
+            ]
+            temporal_only = {
+                "type": "TEMPORAL_SELECTOR",
+                "frame_index": 1,
+                "payload": {"debug": {"kinematic_wide_beam_debug": {"reason": "tracking"}}},
+            }
+            _write_jsonl(score_path, scores)
+            _write_jsonl(baseline_trace_path, candidate_rows + target_rows)
+            _write_jsonl(
+                temporal_only_trace_path,
+                candidate_rows[:1] + target_rows[:1] + [temporal_only] + candidate_rows[1:] + target_rows[1:],
+            )
+
+            baseline = replay_hypothesis_selection_details(score_path, baseline_trace_path)
+            temporal_only_result = replay_hypothesis_selection_details(
+                score_path,
+                temporal_only_trace_path,
+            )
+
+            self.assertEqual(temporal_only_result, baseline)
 
     def test_merge_split_shadow_reports_cycle_phase_without_runtime_gt(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-lineage-") as tmp:
@@ -931,6 +978,75 @@ class StudioHypothesisShadowTest(unittest.TestCase):
         self.assertEqual(reason, "period_association_quality")
         self.assertEqual(comparisons, 0)
 
+    def test_period_recurrence_rejects_later_frozen_track_permutation(self) -> None:
+        positions = ((20.0, 20.0), (80.0, 20.0), (50.0, 50.0))
+        observations = {
+            frame_index: tuple(
+                _FrozenCycleObservation(
+                    f"cycle-track-{track_index}",
+                    PuzzleCandidate(cx, cy, 0.8, 10.0, 10.0),
+                )
+                for track_index, (cx, cy) in enumerate(
+                    positions if frame_index != 9 else positions[1:] + positions[:1]
+                )
+            )
+            for frame_index in (0, 3, 6, 9)
+        }
+
+        supported, reason, comparisons = _period_recurrence_support(observations, 3)
+
+        self.assertFalse(supported)
+        self.assertEqual(reason, "period_association_quality")
+        self.assertEqual(comparisons, 0)
+
+    def test_merge_split_shadow_does_not_freeze_duplicate_rejected_candidates(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-duplicate-atomic-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _long_duplicate_candidate_cycle_frames(total_frames=30),
+                white_frames=set(range(29)),
+                frame_shape=(200, 200),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertEqual(diagnostic["stable_cycle_track_ids"], ("cycle-track-3",))
+            self.assertGreaterEqual(
+                diagnostic["stable_cycle_excluded_counts"].get(
+                    "association_duplicate",
+                    0,
+                ),
+                2,
+            )
+
+    def test_frozen_tracks_reject_predicted_assignment_without_committing_state(self) -> None:
+        tracks = _StableCycleTracks(frame_shape=(200, 200))
+        tracks.update(
+            0,
+            _cycle_candidates(0, ((20.0, 20.0), (60.0, 20.0), (120.0, 20.0))),
+        )
+        tracks.update(
+            1,
+            _cycle_candidates(1, ((30.0, 20.0), (50.0, 20.0), (120.0, 20.0))),
+        )
+        frozen_before = tracks.freeze()
+
+        tracks.update(
+            2,
+            _cycle_candidates(
+                2,
+                ((30.0, 20.0), (50.0, 20.0), (120.0, 20.0)),
+            ),
+        )
+
+        observation, reason = tracks.frozen_observation(2)
+        self.assertIsNone(observation)
+        self.assertEqual(reason, "ambiguous")
+        self.assertEqual(tracks.freeze(), frozen_before)
+        self.assertEqual(
+            set(tracks._tracks["cycle-track-1"].observations),
+            {0, 1},
+        )
+
     def test_merge_split_shadow_rejects_late_tracks_after_empty_white_start(self) -> None:
         with TemporaryDirectory(prefix="studio-cycle-empty-start-") as tmp:
             frames = _periodic_cycle_frames(total_frames=10)
@@ -1289,6 +1405,23 @@ def _trace_candidate(
     }
 
 
+def _cycle_candidates(
+    frame_index: int,
+    centers: tuple[tuple[float, float], ...],
+) -> list[Candidate]:
+    return [
+        Candidate(
+            candidate_id=f"cycle-{frame_index}-{candidate_index}",
+            frame_index=frame_index,
+            bbox=(center[0] - 10.0, center[1] - 10.0, center[0] + 10.0, center[1] + 10.0),
+            center=center,
+            score=0.8,
+            source="raw",
+        )
+        for candidate_index, center in enumerate(centers)
+    ]
+
+
 def _periodic_cycle_frames(
     *,
     total_frames: int,
@@ -1477,6 +1610,30 @@ def _long_ambiguous_candidate_cycle_frames(
         _trace_candidate(f"ambiguous-{index}-b", point)
         for index, point in enumerate(stable)
     ] + [_trace_candidate("target-1", (60.0, 50.0))]
+    return frames
+
+
+def _long_duplicate_candidate_cycle_frames(
+    *,
+    total_frames: int,
+) -> list[list[dict[str, object]]]:
+    frames = [
+        [
+            _trace_candidate("duplicate-a-0", (80.0, 20.0), half_size=10.0),
+            _trace_candidate("duplicate-b-0", (104.0, 20.0), half_size=10.0),
+            _trace_candidate("duplicate-c-0", (150.0, 20.0), half_size=10.0),
+            _trace_candidate("target-0", (60.0, 50.0)),
+        ]
+    ]
+    for frame_index in range(1, total_frames):
+        frames.append(
+            [
+                _trace_candidate(f"duplicate-shared-{frame_index}", (86.0, 20.0), half_size=10.0),
+                _trace_candidate(f"duplicate-extra-{frame_index}", (60.0, 20.0), half_size=10.0),
+                _trace_candidate(f"duplicate-c-{frame_index}", (150.0, 20.0), half_size=10.0),
+                _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
+            ]
+        )
     return frames
 
 

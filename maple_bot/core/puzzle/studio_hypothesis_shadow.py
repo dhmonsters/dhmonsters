@@ -125,7 +125,8 @@ def replay_hypothesis_selection(
         {
             frame_index
             for frame_index, event_type in events
-            if event_type in {"CANDIDATES", "TEMPORAL_SELECTOR"}
+            if event_type == "CANDIDATES"
+            or (merge_split_relative and event_type == "TEMPORAL_SELECTOR")
         }
     )
     tracker = TransparentKinematicBeamTracker(
@@ -873,6 +874,7 @@ class _StableCycleTracks:
             track_id: track
             for track_id, track in self._tracks.items()
             if track.excluded_reason is None
+            and (not self._frozen or track_id in self._frozen_track_ids)
         }
         assignments, rejected, blocked_indexes = _symmetric_track_assignment(
             active_tracks,
@@ -898,14 +900,36 @@ class _StableCycleTracks:
             for track_id, track in active_tracks.items()
             if len(track.observations) >= 2
         }
-        if predicted_tracks and not self._frozen:
+        if predicted_tracks:
+            predicted_indexes = tuple(range(len(candidate_rows)))
+            if self._frozen:
+                predicted_indexes = tuple(
+                    sorted(
+                        {
+                            candidate_index
+                            for track_id, candidate_index in assignments.items()
+                            if track_id in predicted_tracks
+                        }
+                    )
+                )
+            predicted_candidates = [
+                candidate_rows[candidate_index]
+                for candidate_index in predicted_indexes
+            ]
             predicted, predicted_rejected, predicted_blocked = _symmetric_track_assignment(
                 predicted_tracks,
-                candidate_rows,
+                predicted_candidates,
                 _track_prediction_quality,
             )
+            predicted = {
+                track_id: predicted_indexes[candidate_index]
+                for track_id, candidate_index in predicted.items()
+            }
             rejected.update(predicted_rejected)
-            blocked_indexes.update(predicted_blocked)
+            blocked_indexes.update(
+                predicted_indexes[candidate_index]
+                for candidate_index in predicted_blocked
+            )
             for track_id, candidate_index in predicted.items():
                 current_index = assignments.get(track_id)
                 if current_index is not None and current_index != candidate_index:
@@ -955,9 +979,10 @@ class _StableCycleTracks:
             self._tracks[track_id].observations[frame_index] = candidate_rows[candidate_index]
 
         matched_indexes = set(accepted_assignments.values())
-        for candidate_index, candidate in enumerate(candidate_rows):
-            if candidate_index not in matched_indexes and candidate_index not in blocked_indexes:
-                self._start_track(frame_index, candidate)
+        if not self._frozen:
+            for candidate_index, candidate in enumerate(candidate_rows):
+                if candidate_index not in matched_indexes and candidate_index not in blocked_indexes:
+                    self._start_track(frame_index, candidate)
 
     def freeze(self) -> dict[int, tuple[_FrozenCycleObservation, ...]]:
         if self._frozen:
@@ -1114,13 +1139,20 @@ def _symmetric_track_assignment(
     for track_id, candidate_index in forward.items():
         reverse_track_id = reverse.get(candidate_index)
         if reverse_track_id != track_id:
-            rejected[track_id] = "association_disagreement"
+            rejected.setdefault(track_id, "association_disagreement")
             blocked_indexes.add(candidate_index)
             if reverse_track_id is not None:
-                rejected[reverse_track_id] = "association_disagreement"
+                rejected.setdefault(reverse_track_id, "association_disagreement")
             continue
         if track_id not in rejected:
             assignments[track_id] = candidate_index
+    for track_id in rejected:
+        blocked_indexes.update(
+            candidate_index
+            for candidate_index, candidate in enumerate(candidates)
+            if quality_for(tracks[track_id], candidate)
+            <= _TRACK_ASSOCIATION_QUALITY_LIMIT
+        )
     return assignments, rejected, blocked_indexes
 
 
@@ -1334,6 +1366,7 @@ def _period_recurrence_support(
 ) -> tuple[bool, str, int]:
     failures: list[str] = []
     observed_chain = False
+    comparisons = 0
     for middle_frame in sorted(observations):
         previous = observations.get(middle_frame - period)
         current = observations.get(middle_frame)
@@ -1358,8 +1391,9 @@ def _period_recurrence_support(
                 following_assignment,
             )
             if temporal_ok:
-                return True, "observed_period", 2
-            failures.append(temporal_reason)
+                comparisons += 2
+            else:
+                failures.append(temporal_reason)
         else:
             failures.extend((previous_reason, following_reason))
     if not observed_chain:
@@ -1372,6 +1406,8 @@ def _period_recurrence_support(
         return False, "period_association_incomplete", 0
     if "permutation" in failures:
         return False, "period_association_permutation", 0
+    if not failures:
+        return True, "observed_period", comparisons
     return False, "period_association_quality", 0
 
 
