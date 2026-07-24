@@ -1,1 +1,5 @@
-{"version":"2.2.1","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.1/Claude_v2.2.1_Setup.exe","notes":"기존 저장 설정에 남아 있던 빨코2 좌표값을 무시하고, 빨코2 전용 이동·층판정 값을 코드의 단일 고정값으로 사용하도록 수정했습니다."}
+{
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.2/Claude_v2.2.2_Setup.exe",
+    "version":  "2.2.2",
+    "notes":  "빨코2 자동판매 진입 전 2층 X=123~136 정렬 후 윗텔포하고, 판매 종료 후 아랫텔포로 2층 복귀하도록 분리했습니다."
+}
