@@ -1737,6 +1737,48 @@ class StudioHypothesisShadowTest(unittest.TestCase):
         self.assertFalse(local_ok)
         self.assertEqual(local_reason, "loop_residual")
 
+    def test_large_constant_translation_is_not_a_closed_loop(self) -> None:
+        start_frame = 31
+        velocity = (1.8, -2.4)
+        origins = ((40.0, 80.0), (80.0, 80.0), (120.0, 80.0))
+        observations = {
+            frame_index: tuple(
+                _FrozenCycleObservation(
+                    f"cycle-track-{track_index}",
+                    PuzzleCandidate(
+                        origin[0] + velocity[0] * (frame_index - start_frame),
+                        origin[1] + velocity[1] * (frame_index - start_frame),
+                        0.8,
+                        24.0,
+                        24.0,
+                    ),
+                )
+                for track_index, origin in enumerate(origins)
+            )
+            for frame_index in range(start_frame, start_frame + 6)
+        }
+        catalog = BackgroundCatalog()
+        for frame_index, frame in observations.items():
+            catalog.add_frame(
+                frame_index,
+                [observation.candidate for observation in frame],
+            )
+
+        period, _score, reason, _comparisons = _observed_episode_period(
+            catalog,
+            observations,
+        )
+        local_ok, local_reason = _local_lag_temporal_support(
+            observations,
+            frame_index=start_frame + 5,
+            lag=2,
+        )
+
+        self.assertIsNone(period)
+        self.assertEqual(reason, "period_open_trajectory")
+        self.assertFalse(local_ok)
+        self.assertEqual(local_reason, "nonunique_recurrence")
+
     def test_global_assignment_keeps_unique_non_mutual_optimum(self) -> None:
         from core.puzzle import studio_hypothesis_shadow as shadow
 

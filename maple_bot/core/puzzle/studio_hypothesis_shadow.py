@@ -845,6 +845,8 @@ def _candidate_shape(candidate: Candidate) -> tuple[float, float]:
 _CYCLE_ASSOCIATION_QUALITY_LIMIT = 0.75
 _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN = 0.15
 _MAX_CYCLE_LOOP_RESIDUAL = 0.25
+_MIN_DIRECTIONAL_TRAJECTORY_RATIO = 0.9
+_MIN_DIRECTIONAL_TRAJECTORY_STEPS = 2
 _TRACK_ASSOCIATION_QUALITY_LIMIT = 1.5
 _MIN_CYCLE_ASSOCIATIONS = 3
 _MIN_CYCLE_COVERAGE = 0.95
@@ -1505,6 +1507,7 @@ def _observed_episode_period(
     last_frame = observed_frames[-1]
     if last_frame - first_frame < 2:
         return None, None, "insufficient_episode_evidence", 0
+    has_directional_drift = _has_directional_trajectory_drift(observations)
     accepted: list[tuple[float, int, int, float]] = []
     failures: list[str] = []
     for period in range(2, last_frame - first_frame + 1):
@@ -1548,6 +1551,8 @@ def _observed_episode_period(
             <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
         ):
             return None, None, "period_recurrence_ambiguous", 0
+        if has_directional_drift:
+            return None, None, "period_open_trajectory", 0
         return period, catalog_score, "observed_period", comparisons
     if "period_association_ambiguous" in failures:
         return None, None, "period_association_ambiguous", 0
@@ -1612,6 +1617,38 @@ def _period_recurrence_residual(
         if residual is not None:
             residuals.append(residual)
     return float(median(residuals)) if residuals else None
+
+
+def _has_directional_trajectory_drift(
+    observations: dict[int, tuple[_FrozenCycleObservation, ...]],
+) -> bool:
+    candidates_by_track: dict[str, list[PuzzleCandidate]] = {}
+    for frame_index in sorted(observations):
+        for observation in observations[frame_index]:
+            candidates_by_track.setdefault(observation.track_id, []).append(
+                observation.candidate
+            )
+
+    directional_tracks = 0
+    for candidates in candidates_by_track.values():
+        vectors = [
+            (current.cx - previous.cx, current.cy - previous.cy)
+            for previous, current in zip(candidates, candidates[1:])
+            if hypot(current.cx - previous.cx, current.cy - previous.cy) > 1e-9
+        ]
+        if len(vectors) < _MIN_DIRECTIONAL_TRAJECTORY_STEPS:
+            continue
+        path_length = sum(hypot(*vector) for vector in vectors)
+        cumulative_displacement = hypot(
+            sum(vector[0] for vector in vectors),
+            sum(vector[1] for vector in vectors),
+        )
+        if (
+            cumulative_displacement / path_length
+            >= _MIN_DIRECTIONAL_TRAJECTORY_RATIO
+        ):
+            directional_tracks += 1
+    return directional_tracks >= _MIN_CYCLE_ASSOCIATIONS
 
 
 def _local_lag_temporal_support(
