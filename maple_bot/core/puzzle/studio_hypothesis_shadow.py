@@ -18,6 +18,7 @@ from core.puzzle.merge_split_relative import (
     CyclePhaseContext,
     MergeSplitDecision,
     MergeSplitRelativeResolver,
+    StableCycleObservation,
 )
 from core.puzzle.persistent_evidence_quorum import (
     PersistentEvidenceQuorum,
@@ -202,10 +203,20 @@ def replay_hypothesis_selection(
         ]
         wide_debug = _wide_debug(temporal_payload)
         anchor = _point(wide_debug.get("point")) if wide_debug.get("reason") == "white_anchor" else None
+        new_white_episode = bool(
+            merge_split_relative and anchor is not None and not was_white
+        )
+        if new_white_episode:
+            if merge_resolver is not None:
+                merge_resolver.reset()
+            if merge_guard is not None:
+                merge_guard.reset()
+            anchor_shapes.clear()
         if anchor is not None and candidates:
             anchor_candidate = min(candidates, key=lambda candidate: _distance(candidate.center, anchor))
             anchor_shapes.append(_candidate_shape(anchor_candidate))
         phase_context: CyclePhaseContext | None = None
+        current_phase_observations: tuple[_FrozenCycleObservation, ...] = ()
         observed_local_lag: int | None = None
         catalog_candidates = list(candidates)
         if merge_split_relative:
@@ -296,6 +307,7 @@ def replay_hypothesis_selection(
                 if phase_frame is None:
                     local_lag_evidence_reason = f"frozen_survivor_{frozen_failure}"
                 else:
+                    current_phase_observations = phase_frame
                     catalog.add_frame(
                         frame_index,
                         _frozen_catalog_candidates(phase_frame),
@@ -307,7 +319,16 @@ def replay_hypothesis_selection(
                 if phase_frame is None:
                     local_lag_evidence_reason = f"frozen_survivor_{frozen_failure}"
                 else:
-                    candidate_lag = catalog.choose_local_lag(frame_index, catalog_period)
+                    current_phase_observations = phase_frame
+                    ranked_local_lags = catalog.local_lag_scores(
+                        frame_index,
+                        catalog_period,
+                    )
+                    candidate_lag = (
+                        ranked_local_lags[0][0]
+                        if ranked_local_lags
+                        else catalog_period
+                    )
                     local_ok, local_reason = _local_lag_temporal_support(
                         phase_observations,
                         frame_index,
@@ -327,10 +348,31 @@ def replay_hypothesis_selection(
                             )
                         )
             if catalog_period is not None and observed_local_lag is not None:
+                reference_frame = frame_index - observed_local_lag
+                reference_phase_observations = phase_observations.get(
+                    reference_frame,
+                    (),
+                )
                 phase_context = CyclePhaseContext(
                     period=catalog_period,
                     local_lag=observed_local_lag,
                     period_score=catalog_period_score,
+                    observation_started=True,
+                    reference_observations=_resolver_cycle_observations(
+                        reference_frame,
+                        reference_phase_observations,
+                    ),
+                    current_observations=_resolver_cycle_observations(
+                        frame_index,
+                        current_phase_observations,
+                    ),
+                )
+            elif cycle_observation_started:
+                phase_context = CyclePhaseContext(
+                    period=catalog_period,
+                    local_lag=None,
+                    period_score=catalog_period_score,
+                    observation_started=True,
                 )
         tracker.update(candidate_rows, white_anchor=anchor)
         hypothesis_points = tracker.hypothesis_points
@@ -339,11 +381,9 @@ def replay_hypothesis_selection(
         else:
             judge_points = hypothesis_points
 
-        score = scores.get(frame_index)
-        target = _target_point(score)
         target_selection = events.get((frame_index, "TARGET_SELECTION"), {})
         recorded_point = _point(target_selection.get("point"))
-        if score is None or target is None or recorded_point is None:
+        if recorded_point is None:
             continue
 
         replay_point = recorded_point
@@ -444,9 +484,8 @@ def replay_hypothesis_selection(
                 ),
                 frame_shape=frame_shape,
                 frame_index=frame_index,
-                phase_context=(
-                    phase_context if cycle_observation_started else None
-                ),
+                phase_context=phase_context,
+                identity_state=identity_state,
             )
             challenger_point = merge_decision.target_point
             group_margins = _merge_split_group_margins(
@@ -476,6 +515,10 @@ def replay_hypothesis_selection(
                 replay_source = baseline_replay_source
         if replay_point is None:
             replay_point = recorded_point
+        score = scores.get(frame_index)
+        target = _target_point(score)
+        if score is None or target is None:
+            continue
         recorded_passed = _distance(recorded_point, target) <= pass_distance_px
         replay_passed = _distance(replay_point, target) <= pass_distance_px
         total_frames += 1
@@ -514,7 +557,9 @@ def replay_hypothesis_selection(
             if merge_decision is not None:
                 merge_debug = merge_decision.debug
                 local_lag = observed_local_lag
-                phase_qualified = phase_context is not None
+                phase_qualified = bool(
+                    phase_context is not None and phase_context.phase_qualified
+                )
                 qualified_anchor_count = (
                     merge_debug.get("qualified_anchor_count")
                     if phase_qualified
@@ -550,7 +595,7 @@ def replay_hypothesis_selection(
                         "white_anchor_observed": anchor is not None,
                     },
                     "phase_qualified": phase_qualified,
-                    "phase_context_active": phase_context is not None,
+                    "phase_context_active": phase_qualified,
                     "qualified_anchor_count": qualified_anchor_count,
                     "merge_event_id": merge_debug.get("event_id"),
                     "merge_event_context": {
@@ -803,6 +848,7 @@ class _StableCycleTrack:
 class _FrozenCycleObservation:
     track_id: str
     candidate: PuzzleCandidate
+    candidate_id: str | None = None
 
 
 class _StableCycleTracks:
@@ -855,7 +901,13 @@ class _StableCycleTracks:
         if "association_quality" in reasons:
             return "period_association_quality"
         if any(
-            reason in {"association_missing", "cycle_clipped", "cycle_coverage", "cycle_gap"}
+            reason in {
+                "association_missing",
+                "association_unassigned",
+                "cycle_clipped",
+                "cycle_coverage",
+                "cycle_gap",
+            }
             for reason in reasons
         ):
             return "period_association_incomplete"
@@ -877,7 +929,7 @@ class _StableCycleTracks:
             if track.excluded_reason is None
             and (not self._frozen or track_id in self._frozen_track_ids)
         }
-        assignments, rejected, blocked_indexes = _symmetric_track_assignment(
+        assignments, rejected, blocked_indexes = _global_track_assignment(
             active_tracks,
             candidate_rows,
             _track_position_quality,
@@ -900,6 +952,8 @@ class _StableCycleTracks:
             track_id: track
             for track_id, track in active_tracks.items()
             if len(track.observations) >= 2
+            and track_id in assignments
+            and track_id not in rejected
         }
         if predicted_tracks:
             predicted_indexes = tuple(range(len(candidate_rows)))
@@ -917,7 +971,7 @@ class _StableCycleTracks:
                 candidate_rows[candidate_index]
                 for candidate_index in predicted_indexes
             ]
-            predicted, predicted_rejected, predicted_blocked = _symmetric_track_assignment(
+            predicted, predicted_rejected, predicted_blocked = _global_track_assignment(
                 predicted_tracks,
                 predicted_candidates,
                 _track_prediction_quality,
@@ -1036,7 +1090,11 @@ class _StableCycleTracks:
             if candidate is None:
                 return None, "missing"
             observations.append(
-                _FrozenCycleObservation(track_id, _catalog_candidate(candidate))
+                _FrozenCycleObservation(
+                    track_id,
+                    _catalog_candidate(candidate),
+                    candidate.candidate_id,
+                )
             )
         return tuple(observations), "observed"
 
@@ -1069,6 +1127,7 @@ class _StableCycleTracks:
                 _FrozenCycleObservation(
                     track_id,
                     _catalog_candidate(self._tracks[track_id].observations[frame_index]),
+                    self._tracks[track_id].observations[frame_index].candidate_id,
                 )
                 for track_id in self._frozen_track_ids
             )
@@ -1076,93 +1135,163 @@ class _StableCycleTracks:
         }
 
 
-def _symmetric_track_assignment(
+def _global_track_assignment(
     tracks: dict[str, _StableCycleTrack],
     candidates: Sequence[Candidate],
     quality_for: Any,
 ) -> tuple[dict[str, int], dict[str, str], set[int]]:
-    forward: dict[str, int] = {}
+    track_ids = tuple(sorted(tracks))
+    if not track_ids:
+        return {}, {}, set()
+
+    candidate_count = len(candidates)
+    unmatched_cost = _TRACK_ASSOCIATION_QUALITY_LIMIT + 1.0
+    forbidden_cost = unmatched_cost * max(4.0, float(len(track_ids) + 1))
+    qualities = tuple(
+        tuple(float(quality_for(tracks[track_id], candidate)) for candidate in candidates)
+        for track_id in track_ids
+    )
+    costs: list[list[float]] = []
+    for track_index, row in enumerate(qualities):
+        candidate_costs = [
+            quality if quality <= _TRACK_ASSOCIATION_QUALITY_LIMIT else forbidden_cost
+            for quality in row
+        ]
+        dummy_costs = [forbidden_cost] * len(track_ids)
+        dummy_costs[track_index] = unmatched_cost
+        costs.append(candidate_costs + dummy_costs)
+
+    best = _minimum_cost_row_assignment(costs)
+    if best is None:
+        return (
+            {},
+            {track_id: "association_missing" for track_id in track_ids},
+            set(),
+        )
+    best_cost, best_columns = best
+    matched_count = sum(column < candidate_count for column in best_columns)
+
+    alternatives: list[tuple[float, tuple[int, ...]]] = []
+    for track_index, selected_column in enumerate(best_columns):
+        alternative_costs = [row[:] for row in costs]
+        alternative_costs[track_index][selected_column] = forbidden_cost
+        alternative = _minimum_cost_row_assignment(alternative_costs)
+        if alternative is not None:
+            alternatives.append(alternative)
     rejected: dict[str, str] = {}
     blocked_indexes: set[int] = set()
-    for track_id, track in tracks.items():
-        ranked = sorted(
-            (quality_for(track, candidate), candidate_index)
-            for candidate_index, candidate in enumerate(candidates)
+    near_alternatives = tuple(
+        alternative
+        for alternative in alternatives
+        if (alternative[0] - best_cost) / max(1, matched_count)
+        <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+    )
+    ambiguous_track_indexes = {
+        track_index
+        for _alternative_cost, alternative_columns in near_alternatives
+        for track_index, (best_column, alternative_column) in enumerate(
+            zip(best_columns, alternative_columns)
         )
-        usable = [
-            item for item in ranked if item[0] <= _TRACK_ASSOCIATION_QUALITY_LIMIT
-        ]
-        if not usable:
-            rejected[track_id] = "association_quality" if candidates else "association_missing"
-            continue
-        best_quality, candidate_index = usable[0]
-        if (
-            len(usable) > 1
-            and usable[1][0] - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
-        ):
-            rejected[track_id] = "association_ambiguous"
-            blocked_indexes.update(index for _quality, index in usable)
-            continue
-        forward[track_id] = candidate_index
-
-    reverse: dict[int, str] = {}
-    for candidate_index in range(len(candidates)):
-        ranked = sorted(
-            (quality_for(track, candidates[candidate_index]), track_id)
-            for track_id, track in tracks.items()
+        if best_column != alternative_column
+    }
+    for track_index in ambiguous_track_indexes:
+        rejected[track_ids[track_index]] = "association_ambiguous"
+        related_columns = {best_columns[track_index]}
+        related_columns.update(
+            columns[track_index]
+            for _cost, columns in near_alternatives
         )
-        usable = [
-            item for item in ranked if item[0] <= _TRACK_ASSOCIATION_QUALITY_LIMIT
-        ]
-        if not usable:
-            continue
-        best_quality, track_id = usable[0]
-        if (
-            len(usable) > 1
-            and usable[1][0] - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
-        ):
-            blocked_indexes.add(candidate_index)
-            for _quality, tied_track_id in usable:
-                if _quality - best_quality <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN:
-                    rejected[tied_track_id] = "association_ambiguous"
-            continue
-        reverse[candidate_index] = track_id
-
-    reverse_owners: dict[str, list[int]] = {}
-    for candidate_index, track_id in reverse.items():
-        reverse_owners.setdefault(track_id, []).append(candidate_index)
-    for track_id, candidate_indexes in reverse_owners.items():
-        if len(candidate_indexes) > 1 and track_id not in rejected:
-            rejected[track_id] = "association_duplicate"
-            blocked_indexes.update(candidate_indexes)
+        blocked_indexes.update(
+            column for column in related_columns if column < candidate_count
+        )
 
     assignments: dict[str, int] = {}
-    owners: dict[int, list[str]] = {}
-    for track_id, candidate_index in forward.items():
-        owners.setdefault(candidate_index, []).append(track_id)
-    for candidate_index, track_ids in owners.items():
-        if len(track_ids) > 1:
-            blocked_indexes.add(candidate_index)
-            for track_id in track_ids:
-                rejected[track_id] = "association_duplicate"
-    for track_id, candidate_index in forward.items():
-        reverse_track_id = reverse.get(candidate_index)
-        if reverse_track_id != track_id:
-            rejected.setdefault(track_id, "association_disagreement")
-            blocked_indexes.add(candidate_index)
-            if reverse_track_id is not None:
-                rejected.setdefault(reverse_track_id, "association_disagreement")
+    for track_index, (track_id, column) in enumerate(zip(track_ids, best_columns)):
+        if track_index in ambiguous_track_indexes:
             continue
-        if track_id not in rejected:
-            assignments[track_id] = candidate_index
-    for track_id in rejected:
-        blocked_indexes.update(
-            candidate_index
-            for candidate_index, candidate in enumerate(candidates)
-            if quality_for(tracks[track_id], candidate)
-            <= _TRACK_ASSOCIATION_QUALITY_LIMIT
+        if column < candidate_count:
+            assignments[track_id] = column
+            continue
+        row = qualities[track_index]
+        rejected[track_id] = (
+            "association_unassigned"
+            if any(
+                quality <= _TRACK_ASSOCIATION_QUALITY_LIMIT
+                for quality in row
+            )
+            else ("association_quality" if candidates else "association_missing")
         )
     return assignments, rejected, blocked_indexes
+
+
+def _minimum_cost_row_assignment(
+    costs: Sequence[Sequence[float]],
+) -> tuple[float, tuple[int, ...]] | None:
+    row_count = len(costs)
+    if row_count == 0:
+        return 0.0, ()
+    column_count = len(costs[0])
+    if column_count < row_count or any(len(row) != column_count for row in costs):
+        return None
+
+    row_potential = [0.0] * (row_count + 1)
+    column_potential = [0.0] * (column_count + 1)
+    column_owner = [0] * (column_count + 1)
+    predecessor = [0] * (column_count + 1)
+    for row_index in range(1, row_count + 1):
+        column_owner[0] = row_index
+        minimum = [float("inf")] * (column_count + 1)
+        used = [False] * (column_count + 1)
+        current_column = 0
+        while True:
+            used[current_column] = True
+            current_row = column_owner[current_column]
+            delta = float("inf")
+            next_column = 0
+            for column_index in range(1, column_count + 1):
+                if used[column_index]:
+                    continue
+                reduced = (
+                    float(costs[current_row - 1][column_index - 1])
+                    - row_potential[current_row]
+                    - column_potential[column_index]
+                )
+                if reduced < minimum[column_index]:
+                    minimum[column_index] = reduced
+                    predecessor[column_index] = current_column
+                if minimum[column_index] < delta:
+                    delta = minimum[column_index]
+                    next_column = column_index
+            if not isfinite(delta):
+                return None
+            for column_index in range(column_count + 1):
+                if used[column_index]:
+                    row_potential[column_owner[column_index]] += delta
+                    column_potential[column_index] -= delta
+                else:
+                    minimum[column_index] -= delta
+            current_column = next_column
+            if column_owner[current_column] == 0:
+                break
+        while True:
+            previous_column = predecessor[current_column]
+            column_owner[current_column] = column_owner[previous_column]
+            current_column = previous_column
+            if current_column == 0:
+                break
+
+    assignment = [-1] * row_count
+    for column_index in range(1, column_count + 1):
+        owner = column_owner[column_index]
+        if owner != 0:
+            assignment[owner - 1] = column_index - 1
+    if any(column < 0 for column in assignment):
+        return None
+    total_cost = sum(
+        float(costs[row_index][column])
+        for row_index, column in enumerate(assignment)
+    )
+    return total_cost, tuple(assignment)
 
 
 def _track_position_quality(track: _StableCycleTrack, candidate: Candidate) -> float:
@@ -1279,6 +1408,33 @@ def _frozen_catalog_candidates(
     return tuple(observation.candidate for observation in observations)
 
 
+def _resolver_cycle_observations(
+    frame_index: int,
+    observations: Sequence[_FrozenCycleObservation],
+) -> tuple[StableCycleObservation, ...]:
+    rows: list[StableCycleObservation] = []
+    for observation in observations:
+        candidate = observation.candidate
+        rows.append(
+            StableCycleObservation(
+                track_id=observation.track_id,
+                frame_index=int(frame_index),
+                candidate_id=(
+                    observation.candidate_id
+                    or f"{observation.track_id}@{int(frame_index)}"
+                ),
+                point=(candidate.cx, candidate.cy),
+                bbox=(
+                    candidate.cx - candidate.w / 2.0,
+                    candidate.cy - candidate.h / 2.0,
+                    candidate.cx + candidate.w / 2.0,
+                    candidate.cy + candidate.h / 2.0,
+                ),
+            )
+        )
+    return tuple(rows)
+
+
 def _cycle_candidate_clipped(
     candidate: Candidate,
     frame_shape: tuple[int, int] | None,
@@ -1287,7 +1443,14 @@ def _cycle_candidate_clipped(
         return False
     height, width = frame_shape
     x1, y1, x2, y2 = candidate.bbox
-    return x1 <= 0.0 or y1 <= 0.0 or x2 >= float(width) or y2 >= float(height)
+    shape_scale = max(1e-6, x2 - x1, y2 - y1)
+    safe_margin = 0.5 * shape_scale
+    return (
+        x1 < safe_margin
+        or y1 < safe_margin
+        or float(width) - x2 < safe_margin
+        or float(height) - y2 < safe_margin
+    )
 
 
 def _largest_cycle_track_gap(
@@ -1322,13 +1485,13 @@ def _observed_episode_period(
     observations: dict[int, tuple[_FrozenCycleObservation, ...]],
 ) -> tuple[int | None, float | None, str, int]:
     observed_frames = sorted(observations)
-    if catalog is None or len(observed_frames) < 3:
+    if catalog is None or len(observed_frames) < 2:
         return None, None, "insufficient_episode_evidence", 0
     first_frame = observed_frames[0]
     last_frame = observed_frames[-1]
     if last_frame - first_frame < 2:
         return None, None, "insufficient_episode_evidence", 0
-    accepted: list[tuple[float, int, int]] = []
+    accepted: list[tuple[float, int, int, float]] = []
     failures: list[str] = []
     for period in range(2, last_frame - first_frame + 1):
         observed_period, score = catalog.estimate_period(
@@ -1343,12 +1506,31 @@ def _observed_episode_period(
             period,
         )
         if supported:
-            accepted.append((score, period, comparisons))
+            recurrence_residual = _period_recurrence_residual(
+                observations,
+                period,
+            )
+            if recurrence_residual is not None:
+                accepted.append(
+                    (recurrence_residual, period, comparisons, float(score))
+                )
         else:
             failures.append(reason)
     if accepted:
-        score, period, comparisons = min(accepted)
-        return period, score, "observed_period", comparisons
+        accepted.sort()
+        best_residual, period, comparisons, catalog_score = accepted[0]
+        alternatives = [
+            row
+            for row in accepted[1:]
+            if not (row[1] > period and row[1] % period == 0)
+        ]
+        if (
+            alternatives
+            and alternatives[0][0] - best_residual
+            <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+        ):
+            return None, None, "period_recurrence_ambiguous", 0
+        return period, catalog_score, "observed_period", comparisons
     if "period_association_ambiguous" in failures:
         return None, None, "period_association_ambiguous", 0
     if "period_association_permutation" in failures:
@@ -1367,38 +1549,23 @@ def _period_recurrence_support(
     period: int,
 ) -> tuple[bool, str, int]:
     failures: list[str] = []
-    observed_chain = False
+    observed_pair = False
     comparisons = 0
-    for middle_frame in sorted(observations):
-        previous = observations.get(middle_frame - period)
-        current = observations.get(middle_frame)
-        following = observations.get(middle_frame + period)
-        if previous is None or current is None or following is None:
+    for reference_frame in sorted(observations):
+        reference = observations.get(reference_frame)
+        current = observations.get(reference_frame + period)
+        if reference is None or current is None:
             continue
-        observed_chain = True
-        previous_ok, previous_reason, previous_assignment = _frozen_track_assignment(
-            previous,
+        observed_pair = True
+        current_ok, current_reason, _assignment = _frozen_track_assignment(
+            reference,
             current,
         )
-        following_ok, following_reason, following_assignment = _frozen_track_assignment(
-            current,
-            following,
-        )
-        if previous_ok and following_ok:
-            temporal_ok, temporal_reason = _temporal_assignment_consistent(
-                _frozen_catalog_candidates(previous),
-                _frozen_catalog_candidates(current),
-                _frozen_catalog_candidates(following),
-                previous_assignment,
-                following_assignment,
-            )
-            if temporal_ok:
-                comparisons += 2
-            else:
-                failures.append(temporal_reason)
+        if current_ok:
+            comparisons += 1
         else:
-            failures.extend((previous_reason, following_reason))
-    if not observed_chain:
+            failures.append(current_reason)
+    if not observed_pair:
         return False, "period_association_incomplete", 0
     if "ambiguous" in failures:
         return False, "period_association_ambiguous", 0
@@ -1413,38 +1580,85 @@ def _period_recurrence_support(
     return False, "period_association_quality", 0
 
 
+def _period_recurrence_residual(
+    observations: dict[int, tuple[_FrozenCycleObservation, ...]],
+    period: int,
+) -> float | None:
+    residuals: list[float] = []
+    for reference_frame in sorted(observations):
+        reference = observations.get(reference_frame)
+        current = observations.get(reference_frame + period)
+        residual = _frozen_pair_residual(reference, current)
+        if residual is not None:
+            residuals.append(residual)
+    return float(median(residuals)) if residuals else None
+
+
 def _local_lag_temporal_support(
     observations: dict[int, tuple[_FrozenCycleObservation, ...]],
     frame_index: int,
     lag: int,
 ) -> tuple[bool, str]:
-    previous = observations.get(frame_index - 2 * lag)
-    current = observations.get(frame_index - lag)
-    following = observations.get(frame_index)
-    following_ok, following_reason, following_assignment = _frozen_track_assignment(
-        current,
-        following,
-    )
-    if not following_ok:
-        return False, f"association_{following_reason}"
-    if not previous:
-        return False, "history_unavailable"
-    previous_ok, previous_reason, previous_assignment = _frozen_track_assignment(
-        previous,
+    reference = observations.get(frame_index - lag)
+    current = observations.get(frame_index)
+    current_ok, current_reason, _assignment = _frozen_track_assignment(
+        reference,
         current,
     )
-    if not previous_ok:
-        return False, f"association_{previous_reason}"
-    temporal_ok, temporal_reason = _temporal_assignment_consistent(
-        _frozen_catalog_candidates(previous),
-        _frozen_catalog_candidates(current),
-        _frozen_catalog_candidates(following),
-        previous_assignment,
-        following_assignment,
-    )
-    if not temporal_ok:
-        return False, temporal_reason
+    if not current_ok:
+        return False, f"association_{current_reason}"
+    selected_residual = _frozen_pair_residual(reference, current)
+    if selected_residual is None:
+        return False, "association_incomplete"
+
+    alternatives: list[tuple[float, int]] = []
+    earliest_frame = min(observations, default=frame_index)
+    for alternative_lag in range(2, frame_index - earliest_frame + 1):
+        if alternative_lag == lag or (
+            alternative_lag > lag and alternative_lag % lag == 0
+        ):
+            continue
+        alternative_reference = observations.get(frame_index - alternative_lag)
+        alternative_residual = _frozen_pair_residual(
+            alternative_reference,
+            current,
+        )
+        if alternative_residual is not None:
+            alternatives.append((alternative_residual, alternative_lag))
+    if (
+        alternatives
+        and min(alternatives)[0] - selected_residual
+        <= _CYCLE_ASSOCIATION_AMBIGUITY_MARGIN
+    ):
+        return False, "nonunique_recurrence"
     return True, "observed"
+
+
+def _frozen_pair_residual(
+    reference: Sequence[_FrozenCycleObservation] | None,
+    current: Sequence[_FrozenCycleObservation] | None,
+) -> float | None:
+    assignment_ok, _reason, _assignment = _frozen_track_assignment(
+        reference,
+        current,
+    )
+    if not assignment_ok or reference is None or current is None:
+        return None
+    reference_by_id = {
+        observation.track_id: observation.candidate for observation in reference
+    }
+    current_by_id = {
+        observation.track_id: observation.candidate for observation in current
+    }
+    return float(
+        median(
+            _cycle_association_quality(
+                reference_by_id[track_id],
+                current_by_id[track_id],
+            )
+            for track_id in reference_by_id
+        )
+    )
 
 
 def _frozen_track_assignment(

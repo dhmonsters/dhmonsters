@@ -138,27 +138,37 @@ class BackgroundCatalog:
         period: int,
         local_search: int = 8,
     ) -> int:
-        return self._choose_local_lag(
+        ranked = self.local_lag_scores(
             int(frame_index),
             int(period),
             int(local_search),
         )
+        return ranked[0][0] if ranked else int(period)
 
-    def _choose_local_lag(self, frame_index: int, period: int, search: int) -> int:
+    def local_lag_scores(
+        self,
+        frame_index: int,
+        period: int,
+        local_search: int = 8,
+    ) -> tuple[tuple[int, float], ...]:
+        frame_index = int(frame_index)
+        period = int(period)
+        search = int(local_search)
         lo = max(2, period - search)
         hi = min(frame_index, period + search)
-        best: Optional[Tuple[float, int]] = None
+        scores: list[tuple[int, float]] = []
         for lag in range(lo, hi + 1):
             score = self._match_score(
                 self._frames.get(frame_index - lag, []),
                 self._frames.get(frame_index, []),
             )
-            if score is None:
-                continue
-            item = (score, lag)
-            if best is None or item < best:
-                best = item
-        return best[1] if best is not None else period
+            if score is not None:
+                scores.append((lag, float(score)))
+        return tuple(sorted(scores, key=lambda row: (row[1], row[0])))
+
+    def _choose_local_lag(self, frame_index: int, period: int, search: int) -> int:
+        ranked = self.local_lag_scores(frame_index, period, search)
+        return ranked[0][0] if ranked else period
 
     def _lag_score(self, lag: int, start: int) -> Optional[float]:
         scores = []

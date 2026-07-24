@@ -11,6 +11,8 @@ from core.puzzle.models import Candidate
 from core.puzzle.studio_hypothesis_shadow import (
     _FrozenCycleObservation,
     _StableCycleTracks,
+    _local_lag_temporal_support,
+    _observed_episode_period,
     _period_recurrence_support,
     _valid_cycle_frame_shape,
     _stable_target_area,
@@ -18,7 +20,7 @@ from core.puzzle.studio_hypothesis_shadow import (
     replay_hypothesis_selection_details,
     replay_hypothesis_tracker,
 )
-from core.vision.transparent_puzzle_engine import PuzzleCandidate
+from core.vision.transparent_puzzle_engine import BackgroundCatalog, PuzzleCandidate
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -940,7 +942,7 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 Path(tmp),
                 _same_assignment_crossing_cycle_frames(total_frames=10),
                 white_frames=set(range(9)),
-                frame_shape=(200, 200),
+                frame_shape=(400, 400),
             )
 
             diagnostic = details[-1]["merge_split_relative"]
@@ -959,7 +961,7 @@ class StudioHypothesisShadowTest(unittest.TestCase):
                 Path(tmp),
                 _initial_actual_crossing_cycle_frames(total_frames=10),
                 white_frames=set(range(9)),
-                frame_shape=(200, 200),
+                frame_shape=(400, 400),
             )
 
             diagnostic = details[-1]["merge_split_relative"]
@@ -1104,7 +1106,7 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertEqual(diagnostic["stable_cycle_track_ids"], ("cycle-track-3",))
             self.assertGreaterEqual(
                 diagnostic["stable_cycle_excluded_counts"].get(
-                    "association_duplicate",
+                    "association_ambiguous",
                     0,
                 ),
                 2,
@@ -1126,7 +1128,7 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             )
             self.assertGreaterEqual(
                 diagnostic["stable_cycle_excluded_counts"].get(
-                    "association_duplicate",
+                    "association_ambiguous",
                     0,
                 ),
                 1,
@@ -1321,21 +1323,19 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertEqual(preparing["stable_cycle_exclusion_reasons"], {})
 
             diagnostic = details[14]["merge_split_relative"]
-            self.assertIsNone(diagnostic["period"])
-            self.assertFalse(diagnostic["phase_qualified"])
+            self.assertEqual(diagnostic["period"], 3)
+            self.assertTrue(diagnostic["phase_qualified"])
             self.assertEqual(
                 diagnostic["cycle_evidence_reason"],
-                "inactive_prior_period_insufficient_episode_evidence",
+                "observed_period",
             )
-            self.assertIsNone(diagnostic["local_lag"])
+            self.assertEqual(diagnostic["local_lag"], 3)
             self.assertEqual(
                 diagnostic["local_lag_evidence_reason"],
-                "insufficient_episode_evidence",
+                "observed_local_lag",
             )
-            self.assertIn(
-                diagnostic["qualified_anchor_count"],
-                {0, None},
-            )
+            self.assertEqual(diagnostic["stable_cycle_track_count"], 3)
+            self.assertEqual(diagnostic["period_recurrence_comparisons"], 1)
 
     def test_merge_split_shadow_rejects_cardinality_and_temporal_swap(self) -> None:
         cases = {
@@ -1523,6 +1523,259 @@ class StudioHypothesisShadowTest(unittest.TestCase):
             self.assertEqual(details[7]["replay_source"], "merge_split_relative")
             self.assertEqual(details[7]["replay_point"], [33.0, 31.0])
             self.assertTrue(details[7]["replay_passed"])
+
+    def test_opt_in_cycle_without_period_holds_and_preserves_baseline(self) -> None:
+        with TemporaryDirectory(prefix="studio-cycle-hard-gate-") as tmp:
+            score_path, trace_path = _write_merge_lineage_replay(Path(tmp))
+
+            baseline = replay_hypothesis_selection_details(score_path, trace_path)
+            enabled = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                merge_split_relative=True,
+            )
+
+            self.assertEqual(
+                [row["replay_point"] for row in enabled],
+                [row["replay_point"] for row in baseline],
+            )
+            split = enabled[5]["merge_split_relative"]
+            self.assertEqual(split["state"], "SPLITTING")
+            self.assertEqual(split["reason"], "cycle_phase_unavailable")
+            self.assertEqual(split["hold_reason"], "cycle_phase_unavailable")
+            self.assertIsNone(split["target_candidate_id"])
+
+    def test_score_rows_do_not_control_runtime_lineage_state(self) -> None:
+        with TemporaryDirectory(prefix="studio-score-independent-full-") as full_tmp:
+            full_score, full_trace = _write_merge_lineage_replay(Path(full_tmp))
+            full = replay_hypothesis_selection_details(
+                full_score,
+                full_trace,
+                merge_split_relative=True,
+            )
+        with TemporaryDirectory(prefix="studio-score-independent-sparse-") as sparse_tmp:
+            sparse_score, sparse_trace = _write_merge_lineage_replay(
+                Path(sparse_tmp),
+                omitted_score_frames={3, 4},
+            )
+            sparse = replay_hypothesis_selection_details(
+                sparse_score,
+                sparse_trace,
+                merge_split_relative=True,
+            )
+
+        full_by_frame = {row["frame_index"]: row for row in full}
+        sparse_by_frame = {row["frame_index"]: row for row in sparse}
+        for frame_index in range(5, 9):
+            with self.subTest(frame_index=frame_index):
+                full_row = full_by_frame[frame_index]
+                sparse_row = sparse_by_frame[frame_index]
+                self.assertEqual(sparse_row["replay_point"], full_row["replay_point"])
+                self.assertEqual(sparse_row["replay_source"], full_row["replay_source"])
+                self.assertEqual(
+                    sparse_row["merge_split_relative"]["merge_event_id"],
+                    full_row["merge_split_relative"]["merge_event_id"],
+                )
+                self.assertEqual(
+                    sparse_row["merge_split_relative"]["state"],
+                    full_row["merge_split_relative"]["state"],
+                )
+                self.assertEqual(
+                    sparse_row["merge_split_relative"]["reason"],
+                    full_row["merge_split_relative"]["reason"],
+                )
+        self.assertEqual(len(sparse), len(full) - 2)
+
+    def test_phase_resolver_uses_studio_frozen_track_ids(self) -> None:
+        with TemporaryDirectory(prefix="studio-phase-stable-id-") as tmp:
+            details = _replay_cycle_details(
+                Path(tmp),
+                _periodic_cycle_frames(total_frames=12),
+                white_frames=set(range(9)),
+            )
+
+            diagnostic = details[-1]["merge_split_relative"]
+            self.assertTrue(diagnostic["phase_qualified"])
+            self.assertEqual(
+                set(diagnostic["resolver_anchor_track_ids"]),
+                set(diagnostic["stable_cycle_track_ids"]),
+            )
+            self.assertTrue(
+                all(
+                    track_id.startswith("cycle-track-")
+                    for track_id in diagnostic["resolver_anchor_track_ids"]
+                )
+            )
+
+    def test_shape_normalized_boundary_margin_disqualifies_stable_track(self) -> None:
+        tracks = _StableCycleTracks(frame_shape=(100, 100))
+
+        tracks.update(
+            0,
+            _cycle_candidates(
+                0,
+                ((12.0, 50.0), (50.0, 50.0), (75.0, 50.0)),
+            ),
+        )
+
+        self.assertEqual(tracks.exclusion_reasons["cycle-track-1"], "cycle_clipped")
+
+    def test_exactly_one_cycle_pair_can_estimate_period_and_local_lag(self) -> None:
+        observations = {
+            frame_index: tuple(
+                _FrozenCycleObservation(
+                    f"cycle-track-{track_index}",
+                    PuzzleCandidate(cx, cy, 0.8, 10.0, 10.0),
+                )
+                for track_index, (cx, cy) in enumerate(
+                    ((20.0, 20.0), (50.0, 20.0), (80.0, 20.0))
+                )
+            )
+            for frame_index in (0, 3)
+        }
+        catalog = BackgroundCatalog()
+        for frame_index, frame in observations.items():
+            catalog.add_frame(
+                frame_index,
+                [observation.candidate for observation in frame],
+            )
+
+        period, _score, reason, comparisons = _observed_episode_period(
+            catalog,
+            observations,
+        )
+        local_ok, local_reason = _local_lag_temporal_support(
+            observations,
+            frame_index=3,
+            lag=3,
+        )
+
+        self.assertEqual(period, 3)
+        self.assertEqual(reason, "observed_period")
+        self.assertGreaterEqual(comparisons, 1)
+        self.assertTrue(local_ok)
+        self.assertEqual(local_reason, "observed")
+
+    def test_uniform_nonperiodic_motion_has_no_unique_small_lag(self) -> None:
+        observations = {
+            frame_index: tuple(
+                _FrozenCycleObservation(
+                    f"cycle-track-{track_index}",
+                    PuzzleCandidate(
+                        20.0 + track_index * 25.0 + frame_index * 0.5,
+                        20.0,
+                        0.8,
+                        10.0,
+                        10.0,
+                    ),
+                )
+                for track_index in range(3)
+            )
+            for frame_index in range(5)
+        }
+        catalog = BackgroundCatalog()
+        for frame_index, frame in observations.items():
+            catalog.add_frame(
+                frame_index,
+                [observation.candidate for observation in frame],
+            )
+
+        period, _score, reason, _comparisons = _observed_episode_period(
+            catalog,
+            observations,
+        )
+        local_ok, local_reason = _local_lag_temporal_support(
+            observations,
+            frame_index=4,
+            lag=2,
+        )
+
+        self.assertIsNone(period)
+        self.assertEqual(reason, "period_recurrence_ambiguous")
+        self.assertFalse(local_ok)
+        self.assertEqual(local_reason, "nonunique_recurrence")
+
+    def test_global_assignment_keeps_unique_non_mutual_optimum(self) -> None:
+        from core.puzzle import studio_hypothesis_shadow as shadow
+
+        tracks = {
+            track_id: shadow._StableCycleTrack(
+                track_id=track_id,
+                observations={0: _cycle_candidates(0, ((20.0, 20.0),))[0]},
+            )
+            for track_id in ("A", "B")
+        }
+        candidates = (
+            Candidate("X", 1, (0.0, 0.0, 2.0, 2.0), (1.0, 1.0), 0.8, "test"),
+            Candidate("Y", 1, (2.0, 0.0, 4.0, 2.0), (3.0, 1.0), 0.8, "test"),
+        )
+        costs = {
+            ("A", "X"): 0.10,
+            ("A", "Y"): 0.20,
+            ("B", "X"): 0.11,
+            ("B", "Y"): 1.40,
+        }
+
+        assignments, rejected, _blocked = shadow._global_track_assignment(
+            tracks,
+            candidates,
+            lambda track, candidate: costs[(track.track_id, candidate.candidate_id)],
+        )
+
+        self.assertEqual(assignments, {"A": 1, "B": 0})
+        self.assertEqual(rejected, {})
+
+    def test_global_assignment_rejects_near_tied_alternative(self) -> None:
+        from core.puzzle import studio_hypothesis_shadow as shadow
+
+        tracks = {
+            track_id: shadow._StableCycleTrack(
+                track_id=track_id,
+                observations={0: _cycle_candidates(0, ((20.0, 20.0),))[0]},
+            )
+            for track_id in ("A", "B")
+        }
+        candidates = (
+            Candidate("X", 1, (0.0, 0.0, 2.0, 2.0), (1.0, 1.0), 0.8, "test"),
+            Candidate("Y", 1, (2.0, 0.0, 4.0, 2.0), (3.0, 1.0), 0.8, "test"),
+        )
+        costs = {
+            ("A", "X"): 0.10,
+            ("A", "Y"): 0.11,
+            ("B", "X"): 0.11,
+            ("B", "Y"): 0.10,
+        }
+
+        assignments, rejected, blocked = shadow._global_track_assignment(
+            tracks,
+            candidates,
+            lambda track, candidate: costs[(track.track_id, candidate.candidate_id)],
+        )
+
+        self.assertEqual(assignments, {})
+        self.assertEqual(rejected, {"A": "association_ambiguous", "B": "association_ambiguous"})
+        self.assertEqual(blocked, {0, 1})
+
+    def test_new_white_episode_resets_unresolved_merge_state(self) -> None:
+        with TemporaryDirectory(prefix="studio-white-reset-") as tmp:
+            score_path, trace_path = _write_merge_lineage_replay(
+                Path(tmp),
+                white_frames={0, 6},
+            )
+
+            details = replay_hypothesis_selection_details(
+                score_path,
+                trace_path,
+                merge_split_relative=True,
+            )
+
+            before_reset = details[5]["merge_split_relative"]
+            after_reset = details[6]["merge_split_relative"]
+            self.assertEqual(before_reset["state"], "SPLITTING")
+            self.assertEqual(after_reset["state"], "SEPARATE")
+            self.assertEqual(after_reset["merge_event_id"], 0)
+            self.assertEqual(after_reset["fingerprint_pair_count"], 0)
+            self.assertEqual(after_reset["selected_child_ids"], ())
 
 
 def _trace_candidate(
@@ -1716,9 +1969,9 @@ def _same_assignment_crossing_cycle_frames(
     frames = _periodic_cycle_frames(total_frames=total_frames)
     for frame_index, positions in enumerate(
         (
-            ((70.0, 70.0), (110.0, 130.0)),
-            ((80.0, 80.0), (100.0, 100.0)),
-            ((95.0, 100.0), (75.0, 80.0)),
+            ((150.0, 150.0), (190.0, 210.0)),
+            ((160.0, 160.0), (180.0, 180.0)),
+            ((175.0, 180.0), (155.0, 160.0)),
         )
     ):
         frames[frame_index] = [
@@ -1732,7 +1985,7 @@ def _same_assignment_crossing_cycle_frames(
                 positions[1],
                 half_size=26.0,
             ),
-            _trace_candidate(f"same-cross-c-{frame_index}", (150.0, 30.0)),
+            _trace_candidate(f"same-cross-c-{frame_index}", (320.0, 80.0)),
             _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
         ]
     return frames
@@ -1745,8 +1998,8 @@ def _initial_actual_crossing_cycle_frames(
     frames = _periodic_cycle_frames(total_frames=total_frames)
     for frame_index, positions in enumerate(
         (
-            ((80.0, 80.0), (100.0, 100.0)),
-            ((100.0, 100.0), (80.0, 80.0)),
+            ((160.0, 160.0), (180.0, 180.0)),
+            ((180.0, 180.0), (160.0, 160.0)),
         )
     ):
         frames[frame_index] = [
@@ -1760,7 +2013,7 @@ def _initial_actual_crossing_cycle_frames(
                 positions[1],
                 half_size=20.0,
             ),
-            _trace_candidate(f"initial-cross-c-{frame_index}", (150.0, 30.0)),
+            _trace_candidate(f"initial-cross-c-{frame_index}", (320.0, 80.0)),
             _trace_candidate(f"target-{frame_index}", (60.0, 50.0)),
         ]
     return frames
@@ -1966,6 +2219,120 @@ def _replay_cycle_details(
         trace_path,
         merge_split_relative=True,
     )
+
+
+def _write_merge_lineage_replay(
+    root: Path,
+    *,
+    omitted_score_frames: set[int] = set(),
+    white_frames: set[int] = {0},
+) -> tuple[Path, Path]:
+    score_path = root / "score.jsonl"
+    trace_path = root / "trace.jsonl"
+    frame_rows = (
+        ((34.0, 32.0), (30.0, 28.0), "target"),
+        ((34.0, 32.0), (30.0, 28.0), "target"),
+        ((34.0, 32.0), (30.0, 28.0), "target"),
+        ((31.0, 29.0), (30.0, 28.0), "overlap-target"),
+        ((31.0, 29.0), (30.0, 28.0), "overlap-target"),
+        ((33.0, 31.0), (30.0, 28.0), "target-child"),
+        ((33.0, 31.0), (30.0, 28.0), "target-child"),
+        ((33.0, 31.0), (30.0, 28.0), "target-child"),
+        ((33.0, 31.0), (30.0, 28.0), "target-child"),
+    )
+    scores: list[dict[str, object]] = []
+    trace: list[dict[str, object]] = [
+        {
+            "type": "SESSION_START",
+            "frame_index": None,
+            "payload": {"board_roi": {"w": 100, "h": 100}},
+        }
+    ]
+    for frame_index, (target, background, target_id) in enumerate(frame_rows):
+        if frame_index not in omitted_score_frames:
+            scores.append(
+                {
+                    "solver_frame_index": frame_index,
+                    "target_x": target[0],
+                    "target_y": target[1],
+                }
+            )
+        candidates = [
+            _trace_candidate(target_id, target),
+            _trace_candidate(
+                "background-child" if frame_index >= 5 else "background",
+                background,
+            ),
+            _trace_candidate("anchor-a", (20.0, 20.0)),
+            _trace_candidate("anchor-b", (40.0, 20.0)),
+        ]
+        trace.extend(
+            [
+                {
+                    "type": "CANDIDATES",
+                    "frame_index": frame_index,
+                    "payload": {"candidates": candidates},
+                },
+                {
+                    "type": "TEMPORAL_SELECTOR",
+                    "frame_index": frame_index,
+                    "payload": {
+                        "debug": {
+                            "kinematic_wide_beam_debug": {
+                                "reason": (
+                                    "white_anchor"
+                                    if frame_index in white_frames
+                                    else "tracking"
+                                ),
+                                "point": [target[0], target[1]],
+                            }
+                        }
+                    },
+                },
+                {
+                    "type": "IDENTITY_STATE",
+                    "frame_index": frame_index,
+                    "payload": {"state": "TRACK_CONFIDENT"},
+                },
+                {
+                    "type": "EVIDENCE",
+                    "frame_index": frame_index,
+                    "payload": {
+                        "evidence": [
+                            {
+                                "candidate_id": candidate["candidate_id"],
+                                "bg_score": (
+                                    0.1
+                                    if candidate["candidate_id"] == target_id
+                                    else 0.8
+                                ),
+                                "motion_divergence": (
+                                    0.9
+                                    if candidate["candidate_id"] == target_id
+                                    else 0.1
+                                ),
+                            }
+                            for candidate in candidates
+                        ]
+                    },
+                },
+                {
+                    "type": "TARGET_SELECTION",
+                    "frame_index": frame_index,
+                    "payload": {
+                        "point": (
+                            [background[0], background[1]]
+                            if frame_index >= 5
+                            else [target[0], target[1]]
+                        ),
+                        "source": "recorded",
+                    },
+                },
+            ]
+        )
+    _write_jsonl(score_path, scores)
+    _write_jsonl(trace_path, trace)
+    return score_path, trace_path
 
 
 if __name__ == "__main__":

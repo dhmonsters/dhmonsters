@@ -101,10 +101,40 @@ def affine_coordinate_residual(
 
 
 @dataclass(frozen=True)
+class StableCycleObservation:
+    track_id: str
+    frame_index: int
+    candidate_id: str
+    point: Point
+    bbox: tuple[float, float, float, float]
+    clipped: bool = False
+    qualified_cycle: bool = True
+
+
+@dataclass(frozen=True)
 class CyclePhaseContext:
     period: int | None
     local_lag: int | None
     period_score: float | None = None
+    observation_started: bool = False
+    reference_observations: tuple[StableCycleObservation, ...] = ()
+    current_observations: tuple[StableCycleObservation, ...] = ()
+
+    @property
+    def phase_qualified(self) -> bool:
+        return bool(
+            self.period is not None
+            and self.local_lag is not None
+            and int(self.period) > 0
+            and int(self.local_lag) > 0
+        )
+
+    @property
+    def candidate_track_ids(self) -> dict[str, str]:
+        return {
+            observation.candidate_id: observation.track_id
+            for observation in self.current_observations
+        }
 
 
 @dataclass(frozen=True)
@@ -350,6 +380,7 @@ class BackgroundAnchorManager:
         self._candidate_track_ids: dict[str, str] = {}
         self._next_track_number = 1
         self._implicit_frame_index = -1
+        self._uses_exact_stable_ids = False
 
     def update(
         self,
@@ -364,6 +395,11 @@ class BackgroundAnchorManager:
         phase_context: CyclePhaseContext | None = None,
     ) -> tuple[BackgroundAnchor, ...]:
         current_frame = self._resolve_frame_index(frame_index)
+        if phase_context is not None and phase_context.observation_started:
+            if phase_context.current_observations:
+                return self._update_exact_stable_observations(phase_context)
+            self._active_track_ids = set()
+            return ()
         excluded_ids = set(excluded_candidate_ids)
         eligible = [
             candidate
@@ -438,6 +474,82 @@ class BackgroundAnchorManager:
                 not self._has_cycle_gate(phase_context)
                 or track.qualified_cycle
             )
+        )
+
+    def _update_exact_stable_observations(
+        self,
+        phase_context: CyclePhaseContext,
+    ) -> tuple[BackgroundAnchor, ...]:
+        if not self._uses_exact_stable_ids:
+            self._tracks = {}
+            self._active_track_ids = set()
+            self._candidate_track_ids = {}
+            self._uses_exact_stable_ids = True
+
+        all_observations = {
+            (observation.track_id, observation.frame_index): observation
+            for observation in (
+                *phase_context.reference_observations,
+                *phase_context.current_observations,
+            )
+        }
+        for observation in all_observations.values():
+            x1, y1, x2, y2 = observation.bbox
+            width = max(1e-6, float(x2) - float(x1))
+            height = max(1e-6, float(y2) - float(y1))
+            track = self._tracks.get(observation.track_id)
+            if track is None:
+                track = _BackgroundAnchorTrack(
+                    track_id=observation.track_id,
+                    observations={},
+                )
+                self._tracks[observation.track_id] = track
+            track.observations[observation.frame_index] = AnchorObservation(
+                frame_index=observation.frame_index,
+                candidate_id=observation.candidate_id,
+                point=observation.point,
+                bbox=observation.bbox,
+                area=width * height,
+                aspect=width / height,
+                clipped=observation.clipped,
+                merge_like=False,
+            )
+            track.qualified_cycle = bool(
+                observation.qualified_cycle and not observation.clipped
+            )
+            track.cycle_survival = 1.0 if track.qualified_cycle else 0.0
+            track.loop_residual = 0.0 if track.qualified_cycle else None
+            track.disqualified_reason = (
+                None if track.qualified_cycle else "cycle_unqualified"
+            )
+            track.qualification_by_frame[observation.frame_index] = (
+                _AnchorQualificationSnapshot(
+                    stable_observations=max(
+                        self.minimum_stable_observations,
+                        len(track.observations),
+                    ),
+                    qualified_cycle=track.qualified_cycle,
+                    cycle_survival=track.cycle_survival,
+                    loop_residual=track.loop_residual,
+                    disqualified_reason=track.disqualified_reason,
+                )
+            )
+            self._candidate_track_ids[observation.candidate_id] = observation.track_id
+
+        self._active_track_ids = {
+            observation.track_id
+            for observation in phase_context.current_observations
+            if observation.qualified_cycle and not observation.clipped
+        }
+        return tuple(
+            self._anchor_for_track(
+                self._tracks[observation.track_id],
+                self._tracks[observation.track_id].observations[
+                    observation.frame_index
+                ],
+            )
+            for observation in phase_context.current_observations
+            if observation.track_id in self._active_track_ids
         )
 
     def track_id_for_candidate(self, candidate_id: str) -> str | None:
@@ -1158,6 +1270,7 @@ def select_split_child_pair(
     candidates: Sequence[Candidate],
     predicted_target_point: Point,
     stable_scale_px: float,
+    candidate_track_ids: Mapping[str, str] | None = None,
 ) -> SplitChildPair | None:
     candidates = _duplicate_equivalence_representatives(candidates)
     if len(candidates) < 2:
@@ -1174,6 +1287,18 @@ def select_split_child_pair(
     )
     scored_pairs: list[tuple[float, float, float, tuple[Candidate, Candidate]]] = []
     for left, right in combinations(candidates, 2):
+        if candidate_track_ids is not None:
+            left_track_id = candidate_track_ids.get(left.candidate_id)
+            right_track_id = candidate_track_ids.get(right.candidate_id)
+            has_event_lineage = (
+                (left_track_id == context.background_track_id and right_track_id is None)
+                or (
+                    right_track_id == context.background_track_id
+                    and left_track_id is None
+                )
+            )
+            if not has_event_lineage:
+                continue
         child_union = _bbox_union(left.bbox, right.bbox)
         union_residual = _bbox_edge_residual(child_union, merge_bbox, scale)
         ancestry_residual = min(
@@ -1394,6 +1519,8 @@ class MergeSplitRelativeResolver:
         self._split_recovery_success_count = 0
         self._split_first_unresolved_held = False
         self._split_recovery_unresolved = False
+        self._split_recovery_expired = False
+        self._split_recovery_hold_state: MergeState | None = None
 
     def update(
         self,
@@ -1405,10 +1532,40 @@ class MergeSplitRelativeResolver:
         frame_shape: tuple[int, int] | None,
         frame_index: int | None = None,
         phase_context: CyclePhaseContext | None = None,
+        identity_state: str = "",
     ) -> MergeSplitDecision:
         candidate_tuple = tuple(candidates)
         predicted = self._predicted_target_point(incumbent_point, candidate_tuple)
-        nearest = _nearest_candidate(candidate_tuple, incumbent_point)
+        identity_unstable = identity_state in {
+            "IDENTITY_HOLD",
+            "LOST",
+            "OCCLUSION_SUSPECTED",
+        }
+        if self._split_recovery_expired:
+            event_id = (
+                self._merge_context.event_id
+                if self._merge_context is not None
+                else self._event_detector.event_id
+            )
+            hold_state = self._split_recovery_hold_state or self._event_detector.state
+            if hold_state is MergeState.SEPARATE:
+                hold_state = MergeState.SPLITTING
+            return self._event_hold(
+                MergeEvent(
+                    event_id=event_id,
+                    state=hold_state,
+                    reason="split_recovery_expired",
+                    overlap_ratio=0.0,
+                    area_ratio=1.0,
+                    candidate_count=len(candidate_tuple),
+                ),
+                "split_recovery_expired",
+            )
+        nearest = (
+            None
+            if identity_unstable
+            else _nearest_candidate(candidate_tuple, incumbent_point)
+        )
         target_candidate = None
         if nearest is not None:
             area_ratio = _bbox_area(nearest.bbox) / max(1.0, stable_area)
@@ -1441,7 +1598,23 @@ class MergeSplitRelativeResolver:
             self._split_recovery_success_count = 0
             self._split_first_unresolved_held = False
             self._split_recovery_unresolved = True
+            self._split_recovery_hold_state = event.state
         recovering_split = self._split_recovery_remaining > 0
+        if recovering_split and event.state is not MergeState.SEPARATE:
+            self._split_recovery_hold_state = event.state
+
+        if (
+            phase_context is not None
+            and phase_context.observation_started
+            and not phase_context.phase_qualified
+            and event.state is not MergeState.SEPARATE
+        ):
+            if recovering_split:
+                return self._unresolved_split_hold(
+                    event,
+                    "cycle_phase_unavailable",
+                )
+            return self._event_hold(event, "cycle_phase_unavailable")
 
         if (
             recovering_split
@@ -1528,32 +1701,34 @@ class MergeSplitRelativeResolver:
                 frame_index=frame_index,
                 phase_context=phase_context,
             )
-            self._remember_target(target_candidate)
+            if not identity_unstable:
+                self._remember_target(target_candidate)
             if phase_context is None:
                 self._remember_background_relation(collision, evidence, scale)
-            if (
-                target_candidate is None
-                or collision is None
-                or not _is_local_visible_pair(
-                    target_candidate,
-                    collision,
-                    stable_scale_px=scale,
-                )
-            ):
-                self._last_visible_pair = None
-            else:
-                self._remember_visible_pair(
-                    target_candidate,
-                    collision,
-                    event_id=event.event_id,
-                    background_track_id=(
-                        self._anchor_manager.track_id_for_candidate(
-                            collision.candidate_id
-                        )
-                        if phase_context is not None and collision is not None
-                        else None
-                    ),
-                )
+            if not identity_unstable:
+                if (
+                    target_candidate is None
+                    or collision is None
+                    or not _is_local_visible_pair(
+                        target_candidate,
+                        collision,
+                        stable_scale_px=scale,
+                    )
+                ):
+                    self._last_visible_pair = None
+                else:
+                    self._remember_visible_pair(
+                        target_candidate,
+                        collision,
+                        event_id=event.event_id,
+                        background_track_id=(
+                            self._anchor_manager.track_id_for_candidate(
+                                collision.candidate_id
+                            )
+                            if phase_context is not None and collision is not None
+                            else None
+                        ),
+                    )
             if phase_context is not None:
                 self._clear_merge_event_context(
                     clear_relation_fingerprint=self._fingerprint_mode == "phase",
@@ -1697,6 +1872,12 @@ class MergeSplitRelativeResolver:
                     candidates=local_children,
                     predicted_target_point=predicted_target_point,
                     stable_scale_px=scale,
+                    candidate_track_ids=(
+                        phase_context.candidate_track_ids
+                        if phase_context is not None
+                        and phase_context.current_observations
+                        else None
+                    ),
                 )
                 if self._merge_context is not None
                 else None
@@ -1717,7 +1898,7 @@ class MergeSplitRelativeResolver:
                 predicted_target_point=predicted_target_point,
                 incumbent_candidate_id=(
                     target_candidate.candidate_id
-                    if target_candidate is not None
+                    if target_candidate is not None and not identity_unstable
                     else None
                 ),
                 phase_conditioned=phase_context is not None,
@@ -1807,6 +1988,8 @@ class MergeSplitRelativeResolver:
         self._split_recovery_success_count = 0
         self._split_first_unresolved_held = False
         self._split_recovery_unresolved = False
+        self._split_recovery_expired = False
+        self._split_recovery_hold_state = None
 
     def _clear_relation_fingerprint(self) -> None:
         self._fingerprint = None
@@ -2030,15 +2213,21 @@ class MergeSplitRelativeResolver:
         return self._expire_split_recovery(event)
 
     def _expire_split_recovery(self, event: MergeEvent) -> MergeSplitDecision:
-        self._event_detector.complete_split_recovery()
-        self._clear_split_recovery()
-        self._clear_merge_event_context(
-            clear_visible_pair=True,
-            clear_relation_fingerprint=self._fingerprint_mode == "phase",
-        )
+        self._split_recovery_remaining = 0
+        self._split_recovery_success_count = 0
+        self._split_first_unresolved_held = True
+        self._split_recovery_unresolved = True
+        self._split_recovery_expired = True
+        hold_state = self._split_recovery_hold_state or event.state
+        if hold_state is MergeState.SEPARATE:
+            hold_state = MergeState.SPLITTING
         expired_event = MergeEvent(
-            event_id=event.event_id,
-            state=MergeState.SEPARATE,
+            event_id=(
+                self._merge_context.event_id
+                if self._merge_context is not None
+                else event.event_id
+            ),
+            state=hold_state,
             reason="split_recovery_expired",
             overlap_ratio=event.overlap_ratio,
             area_ratio=event.area_ratio,
@@ -2256,6 +2445,9 @@ class MergeSplitRelativeResolver:
             "overlap_ratio": event.overlap_ratio,
             "area_ratio": event.area_ratio,
             "anchor_count": len(self._current_anchors),
+            "resolver_anchor_track_ids": tuple(
+                anchor.track_id for anchor in self._current_anchors
+            ),
             "fingerprint_pair_count": (
                 len(self._fingerprint.pair_coordinates)
                 if self._fingerprint is not None
@@ -2492,4 +2684,11 @@ def _candidate_is_clipped(
         return False
     height, width = frame_shape
     x1, y1, x2, y2 = candidate.bbox
-    return x1 <= 0.0 or y1 <= 0.0 or x2 >= float(width) or y2 >= float(height)
+    shape_scale = max(1e-6, x2 - x1, y2 - y1)
+    safe_margin = 0.5 * shape_scale
+    return (
+        x1 < safe_margin
+        or y1 < safe_margin
+        or float(width) - x2 < safe_margin
+        or float(height) - y2 < safe_margin
+    )

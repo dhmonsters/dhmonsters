@@ -542,6 +542,41 @@ class SplitChildPairSelectionTest(unittest.TestCase):
             {"target-child", "background-child"},
         )
 
+    def test_split_pair_requires_event_background_lineage_and_untracked_target(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        context = module.MergeEventContext(
+            event_id=7,
+            target_candidate_id="target-before-merge",
+            background_track_id="stable-background",
+            anchor_track_ids=("stable-a", "stable-b"),
+            premerge_target_point=(34.0, 32.0),
+            premerge_target_bbox=(33.0, 31.0, 35.0, 33.0),
+            premerge_background_bbox=(29.0, 27.0, 31.0, 29.0),
+            merge_bbox=(29.0, 27.0, 35.0, 33.0),
+            opened_frame=20,
+            last_frame=22,
+        )
+        target_child = _center_candidate("target-child", (34.0, 32.0))
+        background_child = _center_candidate("background-child", (30.0, 28.0))
+        same_size_distractor = _center_candidate("distractor", (32.0, 29.0))
+
+        pair = module.select_split_child_pair(
+            context=context,
+            candidates=(same_size_distractor, target_child, background_child),
+            predicted_target_point=same_size_distractor.center,
+            stable_scale_px=2.0,
+            candidate_track_ids={
+                "background-child": "stable-background",
+                "distractor": "stable-distractor",
+            },
+        )
+
+        self.assertIsNotNone(pair)
+        self.assertEqual(
+            {candidate.candidate_id for candidate in pair.children},
+            {"target-child", "background-child"},
+        )
+
 
 class SplitChildAssignmentTest(unittest.TestCase):
     def test_reference_pair_quorum_holds_when_current_anchor_track_is_missing(self) -> None:
@@ -1440,6 +1475,67 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
         self.assertIsNotNone(after_completion)
         self.assertFalse(before_completion.qualified_cycle)
         self.assertFalse(after_completion.qualified_cycle)
+
+    def test_exact_stable_ids_override_candidate_order_in_phase_context(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        reference = (
+            module.StableCycleObservation(
+                track_id="stable-a",
+                frame_index=0,
+                candidate_id="a-0",
+                point=(20.0, 30.0),
+                bbox=(18.0, 28.0, 22.0, 32.0),
+            ),
+            module.StableCycleObservation(
+                track_id="stable-b",
+                frame_index=0,
+                candidate_id="b-0",
+                point=(40.0, 30.0),
+                bbox=(38.0, 28.0, 42.0, 32.0),
+            ),
+        )
+        current = (
+            module.StableCycleObservation(
+                track_id="stable-a",
+                frame_index=3,
+                candidate_id="a-3",
+                point=(28.0, 30.0),
+                bbox=(26.0, 28.0, 30.0, 32.0),
+            ),
+            module.StableCycleObservation(
+                track_id="stable-b",
+                frame_index=3,
+                candidate_id="b-3",
+                point=(32.0, 30.0),
+                bbox=(30.0, 28.0, 34.0, 32.0),
+            ),
+        )
+        phase = module.CyclePhaseContext(
+            period=3,
+            local_lag=3,
+            observation_started=True,
+            reference_observations=reference,
+            current_observations=current,
+        )
+
+        anchors = manager.update(
+            frame_index=3,
+            candidates=(
+                _center_candidate("b-3", (32.0, 30.0), size=4.0, frame_index=3),
+                _center_candidate("a-3", (28.0, 30.0), size=4.0, frame_index=3),
+            ),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=4.0,
+            phase_context=phase,
+        )
+
+        self.assertEqual(manager.track_id_for_candidate("a-3"), "stable-a")
+        self.assertEqual(manager.track_id_for_candidate("b-3"), "stable-b")
+        self.assertEqual({anchor.track_id for anchor in anchors}, {"stable-a", "stable-b"})
+        self.assertEqual(manager.reference_anchor("stable-a", 0).point, (20.0, 30.0))
 
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
@@ -3410,6 +3506,9 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             (pending_partial_target, pending_partial_background, anchor_a, anchor_b),
             (pending_merged, anchor_a, anchor_b),
         )
+        previous_context = resolver._merge_context
+        previous_visible_pair = resolver._last_visible_pair
+        previous_event_id = resolver._event_detector.event_id
         remaining = resolver._split_recovery_remaining
         decisions = []
         for index in range(remaining):
@@ -3425,14 +3524,16 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(decisions[0].reason, "merge_confirmation_pending")
         self.assertEqual(decisions[-1].reason, "split_recovery_expired")
-        self.assertEqual(decisions[-1].state, module.MergeState.SEPARATE)
+        self.assertEqual(decisions[-1].state, module.MergeState.SPLITTING)
+        self.assertEqual(decisions[-1].debug["event_id"], previous_event_id)
         self.assertEqual(resolver._split_recovery_remaining, 0)
         self.assertEqual(resolver._split_recovery_success_count, 0)
-        self.assertFalse(resolver._split_recovery_unresolved)
-        self.assertIsNone(resolver._merge_context)
-        self.assertIsNone(resolver._last_visible_pair)
-        self.assertIsNone(resolver._merge_center)
-        self.assertIsNone(resolver._merge_bbox)
+        self.assertTrue(resolver._split_recovery_unresolved)
+        self.assertTrue(resolver._split_recovery_expired)
+        self.assertIs(resolver._merge_context, previous_context)
+        self.assertIs(resolver._last_visible_pair, previous_visible_pair)
+        self.assertIsNotNone(resolver._merge_center)
+        self.assertIsNotNone(resolver._merge_bbox)
 
     def test_resolved_split_opens_new_event_for_confirmed_direct_merge(self) -> None:
         module, resolver, anchor_a, anchor_b, _target_child, _background_child = (
@@ -3562,13 +3663,16 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertIsNone(resolver._merge_context)
         self.assertIsNone(resolver._last_visible_pair)
 
-    def test_expired_ambiguous_recovery_drops_visible_pair_before_new_direct_merge(
+    def test_expired_ambiguous_recovery_preserves_lineage_and_blocks_new_merge(
         self,
     ) -> None:
         module, resolver, anchor_a, anchor_b, target_child, background_child = (
             self._start_resolved_split_stabilization(confirm_observations=1)
         )
         previous_fingerprint = resolver._fingerprint
+        previous_context = resolver._merge_context
+        previous_visible_pair = resolver._last_visible_pair
+        previous_event_id = resolver._event_detector.event_id
         ambiguous_child = _center_candidate("ambiguous-child", target_child.center)
         holds = []
         for _ in range(3):
@@ -3583,7 +3687,8 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             )
 
         self.assertEqual(holds[-1].reason, "split_recovery_expired")
-        self.assertIsNone(resolver._last_visible_pair)
+        self.assertIs(resolver._last_visible_pair, previous_visible_pair)
+        self.assertIs(resolver._merge_context, previous_context)
         self.assertIs(resolver._fingerprint, previous_fingerprint)
         self.assertEqual(resolver._fingerprint_mode, "legacy")
 
@@ -3596,9 +3701,11 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             frame_shape=(100, 100),
         )
 
-        self.assertEqual(decision.state, module.MergeState.MERGED)
-        self.assertEqual(decision.debug["event_id"], 2)
-        self.assertIsNone(resolver._merge_context)
+        self.assertEqual(decision.reason, "split_recovery_expired")
+        self.assertEqual(decision.state, holds[-1].state)
+        self.assertNotEqual(decision.state, module.MergeState.SEPARATE)
+        self.assertEqual(decision.debug["event_id"], previous_event_id)
+        self.assertIs(resolver._merge_context, previous_context)
 
     def test_direct_merge_rejects_visible_pair_stale_after_collision_free_observation(
         self,
@@ -3872,7 +3979,19 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
                 frame_shape=(100, 100),
             )
 
-        self.assertEqual(later.reason, "separate")
+        self.assertEqual(later.reason, "split_recovery_expired")
+        self.assertNotEqual(later.state, module.MergeState.SEPARATE)
+        event_id = later.debug["event_id"]
+        continued = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(incomplete, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        self.assertEqual(continued.reason, "split_recovery_expired")
+        self.assertEqual(continued.state, later.state)
+        self.assertEqual(continued.debug["event_id"], event_id)
 
     def test_missing_fingerprint_recovery_expires_after_first_split_hold(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
@@ -3923,7 +4042,19 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
                 frame_shape=(100, 100),
             )
 
-        self.assertEqual(later.reason, "separate")
+        self.assertEqual(later.reason, "split_recovery_expired")
+        self.assertNotEqual(later.state, module.MergeState.SEPARATE)
+        event_id = later.debug["event_id"]
+        continued = resolver.update(
+            incumbent_point=overlap.center,
+            candidates=(child, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+        self.assertEqual(continued.reason, "split_recovery_expired")
+        self.assertEqual(continued.state, later.state)
+        self.assertEqual(continued.debug["event_id"], event_id)
 
     def test_confirmed_new_merge_invalidates_unresolved_context_before_new_children(
         self,
@@ -4162,6 +4293,9 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(reacquired.state, module.MergeState.REACQUIRED)
         self.assertTrue(resolver._split_recovery_unresolved)
+        previous_context = resolver._merge_context
+        previous_visible_pair = resolver._last_visible_pair
+        previous_event_id = resolver._event_detector.event_id
         remaining = resolver._split_recovery_remaining
         merged = _candidate("pending-merged", (25.0, 23.0, 40.0, 38.0))
         pending_observations = (
@@ -4182,20 +4316,14 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(decisions[0].reason, "merge_confirmation_pending")
         self.assertEqual(decisions[-1].reason, "split_recovery_expired")
-        self.assertEqual(decisions[-1].state, module.MergeState.SEPARATE)
+        self.assertEqual(decisions[-1].state, module.MergeState.REACQUIRED)
+        self.assertEqual(decisions[-1].debug["event_id"], previous_event_id)
         self.assertEqual(resolver._split_recovery_remaining, 0)
-        self.assertIsNone(resolver._merge_context)
-        self.assertIsNone(resolver._last_visible_pair)
-        self.assertIsNone(resolver._merge_center)
-        self.assertIsNone(resolver._merge_bbox)
+        self.assertTrue(resolver._split_recovery_unresolved)
+        self.assertTrue(resolver._split_recovery_expired)
+        self.assertIs(resolver._merge_context, previous_context)
+        self.assertIs(resolver._last_visible_pair, previous_visible_pair)
 
-        resolver.update(
-            incumbent_point=overlap.center,
-            candidates=(merged, anchor_a, anchor_b),
-            evidence={},
-            stable_area=4.0,
-            frame_shape=(100, 100),
-        )
         next_merge = resolver.update(
             incumbent_point=overlap.center,
             candidates=(merged, anchor_a, anchor_b),
@@ -4204,9 +4332,10 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             frame_shape=(100, 100),
         )
 
-        self.assertEqual(next_merge.state, module.MergeState.MERGED)
-        self.assertEqual(next_merge.debug["event_id"], 2)
-        self.assertIsNone(resolver._merge_context)
+        self.assertEqual(next_merge.reason, "split_recovery_expired")
+        self.assertEqual(next_merge.state, module.MergeState.REACQUIRED)
+        self.assertEqual(next_merge.debug["event_id"], previous_event_id)
+        self.assertIs(resolver._merge_context, previous_context)
 
     def test_reacquired_merged_reconfirmation_opens_new_event_without_old_context(self) -> None:
         module, resolver, overlap, _background, anchor_a, anchor_b = (
@@ -4264,8 +4393,9 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(decisions[1].state, module.MergeState.PARTIAL_OVERLAP)
         self.assertEqual(decisions[-1].reason, "split_recovery_expired")
-        self.assertEqual(decisions[-1].state, module.MergeState.SEPARATE)
+        self.assertEqual(decisions[-1].state, module.MergeState.PARTIAL_OVERLAP)
         self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertTrue(resolver._split_recovery_expired)
 
     def test_confirmed_merged_consumes_split_recovery_budget(self) -> None:
         module, resolver, overlap, _background, anchor_a, anchor_b = (
@@ -4287,8 +4417,9 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
 
         self.assertEqual(decisions[1].state, module.MergeState.MERGED)
         self.assertEqual(decisions[-1].reason, "split_recovery_expired")
-        self.assertEqual(decisions[-1].state, module.MergeState.SEPARATE)
+        self.assertEqual(decisions[-1].state, module.MergeState.MERGED)
         self.assertEqual(resolver._split_recovery_remaining, 0)
+        self.assertTrue(resolver._split_recovery_expired)
 
     def test_hysteresis_split_recovery_expires_for_one_event(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
@@ -4354,9 +4485,10 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(partial_hold.state, module.MergeState.SPLITTING)
         self.assertEqual(merged_hold.state, module.MergeState.SPLITTING)
         self.assertEqual(final_hold.reason, "split_recovery_expired")
-        self.assertEqual(final_hold.state, module.MergeState.SEPARATE)
+        self.assertEqual(final_hold.state, module.MergeState.SPLITTING)
         self.assertEqual(resolver._split_recovery_remaining, 0)
-        self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
+        self.assertTrue(resolver._split_recovery_expired)
+        self.assertEqual(resolver._event_detector.state, module.MergeState.SPLITTING)
 
     def test_assignment_ambiguity_uses_bounded_split_recovery(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
@@ -4410,9 +4542,68 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
             )
 
         self.assertEqual(final_hold.reason, "split_recovery_expired")
-        self.assertEqual(final_hold.state, module.MergeState.SEPARATE)
+        self.assertNotEqual(final_hold.state, module.MergeState.SEPARATE)
         self.assertEqual(resolver._split_recovery_remaining, 0)
-        self.assertEqual(resolver._event_detector.state, module.MergeState.SEPARATE)
+        self.assertTrue(resolver._split_recovery_expired)
+
+    def test_lost_identity_does_not_reseed_target_participant_from_incumbent(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        resolver = module.MergeSplitRelativeResolver(minimum_anchor_observations=99)
+        target = _center_candidate("target", (34.0, 32.0))
+        background = _center_candidate("background", (30.0, 28.0))
+
+        resolver.update(
+            incumbent_point=target.center,
+            candidates=(target, background),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            identity_state="TRACK_CONFIDENT",
+        )
+        remembered = resolver._last_visible_pair
+        self.assertIsNotNone(remembered)
+
+        resolver.update(
+            incumbent_point=background.center,
+            candidates=(background, target),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+            identity_state="IDENTITY_HOLD",
+        )
+
+        self.assertIs(resolver._last_visible_pair, remembered)
+        self.assertEqual(resolver._last_visible_pair.target.candidate_id, "target")
+        self.assertEqual(resolver._last_visible_pair.background.candidate_id, "background")
+
+    def test_expired_split_recovery_keeps_event_lineage_and_holds(self) -> None:
+        module, resolver, overlap, _background, anchor_a, anchor_b = (
+            self._start_unresolved_split_recovery()
+        )
+        context = resolver._merge_context
+        self.assertIsNotNone(context)
+        event_id = context.event_id
+        child = _center_candidate("child", (33.0, 31.0))
+
+        decisions = []
+        for _ in range(6):
+            decisions.append(
+                resolver.update(
+                    incumbent_point=overlap.center,
+                    candidates=(child, anchor_a, anchor_b),
+                    evidence={},
+                    stable_area=4.0,
+                    frame_shape=(100, 100),
+                )
+            )
+
+        self.assertEqual(decisions[-2].reason, "split_recovery_expired")
+        self.assertEqual(decisions[-1].reason, "split_recovery_expired")
+        self.assertEqual(decisions[-1].debug["event_id"], event_id)
+        self.assertIs(resolver._merge_context, context)
+        self.assertEqual(resolver._merge_context.event_id, event_id)
+        self.assertIsNotNone(resolver._last_visible_pair)
+        self.assertTrue(resolver._split_recovery_unresolved)
 
 
 if __name__ == "__main__":

@@ -50,6 +50,22 @@ class TransparentPuzzleEngineTests(unittest.TestCase):
             3,
         )
 
+    def test_catalog_exposes_ranked_local_lag_scores(self):
+        catalog = BackgroundCatalog()
+        for frame in range(8):
+            x = float((frame % 3) * 10)
+            catalog.add_frame(frame, [PuzzleCandidate(x, 0.0, 1.0, 20.0, 20.0)])
+
+        ranked = catalog.local_lag_scores(
+            frame_index=7,
+            period=3,
+            local_search=1,
+        )
+
+        self.assertEqual(ranked[0][0], 3)
+        self.assertEqual(ranked[0][1], 0.0)
+        self.assertEqual({lag for lag, _score in ranked}, {2, 3, 4})
+
     def test_engine_prefers_continuous_candidate(self):
         engine = TransparentPuzzleEngine()
         engine.update(PuzzleEngineInput(0, [], white_anchor=(100.0, 100.0)))
