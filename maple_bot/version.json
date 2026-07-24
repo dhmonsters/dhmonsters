@@ -1,5 +1,5 @@
 {
-    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.11/Claude_v2.1.11_Setup.exe",
-    "version":  "2.1.11",
-    "notes":  "빨코2 프리셋 자동 보강 중 누락된 copy import로 EXE가 시작되지 않던 문제 수정"
+    "download_url":  "https://github.com/dhmonsters/dhmonsters/releases/download/v2.1.12/Claude_v2.1.12_Setup.exe",
+    "version":  "2.1.12",
+    "notes":  "메인 런타임 로딩 전에 업데이트를 먼저 확인하고, 라이선스 확인을 시작 게이트로 적용"
 }
