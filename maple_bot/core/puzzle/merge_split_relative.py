@@ -700,7 +700,7 @@ def select_split_child_pair(
     score_margin = (
         runner_up_cost - best_cost if runner_up_cost is not None else float("inf")
     )
-    if score_margin <= 0.15:
+    if best_cost > 1.5 or score_margin <= 0.15:
         return None
     return SplitChildPair(
         children=children,
@@ -849,6 +849,8 @@ class MergeSplitRelativeResolver:
         self._current_anchors: tuple[BackgroundAnchor, ...] = ()
         self._fingerprint: RelationFingerprint | None = None
         self._merge_context: MergeEventContext | None = None
+        self._last_visible_target: Candidate | None = None
+        self._last_visible_background: Candidate | None = None
         self._merge_center: Point | None = None
         self._merge_bbox: tuple[float, float, float, float] | None = None
         self._split_recovery_remaining = 0
@@ -912,6 +914,7 @@ class MergeSplitRelativeResolver:
             )
             self._remember_target(target_candidate)
             self._remember_background_relation(collision, evidence, scale)
+            self._remember_visible_pair(target_candidate, collision)
             self._merge_context = None
             self._merge_center = None
             self._merge_bbox = None
@@ -964,9 +967,7 @@ class MergeSplitRelativeResolver:
             if merged is not None:
                 self._merge_center = merged.center
                 self._merge_bbox = merged.bbox
-                if self._merge_context is not None:
-                    self._merge_context.merge_bbox = merged.bbox
-                    self._merge_context.last_frame = merged.frame_index
+                self._ensure_merge_context_for_merged_event(event, merged)
             self._advance_latent_target(incumbent_point)
             return self._event_hold(event, "merged_identity_hold")
 
@@ -1001,7 +1002,8 @@ class MergeSplitRelativeResolver:
                 else None
             )
             if split_pair is None:
-                self._split_recovery_remaining -= 1
+                if event.state is not MergeState.SPLITTING:
+                    self._split_recovery_remaining -= 1
                 return self._event_hold(event, "split_pair_ambiguous")
             decision = assign_split_children(
                 children=split_pair.children,
@@ -1015,6 +1017,24 @@ class MergeSplitRelativeResolver:
                 ),
             )
             self._split_recovery_remaining -= 1
+            self._remember_visible_pair(
+                next(
+                    (
+                        candidate
+                        for candidate in split_pair.children
+                        if candidate.candidate_id == decision.target_candidate_id
+                    ),
+                    None,
+                ),
+                next(
+                    (
+                        candidate
+                        for candidate in split_pair.children
+                        if candidate.candidate_id == decision.background_candidate_id
+                    ),
+                    None,
+                ),
+            )
             return MergeSplitDecision(
                 state=event.state,
                 background_candidate_id=decision.background_candidate_id,
@@ -1056,6 +1076,7 @@ class MergeSplitRelativeResolver:
         target_candidate: Candidate,
         background_candidate: Candidate,
     ) -> None:
+        self._remember_visible_pair(target_candidate, background_candidate)
         if self._merge_context is None or self._merge_context.event_id != event.event_id:
             self._merge_context = MergeEventContext(
                 event_id=event.event_id,
@@ -1074,6 +1095,44 @@ class MergeSplitRelativeResolver:
             return
         self._merge_context.merge_bbox = self._merge_bbox
         self._merge_context.last_frame = target_candidate.frame_index
+
+    def _ensure_merge_context_for_merged_event(
+        self,
+        event: MergeEvent,
+        merged_candidate: Candidate,
+    ) -> None:
+        if self._merge_context is not None and self._merge_context.event_id == event.event_id:
+            self._merge_context.merge_bbox = merged_candidate.bbox
+            self._merge_context.last_frame = merged_candidate.frame_index
+            return
+        if (
+            self._last_visible_target is None
+            or self._last_visible_background is None
+        ):
+            self._merge_context = None
+            return
+        self._merge_context = MergeEventContext(
+            event_id=event.event_id,
+            target_candidate_id=self._last_visible_target.candidate_id,
+            background_track_id=self._last_visible_background.candidate_id,
+            anchor_track_ids=tuple(anchor.track_id for anchor in self._current_anchors),
+            premerge_target_point=self._last_visible_target.center,
+            premerge_target_bbox=self._last_visible_target.bbox,
+            premerge_background_bbox=self._last_visible_background.bbox,
+            merge_bbox=merged_candidate.bbox,
+            opened_frame=self._last_visible_target.frame_index,
+            last_frame=merged_candidate.frame_index,
+        )
+
+    def _remember_visible_pair(
+        self,
+        target_candidate: Candidate | None,
+        background_candidate: Candidate | None,
+    ) -> None:
+        if target_candidate is not None:
+            self._last_visible_target = target_candidate
+        if background_candidate is not None:
+            self._last_visible_background = background_candidate
 
     def _remember_background_relation(
         self,
