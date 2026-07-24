@@ -1,7 +1,7 @@
 # 병합된 투명도형의 배경 상대 좌표와 분리 신분을 복원합니다.
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from math import hypot
 from statistics import median
@@ -100,6 +100,10 @@ def nearest_background_anchors(
 class _BackgroundAnchorTrack:
     track_id: str
     observations: dict[int, AnchorObservation]
+    qualification_by_frame: dict[int, "_AnchorQualificationSnapshot"] = field(
+        default_factory=dict
+    )
+    lifetime_disqualified_reason: str | None = None
     qualified_cycle: bool = False
     cycle_survival: float = 0.0
     loop_residual: float | None = None
@@ -108,6 +112,15 @@ class _BackgroundAnchorTrack:
     @property
     def latest_observation(self) -> AnchorObservation:
         return self.observations[max(self.observations)]
+
+
+@dataclass(frozen=True)
+class _AnchorQualificationSnapshot:
+    stable_observations: int
+    qualified_cycle: bool
+    cycle_survival: float
+    loop_residual: float | None
+    disqualified_reason: str | None
 
 
 class BackgroundAnchorManager:
@@ -306,15 +319,29 @@ class BackgroundAnchorManager:
         track.loop_residual = None
         track.disqualified_reason = None
         if not self._has_cycle_gate(phase_context):
+            self._record_qualification_snapshot(track, frame_index)
             return
 
         assert phase_context is not None
-        reference_frame = frame_index - int(phase_context.local_lag)
-        if reference_frame not in track.observations:
-            track.disqualified_reason = "cycle_incomplete"
+        self._update_lifetime_disqualification(track)
+        if track.lifetime_disqualified_reason is not None:
+            track.disqualified_reason = track.lifetime_disqualified_reason
+            self._record_qualification_snapshot(track, frame_index)
             return
 
-        cycle_frames = range(reference_frame, frame_index + 1)
+        cycle_start = frame_index - int(phase_context.period)
+        reference_frame = frame_index - int(phase_context.local_lag)
+        if cycle_start not in track.observations:
+            track.disqualified_reason = "cycle_incomplete"
+            self._record_qualification_snapshot(track, frame_index)
+            return
+        if reference_frame not in track.observations:
+            track.disqualified_reason = "cycle_reference"
+            self._record_qualification_snapshot(track, frame_index)
+            return
+
+        # Skipped frame indexes count as missing expected cycle observations.
+        cycle_frames = range(cycle_start, frame_index + 1)
         observed_frames = [
             observed_frame
             for observed_frame in cycle_frames
@@ -325,9 +352,11 @@ class BackgroundAnchorManager:
         largest_gap = self._largest_cycle_gap(cycle_frames, track.observations)
         if track.cycle_survival < self.minimum_cycle_survival:
             track.disqualified_reason = "cycle_survival"
+            self._record_qualification_snapshot(track, frame_index)
             return
         if largest_gap / max(1, total_frames) > self.maximum_cycle_gap_ratio:
             track.disqualified_reason = "cycle_gap"
+            self._record_qualification_snapshot(track, frame_index)
             return
 
         reference = track.observations[reference_frame]
@@ -343,14 +372,40 @@ class BackgroundAnchorManager:
             > self.loop_position_tolerance
         ):
             track.disqualified_reason = "period_score"
+            self._record_qualification_snapshot(track, frame_index)
             return
         if track.loop_residual > self.loop_position_tolerance:
             track.disqualified_reason = "loop_position"
+            self._record_qualification_snapshot(track, frame_index)
             return
         if self._shape_residual(reference, current) > self.loop_shape_tolerance:
             track.disqualified_reason = "loop_shape"
+            self._record_qualification_snapshot(track, frame_index)
             return
         track.qualified_cycle = True
+        self._record_qualification_snapshot(track, frame_index)
+
+    @staticmethod
+    def _update_lifetime_disqualification(track: _BackgroundAnchorTrack) -> None:
+        if track.lifetime_disqualified_reason is not None:
+            return
+        if any(observation.clipped for observation in track.observations.values()):
+            track.lifetime_disqualified_reason = "cycle_clipped"
+        elif any(observation.merge_like for observation in track.observations.values()):
+            track.lifetime_disqualified_reason = "cycle_merge_like"
+
+    @staticmethod
+    def _record_qualification_snapshot(
+        track: _BackgroundAnchorTrack,
+        frame_index: int,
+    ) -> None:
+        track.qualification_by_frame[frame_index] = _AnchorQualificationSnapshot(
+            stable_observations=len(track.observations),
+            qualified_cycle=track.qualified_cycle,
+            cycle_survival=track.cycle_survival,
+            loop_residual=track.loop_residual,
+            disqualified_reason=track.disqualified_reason,
+        )
 
     @staticmethod
     def _largest_cycle_gap(
@@ -396,16 +451,37 @@ class BackgroundAnchorManager:
         observation: AnchorObservation | None = None,
     ) -> BackgroundAnchor:
         current = observation or track.latest_observation
+        snapshot = track.qualification_by_frame.get(current.frame_index)
         return BackgroundAnchor(
             track_id=track.track_id,
             point=current.point,
-            stable_observations=len(track.observations),
+            stable_observations=(
+                snapshot.stable_observations
+                if snapshot is not None
+                else len(track.observations)
+            ),
             clipped=current.clipped,
             candidate_id=current.candidate_id,
-            qualified_cycle=track.qualified_cycle,
-            cycle_survival=track.cycle_survival,
-            loop_residual=track.loop_residual,
-            disqualified_reason=track.disqualified_reason,
+            qualified_cycle=(
+                snapshot.qualified_cycle
+                if snapshot is not None
+                else track.qualified_cycle
+            ),
+            cycle_survival=(
+                snapshot.cycle_survival
+                if snapshot is not None
+                else track.cycle_survival
+            ),
+            loop_residual=(
+                snapshot.loop_residual
+                if snapshot is not None
+                else track.loop_residual
+            ),
+            disqualified_reason=(
+                snapshot.disqualified_reason
+                if snapshot is not None
+                else track.disqualified_reason
+            ),
         )
 
 

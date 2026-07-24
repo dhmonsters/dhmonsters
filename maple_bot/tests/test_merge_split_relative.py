@@ -517,6 +517,169 @@ class BackgroundAnchorManagerTest(unittest.TestCase):
 
         self.assertFalse(any(anchor.qualified_cycle for anchor in anchors))
 
+    def test_clipped_cycle_observation_permanently_disqualifies_track(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        for frame, candidate in enumerate(
+            (
+                _center_candidate("clip-0", (6.0, 40.0)),
+                _center_candidate("clip-1", (1.0, 40.0)),
+                _center_candidate("clip-2", (6.0, 40.0)),
+                _center_candidate("clip-3", (6.0, 40.0)),
+            )
+        ):
+            anchors = manager.update(
+                frame_index=frame,
+                candidates=(candidate,),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=10.0,
+                phase_context=phase,
+            )
+
+        track_id = manager.track_id_for_candidate("clip-0")
+        current = manager.reference_anchor(track_id or "", 3)
+
+        self.assertEqual(anchors, ())
+        self.assertIsNotNone(current)
+        self.assertFalse(current.qualified_cycle)
+        self.assertEqual(current.disqualified_reason, "cycle_clipped")
+
+    def test_merge_like_cycle_observation_permanently_disqualifies_track(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        for frame in range(4):
+            candidate = _center_candidate(f"merge-{frame}", (20.0, 40.0))
+            anchors = manager.update(
+                frame_index=frame,
+                candidates=(candidate,),
+                target_candidate=None,
+                evidence=(
+                    {
+                        candidate.candidate_id: CandidateEvidence(
+                            candidate_id=candidate.candidate_id,
+                            merge_likelihood=1.0,
+                        )
+                    }
+                    if frame == 1
+                    else {}
+                ),
+                frame_shape=(100, 100),
+                stable_scale_px=10.0,
+                phase_context=phase,
+            )
+
+        track_id = manager.track_id_for_candidate("merge-0")
+        current = manager.reference_anchor(track_id or "", 3)
+
+        self.assertEqual(anchors, ())
+        self.assertIsNotNone(current)
+        self.assertFalse(current.qualified_cycle)
+        self.assertEqual(current.disqualified_reason, "cycle_merge_like")
+
+    def test_anchor_rejects_failed_loop_closure(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        for frame, x in enumerate((20.0, 25.0, 30.0, 29.0)):
+            anchors = manager.update(
+                frame_index=frame,
+                candidates=(_center_candidate(f"loop-{frame}", (x, 40.0)),),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=10.0,
+                phase_context=phase,
+            )
+
+        track_id = manager.track_id_for_candidate("loop-0")
+        current = manager.reference_anchor(track_id or "", 3)
+
+        self.assertEqual(anchors, ())
+        self.assertIsNotNone(current)
+        self.assertEqual(current.disqualified_reason, "loop_position")
+
+    def test_cycle_survival_and_gap_at_configured_boundary_qualify(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(
+            minimum_stable_observations=1,
+            minimum_cycle_survival=0.8,
+            maximum_cycle_gap_ratio=0.2,
+        )
+        phase = module.CyclePhaseContext(period=4, local_lag=4)
+        for frame, x in ((0, 20.0), (1, 22.0), (3, 24.0), (4, 20.0)):
+            anchors = manager.update(
+                frame_index=frame,
+                candidates=(_center_candidate(f"gap-{frame}", (x, 40.0)),),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=10.0,
+                phase_context=phase,
+            )
+
+        self.assertEqual(len(anchors), 1)
+        self.assertTrue(anchors[0].qualified_cycle)
+        self.assertEqual(anchors[0].cycle_survival, 0.8)
+
+    def test_period_window_must_complete_when_local_lag_is_shorter(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        phase = module.CyclePhaseContext(period=5, local_lag=3)
+        for frame, x in enumerate((20.0, 25.0, 30.0, 20.0)):
+            anchors = manager.update(
+                frame_index=frame,
+                candidates=(_center_candidate(f"period-{frame}", (x, 40.0)),),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=10.0,
+                phase_context=phase,
+            )
+
+        track_id = manager.track_id_for_candidate("period-0")
+        current = manager.reference_anchor(track_id or "", 3)
+
+        self.assertEqual(anchors, ())
+        self.assertIsNotNone(current)
+        self.assertEqual(current.disqualified_reason, "cycle_incomplete")
+
+    def test_reference_anchor_keeps_its_frame_qualification_snapshot(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        manager = module.BackgroundAnchorManager(minimum_stable_observations=1)
+        phase = module.CyclePhaseContext(period=3, local_lag=3)
+        for frame, x in enumerate((20.0, 25.0, 30.0)):
+            manager.update(
+                frame_index=frame,
+                candidates=(_center_candidate(f"snapshot-{frame}", (x, 40.0)),),
+                target_candidate=None,
+                evidence={},
+                frame_shape=(100, 100),
+                stable_scale_px=10.0,
+                phase_context=phase,
+            )
+
+        track_id = manager.track_id_for_candidate("snapshot-0")
+        before_completion = manager.reference_anchor(track_id or "", 0)
+        manager.update(
+            frame_index=3,
+            candidates=(_center_candidate("snapshot-3", (20.0, 40.0)),),
+            target_candidate=None,
+            evidence={},
+            frame_shape=(100, 100),
+            stable_scale_px=10.0,
+            phase_context=phase,
+        )
+        after_completion = manager.reference_anchor(track_id or "", 0)
+
+        self.assertIsNotNone(before_completion)
+        self.assertIsNotNone(after_completion)
+        self.assertFalse(before_completion.qualified_cycle)
+        self.assertFalse(after_completion.qualified_cycle)
+
 
 class MergeSplitRelativeResolverTest(unittest.TestCase):
     def test_partial_overlap_refreshes_visible_background_fingerprint(self) -> None:
