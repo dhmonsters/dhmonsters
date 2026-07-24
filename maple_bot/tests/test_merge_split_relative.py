@@ -320,6 +320,69 @@ class MergeSplitEventDetectorTest(unittest.TestCase):
         self.assertEqual(later.event_id, completed.event_id)
 
 
+class SplitChildPairSelectionTest(unittest.TestCase):
+    def test_split_pair_contains_only_event_descendants(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target-before-merge",
+            background_track_id="background-track",
+            anchor_track_ids=("anchor-a", "anchor-b"),
+            premerge_target_point=(35.0, 45.0),
+            premerge_target_bbox=(30.0, 40.0, 40.0, 50.0),
+            premerge_background_bbox=(38.0, 40.0, 48.0, 50.0),
+            merge_bbox=(30.0, 40.0, 48.0, 50.0),
+            opened_frame=12,
+            last_frame=14,
+        )
+
+        pair = module.select_split_child_pair(
+            context=context,
+            candidates=(
+                _candidate("target-child", (32.0, 40.0, 42.0, 50.0)),
+                _candidate("background-child", (40.0, 40.0, 50.0, 50.0)),
+                _candidate("near-distractor", (24.0, 36.0, 34.0, 46.0)),
+                _candidate("far-distractor", (80.0, 80.0, 90.0, 90.0)),
+            ),
+            predicted_target_point=(38.0, 45.0),
+            stable_scale_px=10.0,
+        )
+
+        self.assertIsNotNone(pair)
+        self.assertEqual(
+            {candidate.candidate_id for candidate in pair.children},
+            {"target-child", "background-child"},
+        )
+
+    def test_split_pair_holds_when_best_pair_is_ambiguous(self) -> None:
+        module = importlib.import_module("core.puzzle.merge_split_relative")
+        context = module.MergeEventContext(
+            event_id=1,
+            target_candidate_id="target-before-merge",
+            background_track_id="background-track",
+            anchor_track_ids=("anchor-a", "anchor-b"),
+            premerge_target_point=(35.0, 45.0),
+            premerge_target_bbox=(30.0, 40.0, 40.0, 50.0),
+            premerge_background_bbox=(38.0, 40.0, 48.0, 50.0),
+            merge_bbox=(30.0, 40.0, 48.0, 50.0),
+            opened_frame=12,
+            last_frame=14,
+        )
+
+        pair = module.select_split_child_pair(
+            context=context,
+            candidates=(
+                _candidate("target-child-a", (32.0, 40.0, 42.0, 50.0)),
+                _candidate("target-child-b", (32.2, 40.0, 42.2, 50.0)),
+                _candidate("background-child", (40.0, 40.0, 50.0, 50.0)),
+            ),
+            predicted_target_point=(38.0, 45.0),
+            stable_scale_px=10.0,
+        )
+
+        self.assertIsNone(pair)
+
+
 class SplitChildAssignmentTest(unittest.TestCase):
     def test_non_background_incumbent_is_preserved_over_closer_prediction(self) -> None:
         module = importlib.import_module("core.puzzle.merge_split_relative")
@@ -923,6 +986,10 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertEqual(decision.target_candidate_id, "target-child")
         self.assertEqual(decision.target_point, (33.0, 31.0))
         self.assertNotIn("far-distractor", decision.debug["local_child_ids"])
+        self.assertEqual(
+            set(decision.debug["split_child_pair_ids"]),
+            {"target-child", "background-child"},
+        )
         self.assertIn("predicted_target_point", decision.debug)
 
     def test_split_assignment_remains_available_for_three_observations(self) -> None:

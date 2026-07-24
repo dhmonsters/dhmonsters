@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from itertools import combinations
 from math import hypot
 from statistics import median
 from typing import Mapping, Sequence
@@ -635,6 +636,81 @@ class MergeEventContext:
 
 
 @dataclass(frozen=True)
+class SplitChildPair:
+    children: tuple[Candidate, Candidate]
+    union_residual: float
+    ancestry_residual: float
+    score_margin: float
+
+
+def select_split_child_pair(
+    *,
+    context: MergeEventContext,
+    candidates: Sequence[Candidate],
+    predicted_target_point: Point,
+    stable_scale_px: float,
+) -> SplitChildPair | None:
+    if len(candidates) < 2:
+        return None
+
+    scale = max(1e-6, float(stable_scale_px))
+    merge_bbox = context.merge_bbox or _bbox_union(
+        context.premerge_target_bbox,
+        context.premerge_background_bbox,
+    )
+    premerge_sizes = (
+        _bbox_size(context.premerge_target_bbox),
+        _bbox_size(context.premerge_background_bbox),
+    )
+    scored_pairs: list[tuple[float, float, float, tuple[Candidate, Candidate]]] = []
+    for left, right in combinations(candidates, 2):
+        child_union = _bbox_union(left.bbox, right.bbox)
+        union_residual = _bbox_edge_residual(child_union, merge_bbox, scale)
+        ancestry_residual = min(
+            _bbox_size_residual(left.bbox, premerge_sizes[0], scale)
+            + _bbox_size_residual(right.bbox, premerge_sizes[1], scale),
+            _bbox_size_residual(left.bbox, premerge_sizes[1], scale)
+            + _bbox_size_residual(right.bbox, premerge_sizes[0], scale),
+        )
+        merge_region_residual = (
+            _point_to_bbox_distance(left.center, merge_bbox)
+            + _point_to_bbox_distance(right.center, merge_bbox)
+        ) / (2.0 * scale)
+        predicted_target_residual = min(
+            hypot(
+                left.center[0] - predicted_target_point[0],
+                left.center[1] - predicted_target_point[1],
+            ),
+            hypot(
+                right.center[0] - predicted_target_point[0],
+                right.center[1] - predicted_target_point[1],
+            ),
+        ) / scale
+        cost = (
+            union_residual
+            + 0.75 * ancestry_residual
+            + 0.50 * merge_region_residual
+            + 0.25 * predicted_target_residual
+        )
+        scored_pairs.append((cost, union_residual, ancestry_residual, (left, right)))
+
+    scored_pairs.sort(key=lambda row: row[0])
+    best_cost, union_residual, ancestry_residual, children = scored_pairs[0]
+    runner_up_cost = scored_pairs[1][0] if len(scored_pairs) > 1 else None
+    score_margin = (
+        runner_up_cost - best_cost if runner_up_cost is not None else float("inf")
+    )
+    if score_margin <= 0.15:
+        return None
+    return SplitChildPair(
+        children=children,
+        union_residual=union_residual,
+        ancestry_residual=ancestry_residual,
+        score_margin=score_margin,
+    )
+
+
+@dataclass(frozen=True)
 class MergeEvent:
     event_id: int
     state: MergeState
@@ -772,6 +848,7 @@ class MergeSplitRelativeResolver:
         self._target_points: list[Point] = []
         self._current_anchors: tuple[BackgroundAnchor, ...] = ()
         self._fingerprint: RelationFingerprint | None = None
+        self._merge_context: MergeEventContext | None = None
         self._merge_center: Point | None = None
         self._merge_bbox: tuple[float, float, float, float] | None = None
         self._split_recovery_remaining = 0
@@ -835,6 +912,7 @@ class MergeSplitRelativeResolver:
             )
             self._remember_target(target_candidate)
             self._remember_background_relation(collision, evidence, scale)
+            self._merge_context = None
             self._merge_center = None
             self._merge_bbox = None
             return self._event_hold(event, "separate")
@@ -873,6 +951,11 @@ class MergeSplitRelativeResolver:
                     target_candidate.bbox,
                     overlapping.bbox,
                 )
+                self._refresh_merge_context(
+                    event=event,
+                    target_candidate=target_candidate,
+                    background_candidate=overlapping,
+                )
                 self._remember_target(target_candidate)
                 self._remember_background_relation(overlapping, evidence, scale)
             return self._event_hold(event, "partial_overlap")
@@ -881,6 +964,9 @@ class MergeSplitRelativeResolver:
             if merged is not None:
                 self._merge_center = merged.center
                 self._merge_bbox = merged.bbox
+                if self._merge_context is not None:
+                    self._merge_context.merge_bbox = merged.bbox
+                    self._merge_context.last_frame = merged.frame_index
             self._advance_latent_target(incumbent_point)
             return self._event_hold(event, "merged_identity_hold")
 
@@ -904,8 +990,21 @@ class MergeSplitRelativeResolver:
                 incumbent_point,
                 candidate_tuple,
             )
+            split_pair = (
+                select_split_child_pair(
+                    context=self._merge_context,
+                    candidates=local_children,
+                    predicted_target_point=predicted_target_point,
+                    stable_scale_px=scale,
+                )
+                if self._merge_context is not None
+                else None
+            )
+            if split_pair is None:
+                self._split_recovery_remaining -= 1
+                return self._event_hold(event, "split_pair_ambiguous")
             decision = assign_split_children(
-                children=local_children,
+                children=split_pair.children,
                 anchors=self._current_anchors,
                 fingerprint=self._fingerprint,
                 predicted_target_point=predicted_target_point,
@@ -933,6 +1032,12 @@ class MergeSplitRelativeResolver:
                     "local_child_ids": tuple(
                         candidate.candidate_id for candidate in local_children
                     ),
+                    "split_child_pair_ids": tuple(
+                        candidate.candidate_id for candidate in split_pair.children
+                    ),
+                    "split_pair_union_residual": split_pair.union_residual,
+                    "split_pair_ancestry_residual": split_pair.ancestry_residual,
+                    "split_pair_score_margin": split_pair.score_margin,
                 },
             )
 
@@ -943,6 +1048,32 @@ class MergeSplitRelativeResolver:
             return
         self._target_points.append(candidate.center)
         self._target_points = self._target_points[-8:]
+
+    def _refresh_merge_context(
+        self,
+        *,
+        event: MergeEvent,
+        target_candidate: Candidate,
+        background_candidate: Candidate,
+    ) -> None:
+        if self._merge_context is None or self._merge_context.event_id != event.event_id:
+            self._merge_context = MergeEventContext(
+                event_id=event.event_id,
+                target_candidate_id=target_candidate.candidate_id,
+                background_track_id=background_candidate.candidate_id,
+                anchor_track_ids=tuple(
+                    anchor.track_id for anchor in self._current_anchors
+                ),
+                premerge_target_point=target_candidate.center,
+                premerge_target_bbox=target_candidate.bbox,
+                premerge_background_bbox=background_candidate.bbox,
+                merge_bbox=self._merge_bbox,
+                opened_frame=target_candidate.frame_index,
+                last_frame=target_candidate.frame_index,
+            )
+            return
+        self._merge_context.merge_bbox = self._merge_bbox
+        self._merge_context.last_frame = target_candidate.frame_index
 
     def _remember_background_relation(
         self,
@@ -1130,6 +1261,29 @@ def _bbox_union(
         max(left[2], right[2]),
         max(left[3], right[3]),
     )
+
+
+def _bbox_size(bbox: tuple[float, float, float, float]) -> tuple[float, float]:
+    return (max(0.0, bbox[2] - bbox[0]), max(0.0, bbox[3] - bbox[1]))
+
+
+def _bbox_size_residual(
+    bbox: tuple[float, float, float, float],
+    expected_size: tuple[float, float],
+    scale: float,
+) -> float:
+    width, height = _bbox_size(bbox)
+    return (
+        abs(width - expected_size[0]) + abs(height - expected_size[1])
+    ) / (2.0 * scale)
+
+
+def _bbox_edge_residual(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+    scale: float,
+) -> float:
+    return sum(abs(left[index] - right[index]) for index in range(4)) / (4.0 * scale)
 
 
 def _is_duplicate_observation(left: Candidate, right: Candidate) -> bool:
