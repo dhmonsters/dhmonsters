@@ -1492,6 +1492,41 @@ class MergeSplitRelativeResolverTest(unittest.TestCase):
         self.assertIsNone(resolver._merge_context)
         self.assertIsNone(resolver._last_visible_pair)
 
+    def test_expired_ambiguous_recovery_drops_visible_pair_before_new_direct_merge(
+        self,
+    ) -> None:
+        module, resolver, anchor_a, anchor_b, target_child, background_child = (
+            self._start_resolved_split_stabilization(confirm_observations=1)
+        )
+        ambiguous_child = _center_candidate("ambiguous-child", target_child.center)
+        holds = []
+        for _ in range(3):
+            holds.append(
+                resolver.update(
+                    incumbent_point=target_child.center,
+                    candidates=(ambiguous_child, anchor_a, anchor_b),
+                    evidence={},
+                    stable_area=4.0,
+                    frame_shape=(100, 100),
+                )
+            )
+
+        self.assertEqual(holds[-1].reason, "split_recovery_expired")
+        self.assertIsNone(resolver._last_visible_pair)
+
+        merged = _candidate("new-merged", (28.0, 26.0, 38.0, 36.0))
+        decision = resolver.update(
+            incumbent_point=target_child.center,
+            candidates=(merged, anchor_a, anchor_b),
+            evidence={},
+            stable_area=4.0,
+            frame_shape=(100, 100),
+        )
+
+        self.assertEqual(decision.state, module.MergeState.MERGED)
+        self.assertEqual(decision.debug["event_id"], 2)
+        self.assertIsNone(resolver._merge_context)
+
     def test_direct_merge_rejects_visible_pair_stale_after_collision_free_observation(
         self,
     ) -> None:

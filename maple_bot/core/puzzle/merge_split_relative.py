@@ -1325,6 +1325,7 @@ class MergeSplitRelativeResolver:
         self._event_detector.complete_split_recovery()
         self._clear_split_recovery()
         self._merge_context = None
+        self._last_visible_pair = None
         self._merge_center = None
         self._merge_bbox = None
         expired_event = MergeEvent(
