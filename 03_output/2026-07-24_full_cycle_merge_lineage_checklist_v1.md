@@ -20,7 +20,7 @@
 - [x] Task 3. 하나의 병합 사건 ID와 참가자 계보를 고정한다.
 - [x] Task 4. 같은 사건의 분리 자식 두 개만 선별한다.
 - [x] Task 5. 위상 보정 상대좌표와 HOLD 판정을 연결한다.
-- [ ] Task 6. Studio opt-in shadow에 period/lag와 진단 로그를 연결한다.
+- [x] Task 6. Studio opt-in shadow에 period/lag와 진단 로그를 연결한다.
 
 ## 검증
 
