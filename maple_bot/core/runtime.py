@@ -384,7 +384,22 @@ class BotRuntime:
 
         # 痢듬퀎 諛섎났 ?щ깷 猷⑦듃 ?ㅽ뻾湲???route_mode + route ?덉쑝硫?蹂꾨룄 ?ㅻ젅?쒕줈 諛섎났 ?ㅽ뻾
         self.floor_hunt_runner = None
-        if config.route_mode and config.route_steps:
+        is_rednose2_route = (
+            config.route_mode
+            and config.route
+            and bool(config.rednose2_v5.get("enabled", True))
+            and config.hunt_ground_active.strip() == "\ube68\ucf542"
+        )
+        if is_rednose2_route:
+            self.floor_hunt_runner = RedNose2RouteRunner(
+                self.block_runner,
+                get_blocks=lambda: self._cfg.route,
+                is_active=self._route_can_run,
+                profile=config.rednose2_v5,
+                log_fn=lambda m: self.log(m, "?대룞"),
+                minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
+            )
+        elif config.route_mode and config.route_steps:
             self.route_input_owner = RouteInputOwner(self.humanizer)
             self.floor_hunt_runner = RouteStateRunner(
                 get_steps=lambda: self._cfg.route_steps,
@@ -393,15 +408,6 @@ class BotRuntime:
                 input_owner=self.route_input_owner,
                 block_runner=self.block_runner,
                 log_fn=lambda m: self.log(m, "?대룞"),
-            )
-        elif config.route_mode and config.route and config.hunt_ground_active.strip() == "鍮⑥퐫2":
-            self.floor_hunt_runner = RedNose2RouteRunner(
-                self.block_runner,
-                get_blocks=lambda: self._cfg.route,
-                is_active=self._route_can_run,
-                profile=config.rednose2_v5,
-                log_fn=lambda m: self.log(m, "?대룞"),
-                minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif config.route_mode and config.route:
             self.floor_hunt_runner = LegacyRouteGuard(
