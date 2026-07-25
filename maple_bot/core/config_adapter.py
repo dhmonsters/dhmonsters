@@ -1,4 +1,4 @@
-# config_adapter — config.json 딕셔너리를 RuntimeConfig로 매핑 (기존 설정 ↔ 신규 런타임 다리)
+﻿# config_adapter ??config.json ?뺤뀛?덈━瑜?RuntimeConfig濡?留ㅽ븨 (湲곗〈 ?ㅼ젙 ???좉퇋 ?고????ㅻ━)
 from __future__ import annotations
 
 try:
@@ -42,7 +42,7 @@ from core.navigation.world_map import ActionSpec, WorldMapModel
 
 
 class _DictConfigView:
-    """dict 설정을 ConfigManager.get 형태로 읽게 해주는 자동판매용 어댑터."""
+    """dict ?ㅼ젙??ConfigManager.get ?뺥깭濡??쎄쾶 ?댁＜???먮룞?먮ℓ???대뙌??"""
 
     def __init__(self, data: dict):
         self._data = data
@@ -57,7 +57,7 @@ class _DictConfigView:
 
 
 def _resolve_window_ratio_region(region_cfg: dict, window_title: str) -> dict | None:
-    """게임창 기준 비율 영역을 현재 게임창 화면 좌표로 변환한다."""
+    """寃뚯엫李?湲곗? 鍮꾩쑉 ?곸뿭???꾩옱 寃뚯엫李??붾㈃ 醫뚰몴濡?蹂?섑븳??"""
     try:
         from core.puzzle.game_window import (
             find_game_hwnd,
@@ -87,8 +87,40 @@ def _resolve_window_ratio_region(region_cfg: dict, window_title: str) -> dict | 
         return None
 
 
+def _legacy_absolute_region_to_window_ratio(region_cfg, window_title: str) -> dict | None:
+    """예전 절대좌표 거탐 영역을 현재 게임창 기준 상대좌표로 변환한다."""
+    try:
+        from core.puzzle.game_window import (
+            find_game_hwnd,
+            find_window_hwnd_by_title,
+            get_game_client_rect_screen,
+        )
+
+        hwnd = None
+        if window_title:
+            hwnd = find_window_hwnd_by_title(window_title)
+        if not hwnd:
+            hwnd = find_game_hwnd()
+        if not hwnd:
+            return None
+
+        left, top, width, height = get_game_client_rect_screen(hwnd)
+        if width <= 0 or height <= 0:
+            return None
+
+        x, y, w, h = [int(v) for v in region_cfg]
+        return {
+            "x_ratio": max(0.0, min(1.0, (x - left) / width)),
+            "y_ratio": max(0.0, min(1.0, (y - top) / height)),
+            "w_ratio": max(0.001, min(1.0, w / width)),
+            "h_ratio": max(0.001, min(1.0, h / height)),
+            "legacy_region": [x, y, w, h],
+        }
+    except Exception:
+        return None
+
 def _potion_rule(cfg: dict) -> PotionRule:
-    """recovery.hp_potion/mp_potion 딕셔너리 → PotionRule. threshold %→비율."""
+    """recovery.hp_potion/mp_potion ?뺤뀛?덈━ ??PotionRule. threshold %?믩퉬??"""
     return PotionRule(
         enabled=bool(cfg.get("enabled", False)),
         key=cfg.get("key", ""),
@@ -120,12 +152,12 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
         "fixed_minimap_region": {"left": 38, "top": 129, "width": 172, "height": 103},
         "attack_key": "end",
         "teleport_key": "x",
-        "attack_hold_sec": 0.08,
+        "attack_hold_sec": 0.9,
         "retry_attack_hold_sec": 1.5,
-        "teleport_hold_sec": 0.05,
+        "teleport_hold_sec": 0.3,
         "teleport_step_px": 13.0,
         "teleport_interval_sec": 0.4,
-        "attack_to_teleport_sec": 0.05,
+        "attack_to_teleport_sec": 0.5,
         "floor2_hunt_teleport_interval_sec": 0.4,
         "floor2_right_edge_teleport_interval_sec": 1.8,
         "close_walk_px": 8,
@@ -144,13 +176,13 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
         "floor3_y_min": 47,
         "floor3_y_max": 51,
         "stair7_x": 41,
-        "stair7_x_min": 37,
-        "stair7_x_max": 45,
+        "stair7_x_min": 38,
+        "stair7_x_max": 44,
         "stair7_y": 67,
         "stair7_return_y_min": 61,
         "stair7_return_y_max": 63,
         "stair7_right_bias_x": 45,
-        "stair7_right_bias_correct_sec": 0.02,
+        "stair7_right_bias_correct_sec": 0.0,
         "stair7_right_teleport_hold_sec": 0.1,
         "stair7_right_teleport_lead_sec": 0.02,
         "platform24_approach_x": 43,
@@ -180,7 +212,7 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     return forced
 
 def _buffs(attack: dict) -> list[Buff]:
-    """attack.normal_buffs/toggle_buffs → Buff 리스트 (활성+키 있는 것만)."""
+    """attack.normal_buffs/toggle_buffs ??Buff 由ъ뒪??(?쒖꽦+???덈뒗 寃껊쭔)."""
     out: list[Buff] = []
     for group in ("normal_buffs", "toggle_buffs"):
         for b in attack.get(group, []) or []:
@@ -196,16 +228,16 @@ def _buffs(attack: dict) -> list[Buff]:
 
 
 def _floors(zones: list) -> list[Floor]:
-    """zones → Floor 리스트 (Y 범위만)."""
+    """zones ??Floor 由ъ뒪??(Y 踰붿쐞留?."""
     return [
-        Floor(name=z.get("name", "구역"),
+        Floor(name=z.get("name", "援ъ뿭"),
               y_min=int(z.get("y_min", 0)), y_max=int(z.get("y_max", 0)))
         for z in (zones or [])
     ]
 
 
 def to_runtime_config(d: dict) -> RuntimeConfig:
-    """config.json 전체 딕셔너리 → RuntimeConfig."""
+    """config.json ?꾩껜 ?뺤뀛?덈━ ??RuntimeConfig."""
     mm = d.get("minimap", {})
     minimap_region = {
         "left": int(mm.get("region_x", 0)),
@@ -218,7 +250,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         if all(k in mm for k in ("char_r", "char_g", "char_b"))
         else None
     )
-    # 노란 캐릭터 점 기준: 빨강/흰색 등 잘못 저장된 색상은 노란색으로 보정한다.
+    # ?몃? 罹먮┃????湲곗?: 鍮④컯/?곗깋 ???섎せ ??λ맂 ?됱긽? ?몃??됱쑝濡?蹂댁젙?쒕떎.
     char_rgb = (
         raw_char_rgb
         if raw_char_rgb is not None
@@ -236,7 +268,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     ladder_profile = d.get("ladder_profile", {}) or {}
     attack_key = attack.get("key", "") or d.get("minimap", {}).get("attack_key", "")
 
-    # 사냥 영역 (B training) — w>0이면 region dict, 아니면 None(전체화면)
+    # ?щ깷 ?곸뿭 (B training) ??w>0?대㈃ region dict, ?꾨땲硫?None(?꾩껜?붾㈃)
     ha = attack.get("hunt_area", {})
     hunt_area_region = None
     if int(ha.get("w", 0)) > 0:
@@ -272,7 +304,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
             ),
         )
 
-    # 몬스터 템플릿 수집 (단일 monster_template + monster_folder 내 png들 = B 다중방식)
+    # 紐ъ뒪???쒗뵆由??섏쭛 (?⑥씪 monster_template + monster_folder ??png??= B ?ㅼ쨷諛⑹떇)
     import os, glob as _glob
     monster_tpls = []
     mt = attack.get("monster_template", "")
@@ -282,14 +314,14 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     if mf and os.path.isdir(mf):
         monster_tpls += sorted(_glob.glob(os.path.join(mf, "*.png")))
 
-    # 순찰: 첫 zone의 좌우 경계 + 랜덤 마진
+    # ?쒖같: 泥?zone??醫뚯슦 寃쎄퀎 + ?쒕뜡 留덉쭊
     zones = d.get("zones", [])
     z0 = zones[0] if zones else {}
     patrol_left = int(z0.get("left_x", 0))
     patrol_right = int(z0.get("right_x", 0))
     patrol_margin = int(z0.get("random_margin_max", 0))
 
-    # 펫 먹이 / 텔레그램 / 유저감지
+    # ??癒뱀씠 / ?붾젅洹몃옩 / ?좎?媛먯?
     pet = recovery.get("pet_food", {})
     pet_key = pet.get("key", "") if pet.get("enabled") else ""
     pet_interval = float(pet.get("interval_min", 10)) * 60
@@ -303,10 +335,12 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     if isinstance(lie_region, dict) and lie_region.get("x_ratio") is not None:
         lie_detect_region = dict(lie_region)
     elif isinstance(lie_region, (list, tuple)) and len(lie_region) == 4:
-        lie_detect_region = {
-            "left": int(lie_region[0]), "top": int(lie_region[1]),
-            "width": int(lie_region[2]), "height": int(lie_region[3]),
-        }
+        lie_detect_region = _legacy_absolute_region_to_window_ratio(lie_region, game_window_title)
+        if lie_detect_region is None:
+            lie_detect_region = {
+                "left": int(lie_region[0]), "top": int(lie_region[1]),
+                "width": int(lie_region[2]), "height": int(lie_region[3]),
+            }
 
     rednose2_profile = _rednose2_v5_profile(d, attack)
     fixed_rednose_mm = rednose2_profile.get("fixed_minimap_region")
@@ -421,3 +455,4 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         atk_y_max=int(attack.get("atk_y_max", 70)),
         name_threshold=float(attack.get("name_tag_threshold", 0.7)),
     )
+

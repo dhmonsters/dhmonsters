@@ -1,4 +1,4 @@
-{
+﻿{
   "settings1": {
     "lie_detector": {
       "enabled": true,
@@ -20,7 +20,7 @@
       "tg_enabled": true,
       "tg_token": "8992873788:AAHn_hg6_rfjgePxT6fXM1CXZBGQxA8dlAY",
       "tg_chat_id": "7451349217",
-      "tg_prefix": "메인",
+      "tg_prefix": "硫붿씤",
       "yolo_model_path": "models/lie_detector.pt"
     },
     "transparent_shape": {
@@ -43,9 +43,9 @@
       "enabled": false,
       "interval_minutes": 5,
       "messages": [
-        "자리입니다.^^",
-        "비켜주시겠어요?",
-        "다른곳에서 사냥해주세요~"
+        "?먮━?낅땲??^^",
+        "鍮꾩폒二쇱떆寃좎뼱??",
+        "?ㅻⅨ怨녹뿉???щ깷?댁＜?몄슂~"
       ]
     },
     "level_stop": {
@@ -90,7 +90,7 @@
     "sequences": [
       {
         "enabled": true,
-        "name": "연속기 1",
+        "name": "?곗냽湲?1",
         "keys": [
           "end",
           "x"
@@ -104,7 +104,7 @@
       }
     ],
     "monster_template": "",
-    "monster_folder": "templates\\hunt_monsters\\빨코2",
+    "monster_folder": "templates\\hunt_monsters\\鍮⑥퐫2",
     "jump_before_attack": false,
     "riding_on_rope": false,
     "range_px": 350,
@@ -178,9 +178,9 @@
   },
   "hunt_mode": "key",
   "hunt_grounds": {
-    "active": "빨코2",
+    "active": "鍮⑥퐫2",
     "presets": {
-      "빨코2": {
+      "鍮⑥퐫2": {
         "minimap": {
           "region_x": 38,
           "region_y": 129,
@@ -205,7 +205,7 @@
           "sequences": [
             {
               "enabled": true,
-              "name": "연속기 1",
+              "name": "?곗냽湲?1",
               "keys": [
                 "end",
                 "x"
@@ -219,7 +219,7 @@
             }
           ],
           "monster_template": "",
-          "monster_folder": "templates\\hunt_monsters\\빨코2",
+          "monster_folder": "templates\\hunt_monsters\\鍮⑥퐫2",
           "jump_before_attack": false,
           "riding_on_rope": false,
           "range_px": 350,
@@ -331,7 +331,7 @@
         },
         "zones": [
           {
-            "name": "1층",
+            "name": "1痢?,
             "left_x": 69,
             "right_x": 213,
             "y_min": 105,
@@ -348,7 +348,7 @@
             "rope_x_ratio": -1.0
           },
           {
-            "name": "2층",
+            "name": "2痢?,
             "left_x": 82,
             "right_x": 190,
             "y_min": 86,
@@ -357,7 +357,7 @@
             "random_margin_min": 0,
             "random_margin_max": 0,
             "sweeps": 11.0,
-            "key_pattern": "많이때리기 패턴",
+            "key_pattern": "留롮씠?뚮━湲??⑦꽩",
             "left_x_ratio": 0.3360655737704918,
             "right_x_ratio": 0.7786885245901639,
             "y_min_ratio": 0.5972222222222222,
@@ -412,7 +412,7 @@
           "teleport_key": "x",
           "teleport_step_px": 13.0,
           "teleport_interval_sec": 0.4,
-          "attack_to_teleport_sec": 0.05,
+          "attack_to_teleport_sec": 0.5,
           "floor2_hunt_teleport_interval_sec": 0.4,
           "floor2_right_edge_teleport_interval_sec": 1.8,
           "floor2_left_x": 55,
@@ -425,10 +425,10 @@
           "floor3_y_min": 47,
           "floor3_y_max": 51,
           "stair7_x": 41,
-          "stair7_x_min": 37,
-          "stair7_x_max": 45,
+          "stair7_x_min": 38,
+          "stair7_x_max": 44,
           "stair7_right_bias_x": 45,
-          "stair7_right_bias_correct_sec": 0.02,
+          "stair7_right_bias_correct_sec": 0.0,
           "stair7_right_teleport_hold_sec": 0.1,
           "stair7_right_teleport_lead_sec": 0.02,
           "platform24_approach_x": 43,
@@ -455,7 +455,7 @@
           "platform27_y_max": 50,
           "platform24_y": 61,
           "stair7_y": 62,
-          "teleport_hold_sec": 0.05,
+          "teleport_hold_sec": 0.3,
           "stair7_return_y_min": 61,
           "stair7_return_y_max": 63
         },
@@ -484,7 +484,7 @@
   },
   "zones": [
     {
-      "name": "1층",
+      "name": "1痢?,
       "left_x": 69,
       "right_x": 213,
       "y_min": 105,
@@ -501,7 +501,7 @@
       "rope_x_ratio": -1.0
     },
     {
-      "name": "2층",
+      "name": "2痢?,
       "left_x": 82,
       "right_x": 190,
       "y_min": 86,
@@ -510,7 +510,7 @@
       "random_margin_min": 0,
       "random_margin_max": 0,
       "sweeps": 11.0,
-      "key_pattern": "많이때리기 패턴",
+      "key_pattern": "留롮씠?뚮━湲??⑦꽩",
       "left_x_ratio": 0.3360655737704918,
       "right_x_ratio": 0.7786885245901639,
       "y_min_ratio": 0.5972222222222222,
@@ -523,7 +523,7 @@
   },
   "key_patterns": {
     "active": {
-      "name": "기본 패턴",
+      "name": "湲곕낯 ?⑦꽩",
       "loop": true,
       "between_min": 0.05,
       "between_max": 0.2,
@@ -555,8 +555,8 @@
       ]
     },
     "presets": {
-      "기본 패턴": {
-        "name": "기본 패턴",
+      "湲곕낯 ?⑦꽩": {
+        "name": "湲곕낯 ?⑦꽩",
         "loop": true,
         "between_min": 0.05,
         "between_max": 0.2,
@@ -587,8 +587,8 @@
           }
         ]
       },
-      "제자리공격": {
-        "name": "제자리공격",
+      "?쒖옄由ш났寃?: {
+        "name": "?쒖옄由ш났寃?,
         "loop": true,
         "between_min": 1.5,
         "between_max": 2.0,
@@ -607,8 +607,8 @@
           }
         ]
       },
-      "많이때리기 패턴": {
-        "name": "많이때리기 패턴",
+      "留롮씠?뚮━湲??⑦꽩": {
+        "name": "留롮씠?뚮━湲??⑦꽩",
         "loop": true,
         "between_min": 0.05,
         "between_max": 0.2,
@@ -639,8 +639,8 @@
           }
         ]
       },
-      "매직클로": {
-        "name": "매직클로",
+      "留ㅼ쭅?대줈": {
+        "name": "留ㅼ쭅?대줈",
         "loop": true,
         "between_min": 1.5,
         "between_max": 1.8,
@@ -796,7 +796,7 @@
       "start_time": ""
     },
     "connection": {
-      "server": "스카니아",
+      "server": "?ㅼ뭅?덉븘",
       "channel": 1,
       "char_slot": 1,
       "account_index": 1,
@@ -885,7 +885,7 @@
         0.5982468955441929
       ]
     },
-    "game_window_title": "MapleStory Worlds-메이플 플래닛"
+    "game_window_title": "MapleStory Worlds-硫붿씠???뚮옒??
   },
   "yolo": {
     "enabled": false,
@@ -917,7 +917,7 @@
   },
   "ropes": [
     {
-      "name": "밧줄1",
+      "name": "諛㏃쨪1",
       "x": 200,
       "approach": "both",
       "jump_offset": 15,
@@ -981,7 +981,7 @@
     "teleport_key": "x",
     "teleport_step_px": 13.0,
     "teleport_interval_sec": 0.4,
-    "attack_to_teleport_sec": 0.05,
+    "attack_to_teleport_sec": 0.5,
     "floor2_hunt_teleport_interval_sec": 0.4,
     "floor2_right_edge_teleport_interval_sec": 1.8,
     "floor2_left_x": 55,
@@ -994,10 +994,10 @@
     "floor3_y_min": 47,
     "floor3_y_max": 51,
     "stair7_x": 41,
-    "stair7_x_min": 37,
-    "stair7_x_max": 45,
+    "stair7_x_min": 38,
+    "stair7_x_max": 44,
     "stair7_right_bias_x": 45,
-    "stair7_right_bias_correct_sec": 0.02,
+    "stair7_right_bias_correct_sec": 0.0,
     "stair7_right_teleport_hold_sec": 0.1,
     "stair7_right_teleport_lead_sec": 0.02,
     "platform24_approach_x": 43,
@@ -1024,8 +1024,10 @@
     "platform27_y_max": 50,
     "platform24_y": 61,
     "stair7_y": 67,
-    "teleport_hold_sec": 0.05,
+    "teleport_hold_sec": 0.3,
     "stair7_return_y_min": 61,
     "stair7_return_y_max": 63
   }
 }
+
+

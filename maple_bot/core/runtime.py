@@ -187,7 +187,8 @@ class BotRuntime:
                     screen_capture, config.lie_title_template,
                     threshold=config.lie_threshold,
                     region=lambda: self._resolve_region(config.lie_detect_region),
-                    debug_log_fn=lambda m: self.log(m, "감지"),
+                    debug_log_fn=self._log_lie_scan,
+                    debug_dir=self._lie_debug_dir(),
                 )
         # ?ㅻⅨ ?좎? 媛먯? (鍮④컯 ?쎌?)
         self.user_scanner = None
@@ -773,7 +774,8 @@ class BotRuntime:
                     config.lie_title_template,
                     threshold=config.lie_threshold,
                     region=lambda: self._resolve_region(config.lie_detect_region),
-                    debug_log_fn=lambda m: self.log(m, "감지"),
+                    debug_log_fn=self._log_lie_scan,
+                    debug_dir=self._lie_debug_dir(),
                 )
             else:
                 self.log(f"거탐 템플릿 없음: {config.lie_title_template}", "감지")
@@ -1248,6 +1250,23 @@ class BotRuntime:
             self.orchestrator.clear_safety()
 
     # ?? ?대? ??????????????????????????????????????????????????????????
+    def _lie_debug_dir(self) -> str:
+        """거탐 감지 실패 시 확인용 이미지를 저장할 폴더를 반환한다."""
+        try:
+            import sys
+            from pathlib import Path
+            if getattr(sys, "frozen", False):
+                base = Path(sys.executable).resolve().parent
+            else:
+                base = Path(__file__).resolve().parent.parent
+            return str(base / "03_output" / "lie_debug")
+        except Exception:
+            return "03_output/lie_debug"
+
+    def _log_lie_scan(self, message: str) -> None:
+        """거탐 감시 상태를 시스템과 감지 로그 양쪽에 표시한다."""
+        self.log(message, "시스템")
+        self.log(message, "감지")
     def _handle_lie(self, ev) -> None:
         """거탐 감지 시 알림을 처리한다."""
         data = getattr(ev, "data", {}) or {}
@@ -1327,3 +1346,5 @@ class BotRuntime:
         self._reply_idx += 1
         # 梨꾪똿: enter ??硫붿떆吏 ?낅젰 ??enter (?ㅺ린 ?낅젰? 諛깆뿏???듯빐)
         self.humanizer.perform(Intent(action="key", key="enter", base_hold_sec=0.05))
+
+
