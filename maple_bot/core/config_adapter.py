@@ -301,7 +301,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     lie_detect_region = None
     game_window_title = str(d.get("settings2", {}).get("game_window_title", ""))
     if isinstance(lie_region, dict) and lie_region.get("x_ratio") is not None:
-        lie_detect_region = _resolve_window_ratio_region(lie_region, game_window_title)
+        lie_detect_region = dict(lie_region)
     elif isinstance(lie_region, (list, tuple)) and len(lie_region) == 4:
         lie_detect_region = {
             "left": int(lie_region[0]), "top": int(lie_region[1]),

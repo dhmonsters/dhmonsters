@@ -186,7 +186,7 @@ class BotRuntime:
                 self.lie_scanner = LieScanner(
                     screen_capture, config.lie_title_template,
                     threshold=config.lie_threshold,
-                    region=config.lie_detect_region,
+                    region=lambda: self._resolve_region(config.lie_detect_region),
                     debug_log_fn=lambda m: self.log(m, "감지"),
                 )
         # ?ㅻⅨ ?좎? 媛먯? (鍮④컯 ?쎌?)
@@ -772,7 +772,7 @@ class BotRuntime:
                     self._capture,
                     config.lie_title_template,
                     threshold=config.lie_threshold,
-                    region=config.lie_detect_region,
+                    region=lambda: self._resolve_region(config.lie_detect_region),
                     debug_log_fn=lambda m: self.log(m, "감지"),
                 )
             else:
@@ -793,9 +793,10 @@ class BotRuntime:
             )
             return
         running = "실행중" if self.lie_scanner.is_running() else "대기중"
+        resolved_region = self._resolve_region(self._cfg.lie_detect_region)
         self.log(
             f"거탐 감지: {running}, threshold={self._cfg.lie_threshold:.3f}, "
-            f"region={self._cfg.lie_detect_region or '전체화면'}, "
+            f"region={resolved_region or '전체화면'}, "
             f"template={self._cfg.lie_title_template}, alert={self._cfg.lie_alert}",
             "감지",
         )
@@ -1121,6 +1122,28 @@ class BotRuntime:
         """?곷? ?곸뿭 dict瑜??꾩옱 寃뚯엫李??먯젏?쇰줈 ?댁꽍(absolute硫?洹몃?濡? None?대㈃ None)."""
         if not region:
             return region
+        if region.get("x_ratio") is not None:
+            try:
+                from core.puzzle.game_window import (
+                    find_game_hwnd,
+                    find_window_hwnd_by_title,
+                    get_game_client_rect_screen,
+                )
+                hwnd = None
+                if self._cfg.game_window_title:
+                    hwnd = find_window_hwnd_by_title(self._cfg.game_window_title)
+                if hwnd is None:
+                    hwnd = find_game_hwnd()
+                if hwnd:
+                    left, top, width, height = get_game_client_rect_screen(hwnd)
+                    return {
+                        "left": left + int(float(region["x_ratio"]) * width),
+                        "top": top + int(float(region["y_ratio"]) * height),
+                        "width": max(1, int(float(region["w_ratio"]) * width)),
+                        "height": max(1, int(float(region["h_ratio"]) * height)),
+                    }
+            except Exception:
+                return None
         from core.config_manager import resolve_window_region
         a = self._cfg.coord_anchor
         anchor = (int(a[0]), int(a[1])) if a else None
@@ -1227,9 +1250,11 @@ class BotRuntime:
     # ?? ?대? ??????????????????????????????????????????????????????????
     def _handle_lie(self, ev) -> None:
         """거탐 감지 시 알림을 처리한다."""
-        score = (getattr(ev, "data", {}) or {}).get("score")
+        data = getattr(ev, "data", {}) or {}
+        score = data.get("score")
+        scale = data.get("scale", 1.0)
         self.log(
-            f"거탐 템플릿 감지: score={float(score):.3f}"
+            f"거탐 템플릿 감지: score={float(score):.3f}, scale={float(scale):.3f}"
             if score is not None else "거탐 템플릿 감지",
             "감지",
         )
@@ -1253,7 +1278,7 @@ class BotRuntime:
                 pass
         _th.Thread(target=_beep, daemon=True).start()
         try:
-            self.telegram.send("嫄고깘 媛먯?????遊??쇱떆?뺤?")
+            self.telegram.send("거탐 감지: 즉시 확인이 필요합니다.")
         except Exception:
             pass
 

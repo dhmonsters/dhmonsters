@@ -1,6 +1,8 @@
-# LieScanner — 거탐(투명도형 타이틀) 출현을 템플릿 매칭으로 감지 → "lie" 이벤트
-# C MinigameWatcher 방식: _on_appear(출현 순간 1회 발행) / _on_disappear(사라지면 리셋)
+# 거탐 제목 템플릿을 화면에서 주기적으로 감지하는 스캐너
 from __future__ import annotations
+
+import time
+from collections.abc import Callable
 
 import cv2
 import numpy as np
@@ -9,9 +11,18 @@ from core.sensing.event import Event
 from core.sensing.scanner import Scanner
 
 
+def _to_gray(image: np.ndarray) -> np.ndarray:
+    """BGR/BGRA 이미지를 템플릿 매칭용 흑백 이미지로 변환한다."""
+    if image.ndim == 2:
+        return image
+    if image.shape[2] == 4:
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+
 def _match_score(scene: np.ndarray, template: np.ndarray) -> float:
-    """scene 안 template 최고 매칭 점수 (TM_CCOEFF_NORMED)."""
-    if template is None or template.size == 0:
+    """scene 안에서 template의 최고 매칭 점수를 반환한다."""
+    if scene is None or template is None or template.size == 0:
         return 0.0
     if template.shape[0] > scene.shape[0] or template.shape[1] > scene.shape[1]:
         return 0.0
@@ -20,39 +31,89 @@ def _match_score(scene: np.ndarray, template: np.ndarray) -> float:
     return float(mx)
 
 
+def _best_scaled_match_score(
+    scene: np.ndarray,
+    template: np.ndarray,
+    scales: tuple[float, ...],
+) -> tuple[float, float]:
+    """여러 템플릿 크기 중 가장 높은 점수와 사용된 스케일을 반환한다."""
+    best_score = 0.0
+    best_scale = 1.0
+    for scale in scales:
+        if abs(scale - 1.0) < 0.0001:
+            scaled = template
+        else:
+            width = max(1, int(round(template.shape[1] * scale)))
+            height = max(1, int(round(template.shape[0] * scale)))
+            scaled = cv2.resize(template, (width, height), interpolation=cv2.INTER_AREA)
+        score = _match_score(scene, scaled)
+        if score > best_score:
+            best_score = score
+            best_scale = scale
+    return best_score, best_scale
+
+
 class LieScanner(Scanner):
-    """거탐 미니게임 타이틀 출현 감지.
+    """거탐 제목 이미지가 나타나는 순간 lie 이벤트를 1회 발행한다."""
 
-    title_template: 타이틀 이미지(ndarray) 또는 파일경로(str).
-    출현 순간에만 "lie" 이벤트 1회 발행(중복 방지). 사라지면 상태 리셋 → 재출현 시 또 발행.
-    """
     interval = 0.2
+    scales = (0.90, 0.925, 0.95, 0.975, 1.0, 1.025, 1.05, 1.075, 1.10)
 
-    def __init__(self, screen_capture, title_template, threshold: float = 0.65,
-                 region: dict | None = None):
+    def __init__(
+        self,
+        screen_capture,
+        title_template,
+        threshold: float = 0.65,
+        region: dict | Callable[[], dict | None] | None = None,
+        debug_log_fn=None,
+        debug_interval: float = 3.0,
+    ):
         super().__init__()
         self._capture = screen_capture
         self._threshold = threshold
         self._region = region
-        self._present = False   # 현재 떠있는지 (appear/disappear 추적)
-        # 템플릿: 경로면 로드, ndarray면 그대로
-        if isinstance(title_template, str):
-            self._tpl = cv2.imread(title_template)
-        else:
-            self._tpl = title_template
+        self._debug_log_fn = debug_log_fn
+        self._debug_interval = max(0.5, float(debug_interval))
+        self._last_debug_at = 0.0
+        self._present = False
+        self._tpl = cv2.imread(title_template) if isinstance(title_template, str) else title_template
+        if self._tpl is not None:
+            self._tpl = _to_gray(self._tpl)
 
     def scan_once(self) -> Event | None:
-        scene = self._capture(self._region) if self._region else self._capture()
-        if scene is None or self._tpl is None:
+        try:
+            region = self._region() if callable(self._region) else self._region
+            scene = self._capture(region) if region else self._capture()
+        except Exception as exc:
+            self._debug_log(f"거탐 스캔 오류: {exc}")
             return None
-        score = _match_score(scene, self._tpl)
+        if scene is None or self._tpl is None:
+            self._debug_log("거탐 스캔 실패: 캡처 또는 템플릿 없음")
+            return None
+
+        scene_gray = _to_gray(scene)
+        score, scale = _best_scaled_match_score(scene_gray, self._tpl, self.scales)
         detected = score >= self._threshold
+        self._debug_log(
+            f"거탐 감시중: score={score:.3f}, scale={scale:.3f}, threshold={self._threshold:.3f}, "
+            f"region={region or '전체화면'}"
+        )
 
         if detected and not self._present:
-            # 출현 순간 (_on_appear)
             self._present = True
-            return Event(type="lie", data={"score": score})
+            return Event(type="lie", data={"score": score, "scale": scale})
         if not detected and self._present:
-            # 사라짐 (_on_disappear) — 상태 리셋, 이벤트는 없음
             self._present = False
         return None
+
+    def _debug_log(self, message: str) -> None:
+        if self._debug_log_fn is None:
+            return
+        now = time.monotonic()
+        if now - self._last_debug_at < self._debug_interval:
+            return
+        self._last_debug_at = now
+        try:
+            self._debug_log_fn(message)
+        except Exception:
+            pass
