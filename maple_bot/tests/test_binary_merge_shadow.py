@@ -608,6 +608,186 @@ def test_split_observation_excludes_all_pair_cluster_members_from_context() -> N
     )
 
 
+def _identity_risk_board_rows(
+    *,
+    extra_outside_candidates: int = 0,
+    reverse_candidates: bool = False,
+) -> list[dict[str, object]]:
+    rows = _preparation_rows(
+        (-2, -1),
+        target_start=0.46,
+        target_step=0.0,
+        background_step=0.0,
+    )
+
+    def board_candidates(frame_index: int) -> list[dict[str, object]]:
+        candidates = _board_distractors(frame_index)
+        candidates.extend(
+            _candidate(
+                f"outside_extra_{frame_index}_{index}",
+                frame_index,
+                (0.02 + 0.03 * index, 0.72),
+                score=0.99,
+            )
+            for index in range(extra_outside_candidates)
+        )
+        return candidates
+
+    rows += _rows_for_frame(
+        0,
+        [
+            _candidate("visible_target_0", 0, (0.46, 0.50)),
+            _candidate("visible_background_0", 0, (0.54, 0.50)),
+            *board_candidates(0),
+        ],
+        (0.46, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(0, (0.46, 0.50)))
+    rows += _rows_for_frame(
+        1,
+        [
+            _candidate("visible_target_1", 1, (0.46, 0.50), half_ratio=0.06),
+            _candidate("visible_background_1", 1, (0.54, 0.50), half_ratio=0.06),
+            *board_candidates(1),
+        ],
+        (0.46, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(1, (0.46, 0.50)))
+    for frame_index in (2, 3):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"risk_target_{frame_index}", frame_index, (0.46, 0.50), half_ratio=0.06),
+                _candidate(f"risk_background_{frame_index}", frame_index, (0.54, 0.50), half_ratio=0.06),
+                *board_candidates(frame_index),
+            ],
+            (0.46, 0.50),
+            identity_state="IDENTITY_HOLD",
+        )
+    rows += _rows_for_frame(
+        4,
+        [
+            _candidate("left_child_4", 4, (0.42, 0.50)),
+            _candidate("middle_child_4", 4, (0.50, 0.50), half_ratio=0.02),
+            _candidate("right_child_4", 4, (0.58, 0.50)),
+            *board_candidates(4),
+        ],
+        (0.42, 0.50),
+        identity_state="IDENTITY_HOLD",
+    )
+    rows += _rows_for_frame(
+        5,
+        [
+            _candidate("left_child_5", 5, (0.42, 0.50)),
+            _candidate("right_child_5", 5, (0.58, 0.50)),
+            *board_candidates(5),
+        ],
+        (0.42, 0.50),
+        identity_state="IDENTITY_HOLD",
+    )
+    if reverse_candidates:
+        for row in rows:
+            if row.get("type") == "CANDIDATES":
+                row["payload"]["candidates"].reverse()
+    return rows
+
+
+def _runtime_integration_signature(
+    extraction: object,
+    replay: BinaryEventReplay,
+) -> tuple[object, ...]:
+    event = getattr(extraction, "events")[0]
+    pair_ids = tuple(
+        tuple(
+            tuple(cluster.candidate.candidate_id for cluster in pair.clusters)
+            for pair in observation.pair_hypotheses
+        )
+        for observation in event.split_observations
+    )
+    return (
+        event.event_id,
+        pair_ids,
+        replay.hold,
+        replay.decision_reason,
+        replay.selected_target_candidate_id,
+        replay.selected_background_candidate_id,
+    )
+
+
+def test_identity_risk_board_flow_integrates_extraction_localization_and_replay(
+    tmp_path: Path,
+) -> None:
+    # RED at 02aab3d: expanded contact sent all board candidates to event detection.
+    rows = _identity_risk_board_rows()
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    extraction = extract_binary_merge_events(rows, event_limit=1)
+    replays = replay_binary_merge_events(trace_path, event_limit=1)
+
+    assert len(extraction.events) == 1
+    assert not extraction.diagnostics
+    assert len(replays) == 1
+    event = extraction.events[0]
+    replay = replays[0]
+    assert event.event_id == replay.event_id == 1
+    assert event.premerge.frame_index == 1
+    assert tuple(observation.frame_index for observation in event.split_observations) == (4, 5)
+    assert replay.split_observations_evaluated == 2
+    assert replay.diagnostics["decisions"][0]["reason"] == "pair_ambiguous"
+    assert not replay.hold
+    assert replay.decision_reason == "binary_judges_agree"
+    assert replay.selected_target_candidate_id == "left_child_5"
+    assert replay.selected_background_candidate_id == "right_child_5"
+
+
+def test_identity_risk_runtime_isolated_from_outside_and_reordered_candidates(
+    tmp_path: Path,
+) -> None:
+    signatures: list[tuple[object, ...]] = []
+    for name, rows in (
+        ("baseline", _identity_risk_board_rows()),
+        ("outside", _identity_risk_board_rows(extra_outside_candidates=3)),
+        ("reordered", _identity_risk_board_rows(reverse_candidates=True)),
+    ):
+        trace_path = tmp_path / f"{name}.jsonl"
+        _write_jsonl(trace_path, rows)
+        extraction = extract_binary_merge_events(rows, event_limit=1)
+        replays = replay_binary_merge_events(trace_path, event_limit=1)
+        assert len(extraction.events) == 1
+        assert len(replays) == 1
+        signatures.append(_runtime_integration_signature(extraction, replays[0]))
+
+    assert signatures[1:] == signatures[:1] * 2
+
+
+def test_identity_risk_runtime_is_invariant_to_post_hoc_gt(tmp_path: Path) -> None:
+    rows = _identity_risk_board_rows()
+    trace_path = tmp_path / "trace.jsonl"
+    left_gt_path = tmp_path / "left-gt.jsonl"
+    right_gt_path = tmp_path / "right-gt.jsonl"
+    _write_jsonl(trace_path, rows)
+    _write_jsonl(left_gt_path, [{"solver_frame_index": 5, "target_x": 168.0, "target_y": 100.0}])
+    _write_jsonl(right_gt_path, [{"solver_frame_index": 5, "target_x": 232.0, "target_y": 100.0}])
+
+    before = replay_binary_merge_events(trace_path, event_limit=1)
+    assert len(before) == 1
+    left_score = score_binary_merge_events(before, left_gt_path, trace_path)
+    after = replay_binary_merge_events(trace_path, event_limit=1)
+    right_score = score_binary_merge_events(after, right_gt_path, trace_path)
+
+    assert json.dumps([asdict(row) for row in before], sort_keys=True) == json.dumps(
+        [asdict(row) for row in after],
+        sort_keys=True,
+    )
+    assert left_score[0].target_candidate_id == "left_child_5"
+    assert right_score[0].target_candidate_id == "right_child_5"
+    assert left_score[0].outcome is BinaryEventOutcome.LATE_RECOVERY
+    assert right_score[0].outcome is BinaryEventOutcome.WRONG_SWITCH
+
+
 def test_child_evidence_uses_premerge_motion_not_parent_center() -> None:
     target = _runtime_candidate("target_child", 1, (100.0, 65.0))
     background = _runtime_candidate("background_child", 1, (125.0, 60.0))

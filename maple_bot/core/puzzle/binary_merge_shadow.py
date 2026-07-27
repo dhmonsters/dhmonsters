@@ -196,10 +196,11 @@ def extract_binary_merge_events(
             )
             else None
         )
-        collision_candidate = _nearest_other_candidate(target_candidate, frame.candidates)
+        event_target_candidate = selected_candidate
+        event_collision_candidate = _nearest_other_candidate(event_target_candidate, frame.candidates)
         visible_contact = _identity_observable(frame) and _candidates_are_in_contact(
-            target_candidate,
-            collision_candidate,
+            event_target_candidate,
+            event_collision_candidate,
         )
         if _identity_observable(frame) and open_event is None:
             if visible_contact:
@@ -216,15 +217,26 @@ def extract_binary_merge_events(
             prior = frame
             continue
         event_candidates = tuple(frame.candidates)
-        if target_candidate is not None:
+        if event_target_candidate is not None:
             event_candidates = (
-                (target_candidate, collision_candidate)
-                if collision_candidate is not None
-                else (target_candidate,)
+                (event_target_candidate, event_collision_candidate)
+                if event_collision_candidate is not None
+                else (event_target_candidate,)
             )
         predicted_point = frame.target_point or (selected_candidate.center if selected_candidate else (0.0, 0.0))
+        detector_target_candidate = target_candidate
+        if detector_target_candidate is None and stable_area > 0.0:
+            scale = max(1.0, stable_area**0.5)
+            expanded_nearby = tuple(
+                candidate
+                for candidate in event_candidates
+                if _bbox_area(candidate.bbox) / stable_area > 1.25
+                and _point_to_bbox_distance(predicted_point, candidate.bbox) / scale <= 0.5
+            )
+            if len(expanded_nearby) > 1:
+                detector_target_candidate = event_target_candidate
         state_event = detector.update(
-            target_candidate=target_candidate,
+            target_candidate=detector_target_candidate,
             candidates=event_candidates,
             stable_area=stable_area,
             predicted_target_point=predicted_point,
