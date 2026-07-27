@@ -65,3 +65,13 @@ runtime trace만 받는 사건 replay와 GT를 사후에만 받는 scoring API�
 wrong switch는 0개지만 올바른 자식 전달을 평가할 물리 사건이 없으므로 Gate 1은 실패다. 두 번째 사건, 임계값 조정, Task 6 Studio 연결은 수행하지 않았다.
 
 CLI는 첫 사건 또는 진단이 확정되는 즉시 extraction과 resolver 계산 자체를 멈추며, 기계 판정 `gate_verdict`, `failure_stage`, `expand_allowed`를 출력하도록 보완했다. 대표 사건은 다시 실행하지 않고 합성 회귀 테스트로만 보완했다. 최종 관련 테스트는 273개와 subtest 37개가 통과했다.
+
+## 2026-07-27 최종 코드 검토와 보정
+
+최종 검토에서 세 가지 일반화 계약을 보강했다. 첫째, 각 병합 사건의 배경 준비 profile은 그 사건 직전보다 앞선 관측만 사용하고 알려진 타겟 후보를 제외한다. 따라서 사건 이후의 미래 프레임이나 타겟 움직임이 현재 결정을 미리 오염시키지 않는다.
+
+둘째, 주변 배경과의 상대 관계는 타겟 후보가 아니라 가설에서 배경으로 배정된 child의 증거로 사용한다. 이 신호는 선택 비용을 돕는 선택적 심판이며 타겟 이동과 배경 이동이라는 필수 증거를 대신 만들지 않는다.
+
+셋째, 다음 사건의 타겟 속도는 신뢰 가능한 SEPARATE 관측으로만 계산한다. 병합 부모 중심, pending merge, SPLITTING, REACQUIRED, IDENTITY_HOLD 좌표는 제외한다. 특히 IDENTITY_HOLD에 raw white-anchor가 우연히 일치해도 속도 이력에 들어가지 않게 했다. 이 경계 사례는 수정 전 -192px/frame으로 재현됐고 수정 후 기대값 약 1.33px/frame을 회복했다.
+
+관련 테스트 결과는 279 passed, 37 subtests passed다. 대표 사건은 다시 실행하지 않았다. Gate 판정은 여전히 candidate normalization 단계의 duplicate_detection_unresolved 실패이며, Task 6은 의도적으로 연결하지 않았다.

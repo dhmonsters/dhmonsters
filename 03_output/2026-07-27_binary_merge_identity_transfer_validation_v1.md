@@ -77,3 +77,15 @@ Gate 실패 후 두 번째 사건을 실행하지 않았고 event detection, jud
 대표 사건은 다시 실행하지 않았다. 합성 회귀 테스트에서 `--event-limit 1`이 첫 사건 또는 진단 이후 extraction과 resolver 계산 자체를 중단하는지 확인했다. CLI 출력에는 `gate_verdict`, canonical `failure_stage`, `expand_allowed`를 추가했다.
 
 보완 커밋은 `0cf0f835c7a0f80d9bbd538dda8bf6842317c556`이다. 최종 관련 테스트는 `273 passed, 37 subtests passed`다. 이 보완은 기존 대표 사건의 `GATE_FAILED`, `candidate normalization` 판정을 바꾸지 않는다.
+
+## 최종 리뷰 보정 부록
+
+- causal prep profile을 적용해 각 사건 이후의 프레임을 현재 사건 판단에서 차단했다.
+- known target 후보를 준비 구간 배경 profile에서 제외했다.
+- neighbor relation 신호를 assigned background child에 연결했다.
+- IDENTITY_HOLD를 포함한 불신 상태의 좌표를 다음 사건 target velocity에서 제외했다.
+- 미래 프레임 추가 전후 replay 결정 불변성 테스트를 보강했다.
+- 최종 관련 테스트는 `279 passed, 37 subtests passed`다.
+- 대표 사건 CLI는 재실행하지 않았다.
+- 최종 Gate는 계속 `GATE_FAILED`, 실패 단계는 `candidate normalization`, 원인은 `duplicate_detection_unresolved`다.
+- Task 6 Studio opt-in 연결은 Gate 통과 전까지 보류한다.
