@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import core.puzzle.binary_merge_shadow as binary_merge_shadow
 from core.puzzle.binary_merge_background import BackgroundFlowProfile
 from core.puzzle.binary_merge_identity import BinaryMergeIdentityResolver, BinaryTransferStatus
 from core.puzzle.binary_merge_shadow import (
@@ -368,6 +369,37 @@ def _two_frame_overlap_then_two_frame_split_rows() -> list[dict[str, object]]:
                 _candidate(f"target_child_{frame_index}", frame_index, (0.42, 0.50)),
                 _candidate(f"background_child_{frame_index}", frame_index, (0.58, 0.50)),
                 _candidate(f"anchor_{frame_index}", frame_index, (0.24, 0.30)),
+            ],
+            (0.42, 0.50),
+        )
+    return rows
+
+
+def _two_scoreable_event_rows() -> list[dict[str, object]]:
+    rows = _two_frame_overlap_then_two_frame_split_rows()
+    rows += _rows_for_frame(
+        5,
+        [
+            _candidate("second_target_before", 5, (0.42, 0.50)),
+            _candidate("second_background_before", 5, (0.58, 0.50)),
+        ],
+        (0.42, 0.50),
+    )
+    for frame_index in (6, 7):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"second_target_overlap_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"second_background_overlap_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+        )
+    for frame_index in (8, 9):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"second_target_child_{frame_index}", frame_index, (0.42, 0.50)),
+                _candidate(f"second_background_child_{frame_index}", frame_index, (0.58, 0.50)),
             ],
             (0.42, 0.50),
         )
@@ -860,3 +892,98 @@ def test_cli_dry_run_writes_one_event_with_runtime_and_post_hoc_diagnostics(tmp_
     assert event_rows[0]["judge_diagnostics"]["decisions"]
     assert event_rows[0]["judge_diagnostics"]["decisions"][-1]["h1"]
     assert event_rows[0]["judge_diagnostics"]["decisions"][-1]["h2"]
+    assert event_rows[0]["gate_verdict"] == "PASSED"
+    assert event_rows[0]["failure_stage"] is None
+    assert event_rows[0]["expand_allowed"] is True
+    markdown = (output_path / "binary_merge_validation.md").read_text(encoding="utf-8")
+    assert "- gate_verdict: PASSED" in markdown
+    assert "- expand_allowed: true" in markdown
+
+
+def test_event_limit_stops_at_first_diagnostic_before_later_valid_event() -> None:
+    extraction = extract_binary_merge_events(
+        make_trace_rows_for_separate_overlap_merged_split(first_split_ambiguous=True),
+        event_limit=1,
+    )
+
+    assert not extraction.events
+    assert len(extraction.diagnostics) == 1
+    assert extraction.diagnostics[0].reason == "duplicate_detection_unresolved"
+
+
+def test_replay_event_limit_does_not_resolve_second_scoreable_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    rows = _two_scoreable_event_rows()
+    _write_jsonl(trace_path, rows)
+    assert len(extract_binary_merge_events(rows).events) == 2
+    resolver_calls: list[int] = []
+    resolver_type = binary_merge_shadow.BinaryMergeIdentityResolver
+
+    class ResolverSpy:
+        def __init__(self) -> None:
+            self._delegate = resolver_type()
+
+        def evaluate(self, **kwargs: object) -> object:
+            event_id = kwargs["event_id"]
+            assert isinstance(event_id, int)
+            resolver_calls.append(event_id)
+            assert event_id == 1
+            return self._delegate.evaluate(**kwargs)
+
+    monkeypatch.setattr(binary_merge_shadow, "BinaryMergeIdentityResolver", ResolverSpy)
+
+    replays = replay_binary_merge_events(trace_path, event_limit=1)
+
+    assert len(replays) == 1
+    assert replays[0].event_id == 1
+    assert resolver_calls == [1]
+
+
+def test_cli_failure_maps_duplicate_normalization_to_canonical_gate(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    score_path = tmp_path / "score.jsonl"
+    output_path = tmp_path / "failed_event"
+    _write_jsonl(
+        trace_path,
+        make_trace_rows_for_separate_overlap_merged_split(first_split_ambiguous=True),
+    )
+    _write_jsonl(score_path, [])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.puzzle.binary_merge_shadow",
+            "--trace",
+            str(trace_path),
+            "--score",
+            str(score_path),
+            "--output",
+            str(output_path),
+            "--event-limit",
+            "1",
+        ],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert {path.name for path in output_path.iterdir()} == {
+        "binary_merge_events.jsonl",
+        "binary_merge_validation.md",
+    }
+    event = json.loads((output_path / "binary_merge_events.jsonl").read_text(encoding="utf-8"))
+    assert event["judge_diagnostics"]["extraction_reason"] == "duplicate_detection_unresolved"
+    assert event["gate_verdict"] == "GATE_FAILED"
+    assert event["failure_stage"] == "candidate_normalization"
+    assert event["expand_allowed"] is False
+    assert "mouse_action" not in json.dumps(event, sort_keys=True)
+    markdown = (output_path / "binary_merge_validation.md").read_text(encoding="utf-8")
+    assert "- gate_verdict: GATE_FAILED" in markdown
+    assert "- failure_stage: candidate_normalization" in markdown
+    assert "- expand_allowed: false" in markdown

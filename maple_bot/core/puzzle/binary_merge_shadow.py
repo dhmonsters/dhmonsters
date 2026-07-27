@@ -125,6 +125,13 @@ class BinaryEventSummary:
     median_normalized_recovery_delay: float | None
 
 
+@dataclass(frozen=True)
+class BinaryGateDecision:
+    gate_verdict: str
+    failure_stage: str | None
+    expand_allowed: bool
+
+
 @dataclass
 class _OpenEvent:
     event_id: int
@@ -136,8 +143,13 @@ class _OpenEvent:
     reason: str
 
 
-def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventExtractionResult:
+def extract_binary_merge_events(
+    rows: Sequence[dict[str, Any]],
+    event_limit: int | None = None,
+) -> BinaryEventExtractionResult:
     """Extract scoreable binary events from runtime trace rows only."""
+    if event_limit is not None and event_limit < 1:
+        raise ValueError("event_limit must be at least 1")
     frame_rows = _index_runtime_rows(rows)
     detector = MergeSplitEventDetector()
     events: list[BinaryMergeEventWindow] = []
@@ -147,6 +159,12 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
     pending_premerge: _FrameRuntime | None = None
     prior: _FrameRuntime | None = None
     stable_area = 0.0
+
+    def result_limit_reached() -> bool:
+        return event_limit is not None and len(events) + len(diagnostics) >= event_limit
+
+    def result() -> BinaryEventExtractionResult:
+        return BinaryEventExtractionResult(tuple(events), tuple(diagnostics))
 
     for frame in frame_rows:
         previous_detector_state = detector.state
@@ -192,6 +210,8 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
         if open_event is not None and event_id != open_event.event_id:
             _finalize_open_event(open_event, events, diagnostics, frame.frame_index)
             open_event = None
+            if result_limit_reached():
+                return result()
 
         if open_event is None and in_merge and suppressed_event_id != event_id:
             premerge = pending_premerge or prior
@@ -205,6 +225,8 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
                     )
                 )
                 suppressed_event_id = event_id
+                if result_limit_reached():
+                    return result()
             else:
                 snapshot = _build_premerge_snapshot(premerge, frame_rows)
                 if snapshot is None:
@@ -216,6 +238,8 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
                         )
                     )
                     suppressed_event_id = event_id
+                    if result_limit_reached():
+                        return result()
                 else:
                     open_event = _OpenEvent(
                         event_id=event_id,
@@ -242,6 +266,8 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
                     diagnostics.append(
                         BinaryEventExtractionDiagnostic(frame.frame_index, reason, len(frame.candidates))
                     )
+                    if result_limit_reached():
+                        return result()
                 else:
                     child_ids = {child.candidate_id for child in children}
                     open_event.split_frame_indices.append(frame.frame_index)
@@ -270,7 +296,7 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
 
     if open_event is not None:
         _finalize_open_event(open_event, events, diagnostics, frame_rows[-1].frame_index)
-    return BinaryEventExtractionResult(tuple(events), tuple(diagnostics))
+    return result()
 
 
 def collapse_physical_candidates(
@@ -738,12 +764,15 @@ def _bbox_from_value(value: object) -> tuple[float, float, float, float] | None:
     return bbox
 
 
-def replay_binary_merge_events(trace_jsonl: str | Path) -> tuple[BinaryEventReplay, ...]:
+def replay_binary_merge_events(
+    trace_jsonl: str | Path,
+    event_limit: int | None = None,
+) -> tuple[BinaryEventReplay, ...]:
     """Replay binary merge decisions from runtime trace data only."""
     rows = _read_jsonl(Path(trace_jsonl))
     frame_shape = _board_frame_shape(rows)
     profile = _profile_from_preparation_rows(rows, frame_shape)
-    extraction = extract_binary_merge_events(rows)
+    extraction = extract_binary_merge_events(rows, event_limit=event_limit)
     resolver = BinaryMergeIdentityResolver()
     replays: list[BinaryEventReplay] = []
 
@@ -850,15 +879,65 @@ def summarize_binary_merge_events(scores: Sequence[BinaryEventScore]) -> BinaryE
     )
 
 
+def evaluate_binary_merge_gate(
+    replays: Sequence[BinaryEventReplay],
+    scores: Sequence[BinaryEventScore],
+) -> BinaryGateDecision:
+    if len(replays) != 1 or len(scores) != 1:
+        return BinaryGateDecision("GATE_FAILED", "event_detection", False)
+    replay = replays[0]
+    score = scores[0]
+    extraction_reason = replay.diagnostics.get("extraction_reason")
+    if isinstance(extraction_reason, str):
+        return BinaryGateDecision(
+            "GATE_FAILED",
+            _canonical_failure_stage(extraction_reason, score.outcome),
+            False,
+        )
+    if replay.split_frame is None:
+        return BinaryGateDecision("GATE_FAILED", "event_detection", False)
+    if replay.decision_frame is not None and replay.decision_frame < replay.split_frame:
+        return BinaryGateDecision("GATE_FAILED", "target_judge", False)
+    if score.outcome is BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES:
+        return BinaryGateDecision("GATE_FAILED", "candidate_absence", False)
+    if replay.hold:
+        return BinaryGateDecision(
+            "GATE_FAILED",
+            _canonical_failure_stage(replay.decision_reason, score.outcome),
+            False,
+        )
+    correct_outcomes = {
+        BinaryEventOutcome.CORRECT_TRANSFER,
+        BinaryEventOutcome.LATE_RECOVERY,
+    }
+    if (
+        score.outcome not in correct_outcomes
+        or score.target_candidate_id is None
+        or score.target_candidate_id != replay.selected_target_candidate_id
+    ):
+        return BinaryGateDecision(
+            "GATE_FAILED",
+            _canonical_failure_stage(score.reason, score.outcome),
+            False,
+        )
+    return BinaryGateDecision("PASSED", None, True)
+
+
 def render_binary_merge_event_markdown(
     replays: Sequence[BinaryEventReplay],
     scores: Sequence[BinaryEventScore],
+    gate_decision: BinaryGateDecision | None = None,
 ) -> str:
     """Render one compact diagnostic section per binary merge event."""
     summary = summarize_binary_merge_events(scores)
+    gate = gate_decision or evaluate_binary_merge_gate(replays, scores)
     score_by_event = {score.event_id: score for score in scores}
     lines = [
         "# Binary Merge Event Summary",
+        "",
+        f"- gate_verdict: {gate.gate_verdict}",
+        f"- failure_stage: {gate.failure_stage or 'none'}",
+        f"- expand_allowed: {str(gate.expand_allowed).lower()}",
         "",
         f"- total_events: {summary.total_events}",
         f"- resolved_events: {summary.resolved_events}",
@@ -896,9 +975,13 @@ def render_binary_merge_event_markdown(
 def _binary_merge_event_output_row(
     replay: BinaryEventReplay,
     score: BinaryEventScore,
+    gate_decision: BinaryGateDecision,
 ) -> dict[str, object]:
     return {
         "event_id": replay.event_id,
+        "gate_verdict": gate_decision.gate_verdict,
+        "failure_stage": gate_decision.failure_stage,
+        "expand_allowed": gate_decision.expand_allowed,
         "runtime_decision": {
             "premerge_frame": replay.premerge_frame,
             "split_frame": replay.split_frame,
@@ -930,12 +1013,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.event_limit is not None and args.event_limit < 1:
         parser.error("--event-limit must be at least 1")
 
-    runtime_replays = replay_binary_merge_events(args.trace)
-    replays = runtime_replays[: args.event_limit]
+    replays = replay_binary_merge_events(args.trace, event_limit=args.event_limit)
     scores = score_binary_merge_events(replays, args.score, args.trace)
+    gate_decision = evaluate_binary_merge_gate(replays, scores)
     args.output.mkdir(parents=True, exist_ok=True)
     event_rows = (
-        json.dumps(_binary_merge_event_output_row(replay, score), ensure_ascii=False, sort_keys=True)
+        json.dumps(
+            _binary_merge_event_output_row(replay, score, gate_decision),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         for replay, score in zip(replays, scores)
     )
     (args.output / "binary_merge_events.jsonl").write_text(
@@ -943,7 +1030,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         encoding="utf-8",
     )
     (args.output / "binary_merge_validation.md").write_text(
-        render_binary_merge_event_markdown(replays, scores),
+        render_binary_merge_event_markdown(replays, scores, gate_decision),
         encoding="utf-8",
     )
     return 0
@@ -1199,6 +1286,32 @@ def _score_one_event(
         recovery_delay_ratio=delay,
         reason="target_identity_transferred",
     )
+
+
+def _canonical_failure_stage(
+    reason: str,
+    outcome: BinaryEventOutcome,
+) -> str:
+    if reason in {
+        "duplicate_detection_unresolved",
+        "parent_region_violation",
+        "missing_merge_parent",
+    }:
+        return "candidate_normalization"
+    if outcome is BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES:
+        return "candidate_absence"
+    if outcome in {
+        BinaryEventOutcome.EVENT_DETECTION_FAILURE,
+        BinaryEventOutcome.DUPLICATE_DETECTION_UNRESOLVED,
+    }:
+        return "event_detection"
+    if "background" in reason:
+        return "background_judge"
+    if "ancestry" in reason:
+        return "ancestry"
+    if "ambiguous" in reason:
+        return "ambiguity"
+    return "target_judge"
 
 
 def _decision_diagnostic(
