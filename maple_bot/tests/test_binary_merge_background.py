@@ -144,7 +144,7 @@ def test_background_flow_profile_is_available_for_nonperiodic_translation() -> N
 def test_background_flow_profile_is_available_for_slowly_rotating_local_flow() -> None:
     frame_shape = (300, 500)
     center = (0.50, 0.50)
-    radii_and_angles = ((0.18, 0.15), (0.27, 1.10), (0.22, 2.35))
+    radii_and_angles = ((0.22, 0.15), (0.22, 1.10), (0.22, 2.35))
     frames = tuple(
         (
             frame_index,
@@ -202,6 +202,36 @@ def test_background_flow_profile_marks_one_normal_match_plus_one_outlier_as_miss
                 (
                     _candidate("normal", 1, (0.22, 0.31), frame_shape),
                     _candidate("outlier", 1, (0.95, 0.35), frame_shape),
+                ),
+            ),
+        ),
+        frame_shape=frame_shape,
+    )
+
+    assert not profile.available
+    assert profile.valid_transitions == 0
+    assert profile.missing_transitions == 1
+    assert profile.reason == "insufficient_background_motion"
+
+
+def test_background_flow_profile_marks_two_retained_matches_after_filtering_as_missing() -> None:
+    frame_shape = (240, 400)
+    profile = build_background_flow_profile(
+        (
+            (
+                0,
+                (
+                    _candidate("anchor-a", 0, (0.16, 0.24), frame_shape),
+                    _candidate("anchor-b", 0, (0.48, 0.65), frame_shape),
+                    _candidate("outlier", 0, (0.78, 0.34), frame_shape),
+                ),
+            ),
+            (
+                1,
+                (
+                    _candidate("anchor-a", 1, (0.18, 0.25), frame_shape),
+                    _candidate("anchor-b", 1, (0.50, 0.66), frame_shape),
+                    _candidate("outlier", 1, (0.94, 0.06), frame_shape),
                 ),
             ),
         ),

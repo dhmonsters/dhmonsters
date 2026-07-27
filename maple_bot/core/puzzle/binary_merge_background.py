@@ -9,6 +9,7 @@ from .models import Candidate
 
 
 _MINIMUM_BACKGROUND_MATCHES = 3
+_MOTION_ENVELOPE_EPSILON = 1e-12
 
 
 @dataclass(frozen=True)
@@ -125,12 +126,14 @@ def _minimum_cost_background_matches(
     ]
     median_cost = median(costs_by_pair)
     cost_mad = median(abs(cost - median_cost) for cost in costs_by_pair)
-    maximum_cost = median_cost + cost_mad
+    maximum_cost = median_cost + cost_mad + _MOTION_ENVELOPE_EPSILON
     reliable_pairs = tuple(
         pair
         for pair, cost in zip(pairs, costs_by_pair)
         if cost <= maximum_cost
     )
+    if len(reliable_pairs) < _MINIMUM_BACKGROUND_MATCHES:
+        return ()
     return reliable_pairs
 
 
