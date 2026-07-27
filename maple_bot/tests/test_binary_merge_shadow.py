@@ -612,6 +612,7 @@ def _identity_risk_board_rows(
     *,
     extra_outside_candidates: int = 0,
     close_collision_distractors: bool = False,
+    initial_close_collision_distractors: bool = False,
     reverse_candidates: bool = False,
     mirrored: bool = False,
 ) -> list[dict[str, object]]:
@@ -651,6 +652,24 @@ def _identity_risk_board_rows(
                     ),
                     _candidate(
                         f"close_large_{frame_index}",
+                        frame_index,
+                        (target_x - direction * 0.02, 0.50),
+                        score=0.99,
+                    ),
+                )
+            )
+        if initial_close_collision_distractors and 0 <= frame_index <= 3:
+            direction = -1.0 if mirrored else 1.0
+            candidates.extend(
+                (
+                    _candidate(
+                        f"initial_close_a_{frame_index}",
+                        frame_index,
+                        (target_x + direction * 0.02, 0.50),
+                        score=0.99,
+                    ),
+                    _candidate(
+                        f"initial_close_b_{frame_index}",
                         frame_index,
                         (target_x - direction * 0.02, 0.50),
                         score=0.99,
@@ -739,6 +758,7 @@ def _runtime_integration_signature(
     )
     return (
         event.event_id,
+        event.premerge.background_candidate_id,
         event.reason,
         event.merge_frame_indices,
         event.split_frame_indices,
@@ -827,6 +847,53 @@ def test_identity_risk_runtime_isolated_from_outside_and_reordered_candidates(
         assert len(extraction.events) == 1
         assert len(replays) == 1
         signatures.append(_runtime_integration_signature(extraction, replays[0]))
+
+    assert signatures[1:] == signatures[:1] * (len(signatures) - 1)
+
+
+def test_identity_risk_frame_zero_close_distractors_do_not_replace_event_background(
+    tmp_path: Path,
+) -> None:
+    signatures: list[tuple[object, ...]] = []
+    for name, rows in (
+        ("baseline", _identity_risk_board_rows()),
+        (
+            "initial-close",
+            _identity_risk_board_rows(initial_close_collision_distractors=True),
+        ),
+        (
+            "initial-close-reordered",
+            _identity_risk_board_rows(
+                initial_close_collision_distractors=True,
+                reverse_candidates=True,
+            ),
+        ),
+    ):
+        trace_path = tmp_path / f"{name}.jsonl"
+        _write_jsonl(trace_path, rows)
+        extraction = extract_binary_merge_events(rows, event_limit=1)
+        replays = replay_binary_merge_events(trace_path, event_limit=1)
+        assert len(extraction.events) == 1
+        assert len(replays) == 1
+        event = extraction.events[0]
+        assert event.premerge.background_candidate_id == "visible_background_1"
+        replay = replays[0]
+        signatures.append(
+            (
+                event.event_id,
+                event.premerge.background_candidate_id,
+                tuple(
+                    tuple(
+                        tuple(cluster.candidate.candidate_id for cluster in pair.clusters)
+                        for pair in observation.pair_hypotheses
+                    )
+                    for observation in event.split_observations
+                ),
+                tuple(decision["status"] for decision in replay.diagnostics["decisions"]),
+                replay.selected_target_candidate_id,
+                replay.selected_background_candidate_id,
+            )
+        )
 
     assert signatures[1:] == signatures[:1] * (len(signatures) - 1)
 

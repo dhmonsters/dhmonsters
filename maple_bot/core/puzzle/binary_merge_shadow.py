@@ -175,6 +175,7 @@ def extract_binary_merge_events(
     prior: _FrameRuntime | None = None
     last_visible_contact: _FrameRuntime | None = None
     last_trusted_snapshot: BinaryPremergeSnapshot | None = None
+    trusted_snapshots_by_frame: dict[int, BinaryPremergeSnapshot] = {}
     trusted_separate_frames: list[_FrameRuntime] = []
     stable_area = 0.0
 
@@ -204,25 +205,33 @@ def extract_binary_merge_events(
             last_trusted_snapshot,
             frame.frame_index,
         )
+        snapshot_frames = tuple(trusted_separate_frames)
+        if not any(row.frame_index == frame.frame_index for row in snapshot_frames):
+            snapshot_frames += (frame,)
+        event_snapshot = (
+            _build_premerge_snapshot(
+                frame,
+                snapshot_frames,
+                background_candidate=event_collision_candidate,
+            )
+            if _premerge_identity_is_trusted(frame)
+            else None
+        )
+        if event_snapshot is not None:
+            trusted_snapshots_by_frame[frame.frame_index] = event_snapshot
         visible_contact = _identity_observable(frame) and _candidates_are_in_contact(
             event_target_candidate,
             event_collision_candidate,
         )
         if _identity_observable(frame) and open_event is None:
-            snapshot_frames = tuple(trusted_separate_frames)
-            if not any(row.frame_index == frame.frame_index for row in snapshot_frames):
-                snapshot_frames += (frame,)
-            current_snapshot = _build_premerge_snapshot(
-                frame,
-                snapshot_frames,
-                background_candidate=event_collision_candidate,
-            )
+            current_snapshot = event_snapshot
             if current_snapshot is not None:
                 if visible_contact and last_trusted_snapshot is not None:
                     current_snapshot = replace(
                         current_snapshot,
                         neighbor_relations=last_trusted_snapshot.neighbor_relations,
                     )
+                trusted_snapshots_by_frame[frame.frame_index] = current_snapshot
                 last_trusted_snapshot = current_snapshot
             if visible_contact:
                 last_visible_contact = frame
@@ -296,16 +305,7 @@ def extract_binary_merge_events(
                 if result_limit_reached():
                     return result()
             else:
-                if (
-                    last_trusted_snapshot is not None
-                    and last_trusted_snapshot.frame_index == premerge.frame_index
-                ):
-                    snapshot = last_trusted_snapshot
-                else:
-                    snapshot_frames = tuple(trusted_separate_frames)
-                    if not any(row.frame_index == premerge.frame_index for row in snapshot_frames):
-                        snapshot_frames += (premerge,)
-                    snapshot = _build_premerge_snapshot(premerge, snapshot_frames)
+                snapshot = trusted_snapshots_by_frame.get(premerge.frame_index)
                 if snapshot is None:
                     diagnostics.append(
                         BinaryEventExtractionDiagnostic(
@@ -400,12 +400,10 @@ def extract_binary_merge_events(
             current_snapshot = _build_premerge_snapshot(
                 frame,
                 tuple(trusted_separate_frames),
-                background_candidate=_nearest_other_candidate(
-                    selected_candidate,
-                    frame.candidates,
-                ),
+                background_candidate=event_collision_candidate,
             )
             if current_snapshot is not None:
+                trusted_snapshots_by_frame[frame.frame_index] = current_snapshot
                 last_trusted_snapshot = current_snapshot
 
         prior = frame
@@ -632,9 +630,9 @@ def _build_premerge_snapshot(
     target = _selected_candidate(frame.candidates, frame.target_point)
     if target is None:
         return None
-    background = background_candidate or _nearest_other_candidate(target, frame.candidates)
-    if background is None:
+    if background_candidate is None:
         return None
+    background = background_candidate
     scale = max(1.0, _bbox_diagonal(target.bbox), _bbox_diagonal(background.bbox))
     relations = tuple(
         BackgroundRelationSnapshot(
@@ -804,16 +802,6 @@ def _nearest_candidate(point: tuple[float, float], candidates: Sequence[Candidat
     )
 
 
-def _nearest_other_candidate(target: Candidate | None, candidates: Sequence[Candidate]) -> Candidate | None:
-    if target is None:
-        return None
-    return min(
-        (candidate for candidate in candidates if candidate.candidate_id != target.candidate_id),
-        key=lambda candidate: (_point_distance(target.center, candidate.center), candidate.candidate_id),
-        default=None,
-    )
-
-
 def _event_local_collision_candidate(
     target: Candidate | None,
     candidates: Sequence[Candidate],
@@ -832,17 +820,37 @@ def _event_local_collision_candidate(
         local = tuple(
             candidate
             for candidate in others
-            if _point_distance(candidate.center, target.center) <= 1.25 * scale
+            if _point_distance(candidate.center, target.center) <= 3.5 * scale
+            and min(
+                abs(candidate.center[0] - target.center[0]),
+                abs(candidate.center[1] - target.center[1]),
+            ) <= 0.4 * scale
         )
-        return min(
+        ranked = sorted(
             local,
             key=lambda candidate: (
-                _point_distance(candidate.center, target.center),
                 _bbox_shape_residual(candidate.bbox, target.bbox),
+                _point_distance(candidate.center, target.center),
                 candidate.candidate_id,
             ),
-            default=None,
         )
+        if not ranked:
+            return None
+        if len(ranked) > 1:
+            first_key = (
+                _bbox_shape_residual(ranked[0].bbox, target.bbox),
+                _point_distance(ranked[0].center, target.center),
+            )
+            second_key = (
+                _bbox_shape_residual(ranked[1].bbox, target.bbox),
+                _point_distance(ranked[1].center, target.center),
+            )
+            if (
+                abs(first_key[0] - second_key[0]) <= 1e-9
+                and abs(first_key[1] - second_key[1]) <= 1e-9 * scale
+            ):
+                return None
+        return ranked[0]
 
     elapsed = max(0, frame_index - reference.frame_index)
     predicted_target = (
@@ -868,7 +876,7 @@ def _event_local_collision_candidate(
         and min(
             _point_distance(candidate.center, predicted_target),
             _point_distance(candidate.center, target.center),
-        ) <= 2.5 * scale
+        ) <= 3.5 * scale
     )
     return min(
         local,
