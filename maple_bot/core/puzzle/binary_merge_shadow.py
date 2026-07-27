@@ -1,6 +1,7 @@
 # 런타임 추적에서 이진 병합 사건과 자식 역할 증거를 구성합니다.
 from __future__ import annotations
 
+import argparse
 import json
 from dataclasses import dataclass
 from enum import Enum
@@ -892,6 +893,62 @@ def render_binary_merge_event_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _binary_merge_event_output_row(
+    replay: BinaryEventReplay,
+    score: BinaryEventScore,
+) -> dict[str, object]:
+    return {
+        "event_id": replay.event_id,
+        "runtime_decision": {
+            "premerge_frame": replay.premerge_frame,
+            "split_frame": replay.split_frame,
+            "decision_frame": replay.decision_frame,
+            "split_observations_evaluated": replay.split_observations_evaluated,
+            "selected_target_candidate_id": replay.selected_target_candidate_id,
+            "selected_background_candidate_id": replay.selected_background_candidate_id,
+            "reason": replay.decision_reason,
+            "hold": replay.hold,
+        },
+        "post_hoc_score": {
+            "outcome": score.outcome.value,
+            "target_candidate_id": score.target_candidate_id,
+            "selected_candidate_id": score.selected_candidate_id,
+            "recovery_delay_ratio": score.recovery_delay_ratio,
+            "reason": score.reason,
+        },
+        "judge_diagnostics": replay.diagnostics,
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Validate binary merge identity transfer events.")
+    parser.add_argument("--trace", type=Path, required=True)
+    parser.add_argument("--score", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--event-limit", type=int, default=None)
+    args = parser.parse_args(argv)
+    if args.event_limit is not None and args.event_limit < 1:
+        parser.error("--event-limit must be at least 1")
+
+    runtime_replays = replay_binary_merge_events(args.trace)
+    replays = runtime_replays[: args.event_limit]
+    scores = score_binary_merge_events(replays, args.score, args.trace)
+    args.output.mkdir(parents=True, exist_ok=True)
+    event_rows = (
+        json.dumps(_binary_merge_event_output_row(replay, score), ensure_ascii=False, sort_keys=True)
+        for replay, score in zip(replays, scores)
+    )
+    (args.output / "binary_merge_events.jsonl").write_text(
+        "".join(f"{row}\n" for row in event_rows),
+        encoding="utf-8",
+    )
+    (args.output / "binary_merge_validation.md").write_text(
+        render_binary_merge_event_markdown(replays, scores),
+        encoding="utf-8",
+    )
+    return 0
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as stream:
@@ -1234,3 +1291,7 @@ def _is_finite_number(value: object) -> bool:
 
 def _nonnegative_float(value: object) -> float:
     return float(value) if _is_finite_number(value) and value >= 0.0 else 0.0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

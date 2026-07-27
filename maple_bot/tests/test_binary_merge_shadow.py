@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -809,3 +811,52 @@ def test_event_summary_and_markdown_are_compact_and_event_scoped() -> None:
     assert "- H1: target=a" in markdown
     assert "- H2: target=b" in markdown
     assert "## Frame" not in markdown
+
+
+def test_cli_dry_run_writes_one_event_with_runtime_and_post_hoc_diagnostics(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    score_path = tmp_path / "score.jsonl"
+    output_path = tmp_path / "representative_event_001"
+    _write_jsonl(trace_path, make_trace_rows_for_separate_overlap_merged_split())
+    _write_jsonl(
+        score_path,
+        [{"solver_frame_index": 4, "target_x": 168.0, "target_y": 100.0}],
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "core.puzzle.binary_merge_shadow",
+            "--trace",
+            str(trace_path),
+            "--score",
+            str(score_path),
+            "--output",
+            str(output_path),
+            "--event-limit",
+            "1",
+        ],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert {path.name for path in output_path.iterdir()} == {
+        "binary_merge_events.jsonl",
+        "binary_merge_validation.md",
+    }
+    event_rows = [
+        json.loads(line)
+        for line in (output_path / "binary_merge_events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(event_rows) == 1
+    assert "mouse_action" not in json.dumps(event_rows[0], sort_keys=True)
+    assert event_rows[0]["runtime_decision"]["reason"] == "binary_judges_agree"
+    assert event_rows[0]["post_hoc_score"]["outcome"] == "correct_transfer"
+    assert event_rows[0]["judge_diagnostics"]["decisions"]
+    assert event_rows[0]["judge_diagnostics"]["decisions"][-1]["h1"]
+    assert event_rows[0]["judge_diagnostics"]["decisions"][-1]["h2"]
