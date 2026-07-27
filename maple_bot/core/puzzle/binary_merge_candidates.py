@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 from math import hypot
+from statistics import median
 from typing import Sequence
 
 from .models import Candidate
@@ -58,13 +59,11 @@ def localize_candidate_pairs(
 
     stable_scale = max(
         1.0,
-        _bbox_diagonal(context.target_bbox),
-        _bbox_diagonal(context.background_bbox),
+        median((_bbox_diagonal(context.target_bbox), _bbox_diagonal(context.background_bbox))),
     )
-    parent_scale = max(1.0, _bbox_diagonal(parent_union))
     uncertainty = max(0.0, float(context.uncertainty_ratio))
     role_radius = stable_scale * (1.0 + uncertainty)
-    parent_radius = parent_scale * (0.25 + uncertainty)
+    parent_radius = stable_scale * (0.25 + uncertainty)
     local_candidates = tuple(
         candidate
         for candidate in candidates
@@ -80,7 +79,6 @@ def localize_candidate_pairs(
         context,
         stable_scale,
         parent_union,
-        parent_scale,
         role_radius,
         uncertainty,
     )
@@ -142,7 +140,6 @@ def _nondominated_pairs(
     context: CandidateLocalizationContext,
     stable_scale: float,
     parent_union: BoundingBox,
-    parent_scale: float,
     role_radius: float,
     uncertainty: float,
 ) -> tuple[CandidatePairHypothesis, ...]:
@@ -157,7 +154,7 @@ def _nondominated_pairs(
         )
         if role_residuals is None:
             continue
-        parent_residual = _parent_residual(left.candidate.bbox, right.candidate.bbox, parent_union, parent_scale)
+        parent_residual = _parent_residual(left.candidate.bbox, right.candidate.bbox, parent_union, stable_scale)
         if parent_residual > 0.50 + uncertainty:
             continue
         hypotheses.append(
@@ -201,10 +198,10 @@ def _parent_residual(
     left: BoundingBox,
     right: BoundingBox,
     parent: BoundingBox,
-    parent_scale: float,
+    stable_scale: float,
 ) -> float:
     child_union = _bbox_union(left, right)
-    return sum(abs(child_union[index] - parent[index]) for index in range(4)) / (4.0 * parent_scale)
+    return sum(abs(child_union[index] - parent[index]) for index in range(4)) / (4.0 * stable_scale)
 
 
 def _dominates(left: CandidatePairHypothesis, right: CandidatePairHypothesis) -> bool:

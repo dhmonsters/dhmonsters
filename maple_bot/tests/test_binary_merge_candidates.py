@@ -170,3 +170,69 @@ def test_localizer_ignores_high_score_yolo_candidate_outside_parent_region() -> 
     )
 
     assert with_outside_yolo == baseline
+
+
+def test_localizer_uses_median_role_diagonal_to_exclude_asymmetric_boundary_distractor() -> None:
+    target = _candidate("target", (100.0, 100.0))
+    background = _candidate("background", (140.0, 100.0), half_size=(100.0, 100.0))
+    boundary_distractor = _candidate("boundary-distractor", (350.0, 100.0), score=0.99)
+    context = replace(
+        _context(),
+        background_bbox=(40.0, 0.0, 240.0, 200.0),
+        parent_bboxes=((40.0, 0.0, 360.0, 200.0),),
+    )
+
+    result = localize_candidate_pairs((target, background, boundary_distractor), context)
+
+    assert tuple(cluster.candidate.candidate_id for cluster in result.clusters) == (
+        "background",
+        "target",
+    )
+
+
+def test_localizer_does_not_expand_parent_region_when_parent_union_only_grows() -> None:
+    candidates = (
+        _candidate("target", (100.0, 100.0)),
+        _candidate("parent-edge", (170.0, 100.0)),
+    )
+    compact_context = replace(_context(), parent_bboxes=((90.0, 90.0, 140.0, 110.0),))
+    expanded_context = replace(_context(), parent_bboxes=((30.0, 90.0, 140.0, 110.0),))
+
+    compact = localize_candidate_pairs(candidates, compact_context)
+    expanded = localize_candidate_pairs(candidates, expanded_context)
+
+    assert compact == expanded
+    assert tuple(cluster.candidate.candidate_id for cluster in expanded.clusters) == ("target",)
+    assert expanded.reason == "candidate_absent"
+
+
+def test_localizer_rejects_parent_residual_when_parent_union_only_grows() -> None:
+    candidates = (
+        _candidate("target", (100.0, 100.0)),
+        _candidate("parent-edge", (150.0, 100.0)),
+    )
+    compact_context = replace(_context(), parent_bboxes=((90.0, 90.0, 140.0, 110.0),))
+    expanded_context = replace(_context(), parent_bboxes=((20.0, 90.0, 140.0, 110.0),))
+
+    compact = localize_candidate_pairs(candidates, compact_context)
+    expanded = localize_candidate_pairs(candidates, expanded_context)
+
+    assert compact.reason == "available"
+    assert expanded.reason == "candidate_absent"
+
+
+def test_localizer_preserves_the_exact_nondominated_pair_set_for_three_clusters() -> None:
+    candidates = (
+        _candidate("target", (100.0, 100.0)),
+        _candidate("middle", (120.0, 100.0)),
+        _candidate("background", (140.0, 100.0)),
+    )
+    context = replace(_context(), parent_bboxes=((105.0, 60.0, 135.0, 140.0),))
+
+    result = localize_candidate_pairs(candidates, context)
+
+    assert result.reason == "pair_ambiguous"
+    assert _pair_ids(result) == (
+        ("background", "middle"),
+        ("middle", "target"),
+    )
