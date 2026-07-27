@@ -611,11 +611,18 @@ def test_split_observation_excludes_all_pair_cluster_members_from_context() -> N
 def _identity_risk_board_rows(
     *,
     extra_outside_candidates: int = 0,
+    close_collision_distractors: bool = False,
     reverse_candidates: bool = False,
+    mirrored: bool = False,
 ) -> list[dict[str, object]]:
+    target_x = 0.54 if mirrored else 0.46
+    background_x = 1.0 - target_x
+    split_target_x = 0.58 if mirrored else 0.42
+    split_background_x = 1.0 - split_target_x
+
     rows = _preparation_rows(
         (-2, -1),
-        target_start=0.46,
+        target_start=target_x,
         target_step=0.0,
         background_step=0.0,
     )
@@ -631,60 +638,84 @@ def _identity_risk_board_rows(
             )
             for index in range(extra_outside_candidates)
         )
+        if close_collision_distractors and 1 <= frame_index <= 3:
+            direction = -1.0 if mirrored else 1.0
+            candidates.extend(
+                (
+                    _candidate(
+                        f"close_small_{frame_index}",
+                        frame_index,
+                        (target_x + direction * 0.02, 0.50),
+                        half_ratio=0.01,
+                        score=0.99,
+                    ),
+                    _candidate(
+                        f"close_large_{frame_index}",
+                        frame_index,
+                        (target_x - direction * 0.02, 0.50),
+                        score=0.99,
+                    ),
+                )
+            )
         return candidates
 
     rows += _rows_for_frame(
         0,
         [
-            _candidate("visible_target_0", 0, (0.46, 0.50)),
-            _candidate("visible_background_0", 0, (0.54, 0.50)),
+            _candidate("visible_target_0", 0, (target_x, 0.50)),
+            _candidate("visible_background_0", 0, (background_x, 0.50)),
             *board_candidates(0),
         ],
-        (0.46, 0.50),
+        (target_x, 0.50),
         identity_state="UNKNOWN",
     )
-    rows.append(_white_anchor_row(0, (0.46, 0.50)))
+    rows.append(_white_anchor_row(0, (target_x, 0.50)))
     rows += _rows_for_frame(
         1,
         [
-            _candidate("visible_target_1", 1, (0.46, 0.50), half_ratio=0.06),
-            _candidate("visible_background_1", 1, (0.54, 0.50), half_ratio=0.06),
+            _candidate("visible_target_1", 1, (target_x, 0.50), half_ratio=0.06),
+            _candidate("visible_background_1", 1, (background_x, 0.50), half_ratio=0.06),
             *board_candidates(1),
         ],
-        (0.46, 0.50),
+        (target_x, 0.50),
         identity_state="UNKNOWN",
     )
-    rows.append(_white_anchor_row(1, (0.46, 0.50)))
+    rows.append(_white_anchor_row(1, (target_x, 0.50)))
     for frame_index in (2, 3):
         rows += _rows_for_frame(
             frame_index,
             [
-                _candidate(f"risk_target_{frame_index}", frame_index, (0.46, 0.50), half_ratio=0.06),
-                _candidate(f"risk_background_{frame_index}", frame_index, (0.54, 0.50), half_ratio=0.06),
+                _candidate(f"risk_target_{frame_index}", frame_index, (target_x, 0.50), half_ratio=0.06),
+                _candidate(f"risk_background_{frame_index}", frame_index, (background_x, 0.50), half_ratio=0.06),
                 *board_candidates(frame_index),
             ],
-            (0.46, 0.50),
+            (target_x, 0.50),
             identity_state="IDENTITY_HOLD",
         )
     rows += _rows_for_frame(
         4,
         [
-            _candidate("left_child_4", 4, (0.42, 0.50)),
-            _candidate("middle_child_4", 4, (0.50, 0.50), half_ratio=0.02),
-            _candidate("right_child_4", 4, (0.58, 0.50)),
+            _candidate("target_child_4", 4, (split_target_x, 0.50)),
+            _candidate("background_child_4", 4, (split_background_x, 0.50)),
+            _candidate(
+                "background_alternative_4",
+                4,
+                ((1.0 - 0.575) if mirrored else 0.575, 0.50),
+                half_ratio=0.02,
+            ),
             *board_candidates(4),
         ],
-        (0.42, 0.50),
+        (split_target_x, 0.50),
         identity_state="IDENTITY_HOLD",
     )
     rows += _rows_for_frame(
         5,
         [
-            _candidate("left_child_5", 5, (0.42, 0.50)),
-            _candidate("right_child_5", 5, (0.58, 0.50)),
+            _candidate("target_child_5", 5, (split_target_x, 0.50)),
+            _candidate("background_child_5", 5, (split_background_x, 0.50)),
             *board_candidates(5),
         ],
-        (0.42, 0.50),
+        (split_target_x, 0.50),
         identity_state="IDENTITY_HOLD",
     )
     if reverse_candidates:
@@ -708,7 +739,27 @@ def _runtime_integration_signature(
     )
     return (
         event.event_id,
+        event.reason,
+        event.merge_frame_indices,
+        event.split_frame_indices,
         pair_ids,
+        replay.split_frame,
+        replay.decision_frame,
+        replay.split_observations_evaluated,
+        tuple(
+            (
+                decision["frame_index"],
+                decision["status"],
+                decision["reason"],
+                decision["normalized_margin"],
+                decision["pair_cost"],
+                decision["runner_up_pair_cost"],
+                decision["required_pair_margin"],
+                decision["h1"],
+                decision["h2"],
+            )
+            for decision in replay.diagnostics["decisions"]
+        ),
         replay.hold,
         replay.decision_reason,
         replay.selected_target_candidate_id,
@@ -735,12 +786,21 @@ def test_identity_risk_board_flow_integrates_extraction_localization_and_replay(
     assert event.event_id == replay.event_id == 1
     assert event.premerge.frame_index == 1
     assert tuple(observation.frame_index for observation in event.split_observations) == (4, 5)
+    assert all(len(observation.pair_hypotheses) == 1 for observation in event.split_observations)
+    assert len(event.split_observations[0].pair_competitors) > 1
     assert replay.split_observations_evaluated == 2
-    assert replay.diagnostics["decisions"][0]["reason"] == "pair_ambiguous"
+    first, second = replay.diagnostics["decisions"]
+    assert first["reason"] == "pair_ambiguous"
+    assert 0.0 < first["normalized_margin"] <= first["required_pair_margin"]
+    assert first["runner_up_pair_cost"] is not None
+    assert first["pair_cost"] < first["runner_up_pair_cost"]
+    assert second["status"] == "resolved"
+    assert second["h1"] is not None
+    assert second["h2"] is not None
     assert not replay.hold
     assert replay.decision_reason == "binary_judges_agree"
-    assert replay.selected_target_candidate_id == "left_child_5"
-    assert replay.selected_background_candidate_id == "right_child_5"
+    assert replay.selected_target_candidate_id == "target_child_5"
+    assert replay.selected_background_candidate_id == "background_child_5"
 
 
 def test_identity_risk_runtime_isolated_from_outside_and_reordered_candidates(
@@ -751,6 +811,14 @@ def test_identity_risk_runtime_isolated_from_outside_and_reordered_candidates(
         ("baseline", _identity_risk_board_rows()),
         ("outside", _identity_risk_board_rows(extra_outside_candidates=3)),
         ("reordered", _identity_risk_board_rows(reverse_candidates=True)),
+        ("close", _identity_risk_board_rows(close_collision_distractors=True)),
+        (
+            "close-reordered",
+            _identity_risk_board_rows(
+                close_collision_distractors=True,
+                reverse_candidates=True,
+            ),
+        ),
     ):
         trace_path = tmp_path / f"{name}.jsonl"
         _write_jsonl(trace_path, rows)
@@ -760,7 +828,70 @@ def test_identity_risk_runtime_isolated_from_outside_and_reordered_candidates(
         assert len(replays) == 1
         signatures.append(_runtime_integration_signature(extraction, replays[0]))
 
-    assert signatures[1:] == signatures[:1] * 2
+    assert signatures[1:] == signatures[:1] * (len(signatures) - 1)
+
+
+def test_identity_risk_h1_h2_role_resolution_is_direction_invariant(tmp_path: Path) -> None:
+    for name, rows in (
+        ("forward", _identity_risk_board_rows()),
+        ("mirrored", _identity_risk_board_rows(mirrored=True)),
+    ):
+        trace_path = tmp_path / f"{name}.jsonl"
+        _write_jsonl(trace_path, rows)
+        (replay,) = replay_binary_merge_events(trace_path, event_limit=1)
+
+        final = replay.diagnostics["decisions"][-1]
+        assert final["status"] == "resolved"
+        assert final["h1"] is not None
+        assert final["h2"] is not None
+        assert {
+            final["h1"]["target_candidate_id"],
+            final["h2"]["target_candidate_id"],
+        } == {"target_child_5", "background_child_5"}
+        assert replay.selected_target_candidate_id == "target_child_5"
+        assert replay.selected_background_candidate_id == "background_child_5"
+
+
+def test_runtime_diagnostics_distinguish_candidate_pair_and_event_failures(tmp_path: Path) -> None:
+    candidate_absent_rows = _identity_risk_board_rows()
+    for row in candidate_absent_rows:
+        if row.get("type") == "CANDIDATES" and row.get("frame_index") in (4, 5):
+            row["payload"]["candidates"] = [
+                candidate
+                for candidate in row["payload"]["candidates"]
+                if not str(candidate["candidate_id"]).startswith("background_")
+            ]
+            row["payload"]["candidates"].append(
+                _candidate(
+                    f"detector_only_{row['frame_index']}",
+                    row["frame_index"],
+                    (0.54, 0.70),
+                    half_ratio=0.01,
+                )
+            )
+    candidate_trace = tmp_path / "candidate-absent.jsonl"
+    pair_trace = tmp_path / "pair-ambiguous.jsonl"
+    event_trace = tmp_path / "event-detection.jsonl"
+    empty_score = tmp_path / "empty-score.jsonl"
+    _write_jsonl(candidate_trace, candidate_absent_rows)
+    _write_jsonl(pair_trace, _identity_risk_board_rows())
+    _write_jsonl(
+        event_trace,
+        make_trace_rows_for_separate_overlap_merged_split(identity_state="IDENTITY_HOLD"),
+    )
+    _write_jsonl(empty_score, [])
+
+    (candidate_replay,) = replay_binary_merge_events(candidate_trace, event_limit=1)
+    (pair_replay,) = replay_binary_merge_events(pair_trace, event_limit=1)
+    (event_replay,) = replay_binary_merge_events(event_trace, event_limit=1)
+    (candidate_score,) = score_binary_merge_events((candidate_replay,), empty_score, candidate_trace)
+    (event_score,) = score_binary_merge_events((event_replay,), empty_score, event_trace)
+
+    assert candidate_replay.decision_reason == "candidate_absent"
+    assert pair_replay.diagnostics["decisions"][0]["reason"] == "pair_ambiguous"
+    assert event_replay.decision_reason == "premerge_identity_untrusted"
+    assert candidate_score.outcome is BinaryEventOutcome.EVENT_DETECTION_FAILURE
+    assert event_score.outcome.value == "event_detection_failure"
 
 
 def test_identity_risk_runtime_is_invariant_to_post_hoc_gt(tmp_path: Path) -> None:
@@ -782,8 +913,8 @@ def test_identity_risk_runtime_is_invariant_to_post_hoc_gt(tmp_path: Path) -> No
         [asdict(row) for row in after],
         sort_keys=True,
     )
-    assert left_score[0].target_candidate_id == "left_child_5"
-    assert right_score[0].target_candidate_id == "right_child_5"
+    assert left_score[0].target_candidate_id == "target_child_5"
+    assert right_score[0].target_candidate_id == "background_child_5"
     assert left_score[0].outcome is BinaryEventOutcome.LATE_RECOVERY
     assert right_score[0].outcome is BinaryEventOutcome.WRONG_SWITCH
 
