@@ -287,6 +287,8 @@ class RedNose2RouteRunner:
                       tolerance: int = 1) -> bool:
         pos = self._current_pos()
         if pos is None or pos[1] is None:
+            pos = self._fresh_pos()
+        if pos is None or pos[1] is None:
             return False
         lower = self._profile_y(min_key, fallback_min)
         upper = self._profile_y(max_key, fallback_max)
@@ -331,6 +333,12 @@ class RedNose2RouteRunner:
         attack_key = self._attack_key()
         if attack_key:
             self._humanizer().release(attack_key)
+
+    def _release_owned_inputs(self) -> None:
+        """빨코2 루틴이 직접 잡은 이동/공격 입력만 해제한다."""
+        h = self._humanizer()
+        h.release_dir()
+        self._release_attack_key()
 
     def _teleport_once(self, direction: str) -> None:
         self._teleport_once_with_hold(direction, float(self._profile.get("teleport_hold_sec", 0.05)))
@@ -611,18 +619,18 @@ class RedNose2RouteRunner:
                 h.release_dir()
                 self._teleport_once("up")
                 if self._wait_floor(lambda: self._is_upper_floor_v5(block), settle_sec):
-                    h.release_all()
+                    self._release_owned_inputs()
                     return True
 
                 self._teleport_once("right")
                 if self._wait_floor(lambda: self._is_upper_floor_v5(block), settle_sec):
-                    h.release_all()
+                    self._release_owned_inputs()
                     return True
 
                 pos = self._current_pos()
                 y_text = "?" if pos is None or pos[1] is None else str(int(pos[1]))
                 self._log(f"[rednose2v5] floor transition not reached, y={y_text}; retry")
-            h.release_all()
+            self._release_owned_inputs()
             return False
         finally:
             self.owns_movement = previous_owns_movement
@@ -637,10 +645,10 @@ class RedNose2RouteRunner:
                 floor_guard=floor_guard,
                 guard_label=guard_label,
             ):
-                self._humanizer().release_all()
+                self._release_owned_inputs()
                 return False
             self._log(f"[rednose2v5] move {index}/{len(targets)} complete -> X={target:.0f}")
-        self._humanizer().release_all()
+        self._release_owned_inputs()
         return True
 
     def _run_pickup_route_v5(self, lower_move, ladder_block) -> bool:
@@ -671,6 +679,13 @@ class RedNose2RouteRunner:
         return self._run_rednose_new_v5_once()
 
     def _run_floor2_hunt_once(self) -> bool:
+        if not self._is_upper_floor_v5(None):
+            deadline = time.monotonic() + 0.6
+            while self._active() and time.monotonic() < deadline:
+                pos = self._fresh_pos()
+                if pos is not None and pos[1] is not None and self._is_upper_floor_v5(None):
+                    break
+                self._sleep(0.05)
         if not self._is_upper_floor_v5(None):
             self._log("[rednose2v5] floor2 hunt detected off-floor; recover through stair7")
             recovered = self._return_floor2_from_stair7()
@@ -815,7 +830,7 @@ class RedNose2RouteRunner:
             )
             return True
         finally:
-            h.release_all()
+            self._release_owned_inputs()
             self.owns_movement = previous_owns_movement
 
     def _manual_active(self) -> bool:
@@ -851,12 +866,33 @@ class RedNose2RouteRunner:
                     active_fn=self._manual_active,
                 ):
                     return False
-            pos = self._fresh_pos()
+            pos = None
+            for wait_attempt in range(1, 11):
+                pos = self._fresh_pos()
+                if pos is not None and self._is_upper_floor_v5(pos) and x_min <= float(pos[0]) <= x_max:
+                    break
+                x_text = "?" if pos is None or pos[0] is None else f"{float(pos[0]):.0f}"
+                y_text = "?" if pos is None or pos[1] is None else f"{float(pos[1]):.0f}"
+                self._log(
+                    f"[rednose2v5] auto-sell entry wait fresh pos "
+                    f"({wait_attempt}/10): x={x_text}, y={y_text}, "
+                    f"range {x_min:.0f}-{x_max:.0f}, floor2={self._is_upper_floor_v5(pos)}"
+                )
+                self._sleep(0.08)
             if pos is None or not (x_min <= float(pos[0]) <= x_max):
                 x_text = "?" if pos is None or pos[0] is None else f"{float(pos[0]):.0f}"
                 y_text = "?" if pos is None or pos[1] is None else f"{float(pos[1]):.0f}"
                 self._log(
                     f"[rednose2v5] auto-sell entry blocked: "
+                    f"x={x_text}, y={y_text}, range {x_min:.0f}-{x_max:.0f}, "
+                    f"floor2={self._is_upper_floor_v5(pos)}"
+                )
+                return False
+            if not self._is_upper_floor_v5(pos):
+                x_text = "?" if pos is None or pos[0] is None else f"{float(pos[0]):.0f}"
+                y_text = "?" if pos is None or pos[1] is None else f"{float(pos[1]):.0f}"
+                self._log(
+                    f"[rednose2v5] auto-sell entry blocked: not floor2 "
                     f"x={x_text}, y={y_text}, range {x_min:.0f}-{x_max:.0f}"
                 )
                 return False

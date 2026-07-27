@@ -4,6 +4,31 @@ from __future__ import annotations
 from core.junk_seller import sell_junk   # A 기존 판매 로직 재사용(템플릿 인벤→상점)
 
 
+def _screen_for_junk_sale(screen):
+    """자동판매가 기대하는 ScreenReader 계약으로 화면 객체를 맞춘다."""
+    if (
+        hasattr(screen, "capture")
+        and hasattr(screen, "find_template")
+        and hasattr(screen, "find_template_score")
+    ):
+        return screen
+    from core.screen_reader import ScreenReader
+    return ScreenReader()
+
+
+def _input_for_junk_sale(config, input_ctrl):
+    """자동판매가 기대하는 InputController 계약으로 입력 객체를 맞춘다."""
+    required = ("focus_game_window", "press_key", "click", "double_click", "scroll")
+    if all(hasattr(input_ctrl, name) for name in required):
+        return input_ctrl
+    from core.input_controller import InputController
+    try:
+        title = config.get("settings2", "game_window_title", default="MapleStory Worlds") or ""
+    except Exception:
+        title = "MapleStory Worlds"
+    return InputController(title)
+
+
 class JunkSeller:
     """잡템 자동판매. 실판매는 검증된 A sell_junk 에 위임하고,
     B 방식 보호목록(화이트리스트)으로 특정 아이템 판매를 막는다.
@@ -14,8 +39,8 @@ class JunkSeller:
     def __init__(self, config, screen, input_ctrl,
                  status_cb=None, stop_event=None, protect_items=None):
         self._config = config
-        self._screen = screen
-        self._input = input_ctrl
+        self._screen = _screen_for_junk_sale(screen)
+        self._input = _input_for_junk_sale(config, input_ctrl)
         self._status = status_cb or (lambda m: None)
         self._stop_event = stop_event
         if protect_items is not None:
@@ -33,10 +58,16 @@ class JunkSeller:
         """아이템명이 보호목록에 (부분)매칭되면 판매 제외."""
         return any(p and p in item_name for p in self._protect)
 
-    def sell(self) -> None:
+    def sell(self, status_cb=None, stop_event=None) -> None:
         """잡템 판매 실행 — A sell_junk 위임 (보호목록은 향후 슬롯별 판매에 적용).
 
         주의: A sell_junk 는 '기타탭 일괄판매'라 아이템명 단위 필터가 없다.
         보호목록은 슬롯 단위 판매로 확장될 때 is_protected 로 거른다(실기 확장 지점).
         """
-        sell_junk(self._config, self._screen, self._input, self._status, self._stop_event)
+        sell_junk(
+            self._config,
+            self._screen,
+            self._input,
+            status_cb or self._status,
+            stop_event or self._stop_event,
+        )

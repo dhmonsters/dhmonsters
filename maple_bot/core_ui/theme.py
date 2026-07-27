@@ -1,27 +1,27 @@
-# Discord Night 디자인 토큰 → PyQt6 QSS/QFont. 게이머 다크+네온, 둥근 카드, 마이크로인터랙션 단일 출처
+# 밝은 제어판 디자인 토큰과 PyQt6 공통 스타일을 관리한다.
 from __future__ import annotations
 
-# ── 색 (Discord Night) ────────────────────────────────────────────
+# ── 색 (Claude Control Light) ─────────────────────────────────────
 TOKENS = {
-    "canvas":          "#1a1b1e",   # 앱 배경
-    "surface_1":       "#202125",   # 내비/컨트롤바/사이드 패널
-    "surface_2":       "#2b2d31",   # 카드
-    "surface_3":       "#34363c",   # 입력/호버
-    "surface_4":       "#3a3c42",   # pressed/strong
-    "hairline":        "#2c2e33",
-    "hairline_strong": "#3a3c42",
-    "ink":             "#f2f3f5",   # 본문
-    "ink_muted":       "#b5bac1",
-    "ink_subtle":      "#80848e",
-    "ink_tertiary":    "#6b6f78",
-    "primary":         "#5865f2",   # 블러플 (주 강조/CTA)
-    "primary_hover":   "#7c6bff",
-    "primary_focus":   "#4752c4",
+    "canvas":          "#f3f5f2",   # 앱 배경
+    "surface_1":       "#ffffff",   # 내비/컨트롤바/사이드 패널
+    "surface_2":       "#ffffff",   # 카드
+    "surface_3":       "#edf2ee",   # 입력/선택/호버
+    "surface_4":       "#dde6df",   # pressed/strong
+    "hairline":        "#d8ded8",
+    "hairline_strong": "#becbc2",
+    "ink":             "#17211d",   # 본문
+    "ink_muted":       "#52635a",
+    "ink_subtle":      "#6f7f76",
+    "ink_tertiary":    "#8a988f",
+    "primary":         "#0f766e",   # 주요 강조/CTA
+    "primary_hover":   "#0b625c",
+    "primary_focus":   "#094e49",
     "on_primary":      "#ffffff",
-    "accent":          "#a855f7",   # 바이올렛 (보조 강조)
-    "success":         "#3ada85",   # 상태/성공
-    "danger":          "#f23f43",   # HP/위험
-    "info":            "#4d7cff",   # MP
+    "accent":          "#d97745",   # 보조 강조
+    "success":         "#27845f",   # 상태/성공
+    "danger":          "#c2413b",   # HP/위험
+    "info":            "#356fa3",   # MP
     "char":            "#ffd33d",   # 캐릭터(노란 점)
 }
 
@@ -66,10 +66,10 @@ def apply_font(app, base_pt: int = 10):
             if fams and fam == "Pretendard":
                 family = fams[0]
 
-    f = QFont(family)
+    safe_pt = base_pt if base_pt > 0 else 10
+    f = QFont(family, safe_pt)
     f.setFamilies([family, "Malgun Gothic", "Segoe UI"])
     f.setStyleHint(QFont.StyleHint.SansSerif)
-    f.setPointSize(base_pt)
     f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, LETTER_SPACING_PX)
     app.setFont(f)
     return family
@@ -227,4 +227,16 @@ def build_qss() -> str:
         border-top: 1px solid {t['hairline_strong']}; border-bottom: 1px solid {t['hairline_strong']};
     }}
     QSplitter#vsplit::handle:vertical:hover {{ background: {t['primary']}; }}
+    QFrame#huntGroundPresetCard {{
+        background-color: {t['surface_2']}; border: 1px solid {t['hairline_strong']};
+        border-radius: {r['lg']}px;
+    }}
+    QLabel#presetTitle {{ color: {t['ink']}; font-size: 16px; font-weight: 700; }}
+    QLabel#presetDescription {{ color: {t['ink_muted']}; }}
+    QLabel#presetStatus {{ color: {t['primary']}; font-weight: 600; }}
+    QPushButton#primaryButton {{
+        background-color: {t['primary']}; color: {t['on_primary']}; border: none;
+        border-radius: {r['md']}px; padding: {s['xs']}px {s['md']}px; font-weight: 700;
+    }}
+    QPushButton#primaryButton:hover {{ background-color: {t['primary_hover']}; }}
     """

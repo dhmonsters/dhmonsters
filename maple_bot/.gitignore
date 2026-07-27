@@ -43,6 +43,7 @@ models/
 dataset/
 dataset_yolo/
 dataset_shapes/
+dataset_cls/
 _shape_check/
 _shape_train_work/
 .superpowers/
@@ -55,3 +56,4 @@ _record_debug/
 
 # GT 라벨 프레임(사용자 빨간점 — 로컬)
 _gt_frames/
+03_output/*license_v2_private_key*.txt

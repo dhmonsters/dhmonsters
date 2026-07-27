@@ -18,9 +18,18 @@ class InputBackend(ABC):
     def press(self, key: str, hold_sec: float = 0.05) -> None: ...
 
     @abstractmethod
+    def click(self, x: int, y: int) -> None: ...
+
+    @abstractmethod
     def is_available(self) -> bool:
         """이 백엔드가 현재 환경에서 사용 가능한가."""
         ...
+
+    def begin_priority(self) -> None:
+        """중요 입력 구간 시작. 지원하지 않는 백엔드는 그대로 실행한다."""
+
+    def end_priority(self) -> None:
+        """중요 입력 구간 종료. 지원하지 않는 백엔드는 그대로 실행한다."""
 
 
 class InterceptionBackend(InputBackend):
@@ -46,6 +55,15 @@ class InterceptionBackend(InputBackend):
 
     def press(self, key: str, hold_sec: float = 0.05) -> None:
         self._ic.press(key, hold_sec)
+
+    def click(self, x: int, y: int) -> None:
+        self._ic.click(int(x), int(y))
+
+    def begin_priority(self) -> None:
+        self._ic.begin_priority()
+
+    def end_priority(self) -> None:
+        self._ic.end_priority()
 
 
 class SendInputBackend(InputBackend):
@@ -74,6 +92,14 @@ class SendInputBackend(InputBackend):
         self.key_down(key)
         time.sleep(max(0.0, hold_sec))
         self.key_up(key)
+
+    def click(self, x: int, y: int) -> None:
+        import time
+        self._src._move_mouse(int(x), int(y))
+        time.sleep(0.03)
+        self._src._click_mouse(True)
+        time.sleep(0.05)
+        self._src._click_mouse(False)
 
 
 def select_backend(candidates: list[InputBackend] | None = None) -> InputBackend:

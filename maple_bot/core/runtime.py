@@ -4,7 +4,9 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from core.humanize.humanizer import Humanizer
 from core.sensing.char_scanner import CharScanner
@@ -26,6 +28,17 @@ from core.sensing import monster_vision
 from core.notify.telegram import TelegramNotifier
 from core.humanize.intent import Intent
 from core.minigame.registry import SolverRegistry
+
+
+def _app_path(path: str) -> str:
+    """상대 리소스 경로를 프로젝트/EXE 기준 절대경로로 변환한다."""
+    if not path:
+        return path
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return str(candidate)
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return str(base / candidate)
 from core.minigame.self_transparent_engine import SelfTransparentEngine
 from core.minigame.sidecar import InMemoryChannel, SidecarChannel
 from core.navigation.viewport_tracker import ViewportTracker
@@ -72,7 +85,7 @@ class RuntimeConfig:
     # 嫄고깘 媛먯? (LieScanner)
     lie_enabled: bool = True
     lie_alert: bool = False                     # 嫄고깘 ?뚮┝(?뚮━+?붾젅洹몃옩) ?듯빀 ?좉?
-    lie_title_template: str = "templates/transparent_shape_title.png"
+    lie_title_template: str = "templates/lie_detector/title.png"
     lie_threshold: float = 0.65
     lie_detect_region: dict | None = None      # ??댄? ?먯깋 ?곸뿭 (None=?꾩껜?붾㈃)
     # ?쒖같 (Patrol) ??泥?援ъ뿭 醫뚯슦 寃쎄퀎
@@ -169,6 +182,7 @@ class BotRuntime:
 
         # 媛먯? 怨꾩링 ???대깽?명걧
         self.event_queue: queue.Queue = queue.Queue()
+        self._lie_template_missing = None
         self.char_scanner = CharScanner(
             screen_capture, lambda: self._resolve_region(config.minimap_region),
             log_fn=lambda m: self.log(m, "媛먯?"),
@@ -184,14 +198,18 @@ class BotRuntime:
         self.lie_scanner = None
         if config.lie_enabled:
             import os as _os
-            if _os.path.exists(config.lie_title_template):
+            lie_title_template = _app_path(config.lie_title_template)
+            self._cfg.lie_title_template = lie_title_template
+            if _os.path.exists(lie_title_template):
                 self.lie_scanner = LieScanner(
-                    screen_capture, config.lie_title_template,
+                    screen_capture, lie_title_template,
                     threshold=config.lie_threshold,
                     region=lambda: self._resolve_region(config.lie_detect_region),
                     debug_log_fn=self._log_lie_scan,
                     debug_dir=self._lie_debug_dir(),
                 )
+            else:
+                self._lie_template_missing = lie_title_template
         # ?ㅻⅨ ?좎? 媛먯? (鍮④컯 ?쎌?)
         self.user_scanner = None
         if config.user_detect_enabled:
@@ -388,9 +406,7 @@ class BotRuntime:
         # 痢듬퀎 諛섎났 ?щ깷 猷⑦듃 ?ㅽ뻾湲???route_mode + route ?덉쑝硫?蹂꾨룄 ?ㅻ젅?쒕줈 諛섎났 ?ㅽ뻾
         self.floor_hunt_runner = None
         is_rednose2_route = (
-            config.route_mode
-            and config.route
-            and bool(config.rednose2_v5.get("enabled", True))
+            bool(config.rednose2_v5.get("enabled", True))
             and config.hunt_ground_active.strip() == "\ube68\ucf542"
         )
         is_rednose3_route = (
@@ -606,7 +622,7 @@ class BotRuntime:
         if getattr(self.floor_hunt_runner, "controls_attack", False):
             return
         if self.floor_hunt_runner is not None:
-            allowed = self._route_hunt_active or self._ladder_monster_waiting
+            allowed = self._floor_runner_attack_allowed(False, False)
         elif self._cfg.hunt_mode == "image":
             allowed = self._monster_in_range()
         else:
@@ -782,17 +798,19 @@ class BotRuntime:
         self.lie_scanner = None
         if config.lie_enabled:
             import os as _os
-            if _os.path.exists(config.lie_title_template):
+            lie_title_template = _app_path(config.lie_title_template)
+            self._cfg.lie_title_template = lie_title_template
+            if _os.path.exists(lie_title_template):
                 self.lie_scanner = LieScanner(
                     self._capture,
-                    config.lie_title_template,
+                    lie_title_template,
                     threshold=config.lie_threshold,
                     region=lambda: self._resolve_region(config.lie_detect_region),
                     debug_log_fn=self._log_lie_scan,
                     debug_dir=self._lie_debug_dir(),
                 )
             else:
-                self.log(f"거탐 템플릿 없음: {config.lie_title_template}", "감지")
+                self.log(f"거탐 템플릿 없음: {lie_title_template}", "감지")
         if was_running and self.lie_scanner is not None:
             self.lie_scanner.start(self.event_queue)
         self.log_lie_scanner_status()
@@ -803,6 +821,8 @@ class BotRuntime:
             self.log("거탐 감지: 꺼짐", "감지")
             return
         if self.lie_scanner is None:
+            if getattr(self, "_lie_template_missing", None):
+                self.log(f"거탐 템플릿 없음: {self._lie_template_missing}", "감지")
             self.log(
                 f"거탐 감지: 스캐너 없음, template={self._cfg.lie_title_template}",
                 "감지",
@@ -835,9 +855,7 @@ class BotRuntime:
             and config.hunt_ground_active.strip() == "\ube68\ucf543"
         )
         is_rednose2_route = (
-            config.route_mode
-            and config.route
-            and bool(config.rednose2_v5.get("enabled", True))
+            bool(config.rednose2_v5.get("enabled", True))
             and config.hunt_ground_active.strip() == "\ube68\ucf542"
         )
         if is_rednose3_route:
@@ -1080,11 +1098,7 @@ class BotRuntime:
             self.buffs.tick(now)
             self.pet.tick(now)
             self.pickup.tick(now)
-            # ?щ깷 援ш컙?먯꽌, 諛吏?dwelling)???뚮쭔 硫덉떠 怨듦꺽(?대룞 park??dwell_fn??泥섎━).
-            # ?쒗뵆由??놁쑝硫?湲곗〈 怨듦꺽諛뺤뒪 ?먯젙?쇰줈 ?대갚.
-            allowed = self._route_hunt_active and (
-                dwelling if density_on else self._monster_in_range()
-            )
+            allowed = self._floor_runner_attack_allowed(density_on, dwelling)
             self._run_attacks(now, allowed)
             return
 
@@ -1150,6 +1164,16 @@ class BotRuntime:
                 interval=self._cfg.attack_interval,
                 hold=self._attack_hold(),
             )
+
+    def _floor_runner_attack_allowed(self, density_on: bool, dwelling: bool) -> bool:
+        """일반 동선 러너는 이동 중에도 기존 전투 설정으로 공격한다."""
+        if isinstance(self.floor_hunt_runner, RouteStateRunner):
+            if density_on:
+                return bool(dwelling)
+            if self._cfg.hunt_mode == "image":
+                return self._monster_in_range()
+            return True
+        return bool(self._route_hunt_active or self._ladder_monster_waiting)
 
     def _check_potions(self, now: float) -> None:
         """HP/MP 鍮꾩쑉???쎌뼱 ?꾧퀎 誘몃쭔?대㈃ 臾쇱빟 ?ъ슜(Combat.check_potions).

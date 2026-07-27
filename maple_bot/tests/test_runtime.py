@@ -107,6 +107,23 @@ def test_potion_no_fire_when_full():
     assert "pgup" not in backend.presses
 
 
+def test_runtime_runs_attack_sequence_in_order():
+    from core.acting.attack_sequence import AttackSequence
+
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        attack_sequences=[AttackSequence("연속기", ("a", "b"), 0.1, 5.0)],
+    )
+    rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
+                    input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel())
+
+    rt.hunting_tick(now=1.0)
+    rt.hunting_tick(now=1.1)
+
+    assert backend.presses[:2] == ["a", "b"]
+
+
 def test_route_mode_floors_from_route_not_single_zone():
     """route_mode면 route의 다층(pos_y)에서 층을 추출 — 단일 zone만으로 오판 안 함.
 

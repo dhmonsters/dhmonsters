@@ -1,7 +1,7 @@
 # 6 카테고리 설정 페이지 — config 키를 폼 필드로 바인딩. shell이 카테고리별로 호출
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton
 
 from core_ui.theme import SPACING
 from core_ui.widgets import (
@@ -48,6 +48,85 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
                 on_done()
         dlg.region_selected.connect(apply)
         dlg.exec()
+
+    btn.clicked.connect(on_click)
+    return btn
+
+
+def _make_bar_picker(config, bar_type: str, label: str) -> QPushButton:
+    """게임창에서 HP/MP 바를 드래그해 게임창 기준 상대좌표로 저장한다."""
+    btn = QPushButton(f"{label} 바 화면 캡처")
+    btn.setObjectName("primary")
+    btn.setToolTip(f"게임 화면에서 {label} 게이지 영역을 드래그해 저장")
+
+    def on_click():
+        from PyQt6.QtWidgets import QMessageBox
+        import mss as _mss
+        import numpy as np
+        import time
+        import win32gui
+        from PyQt6.QtWidgets import QApplication
+        from core_ui.shot_selector import ScreenshotRegionSelector
+
+        title = config.get("settings2", "game_window_title") or "MapleStory"
+        hwnd = win32gui.FindWindow(None, title)
+        if not hwnd:
+            QMessageBox.warning(
+                btn, "게임창을 찾을 수 없음",
+                f"게임창 제목이 '{title}'인지 확인해 주세요.",
+            )
+            return
+
+        ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        cw, ch = right - left, bottom - top
+        px, py, pw, ph = int(ox), int(oy), int(cw), int(ch)
+        if pw <= 0 or ph <= 0:
+            QMessageBox.warning(btn, "게임창 영역 오류", "게임창 클라이언트 영역을 확인할 수 없습니다.")
+            return
+
+        owner = btn.window()
+        owner.hide()
+        QApplication.processEvents()
+        try:
+            win32gui.ShowWindow(hwnd, 9)
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            time.sleep(0.25)
+            with _mss.mss() as sct:
+                game_region = {
+                    "left": int(px), "top": int(py),
+                    "width": int(pw), "height": int(ph),
+                }
+                raw = np.array(sct.grab(game_region))[:, :, :3]
+        finally:
+            owner.show()
+            QApplication.processEvents()
+        selector = ScreenshotRegionSelector(raw, src_origin=(px, py), parent=owner)
+
+        def apply(x, y, width, height):
+            rx = max(0, min(pw, int(x) - px))
+            ry = max(0, min(ph, int(y) - py))
+            rw = max(1, min(pw - rx, int(width)))
+            values = {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "x_ratio": round(rx / pw, 8),
+                "y_ratio": round(ry / ph, 8),
+                "width_ratio": round(rw / pw, 8),
+            }
+            config.set("coordinate", bar_type, values)
+            config.save()
+            QMessageBox.information(
+                btn, f"{label} 바 저장",
+                f"{label} 바 영역을 게임창 기준 상대좌표로 저장했습니다.",
+            )
+
+        selector.region_selected.connect(apply)
+        selector.exec()
 
     btn.clicked.connect(on_click)
     return btn
@@ -186,7 +265,7 @@ def _page(title: str, desc: str, fields: list, buttons: list | None = None,
     if buttons:
         v.addSpacing(SPACING["sm"])
     for f in fields:
-        v.addWidget(f.row)
+        v.addWidget(getattr(f, "row", f))
     ex = extras or []
     for i, w in enumerate(ex):
         # fill_last면 마지막 extra에 stretch=1 부여(빈공간 채움), 나머지/일반 페이지는 0
@@ -202,6 +281,91 @@ def _page(title: str, desc: str, fields: list, buttons: list | None = None,
 
 
 # ── 6 카테고리 빌더 (config 실제 키 매핑) ────────────────────────────
+def _make_current_position_checker(config) -> QWidget:
+    """현재 미니맵에서 감지한 캐릭터 좌표를 픽셀/상대좌표로 보여주는 행."""
+    row = QWidget()
+    row.setObjectName("currentPositionChecker")
+    row._character_provider = None
+    row._minimap_size_provider = None
+    lay = QHBoxLayout(row)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(SPACING["sm"])
+
+    btn = QPushButton("현재 위치 좌표 확인")
+    btn.setObjectName("primary")
+    btn.setMinimumWidth(140)
+    lbl = QLabel("현재 위치: -")
+    lbl.setObjectName("subtle")
+    lbl.setMinimumWidth(360)
+
+    def set_character_provider(fn, size_fn=None):
+        row._character_provider = fn
+        row._minimap_size_provider = size_fn
+
+    def on_click():
+        try:
+            from PyQt6.QtWidgets import QApplication
+            from core.config_manager import resolve_minimap_coords
+            from core.minimap_reader import MinimapConfig, MinimapReader
+            from core.screen_reader import ScreenReader
+
+            stored_mm = config.get("minimap") or {}
+            region_x, region_y, width, height = resolve_minimap_coords(config, stored_mm)
+            pos = None
+            provider = getattr(row, "_character_provider", None)
+            if callable(provider):
+                provided = provider()
+                if (
+                    isinstance(provided, tuple)
+                    and len(provided) == 2
+                    and isinstance(provided[0], tuple)
+                ):
+                    pos, observed_at = provided
+                    if observed_at is not None:
+                        import time
+                        if time.monotonic() - float(observed_at) > 1.0:
+                            pos = None
+                else:
+                    pos = provided
+                size_provider = getattr(row, "_minimap_size_provider", None)
+                if callable(size_provider):
+                    width, height = size_provider()
+            if not pos:
+                reader = MinimapReader(ScreenReader())
+                reader.set_config(MinimapConfig(
+                    region_x=region_x,
+                    region_y=region_y,
+                    width=width,
+                    height=height,
+                    char_r=int(stored_mm.get("char_r", 255)),
+                    char_g=int(stored_mm.get("char_g", 255)),
+                    char_b=int(stored_mm.get("char_b", 0)),
+                    tolerance=int(stored_mm.get("tolerance", 40)),
+                ))
+                pos = reader.get_character_pos()
+            if not pos:
+                lbl.setText("현재 위치: 감지 실패 - 미니맵 영역/캐릭터 색 확인 필요")
+                return
+
+            x, y = int(pos[0]), int(pos[1])
+            rx = x / max(1, int(width))
+            ry = y / max(1, int(height))
+            text = f"현재 위치: X={x}  Y={y} / 상대 X={rx:.4f}, Y={ry:.4f}"
+            lbl.setText(text)
+            QApplication.clipboard().setText(
+                f"X={x}, Y={y}, x_ratio={rx:.4f}, y_ratio={ry:.4f}"
+            )
+        except Exception as exc:
+            lbl.setText(f"현재 위치 확인 오류: {exc}")
+
+    btn.clicked.connect(on_click)
+    row.set_character_provider = set_character_provider
+    lay.addWidget(btn)
+    lay.addWidget(lbl)
+    lay.addStretch()
+    return row
+
+
 def build_pages(config) -> list[QWidget]:
     """6 카테고리 페이지 리스트. shell의 stack에 순서대로 들어감."""
     c = config
@@ -242,8 +406,8 @@ def build_pages(config) -> list[QWidget]:
                               lambda: bool(c.get("attack", "name_template", default="")),
                               [name_cap], extra=name_thr.row)
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
-        ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image", "coordinate"],
-                   labels={"key": "키 입력", "image": "이미지 인식", "coordinate": "좌표"}),
+        ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image"],
+                   labels={"key": "키 입력", "image": "이미지 인식"}),
         mm_status, ha_status, mon_status, name_status,
     ]))
 
@@ -252,24 +416,13 @@ def build_pages(config) -> list[QWidget]:
     from PyQt6.QtWidgets import QLabel as _QLabel
     route_lbl = _QLabel("좌표 동선 블록 (위→아래 순서 실행)")
     route_lbl.setObjectName("subtle")
-    block_editor = BlockEditor(c, ("floor_hunt", "route"))
+    block_editor = BlockEditor(c, ("floor_hunt", "route_steps"))
     # 미니맵 편집 캔버스(RouteCanvas) + 블록타입 툴바. 캡처/모니터 폭 실패 시 캔버스 생략
+    hunt_name_field = TextField("현재 사냥터", c, ("hunt_grounds", "active"))
+    current_position_checker = _make_current_position_checker(c)
     nav_extras = []
-    world_capture = None
-    try:
-        from core.screen_reader import ScreenReader as _WorldScreenReader
-        world_capture = _WorldScreenReader().capture
-    except Exception:
-        pass
-    try:
-        from core_ui.world_map_editor import WorldMapEditor
-        if not c.get("world_map", "enabled", default=False):
-            guide = _QLabel("전역 지도를 등록하고 2점 보정을 완료하면 큰 지도 이동이 활성화됩니다.")
-            guide.setObjectName("subtle")
-            nav_extras.append(guide)
-        nav_extras.append(WorldMapEditor(c, screen_capture=world_capture))
-    except Exception:
-        pass
+    from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
+    nav_extras.append(HuntGroundPresetWidget(c, name_field=hunt_name_field))
     try:
         import mss as _mss
         from PyQt6.QtWidgets import QWidget as _QWidget, QHBoxLayout as _QHBox, \
@@ -302,7 +455,8 @@ def build_pages(config) -> list[QWidget]:
     nav_extras += [route_lbl, block_editor]
     pages.append(_page("동선·이동", "구역·사다리·다운점프·텔포·포탈·블록빌더·녹화·프리셋", [
         CheckField("커스텀 루트 모드", c, ("floor_hunt", "route_mode")),
-        TextField("현재 사냥터", c, ("hunt_grounds", "active")),
+        hunt_name_field,
+        current_position_checker,
         ComboField("좌표 기준", c, ("coord_mode",), ["relative", "absolute"], default="relative",
                    labels={"relative": "게임창 기준(상대)", "absolute": "화면 기준(절대)"}),
     ], extras=nav_extras, fill_last=True))
@@ -316,7 +470,11 @@ def build_pages(config) -> list[QWidget]:
     from core_ui.buff_editor import BuffEditor
     buff_editor = BuffEditor(c, ("attack", "normal_buffs"))
     # HP/MP 실시간 % 미리보기 (A Detector 고정 상대좌표). 게임 없거나 실패 시 생략
+    from core_ui.attack_sequence_editor import AttackSequenceEditor
+    attack_sequence_editor = AttackSequenceEditor(c)
     combat_extras = []
+    combat_extras.append(_make_bar_picker(c, "hp", "HP"))
+    combat_extras.append(_make_bar_picker(c, "mp", "MP"))
     try:
         from core.detector import Detector
         from core.screen_reader import ScreenReader
@@ -326,24 +484,32 @@ def build_pages(config) -> list[QWidget]:
         pass
     combat_extras.append(buff_editor)
     pages.append(_page("전투", "공격·버프·물약·펫·줍기", [
-        TextField("공격 키", c, ("attack", "key"), default="ctrl"),
         atk_status,
         IntField("공격 범위(px)", c, ("attack", "range_px"), 0, 2000, default=350),
+        attack_sequence_editor,
         CheckField("공격 전 점프", c, ("attack", "jump_before_attack")),
         TextField("점프 키", c, ("minimap", "jump_key"), default="alt"),
         CheckField("이동 시 점프 (걷는 동안 점프키 홀드)", c, ("attack", "jump_while_move")),
         CheckField("HP 물약 사용", c, ("recovery", "hp_potion", "enabled")),
         IntField("HP 물약 임계%", c, ("recovery", "hp_potion", "threshold"), 0, 100, default=65),
         TextField("HP 물약 키", c, ("recovery", "hp_potion", "key")),
+        TextField("HP 2차 물약 키", c, ("recovery", "hp_potion", "secondary_key")),
         CheckField("MP 물약 사용", c, ("recovery", "mp_potion", "enabled")),
         IntField("MP 물약 임계%", c, ("recovery", "mp_potion", "threshold"), 0, 100, default=50),
         TextField("MP 물약 키", c, ("recovery", "mp_potion", "key")),
+        TextField("MP 2차 물약 키", c, ("recovery", "mp_potion", "secondary_key")),
         CheckField("펫 먹이 사용", c, ("recovery", "pet_food", "enabled")),
         TextField("펫 먹이 키", c, ("recovery", "pet_food", "key")),
         IntField("펫 먹이 간격(분)", c, ("recovery", "pet_food", "interval_min"), 1, 120, default=10),
     ], extras=combat_extras))
 
     # 4. 안전·안티밴 — 거탐 알림(소리+텔레그램) 통합
+    anti_mob_widget = None
+    try:
+        from core_ui.anti_mob_profile_widget import AntiMobProfileWidget
+        anti_mob_widget = AntiMobProfileWidget(c)
+    except Exception:
+        pass
     pages.append(_page("안전·안티밴", "거탐·방지몹·유저감지·자동응답·채널변경·인간화강도", [
         CheckField("거탐 감지", c, ("settings1", "lie_detector", "enabled")),
         CheckField("거탐 알림 (소리+텔레그램)", c, ("settings1", "lie_detector", "alert_enabled")),
@@ -352,7 +518,7 @@ def build_pages(config) -> list[QWidget]:
         CheckField("투명도형 자동풀이", c, ("settings1", "transparent_shape", "enabled")),
         CheckField("다른 유저 감지", c, ("settings1", "user_detected", "enabled")),
         CheckField("방지몹 해제", c, ("anti_mob", "enabled")),
-    ]))
+    ], extras=[anti_mob_widget] if anti_mob_widget is not None else None))
 
     # 5. 자동화·운영 — 맵이탈 감지영역은 드래그 후 색상으로 확인
     mapexit_picker = _make_region_picker(
@@ -363,11 +529,16 @@ def build_pages(config) -> list[QWidget]:
         "맵이탈 영역", lambda: int(c.get("map_exit", "width", default=0)) > 0,
         [mapexit_picker])
     pages.append(_page("자동화·운영", "자동판매·마을귀환·예약종료·픽업·텔레그램·찰리중사", [
+        CheckField("자동판매 사용", c, ("settings2", "junk_sell", "auto_sell_enabled")),
+        IntField("자동판매 주기(분)", c, ("settings2", "junk_sell", "auto_sell_interval_min"), 1, 240, default=10),
+        CheckField("시작 시 자동판매", c, ("settings2", "junk_sell", "sell_on_start")),
+        CheckField("기타템 판매", c, ("settings2", "junk_sell", "junk_sell_enabled")),
         CheckField("맵 이탈 감지", c, ("map_exit", "enabled")),
         mapexit_status,
         CheckField("긴급 마을귀환", c, ("town_scroll", "enabled")),
         TextField("마을귀환 키", c, ("town_scroll", "key"), default="9"),
         CheckField("픽업 타이머", c, ("pickup_timer", "enabled")),
+        CheckField("항시 픽업 (2초 주기)", c, ("pickup_timer", "always_enabled")),
         IntField("픽업 간격(초)", c, ("pickup_timer", "interval_sec"), 1, 3600, default=60),
         TextField("픽업 키", c, ("pickup_timer", "pickup_key")),
     ]))

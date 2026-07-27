@@ -1,399 +1,416 @@
-# 관리자용 라이선스 발급/관리 도구 (빌드 제외)
+# 라이선스 v2 관리자 발급기 UI.
 from __future__ import annotations
-import json
+
 import os
-import sys
-import time
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
 from datetime import datetime, timedelta, timezone
+from tkinter import messagebox, ttk
 
-# ── Supabase 설정 (license_manager.py 와 동일) ──────────────────────────
-_PROJECT  = "djdpfwoolwqrasqretng"
-_ANON_KEY = "sb_publishable_qUnX4JoLF1MqNzjZGSURmQ_HerOiHZr"
-_BASE_URL = f"https://{_PROJECT}.supabase.co"
+PROJECT_REF = "djdpfwoolwqrasqretng"
+ANON_KEY = "sb_publishable_qUnX4JoLF1MqNzjZGSURmQ_HerOiHZr"
+BASE_URL = f"https://{PROJECT_REF}.supabase.co"
 
-# 인증 키 저장 파일 (처음 실행 시 입력 창이 나옵니다)
-_SERVICE_KEY_FILE = os.path.join(os.path.dirname(__file__), ".service_key")
-_ADMIN_KEY_FILE   = os.path.join(os.path.dirname(__file__), ".admin_key")
+ROOT_DIR = os.path.dirname(__file__)
+ADMIN_KEY_FILE = os.path.join(ROOT_DIR, ".admin_key")
 
-# ── HWID (현재 PC) ───────────────────────────────────────────────────────
-def _get_hwid() -> str:
-    try:
-        sys.path.insert(0, os.path.dirname(__file__))
-        from core.hw_fingerprint import get_hwid
-        return get_hwid()
-    except Exception:
-        return "UNKNOWN"
-
-
-# ── Supabase 호출 헬퍼 ──────────────────────────────────────────────────
-def _headers(service: bool = False) -> dict:
-    key = _load_service_key() if service else _ANON_KEY
-    return {
-        "apikey":        key,
-        "Authorization": f"Bearer {key}",
-        "Content-Type":  "application/json",
-    }
-
-def _load_service_key() -> str:
-    if os.path.exists(_SERVICE_KEY_FILE):
-        with open(_SERVICE_KEY_FILE) as f:
-            return f.read().strip()
-    return ""
-
-def _save_service_key(key: str) -> None:
-    with open(_SERVICE_KEY_FILE, "w") as f:
-        f.write(key.strip())
 
 def _load_admin_key() -> str:
-    if os.path.exists(_ADMIN_KEY_FILE):
-        with open(_ADMIN_KEY_FILE) as f:
+    if os.path.exists(ADMIN_KEY_FILE):
+        with open(ADMIN_KEY_FILE, "r", encoding="utf-8") as f:
             return f.read().strip()
     return ""
 
+
 def _save_admin_key(key: str) -> None:
-    with open(_ADMIN_KEY_FILE, "w") as f:
+    with open(ADMIN_KEY_FILE, "w", encoding="utf-8") as f:
         f.write(key.strip())
 
 
-def generate_license(name: str, days: int) -> str:
-    """generate Edge Function 호출 → 라이선스 키(str) 반환."""
+def _headers() -> dict[str, str]:
+    admin_key = _load_admin_key()
+    return {
+        "apikey": ANON_KEY,
+        "Authorization": f"Bearer {ANON_KEY}",
+        "Content-Type": "application/json",
+        "X-Admin-Key": admin_key,
+    }
+
+
+def _fmt_date(value: str | None) -> str:
+    if not value:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone()
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return value[:10]
+
+
+def _days_left(value: str | None) -> str:
+    if not value:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone()
+        days = (dt - datetime.now().astimezone()).days
+        return f"D-{days}" if days >= 0 else "만료"
+    except Exception:
+        return "-"
+
+
+def generate_license(name: str, email: str, days: int) -> str:
     import requests
+
     expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
     resp = requests.post(
-        f"{_BASE_URL}/functions/v1/generate",
-        headers={
-            **_headers(service=True),
-            "X-Admin-Key": _load_admin_key(),
+        f"{BASE_URL}/functions/v1/generate",
+        headers=_headers(),
+        json={
+            "name": name,
+            "email": email or None,
+            "expires_at": expires_at,
         },
-        json={"expires_at": expires_at, "note": name},
-        timeout=10,
+        timeout=12,
     )
     if resp.status_code not in (200, 201):
-        raise RuntimeError(f"서버 오류 {resp.status_code}: {resp.text}")
+        raise RuntimeError(f"발급 실패 {resp.status_code}: {resp.text}")
     data = resp.json()
-    # 응답 형식: {"keys": ["XXXX-XXXX-XXXX-XXXX"]}
-    keys = data.get("keys") or data.get("key") or []
-    if isinstance(keys, list):
-        key = keys[0] if keys else ""
-    else:
-        key = str(keys)
+    key = str(data.get("key", "")).strip()
     if not key:
-        raise RuntimeError(f"서버 응답에 키 없음: {data}")
+        raise RuntimeError(f"서버 응답에 라이선스 키가 없습니다: {data}")
     return key
 
 
 def fetch_licenses() -> list[dict]:
-    """Supabase REST API로 licenses 테이블 전체 조회."""
     import requests
-    resp = requests.get(
-        f"{_BASE_URL}/rest/v1/licenses?select=*&order=created_at.desc",
-        headers=_headers(service=True),
-        timeout=10,
+
+    resp = requests.post(
+        f"{BASE_URL}/functions/v1/license-admin",
+        headers=_headers(),
+        json={"action": "list"},
+        timeout=12,
     )
     if resp.status_code != 200:
         raise RuntimeError(f"조회 실패 {resp.status_code}: {resp.text}")
-    return resp.json()
+    data = resp.json()
+    if not isinstance(data, list):
+        raise RuntimeError(f"목록 응답이 올바르지 않습니다: {data}")
+    return data
 
 
-def revoke_license(key: str) -> None:
-    """licenses 테이블에서 해당 키 삭제."""
+def revoke_license(key_hint: str) -> None:
     import requests
-    resp = requests.delete(
-        f"{_BASE_URL}/rest/v1/licenses?key=eq.{key}",
-        headers=_headers(service=True),
-        timeout=10,
+
+    resp = requests.post(
+        f"{BASE_URL}/functions/v1/license-admin",
+        headers=_headers(),
+        json={"action": "revoke", "key_hint": key_hint},
+        timeout=12,
     )
     if resp.status_code not in (200, 204):
-        raise RuntimeError(f"삭제 실패 {resp.status_code}: {resp.text}")
+        raise RuntimeError(f"취소 실패 {resp.status_code}: {resp.text}")
 
 
-# ── 날짜 포매팅 ──────────────────────────────────────────────────────────
-def _fmt_dt(iso: str | None) -> str:
-    if not iso:
-        return "-"
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
-        return dt.strftime("%Y-%m-%d")
-    except Exception:
-        return iso[:10]
+def extend_license(key_hint: str, days: int) -> None:
+    import requests
 
-def _days_left(iso: str | None) -> str:
-    if not iso:
-        return "-"
-    try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
-        d  = (dt - datetime.now().astimezone()).days
-        return f"D-{d}" if d >= 0 else "만료"
-    except Exception:
-        return "-"
+    resp = requests.post(
+        f"{BASE_URL}/functions/v1/license-admin",
+        headers=_headers(),
+        json={"action": "extend", "key_hint": key_hint, "days": days},
+        timeout=12,
+    )
+    if resp.status_code not in (200, 204):
+        raise RuntimeError(f"연장 실패 {resp.status_code}: {resp.text}")
 
 
-# ── 메인 UI ──────────────────────────────────────────────────────────────
-class App(tk.Tk):
-    COLS = ("이름/메모", "라이선스 키", "활성화", "HWID", "발급일", "만료일", "남은일")
-    COL_W = (110, 200, 60, 140, 90, 90, 70)
+class LicenseIssuerApp(tk.Tk):
+    COLUMNS = ("name", "key", "status", "activated", "hwid", "created_at", "expires_at", "left")
+    HEADERS = {
+        "name": "이름/메모",
+        "key": "라이선스",
+        "status": "상태",
+        "activated": "활성화",
+        "hwid": "HWID",
+        "created_at": "발급일",
+        "expires_at": "만료일",
+        "left": "남은 기간",
+    }
+    WIDTHS = {
+        "name": 140,
+        "key": 150,
+        "status": 80,
+        "activated": 70,
+        "hwid": 130,
+        "created_at": 90,
+        "expires_at": 90,
+        "left": 80,
+    }
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.title("MapleBot 라이선스 관리")
-        self.geometry("860x520")
-        self.minsize(760, 440)
-        self._hwid = _get_hwid()
+        self.title("Claude 라이선스 v2 발급기")
+        self.geometry("920x560")
+        self.minsize(820, 460)
         self._rows: list[dict] = []
-        self._build()
-        self._check_service_key()
+        self._build_ui()
+        self.after(200, self._ensure_admin_key)
 
-    # ── UI 구성 ─────────────────────────────────────────────────────────
-    def _build(self):
-        # ── 상단 헤더 ─────────────────────────────────────────────────
-        hdr = tk.Frame(self, bg="#1e1e2e", pady=8)
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="MapleBot  라이선스 관리", bg="#1e1e2e",
-                 fg="white", font=("", 13, "bold")).pack(side="left", padx=14)
-        tk.Label(hdr, text=f"현재 PC HWID: {self._hwid}",
-                 bg="#1e1e2e", fg="#aaaacc", font=("Courier", 10)).pack(side="right", padx=14)
+    def _build_ui(self) -> None:
+        header = tk.Frame(self, bg="#173f3a", pady=10)
+        header.pack(fill="x")
+        tk.Label(
+            header,
+            text="Claude 라이선스 v2 발급기",
+            bg="#173f3a",
+            fg="white",
+            font=("", 14, "bold"),
+        ).pack(side="left", padx=14)
+        tk.Label(
+            header,
+            text=f"Project: {PROJECT_REF}",
+            bg="#173f3a",
+            fg="#cfe7e2",
+            font=("Courier", 9),
+        ).pack(side="right", padx=14)
 
-        # ── 발급 폼 ───────────────────────────────────────────────────
-        form = tk.Frame(self, pady=6, padx=10)
+        form = tk.Frame(self, padx=10, pady=8)
         form.pack(fill="x")
 
-        tk.Label(form, text="이름/메모").grid(row=0, column=0, sticky="w", padx=(0, 4))
-        self._name_var = tk.StringVar()
-        tk.Entry(form, textvariable=self._name_var, width=18).grid(row=0, column=1, padx=4)
+        tk.Label(form, text="이름/메모").grid(row=0, column=0, sticky="w")
+        self.name_var = tk.StringVar()
+        tk.Entry(form, textvariable=self.name_var, width=18).grid(row=0, column=1, padx=(4, 12))
 
-        tk.Label(form, text="유효기간").grid(row=0, column=2, sticky="w", padx=(12, 4))
-        self._days_var = tk.StringVar(value="30")
-        days_cb = ttk.Combobox(form, textvariable=self._days_var, width=8,
-                               values=["7", "30", "60", "90", "180", "365", "36500"])
-        days_cb.grid(row=0, column=3, padx=4)
-        tk.Label(form, text="일").grid(row=0, column=4, sticky="w")
+        tk.Label(form, text="이메일").grid(row=0, column=2, sticky="w")
+        self.email_var = tk.StringVar()
+        tk.Entry(form, textvariable=self.email_var, width=24).grid(row=0, column=3, padx=(4, 12))
 
-        self._expire_lbl = tk.Label(form, text="", fg="gray", font=("", 9))
-        self._expire_lbl.grid(row=0, column=5, padx=8)
-        self._days_var.trace_add("write", self._update_expire)
-        self._update_expire()
+        tk.Label(form, text="기간").grid(row=0, column=4, sticky="w")
+        self.days_var = tk.StringVar(value="30")
+        ttk.Combobox(
+            form,
+            textvariable=self.days_var,
+            values=["7", "30", "60", "90", "180", "365", "36500"],
+            width=8,
+        ).grid(row=0, column=5, padx=(4, 2))
+        tk.Label(form, text="일").grid(row=0, column=6, sticky="w")
 
-        self._btn_issue = tk.Button(form, text="+ 라이선스 발급",
-                                    command=self._on_issue,
-                                    bg="#4CAF50", fg="white", font=("", 10, "bold"),
-                                    padx=10, pady=2)
-        self._btn_issue.grid(row=0, column=6, padx=(16, 0))
+        self.expire_label = tk.Label(form, text="", fg="gray")
+        self.expire_label.grid(row=0, column=7, padx=10)
+        self.days_var.trace_add("write", self._update_expire_label)
+        self._update_expire_label()
 
-        # ── 리스트 (Treeview) ─────────────────────────────────────────
+        self.issue_button = tk.Button(
+            form,
+            text="+ 라이선스 발급",
+            command=self._issue,
+            bg="#087f6f",
+            fg="white",
+            padx=10,
+        )
+        self.issue_button.grid(row=0, column=8, padx=(14, 0))
+
         list_frame = tk.Frame(self)
         list_frame.pack(fill="both", expand=True, padx=10, pady=6)
 
-        self._tree = ttk.Treeview(list_frame, columns=self.COLS,
-                                  show="headings", selectmode="browse")
-        for col, w in zip(self.COLS, self.COL_W):
-            self._tree.heading(col, text=col)
-            self._tree.column(col, width=w, anchor="center", minwidth=40)
-        self._tree.column("이름/메모", anchor="w")
-        self._tree.column("라이선스 키", anchor="w")
-        self._tree.column("HWID", anchor="w")
+        self.tree = ttk.Treeview(list_frame, columns=self.COLUMNS, show="headings", selectmode="browse")
+        for col in self.COLUMNS:
+            self.tree.heading(col, text=self.HEADERS[col])
+            self.tree.column(col, width=self.WIDTHS[col], anchor="center")
+        self.tree.column("name", anchor="w")
+        self.tree.column("key", anchor="w")
+        self.tree.column("hwid", anchor="w")
+        self.tree.tag_configure("active", background="#e8f5e9")
+        self.tree.tag_configure("revoked", background="#f3f3f3", foreground="#777777")
+        self.tree.tag_configure("expired", background="#ffebee", foreground="#b71c1c")
+        self.tree.bind("<Double-1>", lambda _: self._copy_selected_key())
 
-        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self._tree.yview)
-        self._tree.configure(yscrollcommand=scroll.set)
-        self._tree.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
 
-        # 행 색상
-        self._tree.tag_configure("activated", background="#e8f5e9")
-        self._tree.tag_configure("expired",   background="#ffebee", foreground="#c62828")
-        self._tree.tag_configure("unused",    background="#ffffff")
+        bar = tk.Frame(self, padx=10, pady=8)
+        bar.pack(fill="x")
+        tk.Button(bar, text="키 복사", command=self._copy_selected_key, width=12).pack(side="left", padx=3)
+        tk.Button(bar, text="라이선스 취소", command=self._revoke_selected, width=12, fg="red").pack(side="left", padx=3)
+        tk.Button(bar, text="+30일", command=lambda: self._extend_selected(30), width=8).pack(side="left", padx=3)
+        tk.Button(bar, text="+90일", command=lambda: self._extend_selected(90), width=8).pack(side="left", padx=3)
+        tk.Button(bar, text="+365일", command=lambda: self._extend_selected(365), width=8).pack(side="left", padx=3)
+        tk.Button(bar, text="새로고침", command=self._refresh, width=12).pack(side="left", padx=3)
+        tk.Button(bar, text="Admin Key 설정", command=self._ask_admin_key, width=14).pack(side="right", padx=3)
+        self.status_label = tk.Label(bar, text="", fg="gray", anchor="w")
+        self.status_label.pack(side="left", padx=12)
 
-        self._tree.bind("<Double-1>", self._on_double_click)
-
-        # ── 하단 버튼 ─────────────────────────────────────────────────
-        btn_bar = tk.Frame(self, pady=6)
-        btn_bar.pack(fill="x", padx=10)
-
-        tk.Button(btn_bar, text="📋 키 복사", command=self._copy_key,
-                  width=12).pack(side="left", padx=4)
-        tk.Button(btn_bar, text="🗑 삭제/취소", command=self._revoke,
-                  width=12, fg="red").pack(side="left", padx=4)
-        tk.Button(btn_bar, text="🔄 새로고침", command=self._refresh,
-                  width=12).pack(side="left", padx=4)
-
-        self._status = tk.Label(btn_bar, text="", fg="gray", anchor="w")
-        self._status.pack(side="left", padx=12)
-
-        tk.Label(btn_bar, text="⚙ 키 설정 변경",
-                 fg="blue", cursor="hand2").pack(side="right", padx=8)
-        btn_bar.winfo_children()[-1].bind("<Button-1>", lambda _: self._ask_service_key())
-
-    # ── 유효기간 라벨 업데이트 ─────────────────────────────────────────
-    def _update_expire(self, *_):
-        try:
-            d = int(self._days_var.get())
-            exp = (datetime.now() + timedelta(days=d)).strftime("%Y-%m-%d")
-            self._expire_lbl.config(text=f"→ 만료 {exp}")
-        except ValueError:
-            self._expire_lbl.config(text="")
-
-    # ── 서비스 키 확인/입력 ───────────────────────────────────────────
-    def _check_service_key(self):
-        if not _load_service_key() or not _load_admin_key():
-            self.after(200, self._ask_service_key)
+    def _ensure_admin_key(self) -> None:
+        if not _load_admin_key():
+            self._ask_admin_key()
         else:
-            self.after(300, self._refresh)
+            self._refresh()
 
-    def _ask_service_key(self):
+    def _ask_admin_key(self) -> None:
         dlg = tk.Toplevel(self)
-        dlg.title("Supabase 키 설정")
-        dlg.geometry("540x200")
+        dlg.title("Admin Key 설정")
+        dlg.geometry("560x145")
         dlg.grab_set()
+        tk.Label(dlg, text="CLAUDE_LICENSE_ADMIN_KEY 값을 입력하세요.", anchor="w").pack(fill="x", padx=16, pady=(16, 4))
+        key_var = tk.StringVar(value=_load_admin_key())
+        entry = tk.Entry(dlg, textvariable=key_var, width=68, show="*")
+        entry.pack(fill="x", padx=16)
+        entry.focus_set()
 
-        tk.Label(dlg, text="서비스 롤 키  (Settings → API → service_role)",
-                 anchor="w").grid(row=0, column=0, padx=16, pady=(16, 2), sticky="w")
-        svc_var = tk.StringVar(value=_load_service_key())
-        tk.Entry(dlg, textvariable=svc_var, width=60, show="*").grid(row=1, column=0, padx=16)
-
-        tk.Label(dlg, text="관리자 키  (ADMIN_KEY 시크릿 값)",
-                 anchor="w").grid(row=2, column=0, padx=16, pady=(12, 2), sticky="w")
-        adm_var = tk.StringVar(value=_load_admin_key())
-        tk.Entry(dlg, textvariable=adm_var, width=60, show="*").grid(row=3, column=0, padx=16)
-
-        def _save():
-            svc = svc_var.get().strip()
-            adm = adm_var.get().strip()
-            if not svc or not adm:
-                messagebox.showwarning("입력 오류", "두 키 모두 입력하세요.", parent=dlg)
+        def save() -> None:
+            key = key_var.get().strip()
+            if not key:
+                messagebox.showwarning("입력 필요", "Admin Key를 입력하세요.", parent=dlg)
                 return
-            _save_service_key(svc)
-            _save_admin_key(adm)
+            _save_admin_key(key)
             dlg.destroy()
             self._refresh()
 
-        tk.Button(dlg, text="저장", command=_save,
-                  bg="#4CAF50", fg="white", width=12).grid(row=4, column=0, pady=14)
-        dlg.grid_columnconfigure(0, weight=1)
+        tk.Button(dlg, text="저장", command=save, bg="#087f6f", fg="white", width=12).pack(pady=14)
 
-    # ── 라이선스 발급 ─────────────────────────────────────────────────
-    def _on_issue(self):
-        name = self._name_var.get().strip()
+    def _update_expire_label(self, *_args) -> None:
+        try:
+            days = int(self.days_var.get())
+            exp = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+            self.expire_label.config(text=f"만료 예정: {exp}")
+        except Exception:
+            self.expire_label.config(text="")
+
+    def _issue(self) -> None:
+        name = self.name_var.get().strip()
+        email = self.email_var.get().strip()
         if not name:
-            messagebox.showwarning("입력 오류", "이름/메모를 입력하세요.", parent=self)
+            messagebox.showwarning("입력 필요", "이름/메모를 입력하세요.", parent=self)
             return
         try:
-            days = int(self._days_var.get())
+            days = int(self.days_var.get())
             if days <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showerror("입력 오류", "유효기간은 양의 정수를 입력하세요.", parent=self)
+            messagebox.showerror("입력 오류", "기간은 1 이상의 숫자여야 합니다.", parent=self)
             return
+        self.issue_button.config(state="disabled", text="발급 중...")
+        self._set_status("서버에 라이선스 발급 요청 중...")
 
-        self._btn_issue.config(state="disabled", text="발급 중...")
-        self._set_status("서버에 발급 요청 중...")
-
-        def _do():
+        def worker() -> None:
             try:
-                key = generate_license(name, days)
-                self.after(0, lambda: self._issue_done(key, name, days))
-            except Exception as e:
-                self.after(0, lambda: self._issue_error(str(e)))
+                key = generate_license(name, email, days)
+                self.after(0, lambda: self._issue_done(key))
+            except Exception as exc:
+                self.after(0, lambda: self._issue_error(str(exc)))
 
-        threading.Thread(target=_do, daemon=True).start()
+        threading.Thread(target=worker, daemon=True).start()
 
-    def _issue_done(self, key: str, name: str, days: int):
-        self._btn_issue.config(state="normal", text="+ 라이선스 발급")
-        if not key:
-            messagebox.showerror("오류", "서버 응답에서 키를 찾을 수 없습니다.\n관리자 키를 확인하세요.", parent=self)
-            return
-        # 클립보드에 즉시 복사
+    def _issue_done(self, key: str) -> None:
+        self.issue_button.config(state="normal", text="+ 라이선스 발급")
         self.clipboard_clear()
         self.clipboard_append(key)
-        self._set_status(f"✅ 발급 완료 — 클립보드에 복사됨")
-        messagebox.showinfo("발급 완료",
-                            f"라이선스 키가 발급되었습니다.\n\n"
-                            f"  {key}\n\n"
-                            f"클립보드에 복사되었습니다.\n"
-                            f"사용자에게 이 키를 전달하세요.",
-                            parent=self)
-        self._name_var.set("")
+        self._set_status("발급 완료. 키를 클립보드에 복사했습니다.")
+        messagebox.showinfo("발급 완료", f"라이선스 키가 발급되었습니다.\n\n{key}\n\n클립보드에 복사했습니다.", parent=self)
+        self.name_var.set("")
+        self.email_var.set("")
         self._refresh()
 
-    def _issue_error(self, msg: str):
-        self._btn_issue.config(state="normal", text="+ 라이선스 발급")
-        self._set_status(f"❌ 발급 실패")
-        messagebox.showerror("발급 실패", msg, parent=self)
+    def _issue_error(self, message: str) -> None:
+        self.issue_button.config(state="normal", text="+ 라이선스 발급")
+        self._set_status("발급 실패")
+        messagebox.showerror("발급 실패", message, parent=self)
 
-    # ── 목록 새로고침 ────────────────────────────────────────────────
-    def _refresh(self):
-        self._set_status("불러오는 중...")
-        def _do():
+    def _refresh(self) -> None:
+        self._set_status("목록을 불러오는 중...")
+
+        def worker() -> None:
             try:
                 rows = fetch_licenses()
                 self.after(0, lambda: self._populate(rows))
-            except Exception as e:
-                self.after(0, lambda: self._set_status(f"❌ 조회 실패: {e}"))
-        threading.Thread(target=_do, daemon=True).start()
+            except Exception as exc:
+                self.after(0, lambda: self._set_status(f"조회 실패: {exc}"))
 
-    def _populate(self, rows: list[dict]):
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _populate(self, rows: list[dict]) -> None:
         self._rows = rows
-        for item in self._tree.get_children():
-            self._tree.delete(item)
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for row in rows:
+            key_hint = str(row.get("key", ""))
+            status = str(row.get("status", ""))
+            activated = "예" if row.get("activated") else "아니오"
+            left = _days_left(row.get("expires_at"))
+            tag = "expired" if left == "만료" else ("revoked" if status == "revoked" else "active")
+            self.tree.insert(
+                "",
+                "end",
+                iid=key_hint,
+                values=(
+                    row.get("name", ""),
+                    key_hint,
+                    status,
+                    activated,
+                    row.get("hwid", "") or "-",
+                    _fmt_date(row.get("created_at")),
+                    _fmt_date(row.get("expires_at")),
+                    left,
+                ),
+                tags=(tag,),
+            )
+        active_count = sum(1 for row in rows if row.get("activated"))
+        self._set_status(f"총 {len(rows)}개. 활성화 {active_count}개.")
 
-        for r in rows:
-            activated = r.get("activated", False)
-            hwid      = r.get("hwid", "") or ""
-            note      = r.get("note", r.get("key", "")[:8])
-            key       = r.get("key", "")
-            created   = _fmt_dt(r.get("created_at"))
-            expires   = _fmt_dt(r.get("expires_at"))
-            left      = _days_left(r.get("expires_at"))
+    def _selected_key_hint(self) -> str | None:
+        selected = self.tree.selection()
+        return selected[0] if selected else None
 
-            tag = "activated" if activated else ("expired" if left == "만료" else "unused")
-            act_txt = "✅ 활성" if activated else "⬜ 미사용"
-
-            self._tree.insert("", "end",
-                              values=(note, key, act_txt, hwid or "-", created, expires, left),
-                              tags=(tag,), iid=key)
-
-        total = len(rows)
-        act   = sum(1 for r in rows if r.get("activated"))
-        self._set_status(f"총 {total}개  |  활성화 {act}개  |  미사용 {total - act}개")
-
-    # ── 키 복사 ─────────────────────────────────────────────────────
-    def _copy_key(self):
-        sel = self._tree.selection()
-        if not sel:
-            messagebox.showinfo("알림", "목록에서 항목을 선택하세요.", parent=self)
+    def _copy_selected_key(self) -> None:
+        key_hint = self._selected_key_hint()
+        if not key_hint:
+            messagebox.showinfo("알림", "목록에서 라이선스를 선택하세요.", parent=self)
             return
-        key = sel[0]   # iid = key
         self.clipboard_clear()
-        self.clipboard_append(key)
-        self._set_status(f"📋 클립보드 복사됨: {key}")
+        self.clipboard_append(key_hint)
+        self._set_status(f"키 힌트를 복사했습니다: {key_hint}")
 
-    def _on_double_click(self, _):
-        self._copy_key()
+    def _revoke_selected(self) -> None:
+        key_hint = self._selected_key_hint()
+        if not key_hint:
+            messagebox.showinfo("알림", "목록에서 라이선스를 선택하세요.", parent=self)
+            return
+        if not messagebox.askyesno("취소 확인", f"이 라이선스를 취소할까요?\n\n{key_hint}", parent=self):
+            return
+        self._set_status("라이선스 취소 중...")
 
-    # ── 삭제/취소 ────────────────────────────────────────────────────
-    def _revoke(self):
-        sel = self._tree.selection()
-        if not sel:
-            messagebox.showinfo("알림", "목록에서 항목을 선택하세요.", parent=self)
-            return
-        key = sel[0]
-        if not messagebox.askyesno("삭제 확인",
-                                   f"아래 라이선스를 삭제하시겠습니까?\n\n{key}",
-                                   parent=self):
-            return
-        self._set_status("삭제 중...")
-        def _do():
+        def worker() -> None:
             try:
-                revoke_license(key)
+                revoke_license(key_hint)
                 self.after(0, self._refresh)
-            except Exception as e:
-                self.after(0, lambda: messagebox.showerror("삭제 실패", str(e), parent=self))
-        threading.Thread(target=_do, daemon=True).start()
+            except Exception as exc:
+                self.after(0, lambda: messagebox.showerror("취소 실패", str(exc), parent=self))
 
-    def _set_status(self, msg: str):
-        self._status.config(text=msg)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _extend_selected(self, days: int) -> None:
+        key_hint = self._selected_key_hint()
+        if not key_hint:
+            messagebox.showinfo("알림", "목록에서 라이선스를 선택하세요.", parent=self)
+            return
+        if not messagebox.askyesno("연장 확인", f"이 라이선스를 {days}일 연장할까요?\n\n{key_hint}", parent=self):
+            return
+        self._set_status(f"라이선스 {days}일 연장 중...")
+
+        def worker() -> None:
+            try:
+                extend_license(key_hint, days)
+                self.after(0, self._refresh)
+            except Exception as exc:
+                self.after(0, lambda: messagebox.showerror("연장 실패", str(exc), parent=self))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _set_status(self, message: str) -> None:
+        self.status_label.config(text=message)
 
 
 if __name__ == "__main__":
-    App().mainloop()
+    LicenseIssuerApp().mainloop()

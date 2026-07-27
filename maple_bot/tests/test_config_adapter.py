@@ -115,3 +115,31 @@ def test_maps_enabled_world_map_and_image_trigger():
     assert runtime.hunt_area_region == {"left": 3, "top": 286, "width": 300, "height": 200}
     assert runtime.image_trigger_spec.template_path == "templates/target.png"
     assert runtime.image_trigger_spec.action.key == "space"
+
+
+def test_maps_attack_sequences_secondary_potions_and_legacy_coordinate_mode():
+    data = {
+        "hunt_mode": "coordinate",
+        "attack": {
+            "key": "ctrl",
+            "sequences": [{
+                "enabled": True,
+                "name": "연속기 1",
+                "keys": ["ctrl", "a"],
+                "key_interval_sec": 0.15,
+                "repeat_interval_sec": 5.0,
+            }],
+        },
+        "recovery": {
+            "hp_potion": {"enabled": True, "key": "9", "secondary_key": "8"},
+            "mp_potion": {"enabled": True, "key": "0", "secondary_key": "7"},
+        },
+    }
+
+    runtime = to_runtime_config(data)
+
+    assert runtime.hunt_mode == "key"
+    assert runtime.attack_sequences[0].keys == ("ctrl", "a")
+    assert runtime.attack_sequences[0].repeat_interval_sec == 5.0
+    assert runtime.hp_rule.secondary_key == "8"
+    assert runtime.mp_rule.secondary_key == "7"

@@ -1,4 +1,4 @@
-# 화면 인식 → 판단 → 입력을 반복하는 봇 메인 루프 (별도 스레드로 실행)
+﻿# 화면 인식 → 판단 → 입력을 반복하는 봇 메인 루프 (별도 스레드로 실행)
 import os
 import time
 import random
@@ -254,14 +254,23 @@ class BotLoop:
             mm = preset.get("minimap", {})
             raw_zones = preset.get("zones", [])
             raw_ropes = preset.get("ropes", [])
-            self._status(f"프리셋 로드: {active}")
+            has_mm = bool(mm.get("region") is not None or mm.get("region_x") is not None or mm.get("x") is not None)
+            self._status(f"[프리셋 적용] 사냥터: {active}")
+            mm_desc = "있음" if has_mm else "없음(기본 미니맵 사용)"
+            self._status(f"[프리셋 적용] 미니맵 영역 지정: {mm_desc}")
+            self._status(f"[프리셋 적용] 구역 {len(raw_zones)}개, 사다리 {len(raw_ropes)}개")
         else:
             mm = self._config.get("minimap") or {}
             raw_zones = self._config.get("zones") or []
             raw_ropes = self._config.get("ropes") or []
+            if active:
+                self._status(f"[프리셋 없음] {active} 미설정 → 기본 설정으로 동작")
+            else:
+                self._status("[프리셋 없음] 사냥터 미선택 → 기본 미니맵/구역/사다리 사용")
 
         from core.config_manager import resolve_minimap_coords
         region_x, region_y, mm_w, mm_h = resolve_minimap_coords(self._config, mm)
+        self._status(f"[미니맵 적용] {mm_w}x{mm_h}, region=({region_x},{region_y})")
         cfg = MinimapConfig(
             region_x=region_x, region_y=region_y,
             width=mm_w, height=mm_h,
@@ -285,7 +294,7 @@ class BotLoop:
         )
 
         if zones:
-            self._status(f"구역 로드: {len(zones)}개  밧줄: {len(ropes)}개")
+            self._status(f"미니맵 적용: 구역 {len(zones)}개, 사다리 {len(ropes)}개")
 
         # 포션 매니저 설정 로드
         hp_potion = self._config.get("recovery", "hp_potion") or {}
@@ -403,6 +412,10 @@ class BotLoop:
             _fh_active  = self._config.get("hunt_grounds", "active") or ""
             _fh_presets = self._config.get("hunt_grounds", "presets") or {}
             _fh_preset  = _fh_presets.get(_fh_active) if _fh_active else None
+            if _fh_preset:
+                self._status(f"[층별 모드] {_fh_active} 프리셋 기반 동선/사다리 사용")
+            else:
+                self._status(f"[층별 모드] {_fh_active} 프리셋 미존재, 기본 동선/사다리 사용")
             raw_zones = _fh_preset.get("zones", []) if _fh_preset else (self._config.get("zones") or [])
             from core.minimap_reader import Zone as _Zone
             from core.config_manager import resolve_minimap_coords

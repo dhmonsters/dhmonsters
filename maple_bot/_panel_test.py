@@ -8,6 +8,7 @@ from core.vision.vit_shape_tracker import acquire_white
 from _homography_track import violation
 from _constellation_score import to_gray_half
 from _gt_score import load_gt
+import _phase_catalog_score as phase_catalog
 ROOT = os.path.dirname(os.path.abspath(__file__))
 THR = 40
 _TRACE = None   # dict 주면 프레임별 (tt.x,tt.y,gated) 기록(디버그)
@@ -40,6 +41,14 @@ def _load_wjsonl(path):
     return [json.loads(l) for l in open(path, encoding='utf-8')]
 
 
+USE_BG_JUDGE = False
+BG_POS_TOL = 10.0
+BG_AREA_TOL = 6.0
+BG_ASPECT_TOL = 6.0
+BG_PENALTY_W = 1.0
+BG_LOCAL_SEARCH = 8
+
+
 def _box_area_at(wrow, x, y):
     """wrow(재검출 박스들 [cx,cy,w,h,score])에서 (x,y) 최근접 박스 면적. 없으면 0."""
     if not wrow:
@@ -53,6 +62,35 @@ def _box_area_at(wrow, x, y):
 DWELL_W = 8          # 머묾 측정 윈도(프레임)
 
 # 심판 = anom(raw 검출속도−배경) + viol(강체위반) 2개만. 진단: 나머지는 지터·비점양으로 죽음.
+def background_explain_penalty(candidate, expected_background,
+                               pos_tol=BG_POS_TOL,
+                               area_tol_pct=BG_AREA_TOL,
+                               aspect_tol_pct=BG_ASPECT_TOL):
+    explained, _ = phase_catalog.explain_background(
+        [candidate],
+        expected_background,
+        pos_tol=pos_tol,
+        area_tol_pct=area_tol_pct,
+        aspect_tol_pct=aspect_tol_pct,
+    )
+    if not explained:
+        return 0.0
+    d = explained[0][2]
+    return max(0.0, 1.0 - d / max(pos_tol, 1e-6))
+
+
+def _candidate_with_shape(bgsets, frame_i, x, y, score):
+    if not bgsets or frame_i >= len(bgsets):
+        return (float(x), float(y), float("nan"), float("nan"), float(score))
+    cands = bgsets[frame_i]
+    if not cands:
+        return (float(x), float(y), float("nan"), float("nan"), float(score))
+    near = min(cands, key=lambda c: (c[0] - x) ** 2 + (c[1] - y) ** 2)
+    if math.hypot(near[0] - x, near[1] - y) <= 25.0:
+        return near
+    return (float(x), float(y), float("nan"), float("nan"), float(score))
+
+
 W_DEFAULT = dict(j1=1.0, j2=1.0)
 
 
@@ -122,6 +160,11 @@ def run(name, W=W_DEFAULT):
         frs.append(f)
     cap.release()
     grays = [cv2.cvtColor(f, cv2.COLOR_BGR2GRAY).astype(np.float32) for f in frs]
+    bgsets = None; bg_period = 0; bg_prep_end = 0
+    if USE_BG_JUDGE:
+        bg_prep_end, bg_white = phase_catalog.detect_prep(frs)
+        bgsets = phase_catalog.candidate_sets(rows, wrows, bg_white)
+        bg_period, _ = phase_catalog.estimate_period_lag(bgsets, bg_prep_end)
     prepped = False; lastwc = None; prev_dp = None
     tracks = []; tt = None; nexttid = 0; out = {}
     prep_seen = 0; pg = None; prev8 = None
@@ -195,10 +238,25 @@ def run(name, W=W_DEFAULT):
                             vx, vy = 0.0, 0.0
                         j1.append(math.hypot(vx - bx, vy - by))                # 배경 비동조(raw)
                         j2.append(viol.get(dj, 0.0))                           # 강체 위반
+                    expected_bg = []
+                    if USE_BG_JUDGE and bgsets is not None and bg_period > 0:
+                        lag = phase_catalog.choose_local_lag(
+                            bgsets, i, bg_period, bg_prep_end, BG_LOCAL_SEARCH)
+                        if i - lag >= 0:
+                            expected_bg = bgsets[i - lag]
+                    bgp = []
+                    for t in act:
+                        penalty = 0.0
+                        dj = detj_of.get(id(t), -1)
+                        if USE_BG_JUDGE and expected_bg and dj >= 0:
+                            cand5 = _candidate_with_shape(
+                                bgsets, i, t.x, t.y, cands[dj][2])
+                            penalty = background_explain_penalty(cand5, expected_bg)
+                        bgp.append(penalty)
                     n1, n2 = rank_norm(j1), rank_norm(j2)
                     for k, t in enumerate(act):
                         t.anom = j1[k]                                # raw 배경대비 속도(재획득용)
-                        t.fs = W['j1'] * n1[k] + W['j2'] * n2[k]      # 이번 프레임 점수
+                        t.fs = W['j1'] * n1[k] + W['j2'] * n2[k] - BG_PENALTY_W * bgp[k]
                         t.panel = PANEL_DECAY * t.panel + t.fs        # 누적(참고)
                     # 연속성 base — tt '위치' 주변 게이트.
                     gated = [t for t in act if (t.x - tt.x) ** 2 + (t.y - tt.y) ** 2 <= JUMP_GATE ** 2]

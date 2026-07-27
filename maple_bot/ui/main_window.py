@@ -1,5 +1,6 @@
 # 메인 윈도우 - 탭 기반 레이아웃과 설정 저장/로드 관리
 from PyQt6.QtWidgets import QMainWindow, QTabWidget, QStatusBar
+from core_ui.branding import claude_icon
 
 from core.config_manager import ConfigManager
 from core.bot_loop import BotLoop
@@ -30,6 +31,7 @@ def _read_version() -> str:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setWindowIcon(claude_icon())
         self.config = ConfigManager()
         self.hotkey_manager = HotkeyManager(self)
         self.setWindowTitle(f"Claude v{_read_version()}")

@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.humanize.intent import Intent
+from core.humanize.timing import down_5
 
 
 @dataclass
@@ -21,7 +22,7 @@ class BuffManager:
     각 버프는 interval 에 ±지터(Humanizer 위임)로 비주기성 확보.
     """
 
-    def __init__(self, humanizer, buffs: list[Buff], log_fn=None, gap: float = 1.2,
+    def __init__(self, humanizer, buffs: list[Buff], log_fn=None, gap: float = 2.5,
                  jitter: float = 0.05):
         self._h = humanizer
         self._buffs = buffs
@@ -33,8 +34,7 @@ class BuffManager:
         self._next_allowed = -1e9
 
     def _jp(self, base: float) -> float:
-        f = getattr(self._h, "jitter_down", None)
-        return f(base, self._jit) if f else base
+        return down_5(base)
 
     def tick(self, now: float) -> None:
         """주기 경과한 버프를 한 틱에 하나씩, gap 간격으로 사용(동시 발동 안 함).
@@ -47,10 +47,14 @@ class BuffManager:
             last = self._last.get(i, -1e9)
             iv = self._iv.get(i, b.interval)   # 이번 주기(±5% 적용된 값)
             if now - last >= iv:
-                self._h.perform(Intent(action="key", key=b.key, base_hold_sec=b.hold_sec,
-                                       hold_jitter_pct=self._jit))   # 홀드 ±5%
+                try:
+                    self._h.perform(Intent(action="key", key=b.key, base_hold_sec=b.hold_sec))
+                finally:
+                    force_release = getattr(self._h, "force_release_key", None)
+                    if callable(force_release):
+                        force_release(b.key)
                 self._last[i] = now
                 self._iv[i] = self._jp(b.interval)        # 다음 주기 ±5%
-                self._next_allowed = now + self._jp(self._gap)
+                self._next_allowed = now + self._h.humanize(self._gap)
                 self._log(f"버프 [{b.key}]")
                 return                      # 한 틱에 한 버프만 → 나머지는 다음 틱(gap 후)

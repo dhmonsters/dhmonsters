@@ -89,6 +89,7 @@ def _resolve_window_ratio_region(region_cfg: dict, window_title: str) -> dict | 
 
 def _legacy_absolute_region_to_window_ratio(region_cfg, window_title: str) -> dict | None:
     """예전 절대좌표 거탐 영역을 현재 게임창 기준 상대좌표로 변환한다."""
+    x, y, w, h = [int(v) for v in region_cfg]
     try:
         from core.puzzle.game_window import (
             find_game_hwnd,
@@ -108,7 +109,6 @@ def _legacy_absolute_region_to_window_ratio(region_cfg, window_title: str) -> di
         if width <= 0 or height <= 0:
             return None
 
-        x, y, w, h = [int(v) for v in region_cfg]
         return {
             "x_ratio": max(0.0, min(1.0, (x - left) / width)),
             "y_ratio": max(0.0, min(1.0, (y - top) / height)),
@@ -117,7 +117,15 @@ def _legacy_absolute_region_to_window_ratio(region_cfg, window_title: str) -> di
             "legacy_region": [x, y, w, h],
         }
     except Exception:
-        return None
+        pass
+    return {
+        "x_ratio": max(0.0, min(1.0, x / 1920.0)),
+        "y_ratio": max(0.0, min(1.0, y / 1080.0)),
+        "w_ratio": max(0.001, min(1.0, w / 1920.0)),
+        "h_ratio": max(0.001, min(1.0, h / 1080.0)),
+        "legacy_region": [x, y, w, h],
+        "fallback_base": [1920, 1080],
+    }
 
 def _potion_rule(cfg: dict) -> PotionRule:
     """recovery.hp_potion/mp_potion ?뺤뀛?덈━ ??PotionRule. threshold %?믩퉬??"""
@@ -217,13 +225,17 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
     mm = d.get("minimap", {}) or {}
     forced = {
         "enabled": True,
+        "use_fixed_minimap_region": True,
+        "fixed_minimap_region": {"left": 38, "top": 129, "width": 172, "height": 103},
         "attack_key": "end",
         "teleport_key": "x",
         "jump_key": str(mm.get("jump_key", "alt") or "alt"),
         "attack_hold_sec": 0.9,
         "attack_gap_sec": 0.05,
-        "teleport_hold_sec": 0.3,
-        "teleport_lead_sec": 0.02,
+        "teleport_hold_sec": 0.07,
+        "teleport_lead_sec": 0.09,
+        "left_direction_hold_sec": 0.15,
+        "right_direction_hold_sec": 0.13,
         "vertical_teleport_lead_sec": 0.02,
         "after_teleport_wait_sec": 0.12,
         "down_jump_lead_sec": 0.03,
@@ -249,6 +261,16 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
         "base_minimap_height": int(mm.get("height", 103)),
     }
     return forced
+
+
+def _hunt_ground_matches(active: str, canonical: str) -> bool:
+    """깨진 인코딩으로 저장된 사냥터 이름까지 전용 루틴 선택에 포함한다."""
+    value = str(active or "").strip()
+    aliases = {
+        "빨코2": {"빨코2", "鍮⑥퐫2", "rednose2", "rednose2v5"},
+        "빨코3": {"빨코3", "鍮⑥퐫3", "rednose3"},
+    }
+    return value in aliases.get(canonical, {canonical})
 
 def _buffs(attack: dict) -> list[Buff]:
     """attack.normal_buffs/toggle_buffs ??Buff 由ъ뒪??(?쒖꽦+???덈뒗 寃껊쭔)."""
@@ -376,20 +398,32 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
     elif isinstance(lie_region, (list, tuple)) and len(lie_region) == 4:
         lie_detect_region = _legacy_absolute_region_to_window_ratio(lie_region, game_window_title)
         if lie_detect_region is None:
-            lie_detect_region = {
-                "left": int(lie_region[0]), "top": int(lie_region[1]),
-                "width": int(lie_region[2]), "height": int(lie_region[3]),
-            }
+            lie_detect_region = None
 
     active_hunt_ground = str(d.get("hunt_grounds", {}).get("active", "") or "").strip()
     rednose2_profile = _rednose2_v5_profile(d, attack)
     rednose3_profile = _rednose3_profile(d, attack)
-    rednose2_profile["enabled"] = active_hunt_ground == "빨코2"
-    rednose3_profile["enabled"] = active_hunt_ground == "빨코3"
-    fixed_rednose_mm = rednose2_profile.get("fixed_minimap_region")
-    if (
+    rednose2_profile["enabled"] = _hunt_ground_matches(active_hunt_ground, "빨코2")
+    rednose3_profile["enabled"] = _hunt_ground_matches(active_hunt_ground, "빨코3")
+    runtime_hunt_ground_active = active_hunt_ground
+    if bool(rednose2_profile.get("enabled", False)):
+        runtime_hunt_ground_active = "빨코2"
+    elif bool(rednose3_profile.get("enabled", False)):
+        runtime_hunt_ground_active = "빨코3"
+    fixed_rednose_mm = (
+        rednose2_profile.get("fixed_minimap_region")
+        if bool(rednose2_profile.get("enabled", False))
+        else rednose3_profile.get("fixed_minimap_region")
+    )
+    fixed_rednose_enabled = (
         bool(rednose2_profile.get("enabled", False))
         and bool(rednose2_profile.get("use_fixed_minimap_region", False))
+    ) or (
+        bool(rednose3_profile.get("enabled", False))
+        and bool(rednose3_profile.get("use_fixed_minimap_region", False))
+    )
+    if (
+        fixed_rednose_enabled
         and isinstance(fixed_rednose_mm, dict)
     ):
         minimap_region = {
@@ -400,6 +434,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         }
         rednose2_profile["minimap_width"] = minimap_region["width"]
         rednose2_profile["minimap_height"] = minimap_region["height"]
+        rednose3_profile["minimap_width"] = minimap_region["width"]
+        rednose3_profile["minimap_height"] = minimap_region["height"]
     junk_sell = d.get("settings2", {}).get("junk_sell", {}) or {}
 
     return RuntimeConfig(
@@ -415,7 +451,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
                      (d.get("floor_hunt", {}).get("route_steps") or [])
                      if isinstance(s, dict) and ("step_type" in s or "type" in s)],
         route_mode=bool(d.get("floor_hunt", {}).get("route_mode", False)),
-        hunt_ground_active=active_hunt_ground,
+        hunt_ground_active=runtime_hunt_ground_active,
         rednose2_v5=rednose2_profile,
         rednose3=rednose3_profile,
         attack_key=attack_key,
@@ -474,7 +510,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         lie_enabled=bool(lie.get("enabled", True)),
         lie_alert=bool(lie.get("alert_enabled",
                                lie.get("play_alarm", False) or lie.get("tg_enabled", False))),
-        lie_title_template=str(lie.get("template_path") or "templates/transparent_shape_title.png"),
+        lie_title_template=str(lie.get("template_path") or "templates/lie_detector/title.png"),
         lie_threshold=float(lie.get("threshold", 0.65)),
         lie_detect_region=lie_detect_region,
         board_roi=lie.get("board_roi"),

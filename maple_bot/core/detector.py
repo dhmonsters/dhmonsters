@@ -58,6 +58,93 @@ class Detector:
         """MP 바의 현재 비율(0.0~1.0)을 반환. 좌표 미설정 시 1.0."""
         return self._bar_ratio("mp")
 
+    def hp_mp_ratios(self) -> tuple[float, float]:
+        """HP와 MP 영역의 합집합을 한 번 캡처해 두 비율을 함께 반환한다."""
+        hp_region = self._combined_bar_region("hp")
+        mp_region = self._combined_bar_region("mp")
+        valid = [region for region in (hp_region, mp_region) if region is not None]
+        if not valid:
+            return 1.0, 1.0
+        left = min(region["left"] for region in valid)
+        top = min(region["top"] for region in valid)
+        right = max(region["left"] + region["width"] for region in valid)
+        bottom = max(region["top"] + region["height"] for region in valid)
+        frame = self._screen.capture({
+            "left": left,
+            "top": top,
+            "width": right - left,
+            "height": bottom - top,
+        })
+
+        def ratio(region, bar_type: str) -> float:
+            if region is None:
+                return 1.0
+            x1 = region["left"] - left
+            y1 = region["top"] - top
+            crop = frame[y1:y1 + region["height"], x1:x1 + region["width"]]
+            return self._combined_bar_ratio(crop, bar_type, region["width"])
+
+        return ratio(hp_region, "hp"), ratio(mp_region, "mp")
+
+    def _combined_bar_region(self, bar_type: str) -> dict | None:
+        coord = self._config.get("coordinate", bar_type) or {}
+        try:
+            import win32gui as _wg
+            title = self._config.get("settings2", "game_window_title") or "MapleStory"
+            hwnd = _wg.FindWindow(None, title)
+            if hwnd:
+                game_ox, game_oy = _wg.ClientToScreen(hwnd, (0, 0))
+                left, top, right, bottom = _wg.GetClientRect(hwnd)
+                game_cw, game_ch = right - left, bottom - top
+            else:
+                game_ox, game_oy, game_cw, game_ch = 0, 0, 0, 0
+        except Exception:
+            game_ox, game_oy, game_cw, game_ch = 0, 0, 0, 0
+        if coord.get("x_ratio") is not None and game_cw > 0 and game_ch > 0:
+            x = game_ox + int(coord["x_ratio"] * game_cw)
+            y = game_oy + int(coord["y_ratio"] * game_ch)
+            width = max(1, int(coord["width_ratio"] * game_cw))
+        else:
+            px, py, width = coord.get("x"), coord.get("y"), coord.get("width")
+            if px is None or py is None or not width:
+                return None
+            x = game_ox + int(px)
+            y = game_oy + int(py)
+            width = int(width)
+        return {"left": int(x), "top": int(max(0, y - 8)), "width": width, "height": 17}
+
+    @staticmethod
+    def _combined_bar_ratio(img: np.ndarray, bar_type: str, width: int) -> float:
+        if img is None or img.size == 0:
+            return 1.0
+        f = img.astype(np.float32) / 255.0
+        r, g, b = f[:, :, 2], f[:, :, 1], f[:, :, 0]
+        maxc = np.maximum(r, np.maximum(g, b))
+        minc = np.minimum(r, np.minimum(g, b))
+        delta = maxc - minc
+        v = maxc
+        with np.errstate(divide="ignore", invalid="ignore"):
+            s = np.where(maxc > 1e-6, delta / maxc, 0.0)
+        base = (s >= 0.35) & (v >= 0.25)
+        hue = np.zeros_like(r)
+        d = delta + 1e-9
+        mr = (delta > 1e-6) & (maxc == r)
+        mg = (delta > 1e-6) & (maxc == g)
+        mb = (delta > 1e-6) & (maxc == b)
+        hue[mr] = ((g[mr] - b[mr]) / d[mr]) % 6
+        hue[mg] = (b[mg] - r[mg]) / d[mg] + 2
+        hue[mb] = (r[mb] - g[mb]) / d[mb] + 4
+        hue_deg = hue * 60
+        if bar_type == "hp":
+            color_mask = (hue_deg <= 20) | (hue_deg >= 340)
+        else:
+            color_mask = (hue_deg >= 180) & (hue_deg <= 260)
+        final_mask = base & color_mask
+        cols = np.where(final_mask.any(axis=0))[0]
+        if len(cols) == 0 or int(final_mask.sum()) < 3:
+            return 1.0
+        return (int(cols[-1]) + 1) / width
+
     def _bar_ratio(self, bar_type: str) -> float:
         """바 영역을 한 번에 캡처 후 numpy HSV로 처리 — 개별 픽셀 API 호출 없음."""
         coord = self._config.get("coordinate", bar_type) or {}
@@ -95,8 +182,7 @@ class Detector:
         scan_h = 17  # ±8행
 
         # 바 영역 한 번에 캡처 (논리 좌표 → 물리 픽셀 변환 후 mss)
-        from core.config_manager import logical_to_physical_coords
-        px2, py2, pw2, ph2 = logical_to_physical_coords(x, max(0, y - 8), width, scan_h)
+        px2, py2, pw2, ph2 = int(x), int(max(0, y - 8)), int(width), int(scan_h)
         region = {"left": px2, "top": py2, "width": pw2, "height": ph2}
         img = self._screen.capture(region)   # BGR numpy (H, W, 3)
 

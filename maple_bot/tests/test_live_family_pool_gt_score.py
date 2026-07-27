@@ -183,6 +183,18 @@ class LiveFamilyPoolGtScoreTests(unittest.TestCase):
         self.assertIn("raw_candidate_cont10_box_switch_p05_p1_to_n1_z0_at8_state_mild", shortlisted)
         self.assertIn("balanced_viterbi_center_mild_state_mild", shortlisted)
 
+    def test_event_gate_shortlist_keeps_kinematic_shape_family(self) -> None:
+        paths = {
+            "kinematic_shape_center_mild_state_mild": {
+                0: (10.0, 20.0),
+                1: (12.0, 20.0),
+            },
+        }
+
+        shortlisted = event_gate_shortlist_paths(paths)
+
+        self.assertIn("kinematic_shape_center_mild_state_mild", shortlisted)
+
     def test_event_gate_shortlist_keeps_box_rel_occlusion_variants(self) -> None:
         paths = {
             "raw_candidate_cont4_box_rel_n1_p05_state_mild_occlusion_state": {0: (4.0, 0.0)},

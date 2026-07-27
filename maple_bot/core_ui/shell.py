@@ -1,13 +1,18 @@
 # MainShell — 6카테고리 셸. 상단 가로 내비 + 중앙 스택 + 하단 컨트롤바 (Discord Night)
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
     QStackedWidget, QLabel, QTextEdit, QButtonGroup, QSplitter,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QPixmap
 
 from core_ui.theme import build_qss, SPACING
+from core_ui.branding import claude_icon
 
 # 6 카테고리 (아이콘 + 이름)
 CATEGORIES = [
@@ -24,15 +29,33 @@ _ICONS = ["🔌", "🧭", "⚔️", "🛡️", "⚙️", "🖥️"]
 LOG_CATEGORIES = ["이동", "공격", "버프", "물약", "펫·줍기", "감지", "시스템"]
 
 
+def _read_version() -> str:
+    if getattr(sys, "frozen", False):
+        bases = [Path(sys.executable).parent]
+        if getattr(sys, "_MEIPASS", None):
+            bases.append(Path(sys._MEIPASS))
+    else:
+        bases = [Path(__file__).resolve().parent.parent]
+    for base in bases:
+        try:
+            return (base / "version.txt").read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+    return "?"
+
+
 class MainShell(QMainWindow):
+    log_requested = pyqtSignal(str, str)
+
     """통합 봇 메인 셸. 상단 내비 탭 + 중앙 페이지 스택 + 하단 컨트롤바(시작/정지·상태·로그)."""
 
     def __init__(self, config=None):
         super().__init__()
         self._config = config
-        self.setWindowTitle("Claude")
+        self.setWindowTitle(f"Claude v{_read_version()}")
+        self.setWindowIcon(claude_icon())
         self.resize(1180, 760)
-        self.setMinimumSize(1024, 640)
+        self.setMinimumSize(760, 560)
         self.setStyleSheet(build_qss())
 
         self.nav_buttons: list[QPushButton] = []
@@ -74,7 +97,11 @@ class MainShell(QMainWindow):
         h.setContentsMargins(SPACING["md"], SPACING["xs"], SPACING["md"], SPACING["xs"])
         h.setSpacing(SPACING["xxs"])
 
-        logo = QLabel("● Claude"); logo.setObjectName("logo")
+        logo_mark = QLabel()
+        logo_mark.setPixmap(claude_icon().pixmap(22, 22))
+        logo_mark.setObjectName("logoMark")
+        h.addWidget(logo_mark)
+        logo = QLabel(f"Claude v{_read_version()}"); logo.setObjectName("logo")
         h.addWidget(logo)
         h.addSpacing(SPACING["sm"])
 
@@ -92,6 +119,17 @@ class MainShell(QMainWindow):
         h.addWidget(self.status_chip)
         return bar
 
+    def _save_current_hunt_ground(self) -> None:
+        from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
+
+        preset = self.findChild(HuntGroundPresetWidget)
+        if preset is not None:
+            preset.save_current()
+            return
+        if self._config is not None:
+            self._config.save()
+            self.set_status("설정 저장 완료")
+
     # ── 로그 드로어 (기본 숨김, 컨트롤바 버튼으로 토글) ──────────────
     def _build_log_drawer(self) -> QWidget:
         self._log_drawer = QWidget()
@@ -99,7 +137,12 @@ class MainShell(QMainWindow):
         v.setContentsMargins(SPACING["md"], SPACING["xs"], SPACING["md"], 0)
         # 카테고리 필터 칩 (켜진 것만 로그에 표시) — 클릭으로 추가/제외
         self._log_buffer: list[tuple] = []          # (cat, msg) 전체 보관(필터 토글 시 재렌더)
+        self._log_pending: list[tuple[str, str]] = []
         self._log_cats_on = set(LOG_CATEGORIES)      # 켜진 카테고리(기본 전부)
+        self.log_requested.connect(self._queue_log)
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.timeout.connect(self._flush_logs)
+        self._log_flush_timer.start(100)
         self._cat_btns: dict[str, QPushButton] = {}
         chips = QWidget(); ch = QHBoxLayout(chips)
         ch.setContentsMargins(0, 0, 0, SPACING["xxs"]); ch.setSpacing(SPACING["xxs"])
@@ -164,6 +207,11 @@ class MainShell(QMainWindow):
                             0, Qt.AlignmentFlag.AlignVCenter)
             except Exception:
                 pass
+        save_btn = QPushButton("현재 설정 저장")
+        save_btn.setObjectName("primaryButton")
+        save_btn.setToolTip("현재 사냥터 이름, 영역, 맵핑, 이탈 설정을 한 번에 저장합니다.")
+        save_btn.clicked.connect(self._save_current_hunt_ground)
+        h.addWidget(save_btn)
         return bar
 
     # ── 단축키 (전역: 게임 포커스 중에도 동작) ────────────────────────
@@ -209,10 +257,20 @@ class MainShell(QMainWindow):
 
     def append_log(self, msg: str, cat: str = "시스템") -> None:
         """카테고리 태그와 함께 로그 적재. 켜진 카테고리만 화면에 표시(전체는 버퍼 보관)."""
+        self.log_requested.emit(str(msg), str(cat))
+
+    def _queue_log(self, msg: str, cat: str) -> None:
         if cat not in LOG_CATEGORIES:
             cat = "시스템"
-        self._log_buffer.append((cat, msg))
+        self._log_pending.append((cat, msg))
+
+    def _flush_logs(self) -> None:
+        if not self._log_pending:
+            return
+        pending, self._log_pending = self._log_pending, []
+        self._log_buffer.extend(pending)
         if len(self._log_buffer) > 1000:        # 버퍼 상한(메모리)
             self._log_buffer = self._log_buffer[-1000:]
-        if cat in self._log_cats_on:
-            self.log_view.append(f"[{cat}] {msg}")
+        visible = [f"[{cat}] {msg}" for cat, msg in pending if cat in self._log_cats_on]
+        if visible:
+            self.log_view.append("\n".join(visible))

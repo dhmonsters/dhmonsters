@@ -1,26 +1,27 @@
-# GitHub Raw에서 최신 버전 정보를 조회하고 인스톨러를 다운로드/실행하는 업데이터
+# GitHub Raw?먯꽌 理쒖떊 踰꾩쟾 ?뺣낫瑜?議고쉶?섍퀬 ?몄뒪?⑤윭瑜??ㅼ슫濡쒕뱶/?ㅽ뻾?섎뒗 ?낅뜲?댄꽣
 from __future__ import annotations
 import os
 import sys
 import subprocess
 import tempfile
+import re
 from typing import Callable
 
-# GitHub Raw URL — version.json 위치
+# GitHub Raw URL ??version.json ?꾩튂
 _VERSION_URL = "https://raw.githubusercontent.com/dhmonsters/dhmonsters/main/maple_bot/version.json"
 
-# 로컬 버전 파일 경로
+# 濡쒖뺄 踰꾩쟾 ?뚯씪 寃쎈줈
 _LOCAL_VERSION_FILE = "version.txt"
 
 
 def _read_local_version() -> str:
-    """로컬 version.txt에서 현재 버전을 읽는다."""
+    """濡쒖뺄 version.txt?먯꽌 ?꾩옱 踰꾩쟾???쎈뒗??"""
     try:
         if getattr(sys, "frozen", False):
-            # PyInstaller exe: version.txt는 exe와 같은 폴더에 위치
+            # PyInstaller exe: version.txt??exe? 媛숈? ?대뜑???꾩튂
             base = os.path.dirname(sys.executable)
         else:
-            # 소스 실행: core/updater.py 기준으로 두 단계 위 (프로젝트 루트)
+            # ?뚯뒪 ?ㅽ뻾: core/updater.py 湲곗??쇰줈 ???④퀎 ??(?꾨줈?앺듃 猷⑦듃)
             base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         path = os.path.join(base, _LOCAL_VERSION_FILE)
         with open(path, encoding="utf-8") as f:
@@ -30,28 +31,34 @@ def _read_local_version() -> str:
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
-    """'1.2.3' → (1, 2, 3) 으로 변환."""
+    """버전 표기 차이를 정리해 숫자 튜플로 변환한다."""
     try:
-        return tuple(int(x) for x in v.strip().split("."))
+        text = str(v or "").strip().lstrip("\ufeff").lower()
+        if text.startswith("v"):
+            text = text[1:]
+        parts = [int(x) for x in re.findall(r"\d+", text)]
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
     except Exception:
-        return (0,)
+        return (0, 0, 0)
 
 
 def get_current_version() -> str:
-    """현재 로컬 버전 문자열을 반환한다."""
+    """?꾩옱 濡쒖뺄 踰꾩쟾 臾몄옄?댁쓣 諛섑솚?쒕떎."""
     return _read_local_version()
 
 
 def check_for_update() -> dict | None:
     """
-    GitHub Raw에서 version.json을 읽어 최신 버전 정보를 반환한다.
-    최신 버전이 없거나 오류 발생 시 None 반환.
+    GitHub Raw?먯꽌 version.json???쎌뼱 理쒖떊 踰꾩쟾 ?뺣낫瑜?諛섑솚?쒕떎.
+    理쒖떊 踰꾩쟾???녾굅???ㅻ쪟 諛쒖깮 ??None 諛섑솚.
 
-    반환 dict 형식:
+    諛섑솚 dict ?뺤떇:
         {
             "current":      "1.1.2",
             "latest":       "1.2.0",
-            "notes":        "변경 사항 요약",
+            "notes":        "蹂寃??ы빆 ?붿빟",
             "download_url": "https://..."
         }
     """
@@ -80,7 +87,7 @@ def download_update(
     url: str,
     progress_cb: Callable[[int, int], None] | None = None,
 ) -> str:
-    """인스톨러를 임시 폴더에 다운로드하고 경로를 반환한다."""
+    """?몄뒪?⑤윭瑜??꾩떆 ?대뜑???ㅼ슫濡쒕뱶?섍퀬 寃쎈줈瑜?諛섑솚?쒕떎."""
     import requests
 
     resp = requests.get(url, stream=True, timeout=30)
@@ -103,6 +110,6 @@ def download_update(
 
 
 def apply_update(installer_path: str) -> None:
-    """인스톨러를 실행하고 현재 앱을 종료한다."""
+    """?몄뒪?⑤윭瑜??ㅽ뻾?섍퀬 ?꾩옱 ?깆쓣 醫낅즺?쒕떎."""
     subprocess.Popen([installer_path], close_fds=True)
     sys.exit(0)

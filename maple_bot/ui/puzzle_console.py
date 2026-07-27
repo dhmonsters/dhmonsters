@@ -34,6 +34,7 @@ PathPicker = Callable[[str], str | Path | None]
 FolderOpener = Callable[[Path], None]
 RecordingStopHandler = Callable[[], bool]
 WatchStartHandler = Callable[[], object]
+ManualStartHandler = Callable[[], object]
 SolverStopHandler = Callable[[], bool]
 LiveStatusHandler = Callable[[], object]
 CaptureCheckHandler = Callable[[], str | Path | None]
@@ -66,6 +67,7 @@ class PuzzleConsoleWindow(QMainWindow):
         folder_opener: FolderOpener | None = None,
         recording_stop_handler: RecordingStopHandler | None = None,
         watch_start_handler: WatchStartHandler | None = None,
+        manual_start_handler: ManualStartHandler | None = None,
         solver_stop_handler: SolverStopHandler | None = None,
         live_status_handler: LiveStatusHandler | None = None,
         capture_check_handler: CaptureCheckHandler | None = None,
@@ -79,6 +81,7 @@ class PuzzleConsoleWindow(QMainWindow):
         self._folder_opener = folder_opener or _open_folder
         self._recording_stop_handler = recording_stop_handler
         self._watch_start_handler = watch_start_handler
+        self._manual_start_handler = manual_start_handler
         self._solver_stop_handler = solver_stop_handler
         self._live_status_handler = live_status_handler
         self._capture_check_handler = capture_check_handler
@@ -285,12 +288,15 @@ class PuzzleConsoleWindow(QMainWindow):
         layout.addWidget(title)
 
         self.start_watch_button = _command_button("솔버 시작 F1", "startWatchButton", primary=True)
+        self.manual_start_button = _command_button("수동 작동", "manualStartButton")
         self.stop_solver_button = _command_button("솔버 종료 F2", "stopSolverButton")
         self.stop_recording_button = _command_button("녹화 종료 F3", "stopRecordingButton")
         self.start_watch_button.clicked.connect(lambda _checked=False: self.start_watch_input())
+        self.manual_start_button.clicked.connect(lambda _checked=False: self.manual_start_input())
         self.stop_solver_button.clicked.connect(lambda _checked=False: self.stop_solver_input())
         self.stop_recording_button.clicked.connect(lambda _checked=False: self.stop_recording_input())
         layout.addWidget(self.start_watch_button)
+        layout.addWidget(self.manual_start_button)
         layout.addWidget(self.stop_solver_button)
         layout.addWidget(self.stop_recording_button)
 
@@ -305,12 +311,16 @@ class PuzzleConsoleWindow(QMainWindow):
         self.puzzle_detect_alert_checkbox = QCheckBox("퍼즐 감지 알람")
         self.puzzle_detect_alert_checkbox.setObjectName("puzzleDetectAlertCheckbox")
         self.puzzle_detect_alert_checkbox.setChecked(True)
+        self.target_overlay_checkbox = QCheckBox("표적 표시")
+        self.target_overlay_checkbox.setObjectName("targetOverlayCheckbox")
+        self.target_overlay_checkbox.setChecked(True)
         self.mouse_control_checkbox = QCheckBox("마우스 제어")
         self.mouse_control_checkbox.setObjectName("mouseControlCheckbox")
         self.mouse_control_checkbox.setChecked(self._initial_mouse_control_enabled)
         layout.addWidget(self.telegram_alert_checkbox)
         layout.addWidget(self.gpu_enabled_checkbox)
         layout.addWidget(self.puzzle_detect_alert_checkbox)
+        layout.addWidget(self.target_overlay_checkbox)
         layout.addWidget(self.mouse_control_checkbox)
 
         log_title = QLabel("로그")
@@ -412,6 +422,9 @@ class PuzzleConsoleWindow(QMainWindow):
 
     def mouse_control_enabled(self) -> bool:
         return bool(self.mouse_control_checkbox.isChecked())
+
+    def target_overlay_enabled(self) -> bool:
+        return bool(self.target_overlay_checkbox.isChecked())
 
     def apply_trace_event(self, event: dict[str, object]) -> None:
         event_type = str(event.get("type") or "")
@@ -788,8 +801,39 @@ class PuzzleConsoleWindow(QMainWindow):
             return True
         self.set_identity_state("SOLVER_ON")
         self._mark_solver_on()
-        self.cctv_status_label.setText("solver on: waiting puzzle")
-        self.append_log("solver on: waiting puzzle")
+        overlay_state = "ON" if self.target_overlay_enabled() else "OFF"
+        self.cctv_status_label.setText(f"solver on: waiting puzzle / target overlay {overlay_state}")
+        self.append_log(f"solver on: waiting puzzle / target overlay {overlay_state}")
+        self.append_log("target marker appears after puzzle activation")
+        return True
+
+    def manual_start_input(self) -> bool:
+        if self._manual_start_handler is None:
+            self.append_log("manual start 대기: handler 없음")
+            return False
+        try:
+            result = self._manual_start_handler()
+        except Exception as exc:
+            self.set_identity_state("MANUAL_FAILED")
+            self.append_log(f"manual start 실패: {exc}")
+            return False
+        session_dir = _watch_result_session_dir(result)
+        preview_path = _watch_result_preview_path(result)
+        preview_frame = _watch_result_preview_frame(result)
+        if session_dir is None:
+            self.set_identity_state("MANUAL_WAITING")
+            self.append_log("manual start skipped: session 없음")
+            return False
+        self.last_session_dir = session_dir
+        self.cctv_status_label.setText(f"recording: {self.last_session_dir}")
+        self.set_identity_state("RECORDING")
+        self._mark_solver_on()
+        self.append_log(f"manual start: {self.last_session_dir}")
+        self._poll_live_trace_events(self.last_session_dir)
+        if preview_frame is not None:
+            self._load_cctv_frame_preview_data(preview_frame)
+        elif preview_path is not None:
+            self._load_cctv_frame_preview(str(preview_path))
         return True
 
     def stop_solver_input(self) -> bool:

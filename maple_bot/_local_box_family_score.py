@@ -42,8 +42,68 @@ DEFAULT_VARIANTS = (
 )
 
 
+SOURCE_PRIORITY = {
+    "balanced_viterbi": 0,
+    "bg_split_viterbi": 1,
+    "strict_transition_viterbi": 2,
+    "panel_default": 3,
+    "merge_context": 4,
+    "decal_strict": 5,
+    "mht_motion_bg": 6,
+    "phase_catalog": 7,
+}
+
+
 def _dist(a: Point, b: Point) -> float:
     return math.hypot(float(a[0]) - float(b[0]), float(a[1]) - float(b[1]))
+
+
+def _family_root(family: str, meta: dict) -> str:
+    source = str(meta.get("source") or family)
+    for root in SOURCE_PRIORITY:
+        if source.startswith(root) or family.startswith(root):
+            return root
+    return source
+
+
+def _local_box_priority(family: str, meta: dict):
+    root = _family_root(family, meta)
+    mode = str(meta.get("mode", "base"))
+    root_rank = SOURCE_PRIORITY.get(root, 20)
+    mode_rank = {"state": 0, "offset": 1, "base": 2}.get(mode, 3)
+
+    name = family.lower()
+    center_rank = 2
+    if "center_mild" in name:
+        center_rank = 0
+    elif "center_medium" in name:
+        center_rank = 1
+    elif "center_aggressive" in name:
+        center_rank = 4
+
+    suffix_rank = 3
+    if name.endswith("_mild"):
+        suffix_rank = 0
+    elif name.endswith("_medium"):
+        suffix_rank = 1
+    elif name.endswith("_aggressive"):
+        suffix_rank = 2
+
+    suspect = int(meta.get("suspect_count", 0) or 0)
+    suspect_rank = abs(suspect - 40)
+    return (root_rank, center_rank, mode_rank, suffix_rank, suspect_rank, family)
+
+
+def select_local_box_family_names(
+    paths: Dict[str, Dict[int, Point]],
+    meta: dict,
+    max_families: int = 96,
+) -> list[str]:
+    ranked = sorted(
+        paths,
+        key=lambda family: _local_box_priority(family, meta.get(family, {})),
+    )
+    return ranked[: max(0, int(max_families))]
 
 
 def _states_near_anchor(
@@ -132,9 +192,13 @@ def augment_local_box_paths(
     frames: Sequence[int],
     *,
     variants: Sequence[LocalBoxVariant] = DEFAULT_VARIANTS,
+    local_box_families: Sequence[str] | None = None,
 ) -> Dict[str, Dict[int, Point]]:
     out = dict(paths)
+    selected = set(local_box_families or paths.keys())
     for family, path in paths.items():
+        if family not in selected:
+            continue
         for variant in variants:
             out[f"{family}_lb_{variant.name}"] = local_box_smooth_path(
                 path,
@@ -152,13 +216,30 @@ def augment_local_box_paths(
     return out
 
 
-def local_box_family_paths(name: str, *, frames: Sequence[int] | None = None):
+def local_box_family_paths(
+    name: str,
+    *,
+    frames: Sequence[int] | None = None,
+    max_local_box_families: int | None = None,
+):
     base_paths, meta, failures = offset_state.offset_state_family_paths(name)
     candidate_sets = offset_state._load_candidate_sets(name)
     if frames is None:
         frames = sorted(candidate_sets)
-    paths = augment_local_box_paths(base_paths, candidate_sets, frames)
-    for family in list(base_paths):
+    local_box_families = None
+    if max_local_box_families is not None:
+        local_box_families = select_local_box_family_names(
+            base_paths,
+            meta,
+            max_families=max_local_box_families,
+        )
+    paths = augment_local_box_paths(
+        base_paths,
+        candidate_sets,
+        frames,
+        local_box_families=local_box_families,
+    )
+    for family in list(local_box_families or base_paths):
         for variant in DEFAULT_VARIANTS:
             paths_name = f"{family}_lb_{variant.name}"
             meta[paths_name] = {
@@ -170,12 +251,21 @@ def local_box_family_paths(name: str, *, frames: Sequence[int] | None = None):
     return paths, meta, failures
 
 
-def score_clip(name: str, *, gt_frames_only: bool = True):
+def score_clip(
+    name: str,
+    *,
+    gt_frames_only: bool = True,
+    max_local_box_families: int | None = None,
+):
     gt = phase_catalog.load_gt(name)
     if not gt:
         return None
     frames = sorted(gt) if gt_frames_only else None
-    paths, meta, failures = local_box_family_paths(name, frames=frames)
+    paths, meta, failures = local_box_family_paths(
+        name,
+        frames=frames,
+        max_local_box_families=max_local_box_families,
+    )
     scores = {
         family: path_oracle.score_path(path, gt)
         for family, path in paths.items()
@@ -196,11 +286,20 @@ def score_clip(name: str, *, gt_frames_only: bool = True):
     }
 
 
-def score_all(names=None, *, gt_frames_only: bool = True):
+def score_all(
+    names=None,
+    *,
+    gt_frames_only: bool = True,
+    max_local_box_families: int | None = None,
+):
     rows = []
     for name in names or phase_catalog.names_from_gt():
         print(f"score {name}", flush=True)
-        row = score_clip(name, gt_frames_only=gt_frames_only)
+        row = score_clip(
+            name,
+            gt_frames_only=gt_frames_only,
+            max_local_box_families=max_local_box_families,
+        )
         if row:
             rows.append(row)
     return rows
@@ -256,13 +355,28 @@ def write_outputs(rows):
         if not md_path.exists() and not csv_path.exists():
             break
         version += 1
-    md_path.write_text(markdown_text(rows), encoding="utf-8")
-    csv_path.write_text(csv_text(rows), encoding="utf-8")
+    try:
+        md_path.write_text(markdown_text(rows), encoding="utf-8")
+        csv_path.write_text(csv_text(rows), encoding="utf-8")
+    except PermissionError:
+        return None, None
     return md_path, csv_path
 
 
 def main():
-    rows = score_all(sys.argv[1:] or None)
+    max_local_box_families = None
+    names = []
+    args = list(sys.argv[1:])
+    while args:
+        arg = args.pop(0)
+        if arg == "--max-local-box-families" and args:
+            max_local_box_families = int(args.pop(0))
+        else:
+            names.append(arg)
+    rows = score_all(
+        names or None,
+        max_local_box_families=max_local_box_families,
+    )
     summary = summarize(rows)
     print(f"local_box_family: {summary['success']}/{summary['total']} mean={summary['mean']:.1f}px")
     for row in rows:
@@ -271,8 +385,11 @@ def main():
             f"{'OK' if row['best_success'] else 'FAIL'} {row['best_family']}"
         )
     md_path, csv_path = write_outputs(rows)
-    print(f"saved: {md_path}")
-    print(f"saved: {csv_path}")
+    if md_path is not None and csv_path is not None:
+        print(f"saved: {md_path}")
+        print(f"saved: {csv_path}")
+    else:
+        print("saved: skipped by current filesystem permission")
     print("\n=== CSV ===")
     print(csv_text(rows))
 

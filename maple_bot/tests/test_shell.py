@@ -49,5 +49,11 @@ def test_log_dock_exists(app):
 
 def test_qss_applied(app):
     shell = MainShell()
-    # 스타일시트가 셸에 적용됐는지 (Discord Night 배경색 포함)
-    assert "#1a1b1e" in shell.styleSheet()
+    assert "#f3f5f2" in shell.styleSheet()
+
+
+def test_shell_can_shrink_to_compact_width(app):
+    shell = MainShell()
+
+    assert shell.minimumWidth() == 760
+    assert shell.minimumHeight() == 560

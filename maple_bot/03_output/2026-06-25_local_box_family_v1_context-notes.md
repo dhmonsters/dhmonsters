@@ -21,3 +21,8 @@
 - 062325: 32.6px, `merge_context_lb_free`.
 - 전체 16판 전체-family 채점은 모든 family에 3개 variant를 붙이면 시간이 너무 길어 중단했다. 다음 단계는 후보 family 제한 또는 캐시 최적화가 필요하다.
 - 이 단계는 selector 완성이 아니라 best-family 상한 확장이다. 최종 selector는 아직 별도 문제로 남아 있다.
+
+## 후속 확인
+
+- `2026-06-25_fast_local_box_score_v1`에서 GT-free family prior로 local-box 대상 96개를 제한했다.
+- 제한 모드 전체 16판 best-family 상한은 16/16, 평균오차 20.3px다.

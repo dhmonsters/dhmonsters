@@ -1,16 +1,16 @@
-# BuffEditor — 버프 목록(attack.normal_buffs) 편집기. 각 행: 사용/키/간격(초). config 양방향 저장
+# BuffEditor — 버프 목록(attack.normal_buffs) 편집기. 각 행: 사용/키/간격/누름시간. config 양방향 저장
 from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
-    QLineEdit, QSpinBox, QFrame,
+    QLineEdit, QSpinBox, QDoubleSpinBox, QFrame,
 )
 
 from core_ui.theme import SPACING
 
 
 class BuffEditor(QWidget):
-    """attack.normal_buffs 리스트를 행 단위로 편집(사용 체크 + 키 + 간격초). 추가/삭제 즉시 저장."""
+    """attack.normal_buffs 리스트를 행 단위로 편집(사용 체크 + 키 + 간격초 + 누름시간). 추가/삭제 즉시 저장."""
 
     def __init__(self, config, keys: tuple = ("attack", "normal_buffs")):
         super().__init__()
@@ -23,7 +23,7 @@ class BuffEditor(QWidget):
         self._v.setSpacing(SPACING["xxs"])
 
         head = QHBoxLayout()
-        head.addWidget(QLabel("버프 (사용 / 키 / 간격초)"))
+        head.addWidget(QLabel("버프 (사용 / 키 / 간격초 / 누름시간)"))
         add = QPushButton("+ 버프 추가"); add.setFixedWidth(96)
         add.clicked.connect(self.add_buff)
         head.addStretch(); head.addWidget(add)
@@ -38,7 +38,7 @@ class BuffEditor(QWidget):
         return len(self._buffs)
 
     def add_buff(self) -> None:
-        self._buffs.append({"enabled": True, "key": "", "interval_sec": 60})
+        self._buffs.append({"enabled": True, "key": "", "interval_sec": 60, "hold_sec": 0.8})
         self._save_render()
 
     def remove_row(self, idx: int) -> None:
@@ -82,10 +82,17 @@ class BuffEditor(QWidget):
         key.textChanged.connect(lambda v, i=idx: self.set_field(i, "key", v))
         h.addWidget(key)
 
-        iv = QSpinBox(); iv.setRange(1, 3600); iv.setSuffix(" 초"); iv.setFixedWidth(90)
-        iv.setValue(int(b.get("interval_sec", 60)))
-        iv.valueChanged.connect(lambda v, i=idx: self.set_field(i, "interval_sec", v))
+        iv = QDoubleSpinBox(); iv.setRange(0.01, 3600.0); iv.setDecimals(2)
+        iv.setSingleStep(0.05); iv.setSuffix(" 초"); iv.setFixedWidth(90)
+        iv.setValue(float(b.get("interval_sec", 60)))
+        iv.valueChanged.connect(lambda v, i=idx: self.set_field(i, "interval_sec", round(float(v), 2)))
         h.addWidget(iv)
+
+        hold = QDoubleSpinBox(); hold.setRange(0.03, 10.0); hold.setDecimals(2)
+        hold.setSingleStep(0.05); hold.setSuffix(" 초"); hold.setFixedWidth(90)
+        hold.setValue(float(b.get("hold_sec", 0.8)))
+        hold.valueChanged.connect(lambda v, i=idx: self.set_field(i, "hold_sec", round(float(v), 2)))
+        h.addWidget(hold)
 
         h.addStretch()
         rm = QPushButton("✕"); rm.setFixedWidth(28)

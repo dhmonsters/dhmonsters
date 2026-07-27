@@ -301,6 +301,8 @@ def _is_event_gate_family(
     lowered = name.lower()
     if lowered.startswith("balanced_viterbi_center_mild_state_mild"):
         return True
+    if lowered.startswith("kinematic_shape_center_mild_state_mild"):
+        return True
     cont_index = _raw_cont_index(lowered)
     if cont_index is None or cont_index not in allowed_cont:
         return False
@@ -879,6 +881,12 @@ def _event_gate_score(
             + smooth_bonus,
             "balanced",
         )
+    if name.startswith("kinematic_shape_center_mild_state_mild"):
+        return (
+            104.0
+            + smooth_bonus,
+            "kinematic_shape",
+        )
     return (smooth_bonus, "fallback")
 
 
@@ -1168,6 +1176,8 @@ def _median_point(points: Sequence[Point]) -> Point:
 
 def _anchor_kind_bonus(family: str) -> float:
     name = family.lower()
+    if name.startswith("kinematic_shape_center_mild_state_mild"):
+        return 8.0
     if "occlusion_state" in name:
         combo = (_raw_cont_index(name), _box_rel_key(name))
         if combo in {

@@ -153,10 +153,22 @@ class RedNose3RouteRunner:
             return
         h = self._humanizer()
         if direction in ("left", "right"):
+            direction_hold_key = f"{direction}_direction_hold_sec"
+            direction_hold_sec = self._humanized(
+                direction_hold_key,
+                0.15 if direction == "left" else 0.13,
+            )
+            lead_sec = self._humanized("teleport_lead_sec", 0.09)
+            started_at = time.monotonic()
             h.hold_dir(direction)
-            self._sleep(self._humanized("teleport_lead_sec", 0.02))
-            h.perform(Intent(action="key", key=key, base_hold_sec=float(self._profile.get("teleport_hold_sec", 0.3))))
-            h.release_dir()
+            try:
+                self._sleep(lead_sec)
+                h.perform(Intent(action="key", key=key, base_hold_sec=float(self._profile.get("teleport_hold_sec", 0.07))))
+                remaining = direction_hold_sec - (time.monotonic() - started_at)
+                if remaining > 0:
+                    self._sleep(remaining)
+            finally:
+                h.release_dir()
             self._sleep(self._humanized("after_teleport_wait_sec", 0.12))
             return
 
@@ -200,6 +212,9 @@ class RedNose3RouteRunner:
 
     def _recover_to_platform1(self) -> bool:
         self._log("[rednose3] fell below platform1; recover to platform1")
+        x_min, x_max, y_min, y_max = self._platform_range(1)
+        target_x = (x_min + x_max) / 2.0
+        fall_y = int(self._profile.get("fall_y_threshold", 70))
         for attempt in range(1, int(self._profile.get("recover_attempts", 10)) + 1):
             if not self._active():
                 return False
@@ -207,12 +222,41 @@ class RedNose3RouteRunner:
             if self._is_on_platform(1, pos):
                 self._log(f"[rednose3] platform1 recovered ({attempt})")
                 return True
-            if pos is not None and pos[1] is not None and int(pos[1]) > int(self._profile.get("fall_y_threshold", 70)):
-                self._teleport("up")
-            elif pos is not None and pos[0] is not None and float(pos[0]) < 55:
-                self._teleport("right")
-            else:
-                self._teleport("left")
+            if pos is None or pos[0] is None or pos[1] is None:
+                self._log(f"[rednose3] recover wait: position missing ({attempt})")
+                self._sleep(0.05)
+                continue
+
+            x = float(pos[0])
+            y = int(pos[1])
+            if y >= fall_y:
+                if x_min <= x <= x_max:
+                    self._humanizer().release_dir()
+                    self._log(
+                        f"[rednose3] recover up-teleport: x={x:.0f}, y={y}, "
+                        f"target X={target_x:.1f}, range {x_min:.0f}-{x_max:.0f}"
+                    )
+                    self._teleport("up")
+                    if self._wait_platform(1):
+                        self._log(f"[rednose3] platform1 recovered by up-teleport ({attempt})")
+                        return True
+                    continue
+                direction = "right" if x < x_min else "left"
+                self._log(
+                    f"[rednose3] recover walk-align before up: direction={direction}, "
+                    f"x={x:.0f}, y={y}, target X={target_x:.1f}, range {x_min:.0f}-{x_max:.0f}"
+                )
+                self._humanizer().hold_dir(direction)
+                self._sleep(0.08)
+                continue
+
+            self._humanizer().release_dir()
+            direction = "right" if x < target_x else "left"
+            self._log(
+                f"[rednose3] recover upper align: direction={direction}, "
+                f"x={x:.0f}, y={y}, platform1 Y={y_min}-{y_max}"
+            )
+            self._teleport(direction)
         return self._is_on_platform(1)
 
     def _main_hunt_once(self) -> bool:
@@ -220,7 +264,10 @@ class RedNose3RouteRunner:
             return self._recover_to_platform1()
         if not self._is_on_platform(1):
             self._log("[rednose3] main hunt: return to platform1")
-            if not self._step_to_platform(1, "right", attempts=3):
+            if self._is_on_platform(2):
+                if not self._step_to_platform(1, "right", attempts=3):
+                    return self._recover_to_platform1()
+            elif not self._recover_to_platform1():
                 return self._recover_to_platform1()
         self._log("[rednose3] main hunt: platform1 attack x16")
         self._tap_attack(int(self._profile.get("platform1_attack_count", 16)))

@@ -61,9 +61,16 @@ class ActionSpec:
     repeat: int
     repeat_interval_sec: float
     wait_after_sec: float
+    action_type: str = "key"
+    click_x: int | None = None
+    click_y: int | None = None
 
     def __post_init__(self) -> None:
-        if not self.key.strip():
+        if self.action_type not in {"key", "click"}:
+            raise ValueError("action_type은 key 또는 click이어야 합니다")
+        if self.action_type == "click" and (self.click_x is None or self.click_y is None):
+            raise ValueError("마우스 클릭 액션에는 화면 X/Y 좌표가 필요합니다")
+        if self.action_type == "key" and not self.key.strip():
             raise ValueError("action key는 비어 있을 수 없습니다")
         if self.repeat < 1:
             raise ValueError("repeat는 1 이상이어야 합니다")

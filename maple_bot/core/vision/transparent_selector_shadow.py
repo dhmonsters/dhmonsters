@@ -127,6 +127,7 @@ class TransparentSelectorShadow:
         candidates: Sequence[Sequence[float]],
         anchors: Mapping[str, Sequence[float] | None],
         expected_by_frame: Mapping[int, Sequence[tuple[int, Sequence[float]]]] | None = None,
+        allow_legacy_rescues: bool = True,
     ) -> dict | None:
         frame = int(frame_index)
         if frame not in self._candidate_sets:
@@ -197,6 +198,31 @@ class TransparentSelectorShadow:
             point = _point(selected_row.get("rescue_point"))
         if point is None:
             point = self._latest_point(paths.get(family, {}), frames)
+        if not allow_legacy_rescues:
+            consensus_family, consensus_point = self._guarded_consensus_rescue(paths, frames)
+            merge_context = self._merge_context()
+            self._selected_history.append(family)
+            if point is not None:
+                self._selected_point_history.append((frame, point))
+            return {
+                "clip": self.clip_id,
+                "frame": frame,
+                "available": True,
+                "family": family,
+                "point": _serial_point(point),
+                "rescue_point": _serial_float_point(point),
+                "rescue_allowed": _rescue_allowed_for_family(family, merge_context),
+                "consensus_rescue_family": consensus_family,
+                "consensus_rescue_point": _serial_float_point(consensus_point),
+                "consensus_rescue_allowed": consensus_point is not None,
+                "merge_context": merge_context,
+                "rows": len(rows),
+                "paths": len(paths),
+                "frames": len(frames),
+                "rank_center": float(selected_row.get("rank_center", 0.0) or 0.0),
+                "rank_rough": float(selected_row.get("rank_rough", 0.0) or 0.0),
+                "legacy_rescues_allowed": False,
+            }
         hold = self._identity_hold_family(family, paths, frames)
         if hold is not None:
             family, point = hold
@@ -290,6 +316,7 @@ class TransparentSelectorShadow:
             "frames": len(frames),
             "rank_center": float(selected_row.get("rank_center", 0.0) or 0.0),
             "rank_rough": float(selected_row.get("rank_rough", 0.0) or 0.0),
+            "legacy_rescues_allowed": True,
         }
 
     def _prune_old_frames(self) -> None:

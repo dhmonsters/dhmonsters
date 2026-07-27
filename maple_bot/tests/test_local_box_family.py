@@ -5,6 +5,7 @@ from _local_box_family_score import (
     LocalBoxVariant,
     augment_local_box_paths,
     local_box_smooth_path,
+    select_local_box_family_names,
 )
 
 
@@ -57,6 +58,61 @@ class LocalBoxFamilyTests(unittest.TestCase):
         self.assertIn("base", out)
         self.assertIn("base_lb_test", out)
         self.assertEqual(out["base_lb_test"][0], (10.0, 10.0))
+
+    def test_select_local_box_family_names_prioritizes_hard_clip_sources(self):
+        paths = {
+            "phase_catalog_center_aggressive": {},
+            "balanced_viterbi_state_mild": {},
+            "panel_default_center_mild": {},
+            "merge_context": {},
+            "mht_motion_bg_offset_aggressive": {},
+        }
+        meta = {
+            "balanced_viterbi_state_mild": {"source": "balanced_viterbi", "mode": "state"},
+            "panel_default_center_mild": {"source": "panel_default", "mode": "base"},
+            "merge_context": {"source": "merge_context", "mode": "base"},
+            "mht_motion_bg_offset_aggressive": {"source": "mht_motion_bg", "mode": "offset"},
+            "phase_catalog_center_aggressive": {"source": "phase_catalog", "mode": "base"},
+        }
+
+        selected = select_local_box_family_names(paths, meta, max_families=3)
+
+        self.assertEqual(
+            selected,
+            [
+                "balanced_viterbi_state_mild",
+                "panel_default_center_mild",
+                "merge_context",
+            ],
+        )
+
+    def test_augment_local_box_paths_can_limit_local_box_families(self):
+        frames = [0]
+        paths = {
+            "keep": {0: (10.0, 10.0)},
+            "skip": {0: (10.0, 10.0)},
+        }
+        candidate_sets = {0: [(10.0, 10.0, 20.0, 20.0, 0.8)]}
+        variants = [
+            LocalBoxVariant(
+                "test",
+                transition_weight=0.1,
+                accel_weight=0.0,
+                anchor_weight=0.0,
+                center_weight=1.0,
+            ),
+        ]
+
+        out = augment_local_box_paths(
+            paths,
+            candidate_sets,
+            frames,
+            variants=variants,
+            local_box_families=["keep"],
+        )
+
+        self.assertIn("keep_lb_test", out)
+        self.assertNotIn("skip_lb_test", out)
 
 
 if __name__ == "__main__":

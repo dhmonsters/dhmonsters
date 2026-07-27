@@ -3,7 +3,10 @@ import importlib
 import json
 import os
 import sys
+import tempfile
 import types
+import unittest
+from pathlib import Path
 
 
 class _Signal:
@@ -246,7 +249,9 @@ def test_puzzle_console_window_exposes_main_regions(monkeypatch):
     assert window.telegram_alert_checkbox.objectName() == "telegramAlertCheckbox"
     assert window.gpu_enabled_checkbox.objectName() == "gpuEnabledCheckbox"
     assert window.puzzle_detect_alert_checkbox.objectName() == "puzzleDetectAlertCheckbox"
+    assert window.target_overlay_checkbox.objectName() == "targetOverlayCheckbox"
     assert window.mouse_control_checkbox.objectName() == "mouseControlCheckbox"
+    assert window.target_overlay_enabled() is True
     assert "투명도형" in window.windowTitle()
 
 
@@ -257,6 +262,7 @@ def test_puzzle_console_window_exposes_expected_commands(monkeypatch):
     window = module.PuzzleConsoleWindow()
 
     assert window.start_watch_button.objectName() == "startWatchButton"
+    assert window.manual_start_button.objectName() == "manualStartButton"
     assert window.stop_solver_button.objectName() == "stopSolverButton"
     assert window.stop_recording_button.objectName() == "stopRecordingButton"
     assert window.solver_start_badge.objectName() == "solverStartBadge"
@@ -420,8 +426,8 @@ def test_puzzle_live_record_command_invokes_runtime(monkeypatch, tmp_path):
     puzzle = importlib.import_module("puzzle")
     calls = []
 
-    def fake_run_live_recording(*, output_root=None, max_frames=None, mouse_enabled=True):
-        calls.append((output_root, max_frames, mouse_enabled))
+    def fake_run_live_recording(*, output_root=None, max_frames=None, mouse_enabled=True, **kwargs):
+        calls.append((output_root, max_frames, mouse_enabled, kwargs))
         report_path = tmp_path / "report.md"
         report_path.write_text("# report\n", encoding="utf-8")
         return report_path
@@ -437,7 +443,18 @@ def test_puzzle_live_record_command_invokes_runtime(monkeypatch, tmp_path):
     ])
 
     assert code == 0
-    assert calls == [(str(tmp_path), 2, True)]
+    assert calls == [(
+        str(tmp_path),
+        2,
+        True,
+        {
+            "visual_check_mode": False,
+            "capture_window_title": "",
+            "visual_batch_runs": 0,
+            "visual_run_frames": 150,
+            "visual_review_samples": 12,
+        },
+    )]
 
 
 def test_puzzle_live_dry_run_command_disables_mouse(monkeypatch, tmp_path):
@@ -445,8 +462,8 @@ def test_puzzle_live_dry_run_command_disables_mouse(monkeypatch, tmp_path):
     puzzle = importlib.import_module("puzzle")
     calls = []
 
-    def fake_run_live_recording(*, output_root=None, max_frames=None, mouse_enabled=True):
-        calls.append((output_root, max_frames, mouse_enabled))
+    def fake_run_live_recording(*, output_root=None, max_frames=None, mouse_enabled=True, **kwargs):
+        calls.append((output_root, max_frames, mouse_enabled, kwargs))
         report_path = tmp_path / "report.md"
         report_path.write_text("# report\n", encoding="utf-8")
         return report_path
@@ -463,7 +480,18 @@ def test_puzzle_live_dry_run_command_disables_mouse(monkeypatch, tmp_path):
     ])
 
     assert code == 0
-    assert calls == [(str(tmp_path), 2, False)]
+    assert calls == [(
+        str(tmp_path),
+        2,
+        False,
+        {
+            "visual_check_mode": False,
+            "capture_window_title": "",
+            "visual_batch_runs": 0,
+            "visual_run_frames": 150,
+            "visual_review_samples": 12,
+        },
+    )]
 
 
 def test_puzzle_live_capture_check_command_returns_success(monkeypatch, tmp_path):
@@ -1232,3 +1260,35 @@ def test_puzzle_console_marks_selected_timeline_frame_in_summary(monkeypatch):
     assert window.select_timeline_frame(5) is True
 
     assert window.timeline_frames_label.text() == "frames 3: 3,5,8 | selected 5"
+
+
+class PuzzleConsoleManualStartSmokeTest(unittest.TestCase):
+    def test_manual_start_button_calls_manual_handler(self) -> None:
+        class _Patch:
+            def setitem(self, target, key, value):
+                target[key] = value
+
+        _install_fake_qt(_Patch())
+        module = importlib.import_module("ui.puzzle_console")
+        calls = []
+        tmp_dir = tempfile.TemporaryDirectory()
+        session_dir = Path(tmp_dir.name) / "manual_session"
+        session_dir.mkdir()
+
+        def manual_start():
+            calls.append("manual")
+            return session_dir
+
+        try:
+            window = module.PuzzleConsoleWindow(manual_start_handler=manual_start)
+
+            self.assertEqual(window.manual_start_button.objectName(), "manualStartButton")
+
+            window.manual_start_button.clicked.emit()
+
+            self.assertEqual(calls, ["manual"])
+            self.assertEqual(window.state_label.text(), "RECORDING")
+            self.assertEqual(window.last_session_dir, session_dir)
+            self.assertIn("manual start", window.event_log.toPlainText())
+        finally:
+            tmp_dir.cleanup()

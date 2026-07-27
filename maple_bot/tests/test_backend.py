@@ -13,6 +13,7 @@ class FakeBackend(InputBackend):
     def key_down(self, key): self.calls.append(("down", key))
     def key_up(self, key): self.calls.append(("up", key))
     def press(self, key, hold_sec=0.05): self.calls.append(("press", key, hold_sec))
+    def click(self, x, y): self.calls.append(("click", x, y))
     def is_available(self): return True
 
 

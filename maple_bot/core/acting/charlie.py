@@ -45,7 +45,9 @@ class CharlieExchange:
 
     # ── 내부 (모든 입력 Humanizer 경유) ──────────────────────────────
     def _npc_talk(self) -> None:
-        self._h.perform(Intent(action="key", key=self._npc, base_hold_sec=0.05, base_delay=0.5))
+        self._h.sleep_humanized(0.5)
+        self._h.perform(Intent(action="key", key=self._npc, base_hold_sec=0.05))
 
     def _dir(self, key: str) -> None:
-        self._h.perform(Intent(action="key", key=key, base_hold_sec=0.05, base_delay=0.1))
+        self._h.sleep_humanized(0.1)
+        self._h.perform(Intent(action="key", key=key, base_hold_sec=0.05))

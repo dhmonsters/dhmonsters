@@ -21,20 +21,15 @@ class PetFeeder:
         self._gap = gap                    # 펫 사이 텀(빠르게 연타하면 다 안 먹음)
         self._jit = jitter                 # 간격·홀드 ±비율 랜덤(소수점4자리)
 
-    def _jp(self, base: float) -> float:
-        f = getattr(self._h, "jitter_down", None)
-        return f(base, self._jit) if f else base
-
     def tick(self, now: float) -> None:
         if not self._key:
             return
         iv = self._iv if self._iv is not None else self._interval
         if now - self._last >= iv:
             for n in range(self._count):
-                self._h.perform(Intent(action="key", key=self._key, base_hold_sec=0.05,
-                                       hold_jitter_pct=self._jit))   # 누르는 시간 ±5%
+                self._h.perform(Intent(action="key", key=self._key, base_hold_sec=0.05))
                 if n < self._count - 1:
-                    self._h.sleep_jittered(self._jp(self._gap))   # 마리 사이 텀(±5%)
+                    self._h.sleep_humanized(self._gap)
             self._last = now
-            self._iv = self._jp(self._interval)   # 다음 먹이 간격 ±5%
+            self._iv = self._h.humanize(self._interval)
             self._log(f"{self._label}{('×' + str(self._count)) if self._count > 1 else ''} [{self._key}]")

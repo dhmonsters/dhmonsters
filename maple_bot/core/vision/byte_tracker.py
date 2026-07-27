@@ -36,11 +36,13 @@ BT_VIOL_PAIRS = 8     # 호모그래피 추정 최소 데칼 대응쌍
 # 대비 속도차)가 낮아지고, 진짜 타겟은 배경과 달라 rel_ema 높음(035137 타겟25 vs 데칼15 측정).
 # 현재 타겟보다 rel_ema가 마진 이상 큰 근처 트랙이 K프레임 지속되면 점프상한 우회 ID전환.
 # 자기게이팅(더 이질적인 것으로만) — 단 타겟이 배경동행인 판에선 멀쩡한 타겟 이탈 위험 → 토글 격리.
-BT_RELREC_MARGIN = 7.0    # 근처 트랙 순간 rel이 현재 타겟보다 이만큼 커야 후보
-BT_RELREC_MIN    = 16.0   # 후보 순간 rel 절대 하한(노이즈 단발 방지)
-BT_RELREC_R      = 100.0  # 복구 탐색 반경(px) — 반대로 멀어지는 진짜 타겟 도달용
-BT_RELREC_HOLD   = 2      # 같은 후보 연속 프레임 확정(1~2 지연 허용)
-BT_RELREC_AGE    = 2      # 후보 최소 age(순간 vel 안정 — 새 트랙 age0은 vel=0)
+# 패널 검증값(035137 해결): 분리 첫 프레임의 어린 트랙 스파이크를 즉시 잡음.
+BT_RELREC_MARGIN = 16.0   # 후보 raw rel이 현재 tt보다 이만큼 커야(분리 스파이크)
+BT_RELREC_MIN    = 33.0   # 후보 raw rel 절대 하한(강한 분리 점프만 — ByteTracker 과발화 억제)
+BT_RELREC_R      = 78.0   # 복구 탐색 반경(px) — 드리프트된 tt서 ~70px 분리 타겟 도달
+BT_RELREC_HOLD   = 1      # 분리 스파이크는 1프레임 — 즉시 전환
+BT_RELREC_AGE    = 3      # 후보는 갓 분리된 어린 트랙만(age≤) — 오래된 데칼 오발 차단
+BT_RELREC_TT_MAX = 20.0   # 현 tt가 데칼처럼 보일 때만(raw rel<) 재획득 — 정상판(타겟=고rel) 보호
 
 # CMC(전역 운동 보상) — 회전 배경을 어파인(회전+균일스케일+이동)으로 모델링.
 # 단일 이동 벡터(데칼 속도 중앙값)는 회전장에서 무의미 → 안정화 좌표계 잔차로 타겟 판별.
@@ -559,20 +561,25 @@ class ByteTracker:
             # 이상도 = raw 프레임속도(현재−직전위치) − 배경(phaseCorrelate bx,by). 트랙 EMA속도·
             # 데칼중앙값 bg는 신호를 뭉개므로(검증), raw·phaseCorr로 직접 계산.
             def _ranom(t):
-                pp = prev_pos.get(t.tid)
-                if pp is None:
+                # 직전 프레임 최근접 위치 대비 raw 속도 − 배경. tid매칭 아닌 최근접 →
+                # 새 트랙(분리 첫 프레임 타겟)도 직전 클러스터 대비 스파이크가 잡힘.
+                if not prev_pos:
                     return 0.0
-                return ((t.x - pp[0] - bx) ** 2 + (t.y - pp[1] - by) ** 2) ** 0.5
+                bp = min(prev_pos.values(),
+                         key=lambda p: (p[0] - t.x) ** 2 + (p[1] - t.y) ** 2)
+                return ((t.x - bp[0] - bx) ** 2 + (t.y - bp[1] - by) ** 2) ** 0.5
             base = _ranom(tgt)
-            cand = None; bestr = base + BT_RELREC_MARGIN
-            for t in self._tracks:
-                if t.tid == self._tid or t.miss != 0 or t.age < BT_RELREC_AGE:
-                    continue
-                if (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 > BT_RELREC_R ** 2:
-                    continue
-                rt = _ranom(t)
-                if rt >= BT_RELREC_MIN and rt > bestr:
-                    bestr = rt; cand = t
+            cand = None; bestr = max(BT_RELREC_MIN, base + BT_RELREC_MARGIN)
+            if base < BT_RELREC_TT_MAX:        # 현 tt가 데칼처럼 보일 때만(배경동조 저rel)
+                for t in self._tracks:
+                    # 갓 분리된 어린 트랙만(age≤) — 분리 스파이크 타겟, 오래된 데칼 제외
+                    if t.tid == self._tid or t.miss != 0 or t.age > BT_RELREC_AGE:
+                        continue
+                    if (t.x - tgt.x) ** 2 + (t.y - tgt.y) ** 2 > BT_RELREC_R ** 2:
+                        continue
+                    rt = _ranom(t)
+                    if rt > bestr:
+                        bestr = rt; cand = t
             if cand is not None and cand.tid == self._relrec_tid:
                 self._relrec_cnt += 1
             elif cand is not None:

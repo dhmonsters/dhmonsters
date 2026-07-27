@@ -1,5 +1,5 @@
 # 투명도형 퍼즐 신분 추적기가 보류와 복원 상태를 안정적으로 전환하는지 검증한다.
-from core.puzzle.identity import IdentityTracker
+from core.puzzle.identity import IdentityTracker, _candidate_cost_parts
 from core.puzzle.models import Candidate, CandidateEvidence
 
 
@@ -58,6 +58,73 @@ def test_white_anchor_initializes_visible_identity():
     assert decision.hold_frames == 0
 
 
+def test_cold_start_prefers_strong_white_candidate_over_low_score_noise():
+    tracker = IdentityTracker()
+    white = Candidate(
+        candidate_id="white",
+        frame_index=1,
+        bbox=(175.0, 240.0, 280.0, 345.0),
+        center=(228.0, 294.0),
+        score=0.99,
+        source="white_anchor",
+        class_name="white_anchor",
+    )
+    noise = _candidate("noise", (199.0, 322.0), score=0.14)
+    evidence = _evidence_many(
+        (
+            white,
+            CandidateEvidence(
+                candidate_id=white.candidate_id,
+                bg_score=0.29,
+                texture_bg_score=0.83,
+                color_residual=0.23,
+                merge_likelihood=0.79,
+            ),
+        ),
+        (
+            noise,
+            CandidateEvidence(
+                candidate_id=noise.candidate_id,
+                bg_score=0.33,
+                texture_bg_score=0.93,
+                color_residual=0.24,
+                merge_likelihood=0.08,
+            ),
+        ),
+    )
+
+    decision = tracker.update(frame_index=1, candidates=[white, noise], evidence=evidence)
+
+    assert decision.state == "TRACK_CONFIDENT"
+    assert decision.candidate_id == "white"
+    assert decision.point == white.center
+    assert decision.reason == "cold_start_white_candidate"
+
+
+def test_reset_clears_identity_state_but_preserves_configuration():
+    tracker = IdentityTracker(
+        jump_distance=33.0,
+        max_hold_frames=7,
+        reacquire_distance=52.0,
+    )
+    tracker.update(frame_index=10, candidates=[], evidence={}, white_anchor=(50.0, 60.0))
+    candidate = _candidate("target", (54.0, 63.0))
+    tracker.update(frame_index=11, candidates=[candidate], evidence=_evidence(candidate))
+
+    tracker.reset()
+
+    assert tracker.state == "LOST"
+    assert tracker.last_point is None
+    assert tracker.last_candidate_id is None
+    assert tracker.last_frame_index is None
+    assert tracker.identity_start_frame_index is None
+    assert tracker.velocity == (0.0, 0.0)
+    assert tracker.hold_frames == 0
+    assert tracker.jump_distance == 33.0
+    assert tracker.max_hold_frames == 7
+    assert tracker.reacquire_distance == 52.0
+
+
 def test_near_candidate_after_anchor_becomes_confident_track():
     tracker = IdentityTracker()
     tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(50.0, 60.0))
@@ -70,6 +137,35 @@ def test_near_candidate_after_anchor_becomes_confident_track():
     assert decision.candidate_id == "target"
     assert decision.hold_frames == 0
     assert decision.debug["distance"] < 10.0
+
+
+def test_identity_decision_exposes_ranked_judge_costs_without_gt():
+    tracker = IdentityTracker()
+    tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(50.0, 50.0))
+    near = _candidate("near", (54.0, 50.0), score=0.8)
+    far = _candidate("far", (80.0, 50.0), score=0.9)
+    evidence = _evidence_many(
+        (near, CandidateEvidence(candidate_id=near.candidate_id, motion_divergence=0.4)),
+        (far, CandidateEvidence(candidate_id=far.candidate_id, bg_score=0.8)),
+    )
+
+    decision = tracker.update(frame_index=2, candidates=[near, far], evidence=evidence)
+
+    ranking = decision.debug["ranking"]
+    assert ranking[0]["candidate_id"] == decision.candidate_id
+    assert ranking[0]["total_cost"] <= ranking[1]["total_cost"]
+    assert set(ranking[0]["cost_parts"]) == {
+        "continuity",
+        "yolo",
+        "overlap",
+        "background",
+        "phase",
+        "texture",
+        "motion",
+        "rigid",
+        "white_blob",
+    }
+    assert round(sum(ranking[0]["judge_shares"].values()), 6) == 100.0
 
 
 def test_large_jump_or_merge_suspicion_enters_occlusion_state():
@@ -137,6 +233,39 @@ def test_reacquire_then_returns_to_confident_tracking():
     assert confident.point == (52.0, 40.0)
 
 
+def test_first_hold_frame_rejects_broad_release_candidate_then_reacquires_local_target():
+    tracker = IdentityTracker(
+        jump_distance=40.0,
+        reacquire_distance=45.0,
+        release_reacquire_distance=85.0,
+        max_hold_frames=4,
+    )
+    tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(100.0, 100.0))
+    target = _candidate("target", (110.0, 100.0))
+    tracker.update(frame_index=2, candidates=[target], evidence=_evidence(target))
+    far = _candidate("far", (200.0, 100.0))
+    suspected = tracker.update(frame_index=3, candidates=[far], evidence=_evidence(far))
+    broad_release = _candidate("broad_release", (170.0, 100.0))
+
+    held = tracker.update(
+        frame_index=4,
+        candidates=[broad_release],
+        evidence=_evidence(broad_release),
+    )
+    local_target = _candidate("local_target", (123.0, 100.0))
+    recovered = tracker.update(
+        frame_index=5,
+        candidates=[local_target],
+        evidence=_evidence(local_target),
+    )
+
+    assert suspected.state == "OCCLUSION_SUSPECTED"
+    assert held.state == "IDENTITY_HOLD"
+    assert held.point == (110.0, 100.0)
+    assert recovered.state == "REACQUIRE"
+    assert recovered.candidate_id == "local_target"
+
+
 def test_hold_limit_without_reacquire_becomes_lost():
     tracker = IdentityTracker(max_hold_frames=2, merge_threshold=0.6)
     tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(10.0, 10.0))
@@ -187,6 +316,61 @@ def test_color_support_fades_after_initial_visible_frames():
     )
 
     assert late.candidate_id == "near_plain"
+
+
+def test_white_blob_support_uses_step_schedule_until_frame_40():
+    tracker = IdentityTracker()
+    tracker.update(frame_index=10, candidates=[], evidence={}, white_anchor=(50.0, 50.0))
+
+    assert tracker._color_weight(10) == 0.70
+    assert tracker._color_weight(40) == 0.70
+    assert tracker._color_weight(41) == 0.50
+    assert tracker._color_weight(50) == 0.50
+    assert tracker._color_weight(51) == 0.0
+
+
+def test_white_blob_support_does_not_restart_on_repeated_visible_anchor():
+    tracker = IdentityTracker()
+    tracker.update(frame_index=0, candidates=[], evidence={}, white_anchor=(50.0, 50.0))
+    tracker.update(frame_index=35, candidates=[], evidence={}, white_anchor=(55.0, 50.0))
+
+    assert tracker._color_weight(39) == 0.50
+    assert tracker._color_weight(40) == 0.50
+    assert tracker._color_weight(41) == 0.0
+    assert tracker._color_weight(51) == 0.0
+
+
+def test_late_overlap_boosts_motion_and_rigid_after_white_support_is_gone():
+    candidate = _candidate("release_candidate", (100.0, 100.0), score=0.8)
+    evidence = CandidateEvidence(
+        candidate_id=candidate.candidate_id,
+        bg_score=0.5,
+        phase_similarity=0.5,
+        texture_bg_score=0.5,
+        motion_divergence=0.5,
+        rigid_violation=0.5,
+        merge_likelihood=0.4,
+    )
+
+    parts = _candidate_cost_parts(candidate, evidence, distance=12.0, color_weight=0.0)
+
+    assert abs(parts["motion"]) > parts["background"]
+    assert abs(parts["rigid"]) > parts["phase"]
+
+
+def test_motion_and_rigid_boost_applies_below_overlap_threshold():
+    candidate = _candidate("subtle_release_candidate", (100.0, 100.0), score=0.8)
+    evidence = CandidateEvidence(
+        candidate_id=candidate.candidate_id,
+        motion_divergence=0.2,
+        rigid_violation=0.2,
+        merge_likelihood=0.0,
+    )
+
+    parts = _candidate_cost_parts(candidate, evidence, distance=12.0, color_weight=0.0)
+
+    assert round(abs(parts["motion"]), 3) == 11.04
+    assert round(abs(parts["rigid"]), 3) == 11.04
 
 
 def test_overlap_candidate_gets_extra_switch_penalty():
@@ -304,9 +488,9 @@ def test_overlap_evidence_does_not_promote_low_yolo_noise_over_local_track():
                 candidate_id=local_track.candidate_id,
                 motion_divergence=0.47,
                 rigid_violation=0.47,
-                bg_score=0.53,
-                phase_similarity=0.53,
-                texture_bg_score=0.96,
+                bg_score=0.2,
+                phase_similarity=0.2,
+                texture_bg_score=0.2,
                 merge_likelihood=0.37,
             ),
         ),
@@ -335,7 +519,7 @@ def test_overlap_evidence_does_not_promote_low_yolo_noise_over_local_track():
     assert decision.point == (185.0, 100.0)
 
 
-def test_hold_reacquires_candidate_near_last_identity_position():
+def test_hold_reacquires_candidate_near_last_identity_after_one_extra_confirmation_frame():
     tracker = IdentityTracker(jump_distance=60.0, reacquire_distance=45.0, merge_threshold=0.6)
     tracker.update(frame_index=1, candidates=[], evidence={}, white_anchor=(100.0, 100.0))
     previous = _candidate("previous", (150.0, 100.0), score=0.8)
@@ -344,12 +528,19 @@ def test_hold_reacquires_candidate_near_last_identity_position():
     tracker.update(frame_index=3, candidates=[merged], evidence=_evidence(merged, merge_likelihood=0.9))
     release = _candidate("release", (160.0, 140.0), score=0.72)
 
-    decision = tracker.update(
+    first_release = tracker.update(
         frame_index=4,
         candidates=[release],
         evidence=_evidence(release, merge_likelihood=0.2),
     )
+    release_confirmed = _candidate("release_confirmed", (162.0, 141.0), score=0.72)
+    decision = tracker.update(
+        frame_index=5,
+        candidates=[release_confirmed],
+        evidence=_evidence(release_confirmed, merge_likelihood=0.2),
+    )
 
+    assert first_release.state == "IDENTITY_HOLD"
     assert decision.state == "REACQUIRE"
-    assert decision.candidate_id == "release"
-    assert decision.point == (160.0, 140.0)
+    assert decision.candidate_id == "release_confirmed"
+    assert decision.point == (162.0, 141.0)

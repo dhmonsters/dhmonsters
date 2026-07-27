@@ -8,9 +8,14 @@ from core.puzzle.models import Candidate, CandidateEvidence, IdentityDecision
 
 
 YOLO_FULL_SCORE = 0.4
+WHITE_BLOB_FULL_SCORE = 0.35
 LOW_YOLO_COST_WEIGHT = 30.0
 LOW_YOLO_CONFIDENCE_WEIGHT = 0.25
 MERGE_COST_WEIGHT = 8.0
+WHITE_BLOB_STRONG_FRAMES = 30
+WHITE_BLOB_MID_FRAMES = 40
+WHITE_BLOB_STRONG_WEIGHT = 0.70
+WHITE_BLOB_MID_WEIGHT = 0.50
 OVERLAP_PRESSURE_THRESHOLD = 0.25
 OVERLAP_EVIDENCE_RADIUS = 90.0
 OVERLAP_DISTANCE_CAP = 18.0
@@ -18,6 +23,7 @@ OVERLAP_DISTANCE_DISCOUNT = 0.5
 OVERLAP_EVIDENCE_BOOST = 65.0
 OVERLAP_SUPPORT_SCORE_FLOOR = 0.25
 OVERLAP_SUPPORT_SCALE_FLOOR = 0.35
+MOTION_RIGID_EVIDENCE_BOOST = 2.4
 
 
 class IdentityTracker:
@@ -29,7 +35,7 @@ class IdentityTracker:
         max_hold_frames: int = 4,
         reacquire_distance: float = 45.0,
         release_reacquire_distance: float = 85.0,
-        color_fade_frames: int = 20,
+        color_fade_frames: int = WHITE_BLOB_MID_FRAMES,
         overlap_switch_penalty: float = 20.0,
     ) -> None:
         if jump_distance <= 0.0:
@@ -61,6 +67,17 @@ class IdentityTracker:
         self.identity_start_frame_index: int | None = None
         self.velocity: tuple[float, float] = (0.0, 0.0)
         self.hold_frames = 0
+        self._last_ranking_debug: list[dict[str, object]] = []
+
+    def reset(self) -> None:
+        self.state = "LOST"
+        self.last_point = None
+        self.last_candidate_id = None
+        self.last_frame_index = None
+        self.identity_start_frame_index = None
+        self.velocity = (0.0, 0.0)
+        self.hold_frames = 0
+        self._last_ranking_debug = []
 
     def update(
         self,
@@ -70,12 +87,14 @@ class IdentityTracker:
         evidence: Mapping[str, CandidateEvidence],
         white_anchor: tuple[float, float] | None = None,
     ) -> IdentityDecision:
+        self._last_ranking_debug = []
         if white_anchor is not None:
             self.state = "INIT_VISIBLE"
             self.last_point = white_anchor
             self.last_candidate_id = None
             self.last_frame_index = frame_index
-            self.identity_start_frame_index = frame_index
+            if self.identity_start_frame_index is None:
+                self.identity_start_frame_index = frame_index
             self.velocity = (0.0, 0.0)
             self.hold_frames = 0
             return self._decision(1.0, "white_anchor", debug={"anchor": white_anchor})
@@ -86,6 +105,24 @@ class IdentityTracker:
                 return IdentityDecision("LOST", None, None, 0.0, "no_identity", 0, {})
             if self.identity_start_frame_index is None:
                 self.identity_start_frame_index = frame_index
+            visible_candidate = max(
+                (
+                    candidate
+                    for candidate in candidates
+                    if candidate.source == "white_anchor" and candidate.score >= YOLO_FULL_SCORE
+                ),
+                key=lambda candidate: candidate.score,
+                default=None,
+            )
+            if visible_candidate is not None:
+                self._accept_candidate(frame_index, visible_candidate)
+                self.state = "TRACK_CONFIDENT"
+                self.hold_frames = 0
+                return self._decision(
+                    visible_candidate.score,
+                    "cold_start_white_candidate",
+                    debug={"candidate": visible_candidate.candidate_id},
+                )
             best, best_evidence, distance = self._best_candidate(
                 candidates,
                 evidence,
@@ -112,8 +149,13 @@ class IdentityTracker:
         )
         if self.state in {"OCCLUSION_SUSPECTED", "IDENTITY_HOLD"}:
             distance_to_last = _distance(best.center, self.last_point)
+            local_reacquire = distance <= self.reacquire_distance
+            broad_release = (
+                self.hold_frames >= 2
+                and distance_to_last <= self.release_reacquire_distance
+            )
             if (
-                (distance <= self.reacquire_distance or distance_to_last <= self.release_reacquire_distance)
+                (local_reacquire or broad_release)
                 and best_evidence.merge_likelihood < self.merge_threshold
             ):
                 self._accept_candidate(frame_index, best)
@@ -166,22 +208,39 @@ class IdentityTracker:
         for candidate in candidates:
             item_evidence = evidence.get(candidate.candidate_id, CandidateEvidence(candidate.candidate_id))
             distance = _distance(candidate.center, predicted)
+            parts = _candidate_cost_parts(
+                candidate,
+                item_evidence,
+                distance,
+                color_weight=color_weight,
+                overlap_switch_penalty=self.overlap_switch_penalty,
+            )
+            total_cost = sum(parts.values())
+            share_total = sum(abs(value) for value in parts.values())
+            shares = {
+                name: (abs(value) / share_total * 100.0 if share_total > 0.0 else 0.0)
+                for name, value in parts.items()
+            }
             ranked.append(
                 (
-                    _candidate_cost(
-                        candidate,
-                        item_evidence,
-                        distance,
-                        color_weight=color_weight,
-                        overlap_switch_penalty=self.overlap_switch_penalty,
-                    ),
+                    total_cost,
                     candidate,
                     item_evidence,
                     distance,
+                    {
+                        "candidate_id": candidate.candidate_id,
+                        "center": [float(candidate.center[0]), float(candidate.center[1])],
+                        "score": float(candidate.score),
+                        "distance": float(distance),
+                        "total_cost": float(total_cost),
+                        "cost_parts": {name: float(value) for name, value in parts.items()},
+                        "judge_shares": {name: float(value) for name, value in shares.items()},
+                    },
                 )
             )
         ranked.sort(key=lambda item: item[0])
-        _, candidate, item_evidence, distance = ranked[0]
+        self._last_ranking_debug = [item[4] for item in ranked[:5]]
+        _, candidate, item_evidence, distance, _debug = ranked[0]
         return candidate, item_evidence, distance
 
     def _accept_candidate(self, frame_index: int, candidate: Candidate) -> None:
@@ -226,7 +285,12 @@ class IdentityTracker:
         if self.identity_start_frame_index is None:
             return 0.0
         elapsed = max(0, frame_index - self.identity_start_frame_index)
-        return max(0.0, min(1.0, 1.0 - elapsed / self.color_fade_frames))
+        strong_frames = min(WHITE_BLOB_STRONG_FRAMES, self.color_fade_frames)
+        if elapsed <= strong_frames:
+            return WHITE_BLOB_STRONG_WEIGHT
+        if elapsed <= self.color_fade_frames:
+            return WHITE_BLOB_MID_WEIGHT
+        return 0.0
 
     def _decision(
         self,
@@ -235,6 +299,8 @@ class IdentityTracker:
         *,
         debug: dict[str, object],
     ) -> IdentityDecision:
+        if self._last_ranking_debug:
+            debug = {**debug, "ranking": list(self._last_ranking_debug)}
         return IdentityDecision(
             state=self.state,
             point=self.last_point,
@@ -254,19 +320,73 @@ def _candidate_cost(
     color_weight: float = 1.0,
     overlap_switch_penalty: float = 0.0,
 ) -> float:
+    return sum(_candidate_cost_parts(candidate, evidence, distance, color_weight=color_weight, overlap_switch_penalty=overlap_switch_penalty).values())
+
+
+def candidate_cost_judge_shares(
+    candidate: Candidate,
+    evidence: CandidateEvidence,
+    distance: float,
+    *,
+    color_weight: float = 1.0,
+    overlap_switch_penalty: float = 0.0,
+) -> dict[str, float]:
+    parts = _candidate_cost_parts(
+        candidate,
+        evidence,
+        distance,
+        color_weight=color_weight,
+        overlap_switch_penalty=overlap_switch_penalty,
+    )
+    total = sum(abs(value) for value in parts.values())
+    if total <= 0.0:
+        return {name: 0.0 for name in parts}
+    return {name: abs(value) / total * 100.0 for name, value in parts.items()}
+
+
+def _candidate_cost_parts(
+    candidate: Candidate,
+    evidence: CandidateEvidence,
+    distance: float,
+    *,
+    color_weight: float = 1.0,
+    overlap_switch_penalty: float = 0.0,
+) -> dict[str, float]:
+    bg_score = evidence.bg_score
+    motion_divergence = evidence.motion_divergence
+    rigid_violation = evidence.rigid_violation
+    phase_similarity = evidence.phase_similarity
+    texture_bg_score = evidence.texture_bg_score
+    color_residual = _full_score_cap(evidence.color_residual, WHITE_BLOB_FULL_SCORE)
+    merge_likelihood = evidence.merge_likelihood
     overlap_pressure = _overlap_pressure(evidence)
     local_overlap_pressure = overlap_pressure if distance <= OVERLAP_EVIDENCE_RADIUS else 0.0
-    target_support = evidence.motion_divergence + evidence.rigid_violation + evidence.color_residual * color_weight
+    boosted_motion = motion_divergence * MOTION_RIGID_EVIDENCE_BOOST
+    boosted_rigid = rigid_violation * MOTION_RIGID_EVIDENCE_BOOST
+    support_scale = 1.0
     if local_overlap_pressure >= OVERLAP_PRESSURE_THRESHOLD:
-        target_support *= _overlap_support_scale(candidate.score)
-    background_cost = evidence.bg_score + evidence.texture_bg_score + evidence.phase_similarity
+        support_scale = _overlap_support_scale(candidate.score)
+        boosted_motion *= support_scale
+        boosted_rigid *= support_scale
+    target_support = boosted_motion + boosted_rigid + color_residual * color_weight
     evidence_weight = 10.0 + local_overlap_pressure * OVERLAP_EVIDENCE_BOOST
     distance_cost = distance
+    background_cost = bg_score + texture_bg_score + phase_similarity
     if local_overlap_pressure >= OVERLAP_PRESSURE_THRESHOLD and target_support > background_cost:
         distance_cost = min(distance, OVERLAP_DISTANCE_CAP) * (1.0 - local_overlap_pressure * OVERLAP_DISTANCE_DISCOUNT)
     low_yolo_cost = max(0.0, YOLO_FULL_SCORE - candidate.score) * LOW_YOLO_COST_WEIGHT
-    merge_cost = evidence.merge_likelihood * (MERGE_COST_WEIGHT + overlap_switch_penalty)
-    return distance_cost + low_yolo_cost - target_support * evidence_weight + background_cost * evidence_weight + merge_cost
+    merge_cost = merge_likelihood * (MERGE_COST_WEIGHT + overlap_switch_penalty)
+    return {
+        "continuity": distance_cost,
+        "yolo": low_yolo_cost,
+        "overlap": merge_cost,
+        "background": bg_score * evidence_weight,
+        "phase": phase_similarity * evidence_weight,
+        "texture": texture_bg_score * evidence_weight,
+        "motion": -boosted_motion * evidence_weight,
+        "rigid": -boosted_rigid * evidence_weight,
+        "white_blob": -(color_residual * color_weight) * evidence_weight,
+    }
 
 
 def _overlap_pressure(evidence: CandidateEvidence) -> float:
@@ -284,6 +404,13 @@ def _overlap_support_scale(score: float) -> float:
     span = YOLO_FULL_SCORE - OVERLAP_SUPPORT_SCORE_FLOOR
     ratio = (score - OVERLAP_SUPPORT_SCORE_FLOOR) / span
     return OVERLAP_SUPPORT_SCALE_FLOOR + ratio * (1.0 - OVERLAP_SUPPORT_SCALE_FLOOR)
+
+
+def _full_score_cap(value: float, threshold: float) -> float:
+    value = max(0.0, min(1.0, float(value)))
+    if value >= threshold:
+        return 1.0
+    return value
 
 
 def _confidence(

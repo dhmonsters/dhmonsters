@@ -42,9 +42,15 @@ DEFAULT_CONFIG = {
             "close_maple": False,
             "shutdown_pc": False,
             "reconnect_after": False,
-            # ── 고정 기본값: 거짓말탐지기 감지 영역 (절대좌표 — 항상 동일) ──
-            "region": [1126, 297, 296, 130],
-            "template_path": "templates/transparent_shape_title.png",
+            # ── 고정 기본값: 거짓말탐지기 감지 영역 (게임창 기준 상대좌표) ──
+            "region": {
+                "x_ratio": 0.724219,
+                "y_ratio": 0.491959,
+                "w_ratio": 0.250781,
+                "h_ratio": 0.453947,
+                "source": "00409.png game-client relative lie detector panel",
+            },
+            "template_path": "templates\\lie_detector\\title.png",
             "threshold": 0.65,
             "check_interval_sec": 0.2,
             "cooldown_sec": 10.0,
@@ -362,6 +368,26 @@ def _ensure_required_presets(data: dict) -> bool:
             "mapping_completed": True,
             "note": "텔레포트 전용 하드코딩 사냥터. 좌표 블록 없이 전용 루틴으로 실행합니다.",
         }
+        changed = True
+
+    attack = data.setdefault("attack", {})
+    bundled_attack = bundled.get("attack") or {}
+    if not attack.get("normal_buffs") and bundled_attack.get("normal_buffs"):
+        attack["normal_buffs"] = copy.deepcopy(bundled_attack["normal_buffs"])
+        changed = True
+    if "toggle_buffs" not in attack and "toggle_buffs" in bundled_attack:
+        attack["toggle_buffs"] = copy.deepcopy(bundled_attack.get("toggle_buffs") or [])
+        changed = True
+
+    lie_detector = data.setdefault("settings1", {}).setdefault("lie_detector", {})
+    lie_template = str(lie_detector.get("template_path") or "")
+    lie_template_name = lie_template.replace("\\", "/").rsplit("/", 1)[-1]
+    if not lie_template or lie_template_name == "transparent_shape_title.png":
+        lie_detector["template_path"] = "templates\\lie_detector\\title.png"
+        changed = True
+    fixed_lie_region = copy.deepcopy(DEFAULT_CONFIG["settings1"]["lie_detector"]["region"])
+    if lie_detector.get("region") != fixed_lie_region:
+        lie_detector["region"] = fixed_lie_region
         changed = True
 
     return changed

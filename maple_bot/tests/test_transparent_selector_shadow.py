@@ -184,6 +184,38 @@ class TransparentSelectorShadowTests(unittest.TestCase):
         self.assertEqual(result["point"], [11, 11])
         self.assertEqual(result["rescue_point"], [11.25, 10.75])
 
+    def test_shadow_generic_mode_keeps_runtime_selection_without_legacy_override(self):
+        runtime = FakeRuntime(
+            selected_family="panel_default_center_mild_state_mild",
+            selected_point=(20.0, 30.0),
+        )
+        shadow = TransparentSelectorShadow(
+            runtime,
+            clip_id="live",
+            window=2,
+            min_frames=1,
+            emit_every=1,
+            include_local_box=False,
+        )
+
+        with patch.object(
+            shadow,
+            "_identity_hold_family",
+            return_value=("legacy_override", (200.0, 300.0)),
+        ):
+            result = shadow.update(
+                0,
+                candidates=[(20.0, 30.0, 0.9, 20.0, 20.0)],
+                anchors={
+                    "panel_default_center_mild_state_mild": (20.0, 30.0),
+                },
+                allow_legacy_rescues=False,
+            )
+
+        self.assertEqual(result["family"], "panel_default_center_mild_state_mild")
+        self.assertEqual(result["point"], [20, 30])
+        self.assertFalse(result["legacy_rescues_allowed"])
+
     def test_shadow_uses_runtime_point_for_augmented_family(self):
         runtime = FakeRuntime(
             selected_family="raw_candidate_cont2_box_switch_p1_p05_to_n05_z0_at2_state_mild",

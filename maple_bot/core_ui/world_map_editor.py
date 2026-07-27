@@ -3,6 +3,7 @@ from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -44,6 +45,7 @@ class WorldMapEditor(QWidget):
         self._build_ui()
         self.reload()
         if self._capture is not None:
+            self._refresh_local_capture()
             self._local_timer.start(250)
 
     def _build_ui(self):
@@ -71,8 +73,10 @@ class WorldMapEditor(QWidget):
         side.addWidget(QLabel("전역 지도 편집"))
         self._calibration_status = QLabel("보정 순서 · 큰 지도 점 → 같은 미니맵 점을 2회 선택")
         side.addWidget(self._calibration_status)
-        self._local_preview = QLabel("현재 미니맵")
-        self._local_preview.setMinimumSize(200, 100)
+        side.addWidget(QLabel("미니맵 미리보기"))
+        self._local_preview = QLabel("미니맵 영역을 먼저 설정하세요")
+        self._local_preview.setMinimumSize(240, 120)
+        self._local_preview.setMaximumHeight(180)
         self._local_preview.setScaledContents(True)
         self._local_preview.mousePressEvent = self._local_preview_clicked
         side.addWidget(self._local_preview)
@@ -95,20 +99,36 @@ class WorldMapEditor(QWidget):
         form = QFormLayout()
         self._trigger_enabled = QCheckBox()
         self._template_path = QLineEdit()
+        template_row = QHBoxLayout()
+        template_row.addWidget(self._template_path, 1)
+        capture_template = QPushButton("화면 캡처")
+        capture_template.clicked.connect(self._capture_trigger_template)
+        template_row.addWidget(capture_template)
+        choose_template = QPushButton("찾기")
+        choose_template.clicked.connect(self._choose_trigger_template)
+        template_row.addWidget(choose_template)
         self._threshold = QDoubleSpinBox(); self._threshold.setRange(0, 1); self._threshold.setValue(0.8)
         self._check_interval = QDoubleSpinBox(); self._check_interval.setRange(0, 60); self._check_interval.setValue(0.1)
         self._cooldown = QDoubleSpinBox(); self._cooldown.setRange(0, 3600); self._cooldown.setValue(2.0)
+        self._action_type = QComboBox()
+        self._action_type.addItem("키 입력", "key")
+        self._action_type.addItem("마우스 클릭", "click")
         self._action_key = QLineEdit("space")
+        self._click_x = QSpinBox(); self._click_x.setRange(-10000, 10000)
+        self._click_y = QSpinBox(); self._click_y.setRange(-10000, 10000)
         self._hold_sec = QDoubleSpinBox(); self._hold_sec.setRange(0, 30); self._hold_sec.setValue(0.1)
         self._repeat = QSpinBox(); self._repeat.setRange(1, 100); self._repeat.setValue(1)
         self._repeat_interval = QDoubleSpinBox(); self._repeat_interval.setRange(0, 60)
         self._wait_after = QDoubleSpinBox(); self._wait_after.setRange(0, 60)
         form.addRow("이미지 감지", self._trigger_enabled)
-        form.addRow("템플릿", self._template_path)
+        form.addRow("템플릿", template_row)
         form.addRow("유사도", self._threshold)
         form.addRow("감지 주기", self._check_interval)
         form.addRow("쿨다운", self._cooldown)
+        form.addRow("액션 방식", self._action_type)
         form.addRow("액션 키", self._action_key)
+        form.addRow("화면 X", self._click_x)
+        form.addRow("화면 Y", self._click_y)
         form.addRow("누름 시간", self._hold_sec)
         form.addRow("반복", self._repeat)
         form.addRow("반복 간격", self._repeat_interval)
@@ -140,6 +160,74 @@ class WorldMapEditor(QWidget):
         for route in routes:
             self._routes.addItem(route.get("name", route.get("id")))
             self._routes.item(self._routes.count() - 1).setData(0x0100, route.get("id"))
+        trigger = self._cfg.get("attack", "image_trigger", default={}) or {}
+        action = trigger.get("action", {}) or {}
+        self._trigger_enabled.setChecked(bool(trigger.get("enabled", False)))
+        self._template_path.setText(str(trigger.get("template_path", "")))
+        self._threshold.setValue(float(trigger.get("threshold", 0.8)))
+        self._check_interval.setValue(float(trigger.get("check_interval_sec", 0.1)))
+        self._cooldown.setValue(float(trigger.get("cooldown_sec", 2.0)))
+        action_index = self._action_type.findData(action.get("action_type", "key"))
+        self._action_type.setCurrentIndex(max(0, action_index))
+        self._action_key.setText(str(action.get("key", "space")))
+        self._click_x.setValue(int(action.get("click_x", 0) or 0))
+        self._click_y.setValue(int(action.get("click_y", 0) or 0))
+        self._hold_sec.setValue(float(action.get("hold_sec", 0.1)))
+        self._repeat.setValue(int(action.get("repeat", 1)))
+        self._repeat_interval.setValue(float(action.get("repeat_interval_sec", 0.0)))
+        self._wait_after.setValue(float(action.get("wait_after_sec", 0.0)))
+
+    def _choose_trigger_template(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "이미지 템플릿 선택", "", "이미지 (*.png *.jpg *.jpeg *.bmp)"
+        )
+        if path:
+            self._template_path.setText(path)
+
+    def _capture_trigger_template(self):
+        try:
+            import os
+            import cv2
+            import mss
+            import numpy as np
+            from core_ui.shot_selector import ScreenshotRegionSelector
+
+            with mss.mss() as sct:
+                monitor = sct.monitors[1]
+                frame = np.array(sct.grab(monitor))[:, :, :3]
+                origin = (int(monitor["left"]), int(monitor["top"]))
+
+            selector = ScreenshotRegionSelector(frame, src_origin=origin, parent=self)
+
+            def save_template(x, y, width, height):
+                try:
+                    left = max(0, int(x - origin[0]))
+                    top = max(0, int(y - origin[1]))
+                    right = min(frame.shape[1], left + int(width))
+                    bottom = min(frame.shape[0], top + int(height))
+                    crop = frame[top:bottom, left:right]
+                    if crop.size == 0:
+                        raise ValueError("캡처 영역이 비어 있습니다.")
+                    folder = os.path.join("templates", "image_actions")
+                    os.makedirs(folder, exist_ok=True)
+                    index = 1
+                    while True:
+                        path = os.path.join(folder, f"trigger_{index:03d}.png")
+                        if not os.path.exists(path):
+                            break
+                        index += 1
+                    ok, encoded = cv2.imencode(".png", crop)
+                    if not ok:
+                        raise ValueError("이미지 변환에 실패했습니다.")
+                    encoded.tofile(path)
+                    self._template_path.setText(os.path.abspath(path))
+                except Exception as exc:
+                    QMessageBox.warning(self, "액션 템플릿 저장 오류", str(exc))
+
+            selector.region_selected.connect(save_template)
+            selector.exec()
+        except Exception as exc:
+            QMessageBox.warning(self, "액션 템플릿 캡처 오류", str(exc))
 
     def _choose_world_map_image(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -152,10 +240,10 @@ class WorldMapEditor(QWidget):
         pixmap = QPixmap(str(path))
         if pixmap.isNull():
             raise ValueError("큰 지도 이미지를 읽을 수 없습니다.")
-        self._cfg.set("world_map", "enabled", value=True)
-        self._cfg.set("world_map", "image_path", value=str(path))
-        self._cfg.set("world_map", "image_width", value=pixmap.width())
-        self._cfg.set("world_map", "image_height", value=pixmap.height())
+        self._cfg.set("world_map", "enabled", True)
+        self._cfg.set("world_map", "image_path", str(path))
+        self._cfg.set("world_map", "image_width", pixmap.width())
+        self._cfg.set("world_map", "image_height", pixmap.height())
         self._cfg.save()
         self.reload()
 
@@ -184,7 +272,7 @@ class WorldMapEditor(QWidget):
             "arrival_radius": 4.0,
             "label": "이동점",
         })
-        self._cfg.set("navigation", "nodes", value=nodes)
+        self._cfg.set("navigation", "nodes", nodes)
         self._cfg.save()
         self.reload()
 
@@ -212,7 +300,7 @@ class WorldMapEditor(QWidget):
             "traversal": "walk",
         })
         self._connect_from_id = None
-        self._cfg.set("navigation", "edges", value=edges)
+        self._cfg.set("navigation", "edges", edges)
         self._cfg.save()
         self.reload()
 
@@ -234,14 +322,15 @@ class WorldMapEditor(QWidget):
                 "wait_after_sec": wait_after_sec,
             },
         })
-        self._cfg.set("navigation", "nodes", value=nodes)
+        self._cfg.set("navigation", "nodes", nodes)
         self._cfg.save()
         self.reload()
 
     def save_image_trigger(self, enabled, template_path, threshold,
                            check_interval_sec, cooldown_sec, key, hold_sec,
-                           repeat, repeat_interval_sec, wait_after_sec):
-        self._cfg.set("attack", "image_trigger", value={
+                           repeat, repeat_interval_sec, wait_after_sec,
+                           action_type="key", click_x=None, click_y=None):
+        self._cfg.set("attack", "image_trigger", {
             "enabled": bool(enabled),
             "template_path": str(template_path),
             "threshold": float(threshold),
@@ -249,6 +338,9 @@ class WorldMapEditor(QWidget):
             "cooldown_sec": float(cooldown_sec),
             "action": {
                 "key": str(key),
+                "action_type": str(action_type),
+                "click_x": None if click_x is None else int(click_x),
+                "click_y": None if click_y is None else int(click_y),
                 "hold_sec": float(hold_sec),
                 "repeat": int(repeat),
                 "repeat_interval_sec": float(repeat_interval_sec),
@@ -263,6 +355,7 @@ class WorldMapEditor(QWidget):
             self._threshold.value(), self._check_interval.value(),
             self._cooldown.value(), self._action_key.text(), self._hold_sec.value(),
             self._repeat.value(), self._repeat_interval.value(), self._wait_after.value(),
+            self._action_type.currentData(), self._click_x.value(), self._click_y.value(),
         )
 
     def apply_calibration(self):
@@ -272,7 +365,7 @@ class WorldMapEditor(QWidget):
             self._world_points[0], self._world_points[1],
             self._local_points[0], self._local_points[1],
         )
-        self._cfg.set("world_map", "calibration", value={
+        self._cfg.set("world_map", "calibration", {
             "scale": calibration.scale,
             "offset": [calibration.offset_x, calibration.offset_y],
         })

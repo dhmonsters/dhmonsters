@@ -1,24 +1,23 @@
-# theme — Discord Night 토큰과 QSS 생성 검증
+# 밝은 제어판 테마 토큰과 QSS 생성을 검증
 from core_ui.theme import TOKENS, build_qss
 
 
-def test_tokens_match_discord_night():
-    """Discord Night 핵심 토큰."""
-    assert TOKENS["canvas"] == "#1a1b1e"     # 다크 배경
-    assert TOKENS["primary"] == "#5865f2"    # 블러플
-    assert TOKENS["surface_1"] == "#202125"  # 내비/컨트롤바
-    assert TOKENS["hairline"] == "#2c2e33"
-    assert TOKENS["ink"] == "#f2f3f5"
-    assert TOKENS["accent"] == "#a855f7"     # 바이올렛
-    assert TOKENS["danger"] == "#f23f43"     # HP
+def test_tokens_match_claude_control_light():
+    assert TOKENS["canvas"] == "#f3f5f2"
+    assert TOKENS["primary"] == "#0f766e"
+    assert TOKENS["surface_1"] == "#ffffff"
+    assert TOKENS["hairline"] == "#d8ded8"
+    assert TOKENS["ink"] == "#17211d"
+    assert TOKENS["accent"] == "#d97745"
+    assert TOKENS["danger"] == "#c2413b"
 
 
 def test_build_qss_returns_stylesheet():
     qss = build_qss()
     assert isinstance(qss, str) and len(qss) > 0
     # 배경/강조 색이 QSS에 들어있어야
-    assert "#1a1b1e" in qss
-    assert "#5865f2" in qss
+    assert "#f3f5f2" in qss
+    assert "#0f766e" in qss
 
 
 def test_design_tokens_present():
@@ -56,3 +55,35 @@ def test_apply_font_loads_pretendard():
     assert "Pretendard" in fam   # 가변폰트는 'Pretendard Variable'로 등록됨
     # 자간이 음수(타이트)로 적용됐는지
     assert app.font().letterSpacing() < 0
+
+
+def test_apply_font_clamps_invalid_point_size():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+    from core_ui.theme import apply_font
+
+    app = QApplication.instance() or QApplication([])
+    apply_font(app, base_pt=-1)
+
+    assert app.font().pointSize() > 0
+
+
+def test_apply_font_does_not_emit_invalid_point_size_warning():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtCore import qInstallMessageHandler
+    from PyQt6.QtWidgets import QApplication
+    from core_ui.theme import apply_font
+
+    app = QApplication.instance() or QApplication([])
+    messages = []
+    previous = qInstallMessageHandler(
+        lambda _kind, _context, message: messages.append(message)
+    )
+    try:
+        apply_font(app)
+    finally:
+        qInstallMessageHandler(previous)
+
+    assert not any("Point size <= 0" in message for message in messages)

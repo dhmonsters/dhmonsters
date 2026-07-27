@@ -10,14 +10,20 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSize
 
 from core_ui.theme import SPACING
-from core.navigation.block import Block
+from core.navigation.route_state import RouteStep
 
 # 블록 타입별 기본값 (C routine_runner 스키마)
 _DEFAULTS = {
-    "move":   {"type": "move", "target_x": 0, "move_type": "walk", "direction": "right"},
-    "attack": {"type": "attack", "skill_key": "", "attack_mode": "duration", "attack_value": 1.0},
-    "ladder": {"type": "ladder", "ladder_x": 0, "y_top": 0, "y_bot": 0, "exit_side": "left"},
-    "jump":   {"type": "jump", "direction": "right"},
+    "move": {"id": "move", "step_type": "move", "type": "move",
+             "start_x": 0, "end_x": 0, "move_type": "walk", "mode": "count",
+             "sweeps": 1, "completion": {"type": "repeat_count", "repeat_count": 1, "tolerance": 1}},
+    "attack": {"id": "action", "step_type": "action", "type": "attack",
+               "skill_key": "", "hold_sec": 0.1, "completion": {"type": "action_done"}},
+    "ladder": {"id": "ladder", "step_type": "ladder_up", "type": "ladder",
+               "ladder_x": 0, "y_top": 0, "y_bot": 0, "ladder_dir": "up",
+               "exit_side": "left", "completion": {"type": "floor_changed"}},
+    "jump": {"id": "jump", "step_type": "jump", "type": "jump", "direction": "right",
+             "completion": {"type": "action_done"}},
 }
 
 # 블록 타입 한글 표시명 (저장값은 영문 유지)
@@ -72,7 +78,13 @@ class BlockEditor(QWidget):
         return len(self._route)
 
     def add_block(self, block_type: str) -> None:
-        self._route.append(dict(_DEFAULTS[block_type]))
+        base = "move" if block_type == "teleport" else block_type
+        block = dict(_DEFAULTS[base])
+        block["id"] = f"{block['id']}_{len(self._route) + 1}"
+        if block_type == "teleport":
+            block["step_type"] = "teleport"
+            block["move_type"] = "teleport"
+        self._route.append(block)
         self._save_render()
 
     def remove_row(self, idx: int) -> None:
@@ -181,8 +193,10 @@ class BlockEditor(QWidget):
         valid = []
         for b in self._route:
             try:
-                Block.from_dict(b)
-                valid.append(b)
+                if b.get("type") == "ladder":
+                    b["step_type"] = ("drop_down" if b.get("ladder_dir") == "down"
+                                      else "ladder_up")
+                valid.append(RouteStep.from_dict(b).to_dict())
             except Exception:
                 pass
         self._cfg.set(*self._keys, valid)
@@ -308,6 +322,8 @@ class BlockEditor(QWidget):
             top.addWidget(g(gs, 84), 1)
             jo = QSpinBox(); jo.setRange(0, 99); jo.setPrefix("점프 ")
             jo.setValue(int(blk.get("jump_offset", 8)))
+            jo.setEnabled(False)
+            jo.setToolTip("이전 설정 호환용입니다. 동선·이동 탭의 전역 사다리 점프 출발거리를 사용합니다.")
             jo.setToolTip("밧줄에서 이만큼(px) 떨어진 곳에서 점프해 잡음. 실제 거리 ±10% 랜덤(0=사다리 X에서 점프)")
             jo.valueChanged.connect(lambda val, i=idx: self.set_field(i, "jump_offset", val))
             top.addWidget(g(jo, 78), 1)

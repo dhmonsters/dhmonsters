@@ -7,17 +7,23 @@ from core.navigation.world_graph import shortest_edge_path
 
 
 class ActionExecutor:
-    def __init__(self, humanizer, sleep_fn=time.sleep):
+    def __init__(self, humanizer, click_fn=None, sleep_fn=time.sleep):
         self._humanizer = humanizer
+        self._click = click_fn
         self._sleep = sleep_fn
 
     def execute(self, spec) -> None:
         for index in range(spec.repeat):
-            self._humanizer.perform(Intent(
-                action="key",
-                key=spec.key,
-                base_hold_sec=spec.hold_sec,
-            ))
+            if spec.action_type == "click":
+                if self._click is None:
+                    raise RuntimeError("마우스 클릭 입력 백엔드를 사용할 수 없습니다")
+                self._click(spec.click_x, spec.click_y)
+            else:
+                self._humanizer.perform(Intent(
+                    action="key",
+                    key=spec.key,
+                    base_hold_sec=spec.hold_sec,
+                ))
             if index + 1 < spec.repeat and spec.repeat_interval_sec > 0:
                 self._sleep(spec.repeat_interval_sec)
         if spec.wait_after_sec > 0:

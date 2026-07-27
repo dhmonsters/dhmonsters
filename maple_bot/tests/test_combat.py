@@ -75,3 +75,45 @@ def test_mp_potion_independent():
     c.check_potions(hp_ratio=0.9, mp_ratio=0.3, now=10.0)
     assert any(i.key == "0" for i in h.intents)
     assert not any(i.key == "9" for i in h.intents)
+
+
+def test_secondary_hp_potion_fires_after_jittered_check_when_not_recovered():
+    h = FakeHumanizer()
+    rule = PotionRule(
+        enabled=True, key="9", secondary_key="8", threshold=0.7,
+        cooldown=3.0, verify_delay=0.2, min_recovery=0.01,
+    )
+    c = Combat(humanizer=h, hp_rule=rule)
+
+    c.check_potions(hp_ratio=0.50, mp_ratio=1.0, now=10.0)
+    c.check_potions(hp_ratio=0.505, mp_ratio=1.0, now=10.1899)
+    assert [i.key for i in h.intents] == ["9"]
+
+    c.check_potions(hp_ratio=0.505, mp_ratio=1.0, now=10.19)
+    assert [i.key for i in h.intents] == ["9", "8"]
+
+
+def test_secondary_potion_is_skipped_after_one_percent_recovery():
+    h = FakeHumanizer()
+    rule = PotionRule(
+        enabled=True, key="9", secondary_key="8", threshold=0.7,
+        cooldown=3.0, verify_delay=0.2, min_recovery=0.01,
+    )
+    c = Combat(humanizer=h, hp_rule=rule)
+
+    c.check_potions(hp_ratio=0.50, mp_ratio=1.0, now=20.0)
+    c.check_potions(hp_ratio=0.51, mp_ratio=1.0, now=20.19)
+
+    assert [i.key for i in h.intents] == ["9"]
+
+
+def test_secondary_hp_and_mp_potions_are_independent():
+    h = FakeHumanizer()
+    hp = PotionRule(enabled=True, key="9", secondary_key="8", threshold=0.7, cooldown=3.0)
+    mp = PotionRule(enabled=True, key="0", secondary_key="7", threshold=0.6, cooldown=3.0)
+    c = Combat(humanizer=h, hp_rule=hp, mp_rule=mp)
+
+    c.check_potions(hp_ratio=0.50, mp_ratio=0.40, now=30.0)
+    c.check_potions(hp_ratio=0.50, mp_ratio=0.42, now=30.19)
+
+    assert [i.key for i in h.intents] == ["9", "0", "8"]

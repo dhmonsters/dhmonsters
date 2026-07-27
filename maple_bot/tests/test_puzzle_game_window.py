@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import unittest
 
-from core.puzzle.game_window import find_game_hwnd, get_game_client_rect_screen, list_game_window_candidates
+from core.puzzle.game_window import (
+    find_game_hwnd,
+    find_window_hwnd_by_title,
+    get_game_client_rect_screen,
+    list_game_window_candidates,
+)
 
 
 class _FakeWin32Gui:
@@ -108,6 +113,43 @@ class GameWindowFinderTest(unittest.TestCase):
         candidates = list_game_window_candidates(win32gui_module=fake)
 
         self.assertEqual([candidate.hwnd for candidate in candidates], [20, 30])
+
+    def test_finds_large_window_by_title_substring(self) -> None:
+        fake = _FakeWin32Gui(
+            {
+                10: {
+                    "visible": True,
+                    "class_name": "Chrome_WidgetWin_1",
+                    "title": "Lie Captcha Studio - Chrome",
+                    "client_size": (1280, 820),
+                    "origin": (20, 30),
+                },
+                20: {
+                    "visible": True,
+                    "class_name": "Qt5152QWindowIcon",
+                    "title": "투명도형 퍼즐 분석 콘솔",
+                    "client_size": (1000, 800),
+                    "origin": (100, 100),
+                },
+            }
+        )
+
+        self.assertEqual(find_window_hwnd_by_title("Lie Captcha Studio", win32gui_module=fake), 10)
+
+    def test_title_window_finder_rejects_small_matches(self) -> None:
+        fake = _FakeWin32Gui(
+            {
+                10: {
+                    "visible": True,
+                    "class_name": "Chrome_WidgetWin_1",
+                    "title": "Lie Captcha Studio",
+                    "client_size": (120, 80),
+                    "origin": (20, 30),
+                },
+            }
+        )
+
+        self.assertIsNone(find_window_hwnd_by_title("Lie Captcha Studio", win32gui_module=fake))
 
 
 if __name__ == "__main__":

@@ -56,15 +56,38 @@ class PeriodicTracker:
         if len(self._buf) > PT_BUF:
             self._buf.pop(0); self._Dcum.pop(0)
 
+    def _resid_med(self, a, b, sh):
+        """frame a를 sh만큼 밀어 b에 맞춘 뒤 잔차 median(배경 상쇄 품질). 작을수록 좋음."""
+        H, W = b.shape
+        warp = cv2.warpAffine(a, np.float32([[1, 0, sh[0]], [0, 1, sh[1]]]), (W, H))
+        try:
+            (dx, dy), _ = cv2.phaseCorrelate(warp.astype(np.float32), b.astype(np.float32))
+            if abs(dx) < 20 and abs(dy) < 20:
+                warp = cv2.warpAffine(a, np.float32([[1, 0, sh[0]+dx], [0, 1, sh[1]+dy]]), (W, H))
+        except cv2.error:
+            pass
+        return float(np.median(cv2.absdiff(b, warp)))
+
     def _estimate_T(self):
-        n = len(self._Dcum)
-        if n < PT_TMIN + 5:
+        # T 자가선택: 후보 T마다 '최근 여러 프레임'의 frame[k]−정렬(frame[k−T]) 잔차를 평균,
+        # 배경이 가장 깨끗이 사라지는(평균 잔차 최소) T를 고름. (한 프레임 잔차는 노이즈라 평균)
+        n = len(self._buf)
+        if n < PT_TMIN + 3:
             return None
-        D = self._Dcum; bestT, bc = None, 1e9
-        for T in range(PT_TMIN, min(PT_TMAX, n - 3) + 1):
-            d = [np.hypot(*(D[i] - D[i - T])) for i in range(T, n)]
-            if d and np.mean(d) < bc:
-                bc, bestT = np.mean(d), T
+        AVG = 8                                     # 최근 AVG 프레임 평균
+        bestT, bc = None, 1e18
+        for T in range(PT_TMIN, min(PT_TMAX, n - 1) + 1):
+            res = []
+            for k in range(n - 1, max(T, n - 1 - AVG), -1):   # 최근 프레임들에서
+                j = k - T
+                if j < 0:
+                    break
+                sh = self._Dcum[k] - self._Dcum[j]
+                res.append(self._resid_med(self._buf[j], self._buf[k], sh))
+            if res:
+                m = float(np.mean(res))
+                if m < bc:
+                    bc, bestT = m, T
         return bestT
 
     def update(self, gray_u8, white_center=None):
