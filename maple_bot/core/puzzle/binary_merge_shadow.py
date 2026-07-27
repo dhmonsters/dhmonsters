@@ -158,6 +158,7 @@ def extract_binary_merge_events(
     suppressed_event_id: int | None = None
     pending_premerge: _FrameRuntime | None = None
     prior: _FrameRuntime | None = None
+    trusted_separate_frames: list[_FrameRuntime] = []
     stable_area = 0.0
 
     def result_limit_reached() -> bool:
@@ -228,7 +229,7 @@ def extract_binary_merge_events(
                 if result_limit_reached():
                     return result()
             else:
-                snapshot = _build_premerge_snapshot(premerge, frame_rows)
+                snapshot = _build_premerge_snapshot(premerge, trusted_separate_frames)
                 if snapshot is None:
                     diagnostics.append(
                         BinaryEventExtractionDiagnostic(
@@ -291,6 +292,13 @@ def extract_binary_merge_events(
             and detector.pending_merge_state is None
         ):
             stable_area = _bbox_area(target_candidate.bbox)
+
+        if (
+            state_event.state is MergeState.SEPARATE
+            and detector.pending_merge_state is None
+            and _premerge_identity_is_trusted(frame)
+        ):
+            trusted_separate_frames.append(frame)
 
         prior = frame
 
@@ -463,7 +471,10 @@ def _candidate_from_trace(raw: object, frame_index: int) -> Candidate | None:
     return Candidate(candidate_id, frame_index, bbox, center, float(score), str(source))
 
 
-def _build_premerge_snapshot(frame: _FrameRuntime, all_frames: Sequence[_FrameRuntime]) -> BinaryPremergeSnapshot | None:
+def _build_premerge_snapshot(
+    frame: _FrameRuntime,
+    trusted_separate_frames: Sequence[_FrameRuntime],
+) -> BinaryPremergeSnapshot | None:
     target = _selected_candidate(frame.candidates, frame.target_point)
     if target is None:
         return None
@@ -483,8 +494,8 @@ def _build_premerge_snapshot(frame: _FrameRuntime, all_frames: Sequence[_FrameRu
         for candidate in frame.candidates
         if candidate.candidate_id not in {target.candidate_id, background.candidate_id}
     )
-    target_velocity = _selection_velocity(frame, all_frames)
-    background_velocity = _candidate_velocity(background, frame, all_frames)
+    target_velocity = _selection_velocity(frame, trusted_separate_frames)
+    background_velocity = _candidate_velocity(background, frame, trusted_separate_frames)
     return BinaryPremergeSnapshot(
         frame_index=frame.frame_index,
         target_candidate_id=target.candidate_id,
@@ -499,8 +510,20 @@ def _build_premerge_snapshot(frame: _FrameRuntime, all_frames: Sequence[_FrameRu
     )
 
 
-def _selection_velocity(frame: _FrameRuntime, all_frames: Sequence[_FrameRuntime]) -> tuple[float, float]:
-    previous = next((row for row in reversed(all_frames) if row.frame_index < frame.frame_index and row.target_point is not None), None)
+def _selection_velocity(
+    frame: _FrameRuntime,
+    trusted_separate_frames: Sequence[_FrameRuntime],
+) -> tuple[float, float]:
+    if not any(row.frame_index == frame.frame_index for row in trusted_separate_frames):
+        return (0.0, 0.0)
+    previous = next(
+        (
+            row
+            for row in reversed(trusted_separate_frames)
+            if row.frame_index < frame.frame_index and row.target_point is not None
+        ),
+        None,
+    )
     if previous is None or frame.target_point is None:
         return (0.0, 0.0)
     elapsed = max(1, frame.frame_index - previous.frame_index)
@@ -771,12 +794,16 @@ def replay_binary_merge_events(
     """Replay binary merge decisions from runtime trace data only."""
     rows = _read_jsonl(Path(trace_jsonl))
     frame_shape = _board_frame_shape(rows)
-    profile = _profile_from_preparation_rows(rows, frame_shape)
     extraction = extract_binary_merge_events(rows, event_limit=event_limit)
     resolver = BinaryMergeIdentityResolver()
     replays: list[BinaryEventReplay] = []
 
     for event in extraction.events:
+        profile = _profile_from_preparation_rows(
+            rows,
+            frame_shape,
+            before_frame_index=event.premerge.frame_index,
+        )
         decisions: list[tuple[int, BinaryTransferDecision]] = []
         for observation in event.split_observations:
             child_a, child_b = observation.children
@@ -1072,14 +1099,23 @@ def _board_frame_shape(rows: Sequence[dict[str, Any]]) -> tuple[int, int]:
 def _profile_from_preparation_rows(
     rows: Sequence[dict[str, Any]],
     frame_shape: tuple[int, int],
+    *,
+    before_frame_index: int,
 ) -> BackgroundFlowProfile:
     preparation_frames: list[tuple[int, tuple[Candidate, ...]]] = []
     for frame in _index_runtime_rows(rows):
-        if len(frame.candidates) < 3:
-            if preparation_frames:
-                break
-            continue
-        preparation_frames.append((frame.frame_index, frame.candidates))
+        if frame.frame_index >= before_frame_index:
+            break
+        candidates = frame.candidates
+        if _premerge_identity_is_trusted(frame):
+            known_target = _selected_candidate(frame.candidates, frame.target_point)
+            if known_target is not None:
+                candidates = tuple(
+                    candidate
+                    for candidate in candidates
+                    if candidate.candidate_id != known_target.candidate_id
+                )
+        preparation_frames.append((frame.frame_index, candidates))
     return build_background_flow_profile(tuple(preparation_frames), frame_shape=frame_shape)
 
 

@@ -124,13 +124,51 @@ def _rows_for_frame(
     ]
 
 
+def _preparation_rows(
+    frame_indices: tuple[int, ...] = (0, 1, 2),
+    *,
+    target_start: float = 0.50,
+    target_step: float = 0.02,
+    background_step: float = 0.01,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    first_frame = frame_indices[0]
+    for frame_index in frame_indices:
+        elapsed = frame_index - first_frame
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"prep_target_{frame_index}", frame_index, (target_start + target_step * elapsed, 0.50)),
+                _candidate(f"prep_background_a_{frame_index}", frame_index, (0.10 + background_step * elapsed, 0.20)),
+                _candidate(f"prep_background_b_{frame_index}", frame_index, (0.30 + background_step * elapsed, 0.40)),
+                _candidate(f"prep_background_c_{frame_index}", frame_index, (0.70 + background_step * elapsed, 0.60)),
+            ],
+            (target_start + target_step * elapsed, 0.50),
+        )
+    return rows
+
+
+def _shift_frame_indices(rows: list[dict[str, object]], offset: int) -> list[dict[str, object]]:
+    shifted = json.loads(json.dumps(rows))
+    for row in shifted:
+        frame_index = row.get("frame_index")
+        if isinstance(frame_index, int):
+            row["frame_index"] = frame_index + offset
+    return shifted
+
+
 def make_trace_rows_for_separate_overlap_merged_split(
     *,
     parent_center_ratio: tuple[float, float] = (0.50, 0.50),
     first_split_ambiguous: bool = False,
     identity_state: str = "TRACK_CONFIDENT",
 ) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
+    rows = _preparation_rows(
+        (-2, -1),
+        target_start=0.42,
+        target_step=0.0,
+        background_step=0.0,
+    )
     rows += _rows_for_frame(
         0,
         [
@@ -342,8 +380,159 @@ def test_child_evidence_preserves_background_anchor_relation_and_role_decision()
     assert decision.target_candidate_id == "target_child"
 
 
-def _two_frame_overlap_then_two_frame_split_rows() -> list[dict[str, object]]:
+def test_preparation_profile_ignores_rows_at_or_after_event_premerge() -> None:
+    past_rows = _preparation_rows()
+    future_rows = _preparation_rows((3, 4, 5))
+    for row in future_rows:
+        if row["type"] != "CANDIDATES":
+            continue
+        for candidate in row["payload"]["candidates"]:
+            candidate["center"][0] += 200.0
+            candidate["bbox"][0] += 200.0
+            candidate["bbox"][2] += 200.0
+
+    past_profile = binary_merge_shadow._profile_from_preparation_rows(
+        past_rows,
+        FRAME_SHAPE,
+        before_frame_index=3,
+    )
+    profile_with_future = binary_merge_shadow._profile_from_preparation_rows(
+        past_rows + future_rows,
+        FRAME_SHAPE,
+        before_frame_index=3,
+    )
+
+    assert past_profile == profile_with_future
+    assert past_profile.velocity_ratio == pytest.approx((0.01, 0.0))
+
+
+def test_preparation_profile_excludes_each_trusted_target_candidate() -> None:
     rows: list[dict[str, object]] = []
+    for frame_index in (0, 1):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"target_{frame_index}", frame_index, (0.50 + 0.01 * frame_index, 0.80)),
+                _candidate(f"background_a_{frame_index}", frame_index, (0.10 + 0.01 * frame_index, 0.20)),
+                _candidate(f"background_b_{frame_index}", frame_index, (0.70 + 0.01 * frame_index, 0.60)),
+            ],
+            (0.50 + 0.01 * frame_index, 0.80),
+        )
+
+    profile = binary_merge_shadow._profile_from_preparation_rows(
+        rows,
+        FRAME_SHAPE,
+        before_frame_index=2,
+    )
+
+    assert not profile.available
+    assert profile.reason == "insufficient_background_motion"
+
+
+def test_replay_builds_profile_only_from_rows_before_each_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event_rows = _shift_frame_indices(make_trace_rows_for_separate_overlap_merged_split(), 3)
+    for row in event_rows:
+        if row.get("type") == "CANDIDATES" and row.get("frame_index") == 5:
+            row["payload"]["candidates"].append(_candidate("merge_context", 5, (0.15, 0.15)))
+    future_rows: list[dict[str, object]] = []
+    for frame_index in (8, 9):
+        future_rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"future_target_{frame_index}", frame_index, (0.42, 0.50)),
+                _candidate(f"future_background_{frame_index}", frame_index, (0.58, 0.50)),
+                _candidate(f"future_anchor_a_{frame_index}", frame_index, (0.10, 0.15)),
+                _candidate(f"future_anchor_b_{frame_index}", frame_index, (0.90, 0.85)),
+            ],
+            (0.42, 0.50),
+        )
+    rows = _preparation_rows() + event_rows + future_rows
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+    captured_frames: list[tuple[int, ...]] = []
+    original_builder = binary_merge_shadow.build_background_flow_profile
+
+    def capture_profile(
+        frames: tuple[tuple[int, tuple[Candidate, ...]], ...],
+        *,
+        frame_shape: tuple[int, int],
+    ) -> BackgroundFlowProfile:
+        captured_frames.append(tuple(frame_index for frame_index, _candidates in frames))
+        return original_builder(frames, frame_shape=frame_shape)
+
+    monkeypatch.setattr(binary_merge_shadow, "build_background_flow_profile", capture_profile)
+
+    replays = replay_binary_merge_events(trace_path, event_limit=1)
+
+    assert len(replays) == 1
+    assert captured_frames
+    assert all(frame_index < replays[0].premerge_frame for frame_index in captured_frames[0])
+
+
+def test_premerge_velocity_ignores_untrusted_hold_selection() -> None:
+    rows: list[dict[str, object]] = []
+    rows += _rows_for_frame(
+        0,
+        [
+            _candidate("trusted_target_0", 0, (0.40, 0.50)),
+            _candidate("trusted_background_0", 0, (0.65, 0.50)),
+        ],
+        (0.40, 0.50),
+    )
+    rows += _rows_for_frame(
+        5,
+        [
+            _candidate("hold_selection", 5, (0.90, 0.50)),
+            _candidate("hold_background", 5, (0.65, 0.50)),
+        ],
+        (0.90, 0.50),
+        identity_state="IDENTITY_HOLD",
+    )
+    rows += _rows_for_frame(
+        6,
+        [
+            _candidate("trusted_target_6", 6, (0.42, 0.50)),
+            _candidate("trusted_background_6", 6, (0.65, 0.50)),
+        ],
+        (0.42, 0.50),
+    )
+    for frame_index in (7, 8):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"target_overlap_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"background_overlap_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+        )
+    rows += _rows_for_frame(
+        9,
+        [
+            _candidate("target_child", 9, (0.44, 0.50)),
+            _candidate("background_child", 9, (0.58, 0.50)),
+        ],
+        (0.44, 0.50),
+    )
+
+    extraction = extract_binary_merge_events(rows)
+
+    assert len(extraction.events) == 1
+    assert extraction.events[0].premerge.frame_index == 6
+    assert extraction.events[0].premerge.target_velocity == pytest.approx(
+        (((0.42 - 0.40) * FRAME_SHAPE[1]) / 6.0, 0.0)
+    )
+
+
+def _two_frame_overlap_then_two_frame_split_rows() -> list[dict[str, object]]:
+    rows = _preparation_rows(
+        (-2, -1),
+        target_start=0.42,
+        target_step=0.0,
+        background_step=0.0,
+    )
     rows += _rows_for_frame(
         0,
         [

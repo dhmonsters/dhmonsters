@@ -113,6 +113,71 @@ def test_swapping_children_preserves_physical_role_assignment() -> None:
     assert original.background_candidate_id == swapped.background_candidate_id == "background"
 
 
+def test_neighbor_relation_scores_only_the_assigned_background_child() -> None:
+    resolver = BinaryMergeIdentityResolver()
+    control = resolver.evaluate(
+        event_id=18,
+        child_a=_evidence(
+            "target",
+            target_motion_residual=0.10,
+            background_motion_residual=2.0,
+            neighbor_relation_residual=2.0,
+        ),
+        child_b=_evidence(
+            "background",
+            target_motion_residual=2.0,
+            background_motion_residual=0.10,
+            neighbor_relation_residual=2.0,
+        ),
+    )
+
+    decision = resolver.evaluate(
+        event_id=18,
+        child_a=_evidence(
+            "target",
+            target_motion_residual=0.10,
+            background_motion_residual=2.0,
+            neighbor_relation_residual=2.0,
+        ),
+        child_b=_evidence(
+            "background",
+            target_motion_residual=2.0,
+            background_motion_residual=0.10,
+            neighbor_relation_residual=0.05,
+        ),
+    )
+
+    assert decision.status is BinaryTransferStatus.RESOLVED
+    assert decision.target_candidate_id == "target"
+    assert "neighbor_relation" in decision.debug["h1"].support_groups
+    assert "neighbor_relation" not in decision.debug["h2"].support_groups
+    assert decision.debug["h1"].total_cost < control.debug["h1"].total_cost
+    assert decision.debug["h1"].target_cost == pytest.approx(control.debug["h1"].target_cost)
+    assert decision.debug["h1"].background_cost < control.debug["h1"].background_cost
+    assert decision.debug["h2"].total_cost == pytest.approx(control.debug["h2"].total_cost)
+
+
+def test_neighbor_relation_cannot_replace_required_motion_support() -> None:
+    decision = BinaryMergeIdentityResolver().evaluate(
+        event_id=19,
+        child_a=_evidence(
+            "target_like",
+            target_motion_residual=0.50,
+            background_motion_residual=0.50,
+            neighbor_relation_residual=2.0,
+        ),
+        child_b=_evidence(
+            "background_like",
+            target_motion_residual=0.50,
+            background_motion_residual=0.50,
+            neighbor_relation_residual=0.05,
+        ),
+    )
+
+    assert decision.status is BinaryTransferStatus.HOLD
+    assert decision.reason == "judge_disagreement"
+
+
 def test_low_yolo_cannot_override_agreeing_motion_judges() -> None:
     resolver = BinaryMergeIdentityResolver()
     control = resolver.evaluate(

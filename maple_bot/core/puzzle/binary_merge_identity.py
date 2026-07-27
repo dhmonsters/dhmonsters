@@ -104,15 +104,19 @@ class BinaryMergeIdentityResolver:
         if target.ancestry_residual + uncertainty < background.ancestry_residual:
             support_groups.append("ancestry")
         if self._has_optional_pair(target.neighbor_relation_residual, background.neighbor_relation_residual):
-            if target.neighbor_relation_residual + uncertainty < background.neighbor_relation_residual:
+            if background.neighbor_relation_residual + uncertainty < target.neighbor_relation_residual:
                 support_groups.append("neighbor_relation")
 
         target_cost = (
             target.target_motion_residual
             + target.ancestry_residual
-            + self._optional_penalty(target, background)
+            + self._target_optional_penalty(target, background)
         )
-        background_cost = background.background_motion_residual + background.ancestry_residual
+        background_cost = (
+            background.background_motion_residual
+            + background.ancestry_residual
+            + self._background_optional_penalty(target, background)
+        )
         return BinaryHypothesis(
             name=name,
             target_candidate_id=target.candidate_id,
@@ -156,13 +160,27 @@ class BinaryMergeIdentityResolver:
         return abs(runner_up.total_cost - best.total_cost) / scale
 
     @staticmethod
-    def _optional_penalty(target: BinaryRoleEvidence, background: BinaryRoleEvidence) -> float:
-        optional_pairs = (
-            (target.neighbor_relation_residual, background.neighbor_relation_residual),
+    def _target_optional_penalty(target: BinaryRoleEvidence, background: BinaryRoleEvidence) -> float:
+        penalty = 0.0
+        for target_value, background_value in (
             (target.shape_residual, background.shape_residual),
             (target.yolo_shortfall, background.yolo_shortfall),
-        )
-        return sum(target_value for target_value, background_value in optional_pairs if BinaryMergeIdentityResolver._has_optional_pair(target_value, background_value))
+        ):
+            if BinaryMergeIdentityResolver._has_optional_pair(target_value, background_value):
+                penalty += target_value
+        return penalty
+
+    @staticmethod
+    def _background_optional_penalty(
+        target: BinaryRoleEvidence,
+        background: BinaryRoleEvidence,
+    ) -> float:
+        if BinaryMergeIdentityResolver._has_optional_pair(
+            target.neighbor_relation_residual,
+            background.neighbor_relation_residual,
+        ):
+            return float(background.neighbor_relation_residual)
+        return 0.0
 
     @staticmethod
     def _has_optional_pair(target_value: float | None, background_value: float | None) -> bool:
