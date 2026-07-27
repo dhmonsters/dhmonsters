@@ -348,6 +348,14 @@ def _ensure_required_presets(data: dict) -> bool:
         data["rednose2_v5"] = copy.deepcopy(bundled["rednose2_v5"])
         changed = True
 
+    if "빨코2" not in presets:
+        presets["빨코2"] = {
+            "name": "빨코2",
+            "mapping_completed": True,
+            "note": "빨코2 v5/new 전용 하드코딩 사냥터. 전용 동작값으로 실행합니다.",
+        }
+        changed = True
+
     if "빨코3" not in presets:
         presets["빨코3"] = {
             "name": "빨코3",
