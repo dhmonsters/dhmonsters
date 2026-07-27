@@ -71,3 +71,9 @@
 ## 중단 기록
 
 Gate 실패 후 두 번째 사건을 실행하지 않았고 event detection, judge, ancestry 관련 threshold를 변경하지 않았다. Task 6 이후 확장은 수행하지 않는다.
+
+## 검증 후 CLI 계약 보완
+
+대표 사건은 다시 실행하지 않았다. 합성 회귀 테스트에서 `--event-limit 1`이 첫 사건 또는 진단 이후 extraction과 resolver 계산 자체를 중단하는지 확인했다. CLI 출력에는 `gate_verdict`, canonical `failure_stage`, `expand_allowed`를 추가했다.
+
+보완 커밋은 `0cf0f835c7a0f80d9bbd538dda8bf6842317c556`이다. 최종 관련 테스트는 `273 passed, 37 subtests passed`다. 이 보완은 기존 대표 사건의 `GATE_FAILED`, `candidate normalization` 판정을 바꾸지 않는다.
