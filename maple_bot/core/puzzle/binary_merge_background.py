@@ -8,6 +8,9 @@ from statistics import median
 from .models import Candidate
 
 
+_MINIMUM_BACKGROUND_MATCHES = 3
+
+
 @dataclass(frozen=True)
 class BackgroundFlowSample:
     frame_index: int
@@ -113,6 +116,9 @@ def _minimum_cost_background_matches(
         assignment = _minimum_cost_assignment(costs)
         pairs = tuple((previous[column], current[index]) for index, column in enumerate(assignment))
 
+    if len(pairs) < _MINIMUM_BACKGROUND_MATCHES:
+        return ()
+
     costs_by_pair = [
         _normalized_distance(left, right, width, height)
         for left, right in pairs
@@ -120,11 +126,12 @@ def _minimum_cost_background_matches(
     median_cost = median(costs_by_pair)
     cost_mad = median(abs(cost - median_cost) for cost in costs_by_pair)
     maximum_cost = median_cost + cost_mad
-    return tuple(
+    reliable_pairs = tuple(
         pair
         for pair, cost in zip(pairs, costs_by_pair)
         if cost <= maximum_cost
     )
+    return reliable_pairs
 
 
 def _deduplicate_candidates(candidates: tuple[Candidate, ...]) -> tuple[Candidate, ...]:

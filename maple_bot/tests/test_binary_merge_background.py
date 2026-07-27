@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import math
+from statistics import median
 
 import pytest
 
-from core.puzzle.binary_merge_background import build_background_flow_profile
+from core.puzzle.binary_merge_background import (
+    _minimum_cost_background_matches,
+    build_background_flow_profile,
+)
 from core.puzzle.models import Candidate
 
 
@@ -164,3 +168,175 @@ def test_background_flow_profile_is_available_for_slowly_rotating_local_flow() -
 
     assert profile.available
     assert profile.valid_transitions == 2
+
+
+def test_background_flow_profile_marks_a_single_far_jump_as_missing() -> None:
+    frame_shape = (240, 400)
+    profile = build_background_flow_profile(
+        (
+            (0, (_candidate("anchor", 0, (0.05, 0.50), frame_shape),)),
+            (1, (_candidate("anchor", 1, (0.95, 0.50), frame_shape),)),
+        ),
+        frame_shape=frame_shape,
+    )
+
+    assert not profile.available
+    assert profile.valid_transitions == 0
+    assert profile.missing_transitions == 1
+    assert profile.reason == "insufficient_background_motion"
+
+
+def test_background_flow_profile_marks_one_normal_match_plus_one_outlier_as_missing() -> None:
+    frame_shape = (240, 400)
+    profile = build_background_flow_profile(
+        (
+            (
+                0,
+                (
+                    _candidate("normal", 0, (0.20, 0.30), frame_shape),
+                    _candidate("outlier", 0, (0.68, 0.70), frame_shape),
+                ),
+            ),
+            (
+                1,
+                (
+                    _candidate("normal", 1, (0.22, 0.31), frame_shape),
+                    _candidate("outlier", 1, (0.95, 0.35), frame_shape),
+                ),
+            ),
+        ),
+        frame_shape=frame_shape,
+    )
+
+    assert not profile.available
+    assert profile.valid_transitions == 0
+    assert profile.missing_transitions == 1
+    assert profile.reason == "insufficient_background_motion"
+
+
+def test_minimum_cost_background_matches_excludes_outlier_from_envelope() -> None:
+    frame_shape = (240, 400)
+    previous = tuple(
+        _candidate(candidate_id, 0, position, frame_shape)
+        for candidate_id, position in (
+            ("anchor-a", (0.18, 0.27)),
+            ("anchor-b", (0.52, 0.61)),
+            ("anchor-c", (0.79, 0.36)),
+            ("outlier", (0.72, 0.24)),
+        )
+    )
+    current = tuple(
+        _candidate(candidate_id, 1, position, frame_shape)
+        for candidate_id, position in (
+            ("anchor-a", (0.20, 0.28)),
+            ("anchor-b", (0.54, 0.62)),
+            ("anchor-c", (0.81, 0.37)),
+            ("outlier", (0.92, 0.06)),
+        )
+    )
+
+    matches = _minimum_cost_background_matches(previous, current, frame_shape)
+
+    assert tuple((left.candidate_id, right.candidate_id) for left, right in matches) == (
+        ("anchor-a", "anchor-a"),
+        ("anchor-b", "anchor-b"),
+        ("anchor-c", "anchor-c"),
+    )
+
+
+def test_minimum_cost_background_matches_collapses_duplicates_deterministically() -> None:
+    frame_shape = (240, 400)
+    previous = (
+        _candidate("anchor-a", 0, (0.20, 0.30), frame_shape),
+        _candidate("anchor-a-duplicate", 0, (0.201, 0.30), frame_shape),
+        _candidate("anchor-b", 0, (0.70, 0.60), frame_shape),
+        _candidate("anchor-c", 0, (0.45, 0.72), frame_shape),
+    )
+    current = (
+        _candidate("anchor-a", 1, (0.22, 0.31), frame_shape),
+        _candidate("anchor-a-duplicate", 1, (0.221, 0.31), frame_shape),
+        _candidate("anchor-b", 1, (0.72, 0.61), frame_shape),
+        _candidate("anchor-c", 1, (0.47, 0.73), frame_shape),
+    )
+
+    ordered = _minimum_cost_background_matches(previous, current, frame_shape)
+    permuted = _minimum_cost_background_matches(
+        tuple(reversed(previous)),
+        (current[1], current[3], current[2], current[0]),
+        frame_shape,
+    )
+
+    expected = (
+        ("anchor-a", "anchor-a"),
+        ("anchor-c", "anchor-c"),
+        ("anchor-b", "anchor-b"),
+    )
+    assert tuple((left.candidate_id, right.candidate_id) for left, right in ordered) == expected
+    assert tuple((left.candidate_id, right.candidate_id) for left, right in permuted) == expected
+
+
+def test_minimum_cost_background_matches_uses_global_optimum_over_greedy_pairing() -> None:
+    frame_shape = (1000, 1000)
+    previous = (
+        _candidate("left-a", 0, (0.20, 0.20), frame_shape),
+        _candidate("left-b", 0, (0.40, 0.20), frame_shape),
+        _candidate("left-c", 0, (0.65, 0.70), frame_shape),
+    )
+    current = (
+        _candidate("right-x", 1, (0.30, 0.20), frame_shape),
+        _candidate("right-y", 1, (0.20, 0.31), frame_shape),
+        _candidate("right-z", 1, (0.67, 0.71), frame_shape),
+    )
+
+    matches = _minimum_cost_background_matches(previous, current, frame_shape)
+
+    assert tuple((left.candidate_id, right.candidate_id) for left, right in matches) == (
+        ("left-a", "right-y"),
+        ("left-b", "right-x"),
+        ("left-c", "right-z"),
+    )
+
+
+def test_background_flow_profile_reports_rotating_tangent_velocity_and_dispersion() -> None:
+    frame_shape = (300, 500)
+    center = (0.50, 0.50)
+    radius = 0.20
+    angles = (0.0, 2.0 * math.pi / 3.0, 4.0 * math.pi / 3.0)
+    rotation = 0.04
+    frames = tuple(
+        (
+            frame_index,
+            tuple(
+                _candidate(
+                    f"anchor-{candidate_index}",
+                    frame_index,
+                    (
+                        center[0] + radius * math.cos(angle + rotation * frame_index),
+                        center[1] + radius * math.sin(angle + rotation * frame_index),
+                    ),
+                    frame_shape,
+                )
+                for candidate_index, angle in enumerate(angles)
+            ),
+        )
+        for frame_index in range(2)
+    )
+    dx_values = tuple(
+        radius * (math.cos(angle + rotation) - math.cos(angle))
+        for angle in angles
+    )
+    dy_values = tuple(
+        radius * (math.sin(angle + rotation) - math.sin(angle))
+        for angle in angles
+    )
+    expected_velocity = (median(dx_values), median(dy_values))
+    expected_dispersion = median(
+        math.hypot(dx - expected_velocity[0], dy - expected_velocity[1])
+        for dx, dy in zip(dx_values, dy_values)
+    )
+
+    profile = build_background_flow_profile(frames, frame_shape=frame_shape)
+
+    assert profile.available
+    assert profile.velocity_ratio == pytest.approx(expected_velocity)
+    assert profile.dispersion == pytest.approx(expected_dispersion)
