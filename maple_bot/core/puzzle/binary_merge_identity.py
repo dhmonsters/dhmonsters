@@ -16,10 +16,10 @@ class BinaryRoleEvidence:
     candidate_id: str
     target_motion_residual: float
     background_motion_residual: float
-    neighbor_relation_residual: float
+    neighbor_relation_residual: float | None
     ancestry_residual: float
-    shape_residual: float
-    yolo_shortfall: float
+    shape_residual: float | None
+    yolo_shortfall: float | None
     uncertainty: float
 
 
@@ -63,12 +63,16 @@ class BinaryMergeIdentityResolver:
 
         h1 = self._hypothesis("h1", child_a, child_b)
         h2 = self._hypothesis("h2", child_b, child_a)
-        best, runner_up = sorted((h1, h2), key=lambda row: row.total_cost)
-        scale = max(1.0, abs(best.total_cost), abs(runner_up.total_cost))
-        margin = (runner_up.total_cost - best.total_cost) / scale
         required = {"target_motion", "background_motion"}
-        if not required.issubset(best.support_groups):
+        supported = [row for row in (h1, h2) if required.issubset(row.support_groups)]
+        if len(supported) != 1:
+            best, runner_up = sorted((h1, h2), key=lambda row: row.total_cost)
+            margin = self._normalized_margin(best, runner_up)
             return self._hold(event_id, margin, "judge_disagreement", h1, h2)
+
+        best = supported[0]
+        runner_up = h2 if best is h1 else h1
+        margin = self._normalized_margin(best, runner_up)
 
         required_margin = max(0.0, child_a.uncertainty, child_b.uncertainty)
         if margin <= required_margin:
@@ -99,11 +103,15 @@ class BinaryMergeIdentityResolver:
             support_groups.append("background_motion")
         if target.ancestry_residual + uncertainty < background.ancestry_residual:
             support_groups.append("ancestry")
-        if target.neighbor_relation_residual is not None and background.neighbor_relation_residual is not None:
+        if self._has_optional_pair(target.neighbor_relation_residual, background.neighbor_relation_residual):
             if target.neighbor_relation_residual + uncertainty < background.neighbor_relation_residual:
                 support_groups.append("neighbor_relation")
 
-        target_cost = target.target_motion_residual + target.ancestry_residual
+        target_cost = (
+            target.target_motion_residual
+            + target.ancestry_residual
+            + self._optional_penalty(target, background)
+        )
         background_cost = background.background_motion_residual + background.ancestry_residual
         return BinaryHypothesis(
             name=name,
@@ -138,9 +146,39 @@ class BinaryMergeIdentityResolver:
             child_b.ancestry_residual,
             child_b.uncertainty,
         )
-        if any(not isinstance(value, (int, float)) or not isfinite(value) for value in required_values):
+        if any(not BinaryMergeIdentityResolver._is_nonnegative_finite(value) for value in required_values):
             return "invalid_evidence"
         return None
+
+    @staticmethod
+    def _normalized_margin(best: BinaryHypothesis, runner_up: BinaryHypothesis) -> float:
+        scale = max(1.0, abs(best.total_cost), abs(runner_up.total_cost))
+        return abs(runner_up.total_cost - best.total_cost) / scale
+
+    @staticmethod
+    def _optional_penalty(target: BinaryRoleEvidence, background: BinaryRoleEvidence) -> float:
+        optional_pairs = (
+            (target.neighbor_relation_residual, background.neighbor_relation_residual),
+            (target.shape_residual, background.shape_residual),
+            (target.yolo_shortfall, background.yolo_shortfall),
+        )
+        return sum(target_value for target_value, background_value in optional_pairs if BinaryMergeIdentityResolver._has_optional_pair(target_value, background_value))
+
+    @staticmethod
+    def _has_optional_pair(target_value: float | None, background_value: float | None) -> bool:
+        return (
+            BinaryMergeIdentityResolver._is_nonnegative_finite(target_value)
+            and BinaryMergeIdentityResolver._is_nonnegative_finite(background_value)
+        )
+
+    @staticmethod
+    def _is_nonnegative_finite(value: object) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and isfinite(value)
+            and value >= 0.0
+        )
 
     @staticmethod
     def _hold(

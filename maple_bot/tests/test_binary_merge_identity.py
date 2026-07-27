@@ -17,10 +17,10 @@ def _evidence(
     *,
     target_motion_residual: float,
     background_motion_residual: float,
-    neighbor_relation_residual: float = 0.30,
+    neighbor_relation_residual: float | None = 0.30,
     ancestry_residual: float = 0.20,
-    shape_residual: float = 0.30,
-    yolo_shortfall: float = 0.0,
+    shape_residual: float | None = 0.30,
+    yolo_shortfall: float | None = 0.0,
     uncertainty: float = 0.10,
 ) -> BinaryRoleEvidence:
     return BinaryRoleEvidence(
@@ -115,6 +115,11 @@ def test_swapping_children_preserves_physical_role_assignment() -> None:
 
 def test_low_yolo_cannot_override_agreeing_motion_judges() -> None:
     resolver = BinaryMergeIdentityResolver()
+    control = resolver.evaluate(
+        event_id=10,
+        child_a=_evidence("a", target_motion_residual=0.10, background_motion_residual=2.0),
+        child_b=_evidence("b", target_motion_residual=2.0, background_motion_residual=0.10),
+    )
 
     decision = resolver.evaluate(
         event_id=10,
@@ -135,6 +140,7 @@ def test_low_yolo_cannot_override_agreeing_motion_judges() -> None:
     assert decision.status is BinaryTransferStatus.RESOLVED
     assert decision.target_candidate_id == "a"
     assert decision.background_candidate_id == "b"
+    assert decision.debug["h1"].total_cost > control.debug["h1"].total_cost
 
 
 def test_equal_motion_residuals_hold_as_ambiguous() -> None:
@@ -182,3 +188,156 @@ def test_duplicate_candidate_identity_holds() -> None:
 
     assert decision.status is BinaryTransferStatus.HOLD
     assert decision.reason == "duplicate_candidate_identity"
+
+
+def test_shape_and_yolo_change_cost_without_creating_motion_support() -> None:
+    resolver = BinaryMergeIdentityResolver()
+    control = resolver.evaluate(
+        event_id=14,
+        child_a=_evidence(
+            "a",
+            target_motion_residual=0.20,
+            background_motion_residual=2.0,
+            neighbor_relation_residual=0.0,
+            shape_residual=0.0,
+            yolo_shortfall=0.0,
+            uncertainty=0.05,
+        ),
+        child_b=_evidence(
+            "b",
+            target_motion_residual=2.0,
+            background_motion_residual=0.20,
+            neighbor_relation_residual=0.0,
+            shape_residual=0.0,
+            yolo_shortfall=0.0,
+            uncertainty=0.05,
+        ),
+    )
+    decision = resolver.evaluate(
+        event_id=14,
+        child_a=_evidence(
+            "a",
+            target_motion_residual=0.20,
+            background_motion_residual=2.0,
+            neighbor_relation_residual=0.0,
+            shape_residual=0.40,
+            yolo_shortfall=0.30,
+            uncertainty=0.05,
+        ),
+        child_b=_evidence(
+            "b",
+            target_motion_residual=2.0,
+            background_motion_residual=0.20,
+            neighbor_relation_residual=0.0,
+            shape_residual=0.10,
+            yolo_shortfall=0.10,
+            uncertainty=0.05,
+        ),
+    )
+
+    assert decision.status is BinaryTransferStatus.RESOLVED
+    assert decision.target_candidate_id == "a"
+    assert decision.debug["h1"].total_cost > control.debug["h1"].total_cost
+    assert decision.normalized_margin != control.normalized_margin
+    assert decision.debug["h1"].support_groups == control.debug["h1"].support_groups
+    assert decision.debug["h2"].support_groups == control.debug["h2"].support_groups
+
+
+@pytest.mark.parametrize(
+    ("uncertainty", "expected_status"),
+    (
+        (0.09, BinaryTransferStatus.RESOLVED),
+        (0.10, BinaryTransferStatus.HOLD),
+        (0.11, BinaryTransferStatus.HOLD),
+    ),
+)
+def test_uncertainty_margin_boundary_controls_resolved_status(
+    uncertainty: float,
+    expected_status: BinaryTransferStatus,
+) -> None:
+    resolver = BinaryMergeIdentityResolver()
+
+    decision = resolver.evaluate(
+        event_id=15,
+        child_a=_evidence(
+            "a",
+            target_motion_residual=0.0,
+            background_motion_residual=0.20,
+            ancestry_residual=1.50,
+            uncertainty=uncertainty,
+        ),
+        child_b=_evidence(
+            "b",
+            target_motion_residual=0.20,
+            background_motion_residual=0.0,
+            ancestry_residual=1.50,
+            uncertainty=uncertainty,
+        ),
+    )
+
+    assert decision.status is expected_status
+    assert decision.normalized_margin == pytest.approx(0.10)
+    if expected_status is BinaryTransferStatus.HOLD:
+        assert decision.reason == "hypothesis_ambiguous"
+
+
+@pytest.mark.parametrize("optional_field", ("neighbor_relation_residual", "shape_residual", "yolo_shortfall"))
+@pytest.mark.parametrize("unavailable", (None, math.nan, math.inf))
+@pytest.mark.parametrize("missing_child", ("a", "b"))
+def test_unavailable_optional_evidence_is_skipped_without_zero_advantage(
+    optional_field: str,
+    unavailable: float | None,
+    missing_child: str,
+) -> None:
+    resolver = BinaryMergeIdentityResolver()
+    child_a_values: dict[str, float | None] = {optional_field: 0.80}
+    child_b_values: dict[str, float | None] = {optional_field: 0.80}
+    if missing_child == "a":
+        child_a_values[optional_field] = unavailable
+    else:
+        child_b_values[optional_field] = unavailable
+
+    decision = resolver.evaluate(
+        event_id=16,
+        child_a=_evidence("a", target_motion_residual=0.50, background_motion_residual=0.50, **child_a_values),
+        child_b=_evidence("b", target_motion_residual=0.50, background_motion_residual=0.50, **child_b_values),
+    )
+
+    assert decision.debug["h1"].total_cost == decision.debug["h2"].total_cost
+    assert "neighbor_relation" not in decision.debug["h1"].support_groups
+    assert "neighbor_relation" not in decision.debug["h2"].support_groups
+
+
+@pytest.mark.parametrize("child_name", ("a", "b"))
+@pytest.mark.parametrize(
+    "required_field",
+    ("target_motion_residual", "background_motion_residual", "ancestry_residual", "uncertainty"),
+)
+@pytest.mark.parametrize("invalid_value", (None, math.nan, math.inf, -math.inf, -0.01))
+def test_every_required_field_rejects_missing_nonfinite_and_negative_values(
+    child_name: str,
+    required_field: str,
+    invalid_value: float | None,
+) -> None:
+    resolver = BinaryMergeIdentityResolver()
+    child_a_values: dict[str, float | None] = {
+        "target_motion_residual": 0.10,
+        "background_motion_residual": 2.0,
+    }
+    child_b_values: dict[str, float | None] = {
+        "target_motion_residual": 2.0,
+        "background_motion_residual": 0.10,
+    }
+    if child_name == "a":
+        child_a_values[required_field] = invalid_value
+    else:
+        child_b_values[required_field] = invalid_value
+
+    decision = resolver.evaluate(
+        event_id=17,
+        child_a=_evidence("a", **child_a_values),
+        child_b=_evidence("b", **child_b_values),
+    )
+
+    assert decision.status is BinaryTransferStatus.HOLD
+    assert decision.reason == "invalid_evidence"
