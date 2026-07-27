@@ -1,1 +1,1 @@
-{"version":"2.2.10","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.10/Claude_v2.2.10_Setup.exe","notes":"빨코2 필수 프리셋이 목록에서 누락되는 문제를 수정했습니다. 빨코2와 빨코3 전용 사냥터가 모두 프리셋 목록에 표시됩니다."}
+{"version":"2.2.11","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.11/Claude_v2.2.11_Setup.exe","notes":"지금까지 반영된 빨코2 안정화, 빨코3 루틴 보정, 거탐 감지 영역 및 템플릿 스케일 개선, 자동판매 보정, 좌표 캡처 복사 개선 내용을 포함했습니다."}
