@@ -22,6 +22,7 @@ from core.puzzle.binary_merge_shadow import (
     BackgroundRelationSnapshot,
     build_child_evidence,
     collapse_physical_candidates,
+    evaluate_binary_merge_gate,
     extract_binary_merge_events,
     _board_frame_shape,
     render_binary_merge_event_markdown,
@@ -354,6 +355,59 @@ def test_visible_white_contact_with_board_distractors_is_not_event_or_diagnostic
     assert not extraction.diagnostics
 
 
+def test_visible_identity_observability_normalizes_duplicate_target_proposals() -> None:
+    rows = _rows_for_frame(
+        0,
+        [
+            _candidate("target-primary", 0, (0.42, 0.50), score=0.9),
+            _candidate("target-duplicate", 0, (0.421, 0.50), score=0.7),
+            _candidate("background", 0, (0.58, 0.50)),
+        ],
+        (0.42, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(0, (0.421, 0.50)))
+
+    (frame,) = binary_merge_shadow._index_runtime_rows(rows)
+
+    assert binary_merge_shadow._identity_observable(frame)
+
+
+def test_premerge_snapshot_uses_physical_participants_and_excludes_cluster_duplicates() -> None:
+    rows = _rows_for_frame(
+        0,
+        [
+            _candidate("target-primary", 0, (0.42, 0.50), score=0.9),
+            _candidate("target-duplicate", 0, (0.421, 0.50), score=0.7),
+            _candidate("background-primary", 0, (0.58, 0.50), score=0.9),
+            _candidate("background-duplicate", 0, (0.579, 0.50), score=0.7),
+            _candidate("anchor", 0, (0.50, 0.30)),
+        ],
+        (0.42, 0.50),
+    )
+    (frame,) = binary_merge_shadow._index_runtime_rows(rows)
+    target = binary_merge_shadow._selected_candidate(frame.candidates, frame.target_point)
+
+    background = binary_merge_shadow._event_local_collision_candidate(
+        target,
+        frame.candidates,
+        None,
+        frame.frame_index,
+    )
+    snapshot = binary_merge_shadow._build_premerge_snapshot(
+        frame,
+        (frame,),
+        background_candidate=background,
+    )
+
+    assert snapshot is not None
+    assert snapshot.target_candidate_id == "target-primary"
+    assert snapshot.background_candidate_id == "background-primary"
+    assert tuple(relation.anchor_candidate_id for relation in snapshot.neighbor_relations) == (
+        "anchor",
+    )
+
+
 def test_identity_risk_after_visible_contact_uses_last_visible_contact_snapshot() -> None:
     rows: list[dict[str, object]] = []
     rows += _rows_for_frame(
@@ -475,6 +529,21 @@ def _two_pair_split_rows() -> list[dict[str, object]]:
     return rows
 
 
+def _one_frame_candidate_dropout_rows() -> list[dict[str, object]]:
+    rows = _identity_risk_board_rows()
+    for row in rows:
+        if row.get("type") == "CANDIDATES" and row.get("frame_index") == 4:
+            row["payload"]["candidates"] = [
+                candidate
+                for candidate in row["payload"]["candidates"]
+                if not str(candidate["candidate_id"]).startswith("background_")
+            ]
+            row["payload"]["candidates"].append(
+                _candidate("detector_only_4", 4, (0.54, 0.70), half_ratio=0.01)
+            )
+    return rows
+
+
 def test_replay_holds_pair_ambiguous_when_first_split_has_two_plausible_pairs(tmp_path: Path) -> None:
     # RED at ed04a19: replay returned two diagnostic rows instead of one event HOLD.
     rows = [
@@ -511,6 +580,31 @@ def test_replay_resolves_later_unique_pair_under_the_same_event_id(tmp_path: Pat
     assert len(extraction.events[0].split_observations[1].pair_hypotheses) == 1
     assert replay.event_id == 1
     assert replay.decision_frame == 4
+    assert replay.split_observations_evaluated == 2
+    assert not replay.hold
+
+
+def test_candidate_absence_holds_then_recovers_under_the_same_event_id(tmp_path: Path) -> None:
+    rows = _one_frame_candidate_dropout_rows()
+    trace_path = tmp_path / "candidate-dropout.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    extraction = extract_binary_merge_events(rows, event_limit=1)
+    (replay,) = replay_binary_merge_events(trace_path, event_limit=1)
+
+    assert len(extraction.events) == 1
+    assert not extraction.diagnostics
+    event = extraction.events[0]
+    assert event.event_id == 1
+    assert tuple(observation.frame_index for observation in event.split_observations) == (4, 5)
+    assert event.split_observations[0].reason == "candidate_absent"
+    assert not event.split_observations[0].pair_hypotheses
+    assert replay.event_id == event.event_id
+    assert tuple(decision["reason"] for decision in replay.diagnostics["decisions"]) == (
+        "candidate_absent",
+        "binary_judges_agree",
+    )
+    assert replay.decision_frame == 5
     assert replay.split_observations_evaluated == 2
     assert not replay.hold
 
@@ -946,7 +1040,7 @@ def test_runtime_diagnostics_distinguish_candidate_pair_and_event_failures(tmp_p
     assert candidate_replay.decision_reason == "candidate_absent"
     assert pair_replay.diagnostics["decisions"][0]["reason"] == "pair_ambiguous"
     assert event_replay.decision_reason == "premerge_identity_untrusted"
-    assert candidate_score.outcome is BinaryEventOutcome.EVENT_DETECTION_FAILURE
+    assert candidate_score.outcome is BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES
     assert event_score.outcome.value == "event_detection_failure"
 
 
@@ -1747,6 +1841,117 @@ def test_event_summary_and_markdown_are_compact_and_event_scoped() -> None:
     assert "- H1: target=a" in markdown
     assert "- H2: target=b" in markdown
     assert "## Frame" not in markdown
+
+
+def _safe_hold_gate_replay(*, with_evidence: bool = True) -> BinaryEventReplay:
+    decision = {
+        "frame_index": 11,
+        "status": "hold",
+        "reason": "hypothesis_ambiguous",
+        "normalized_margin": 0.10,
+        "h1": {
+            "target_candidate_id": "a",
+            "background_candidate_id": "b",
+            "target_cost": 1.0,
+            "background_cost": 2.0,
+            "support_groups": ("target_motion",),
+        },
+        "h2": {
+            "target_candidate_id": "b",
+            "background_candidate_id": "a",
+            "target_cost": 2.0,
+            "background_cost": 1.0,
+            "support_groups": ("background_motion",),
+        },
+    }
+    if not with_evidence:
+        decision["h1"] = {}
+        decision["h2"] = {}
+    return BinaryEventReplay(
+        event_id=1,
+        premerge_frame=10,
+        split_frame=11,
+        decision_frame=None,
+        split_observations_evaluated=1,
+        selected_target_candidate_id=None,
+        selected_background_candidate_id=None,
+        decision_reason="hypothesis_ambiguous",
+        hold=True,
+        diagnostics={
+            "source": "runtime_replay",
+            "physical_child_ids_by_frame": {11: ("a", "b")},
+            "decisions": (decision,),
+        },
+    )
+
+
+def test_gate_passes_approved_safe_hold_with_role_evidence() -> None:
+    replay = _safe_hold_gate_replay()
+    score = BinaryEventScore(
+        event_id=1,
+        outcome=BinaryEventOutcome.SAFE_HOLD,
+        target_candidate_id="a",
+        selected_candidate_id=None,
+        recovery_delay_ratio=None,
+        reason="hypothesis_ambiguous",
+    )
+
+    decision = evaluate_binary_merge_gate((replay,), (score,))
+
+    assert decision.gate_verdict == "PASSED"
+    assert decision.failure_stage is None
+    assert decision.expand_allowed
+
+
+def test_gate_rejects_safe_hold_without_approved_evidence() -> None:
+    replay = _safe_hold_gate_replay(with_evidence=False)
+    score = BinaryEventScore(
+        event_id=1,
+        outcome=BinaryEventOutcome.SAFE_HOLD,
+        target_candidate_id="a",
+        selected_candidate_id=None,
+        recovery_delay_ratio=None,
+        reason="hypothesis_ambiguous",
+    )
+
+    decision = evaluate_binary_merge_gate((replay,), (score,))
+
+    assert decision.gate_verdict == "GATE_FAILED"
+    assert decision.failure_stage == "ambiguity"
+    assert not decision.expand_allowed
+
+
+def test_gate_keeps_premerge_identity_diagnostic_failed() -> None:
+    replay = BinaryEventReplay(
+        event_id=-1,
+        premerge_frame=70,
+        split_frame=70,
+        decision_frame=None,
+        split_observations_evaluated=0,
+        selected_target_candidate_id=None,
+        selected_background_candidate_id=None,
+        decision_reason="premerge_identity_untrusted",
+        hold=True,
+        diagnostics={
+            "source": "extraction",
+            "extraction_reason": "premerge_identity_untrusted",
+            "candidate_count": 35,
+        },
+    )
+    score = BinaryEventScore(
+        event_id=-1,
+        outcome=BinaryEventOutcome.EVENT_DETECTION_FAILURE,
+        target_candidate_id=None,
+        selected_candidate_id=None,
+        recovery_delay_ratio=None,
+        reason="premerge_identity_untrusted",
+    )
+
+    decision = evaluate_binary_merge_gate((replay,), (score,))
+
+    assert decision.gate_verdict == "GATE_FAILED"
+    assert decision.failure_stage == "event_detection"
+    assert not decision.expand_allowed
 
 
 def test_cli_dry_run_writes_one_event_with_runtime_and_post_hoc_diagnostics(tmp_path: Path) -> None:

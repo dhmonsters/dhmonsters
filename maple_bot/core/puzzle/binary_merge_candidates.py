@@ -25,6 +25,10 @@ class CandidateLocalizationContext:
     background_bbox: BoundingBox
     parent_bboxes: tuple[BoundingBox, ...]
     uncertainty_ratio: float
+    target_velocity: tuple[float, float] = (0.0, 0.0)
+    background_velocity: tuple[float, float] = (0.0, 0.0)
+    elapsed_observations: int = 0
+    motion_uncertainty_ratio: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,7 @@ class CandidatePairLocalization:
     clusters: tuple[CandidateCluster, ...]
     pairs: tuple[CandidatePairHypothesis, ...]
     reason: str
+    effective_uncertainty_ratio: float
 
 
 def localize_candidate_pairs(
@@ -53,15 +58,16 @@ def localize_candidate_pairs(
     context: CandidateLocalizationContext,
 ) -> CandidatePairLocalization:
     """Return all non-dominated physical candidate pairs in the event region."""
-    parent_union = _bbox_union_many(context.parent_bboxes)
-    if parent_union is None:
-        return CandidatePairLocalization((), (), "candidate_absent")
-
     stable_scale = max(
         1.0,
         median((_bbox_diagonal(context.target_bbox), _bbox_diagonal(context.background_bbox))),
     )
-    uncertainty = max(0.0, float(context.uncertainty_ratio))
+    uncertainty = _effective_uncertainty_ratio(context)
+    parent_union = _bbox_union_many(context.parent_bboxes)
+    if parent_union is None:
+        return CandidatePairLocalization((), (), "candidate_absent", uncertainty)
+
+    predicted_target, predicted_background = _predicted_role_centers(context)
     role_radius = stable_scale * (1.0 + uncertainty)
     parent_radius = stable_scale * (0.25 + uncertainty)
     local_candidates = tuple(
@@ -69,24 +75,26 @@ def localize_candidate_pairs(
         for candidate in candidates
         if _point_to_bbox_distance(candidate.center, parent_union) <= parent_radius
         and min(
-            _point_distance(candidate.center, context.target_center),
-            _point_distance(candidate.center, context.background_center),
+            _point_distance(candidate.center, predicted_target),
+            _point_distance(candidate.center, predicted_background),
         ) <= role_radius
     )
-    clusters = _physical_clusters(local_candidates)
+    clusters = cluster_physical_candidates(local_candidates)
     pairs = _nondominated_pairs(
         clusters,
-        context,
+        predicted_target,
+        predicted_background,
         stable_scale,
         parent_union,
         role_radius,
         uncertainty,
     )
     reason = "candidate_absent" if not pairs else "available" if len(pairs) == 1 else "pair_ambiguous"
-    return CandidatePairLocalization(clusters, pairs, reason)
+    return CandidatePairLocalization(clusters, pairs, reason, uncertainty)
 
 
-def _physical_clusters(candidates: Sequence[Candidate]) -> tuple[CandidateCluster, ...]:
+def cluster_physical_candidates(candidates: Sequence[Candidate]) -> tuple[CandidateCluster, ...]:
+    """Group same-frame proposals that represent the same physical candidate."""
     ordered = tuple(sorted(candidates, key=lambda candidate: candidate.candidate_id))
     connected: list[set[int]] = [{index} for index in range(len(ordered))]
     for left_index, right_index in combinations(range(len(ordered)), 2):
@@ -137,7 +145,8 @@ def _same_physical_candidate(left: Candidate, right: Candidate) -> bool:
 
 def _nondominated_pairs(
     clusters: Sequence[CandidateCluster],
-    context: CandidateLocalizationContext,
+    predicted_target: tuple[float, float],
+    predicted_background: tuple[float, float],
     stable_scale: float,
     parent_union: BoundingBox,
     role_radius: float,
@@ -148,7 +157,8 @@ def _nondominated_pairs(
         role_residuals = _role_residuals(
             left.candidate,
             right.candidate,
-            context,
+            predicted_target,
+            predicted_background,
             stable_scale,
             role_radius,
         )
@@ -181,17 +191,42 @@ def _nondominated_pairs(
 def _role_residuals(
     left: Candidate,
     right: Candidate,
-    context: CandidateLocalizationContext,
+    predicted_target: tuple[float, float],
+    predicted_background: tuple[float, float],
     stable_scale: float,
     role_radius: float,
 ) -> tuple[float, float] | None:
     assignments = []
     for target, background in ((left, right), (right, left)):
-        target_distance = _point_distance(target.center, context.target_center)
-        background_distance = _point_distance(background.center, context.background_center)
+        target_distance = _point_distance(target.center, predicted_target)
+        background_distance = _point_distance(background.center, predicted_background)
         if target_distance <= role_radius and background_distance <= role_radius:
             assignments.append((target_distance / stable_scale, background_distance / stable_scale))
     return min(assignments, key=lambda residuals: (sum(residuals), residuals)) if assignments else None
+
+
+def _predicted_role_centers(
+    context: CandidateLocalizationContext,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    elapsed = max(0, int(context.elapsed_observations))
+    return (
+        (
+            context.target_center[0] + elapsed * context.target_velocity[0],
+            context.target_center[1] + elapsed * context.target_velocity[1],
+        ),
+        (
+            context.background_center[0] + elapsed * context.background_velocity[0],
+            context.background_center[1] + elapsed * context.background_velocity[1],
+        ),
+    )
+
+
+def _effective_uncertainty_ratio(context: CandidateLocalizationContext) -> float:
+    elapsed = max(0, int(context.elapsed_observations))
+    return max(0.0, float(context.uncertainty_ratio)) + elapsed * max(
+        0.0,
+        float(context.motion_uncertainty_ratio),
+    )
 
 
 def _parent_residual(

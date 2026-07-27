@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import replace
 from itertools import chain
 
+import pytest
+
 from core.puzzle.binary_merge_candidates import (
     CandidateLocalizationContext,
     localize_candidate_pairs,
@@ -236,3 +238,30 @@ def test_localizer_preserves_the_exact_nondominated_pair_set_for_three_clusters(
         ("background", "middle"),
         ("middle", "target"),
     )
+
+
+def test_localizer_uses_elapsed_role_prediction_and_motion_uncertainty() -> None:
+    context = CandidateLocalizationContext(
+        target_center=(100.0, 100.0),
+        background_center=(140.0, 100.0),
+        target_bbox=(90.0, 90.0, 110.0, 110.0),
+        background_bbox=(130.0, 90.0, 150.0, 110.0),
+        parent_bboxes=((165.0, 88.0, 232.0, 112.0),),
+        uncertainty_ratio=0.25,
+        target_velocity=(6.0, 0.0),
+        background_velocity=(8.0, 0.0),
+        elapsed_observations=5,
+        motion_uncertainty_ratio=0.05,
+    )
+    candidates = (
+        _candidate("target-child", (170.0, 100.0)),
+        _candidate("background-child", (220.0, 100.0)),
+        _candidate("static-target-distractor", (100.0, 100.0)),
+        _candidate("static-background-distractor", (140.0, 100.0)),
+    )
+
+    result = localize_candidate_pairs(candidates, context)
+
+    assert result.reason == "available"
+    assert result.effective_uncertainty_ratio == pytest.approx(0.50)
+    assert _pair_ids(result) == (("background-child", "target-child"),)

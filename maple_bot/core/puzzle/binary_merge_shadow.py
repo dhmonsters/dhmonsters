@@ -16,6 +16,7 @@ from .binary_merge_candidates import (
     CandidateCluster,
     CandidateLocalizationContext,
     CandidatePairHypothesis,
+    cluster_physical_candidates,
     localize_candidate_pairs,
 )
 from .binary_merge_identity import (
@@ -60,6 +61,7 @@ class BinarySplitObservation:
     pair_competitors: tuple[CandidatePairHypothesis, ...]
     pair_uncertainty: float
     context_candidates: tuple[Candidate, ...]
+    reason: str
 
     @property
     def children(self) -> tuple[Candidate, Candidate] | None:
@@ -334,50 +336,45 @@ def extract_binary_merge_events(
                 parent = _merge_parent_bbox(event_candidates, target_candidate or selected_candidate)
                 if parent is not None:
                     open_event.parent_bboxes.append(parent)
-            elif len(frame.candidates) >= 2 and detector.pending_merge_state is None:
-                localization_context = _candidate_localization_context(open_event)
+            elif detector.pending_merge_state is None:
+                localization_context = _candidate_localization_context(
+                    open_event,
+                    frame.frame_index,
+                )
                 localization = localize_candidate_pairs(
                     frame.candidates,
                     localization_context,
                 )
-                if not localization.pairs:
-                    diagnostics.append(
-                        BinaryEventExtractionDiagnostic(
-                            frame.frame_index,
-                            localization.reason,
-                            len(frame.candidates),
-                        )
-                    )
-                    if result_limit_reached():
-                        return result()
-                else:
+                pair_competitors: tuple[CandidatePairHypothesis, ...] = ()
+                if localization.pairs:
                     pair_competitors = _candidate_pair_competitors(
                         localization.clusters,
                         localization_context,
                     )
-                    participant_ids = {
-                        cluster.candidate.candidate_id
-                        for pair in pair_competitors
-                        for cluster in pair.clusters
-                    }
-                    physical_ids = {
-                        member.candidate_id
-                        for cluster in localization.clusters
-                        if cluster.candidate.candidate_id in participant_ids
-                        for member in cluster.members
-                    }
-                    open_event.split_frame_indices.append(frame.frame_index)
-                    open_event.split_observations.append(
-                        BinarySplitObservation(
-                            frame_index=frame.frame_index,
-                            pair_hypotheses=localization.pairs,
-                            pair_competitors=pair_competitors,
-                            pair_uncertainty=localization_context.uncertainty_ratio,
-                            context_candidates=tuple(
-                                candidate for candidate in frame.candidates if candidate.candidate_id not in physical_ids
-                            ),
-                        )
+                participant_ids = {
+                    cluster.candidate.candidate_id
+                    for pair in pair_competitors
+                    for cluster in pair.clusters
+                }
+                physical_ids = {
+                    member.candidate_id
+                    for cluster in localization.clusters
+                    if cluster.candidate.candidate_id in participant_ids
+                    for member in cluster.members
+                }
+                open_event.split_frame_indices.append(frame.frame_index)
+                open_event.split_observations.append(
+                    BinarySplitObservation(
+                        frame_index=frame.frame_index,
+                        pair_hypotheses=localization.pairs,
+                        pair_competitors=pair_competitors,
+                        pair_uncertainty=localization.effective_uncertainty_ratio,
+                        context_candidates=tuple(
+                            candidate for candidate in frame.candidates if candidate.candidate_id not in physical_ids
+                        ),
+                        reason=localization.reason,
                     )
+                )
 
         if not in_merge and open_event is None and event_id == suppressed_event_id:
             suppressed_event_id = None
@@ -454,7 +451,21 @@ def collapse_physical_candidates(
 
 def _candidate_localization_context(
     event: _OpenEvent,
+    frame_index: int,
 ) -> CandidateLocalizationContext:
+    scale = max(
+        1.0,
+        median(
+            (
+                _bbox_diagonal(event.premerge.target_bbox),
+                _bbox_diagonal(event.premerge.background_bbox),
+            )
+        ),
+    )
+    motion_uncertainty = 0.25 * max(
+        hypot(*event.premerge.target_velocity),
+        hypot(*event.premerge.background_velocity),
+    ) / scale
     return CandidateLocalizationContext(
         target_center=event.premerge.target_center,
         background_center=event.premerge.background_center,
@@ -462,6 +473,10 @@ def _candidate_localization_context(
         background_bbox=event.premerge.background_bbox,
         parent_bboxes=tuple(event.parent_bboxes),
         uncertainty_ratio=_PARENT_REGION_TOLERANCE,
+        target_velocity=event.premerge.target_velocity,
+        background_velocity=event.premerge.background_velocity,
+        elapsed_observations=max(0, frame_index - event.premerge.frame_index),
+        motion_uncertainty_ratio=motion_uncertainty,
     )
 
 
@@ -627,27 +642,32 @@ def _build_premerge_snapshot(
     *,
     background_candidate: Candidate | None = None,
 ) -> BinaryPremergeSnapshot | None:
-    target = _selected_candidate(frame.candidates, frame.target_point)
-    if target is None:
+    selected_target = _selected_candidate(frame.candidates, frame.target_point)
+    if selected_target is None or background_candidate is None:
         return None
-    if background_candidate is None:
+    clusters = cluster_physical_candidates(frame.candidates)
+    target_cluster = _candidate_cluster(clusters, selected_target)
+    background_cluster = _candidate_cluster(clusters, background_candidate)
+    if target_cluster is None or background_cluster is None or target_cluster is background_cluster:
         return None
-    background = background_candidate
+    target = target_cluster.candidate
+    background = background_cluster.candidate
     scale = max(1.0, _bbox_diagonal(target.bbox), _bbox_diagonal(background.bbox))
     relations = tuple(
         BackgroundRelationSnapshot(
-            anchor_candidate_id=candidate.candidate_id,
-            anchor_center=candidate.center,
+            anchor_candidate_id=cluster.candidate.candidate_id,
+            anchor_center=cluster.candidate.center,
             relative_vector_ratio=(
-                (candidate.center[0] - background.center[0]) / scale,
-                (candidate.center[1] - background.center[1]) / scale,
+                (cluster.candidate.center[0] - background.center[0]) / scale,
+                (cluster.candidate.center[1] - background.center[1]) / scale,
             ),
         )
-        for candidate in frame.candidates
-        if candidate.candidate_id not in {target.candidate_id, background.candidate_id}
+        for cluster in clusters
+        if cluster is not target_cluster
+        and cluster is not background_cluster
         and min(
-            _point_distance(candidate.center, target.center),
-            _point_distance(candidate.center, background.center),
+            _point_distance(cluster.candidate.center, target.center),
+            _point_distance(cluster.candidate.center, background.center),
         ) <= 2.0 * scale
     )
     target_velocity = _selection_velocity(frame, trusted_separate_frames)
@@ -693,10 +713,20 @@ def _candidate_velocity(candidate: Candidate, frame: _FrameRuntime, all_frames: 
     previous = next((row for row in reversed(all_frames) if row.frame_index < frame.frame_index), None)
     if previous is None:
         return (0.0, 0.0)
-    prior_candidate = _nearest_candidate(candidate.center, previous.candidates)
+    prior_candidates = tuple(
+        cluster.candidate for cluster in cluster_physical_candidates(previous.candidates)
+    )
+    prior_candidate = _nearest_candidate(candidate.center, prior_candidates)
     if prior_candidate is None:
         return (0.0, 0.0)
     elapsed = max(1, frame.frame_index - previous.frame_index)
+    association_scale = max(
+        1.0,
+        _bbox_diagonal(candidate.bbox),
+        _bbox_diagonal(prior_candidate.bbox),
+    )
+    if _point_distance(candidate.center, prior_candidate.center) > elapsed * association_scale:
+        return (0.0, 0.0)
     return (
         (candidate.center[0] - prior_candidate.center[0]) / elapsed,
         (candidate.center[1] - prior_candidate.center[1]) / elapsed,
@@ -716,10 +746,13 @@ def _identity_observable(frame: _FrameRuntime) -> bool:
         return False
     anchor_candidate = _selected_candidate(frame.candidates, frame.white_anchor_point)
     selected_candidate = _selected_candidate(frame.candidates, frame.target_point)
+    clusters = cluster_physical_candidates(frame.candidates)
+    anchor_cluster = _candidate_cluster(clusters, anchor_candidate)
+    selected_cluster = _candidate_cluster(clusters, selected_candidate)
     return (
-        anchor_candidate is not None
-        and selected_candidate is not None
-        and anchor_candidate.candidate_id == selected_candidate.candidate_id
+        anchor_cluster is not None
+        and selected_cluster is not None
+        and anchor_cluster is selected_cluster
     )
 
 
@@ -802,6 +835,22 @@ def _nearest_candidate(point: tuple[float, float], candidates: Sequence[Candidat
     )
 
 
+def _candidate_cluster(
+    clusters: Sequence[CandidateCluster],
+    candidate: Candidate | None,
+) -> CandidateCluster | None:
+    if candidate is None:
+        return None
+    return next(
+        (
+            cluster
+            for cluster in clusters
+            if any(member.candidate_id == candidate.candidate_id for member in cluster.members)
+        ),
+        None,
+    )
+
+
 def _event_local_collision_candidate(
     target: Candidate | None,
     candidates: Sequence[Candidate],
@@ -810,10 +859,14 @@ def _event_local_collision_candidate(
 ) -> Candidate | None:
     if target is None:
         return None
+    clusters = cluster_physical_candidates(candidates)
+    target_cluster = _candidate_cluster(clusters, target)
+    if target_cluster is None:
+        return None
     others = tuple(
-        candidate
-        for candidate in candidates
-        if candidate.candidate_id != target.candidate_id
+        cluster.candidate
+        for cluster in clusters
+        if cluster is not target_cluster
     )
     if reference is None:
         scale = max(1.0, _bbox_diagonal(target.bbox))
@@ -1119,6 +1172,8 @@ def _select_pair_hypothesis(
     event_id: int,
     observation: BinarySplitObservation,
 ) -> tuple[CandidatePairHypothesis | None, BinaryTransferDecision | None]:
+    if not observation.pair_hypotheses:
+        return None, _candidate_absence_hold(event_id, observation)
     if len(observation.pair_hypotheses) != 1:
         return None, _pair_ambiguity_hold(
             event_id,
@@ -1157,6 +1212,22 @@ def _select_pair_hypothesis(
             runner_up_cost=runner_up_cost,
         )
     return selected, None
+
+
+def _candidate_absence_hold(
+    event_id: int,
+    observation: BinarySplitObservation,
+) -> BinaryTransferDecision:
+    return BinaryTransferDecision(
+        event_id=event_id,
+        status=BinaryTransferStatus.HOLD,
+        target_candidate_id=None,
+        background_candidate_id=None,
+        selected_hypothesis=None,
+        normalized_margin=0.0,
+        reason="candidate_absent",
+        debug={"candidate_count": len(observation.context_candidates)},
+    )
 
 
 def _pair_normalized_cost(pair: CandidatePairHypothesis) -> float:
@@ -1301,6 +1372,8 @@ def evaluate_binary_merge_gate(
     if replay.decision_frame is not None and replay.decision_frame < replay.split_frame:
         return BinaryGateDecision("GATE_FAILED", "target_judge", False)
     if replay.hold:
+        if _safe_hold_gate_passes(replay, score):
+            return BinaryGateDecision("PASSED", None, True)
         return BinaryGateDecision(
             "GATE_FAILED",
             _canonical_failure_stage(replay.decision_reason, score.outcome),
@@ -1323,6 +1396,83 @@ def evaluate_binary_merge_gate(
             False,
         )
     return BinaryGateDecision("PASSED", None, True)
+
+
+def _safe_hold_gate_passes(
+    replay: BinaryEventReplay,
+    score: BinaryEventScore,
+) -> bool:
+    if (
+        score.outcome is not BinaryEventOutcome.SAFE_HOLD
+        or score.event_id != replay.event_id
+        or score.reason != replay.decision_reason
+        or score.target_candidate_id is None
+        or score.selected_candidate_id is not None
+        or replay.decision_frame is not None
+        or replay.selected_target_candidate_id is not None
+        or replay.selected_background_candidate_id is not None
+        or replay.split_observations_evaluated < 1
+        or score.target_candidate_id not in _physical_child_ids(replay, replay.split_frame)
+    ):
+        return False
+    return _has_approved_safe_hold_evidence(replay)
+
+
+def _has_approved_safe_hold_evidence(replay: BinaryEventReplay) -> bool:
+    decisions = replay.diagnostics.get("decisions")
+    if not isinstance(decisions, Sequence) or isinstance(decisions, (str, bytes)):
+        return False
+    matching = next(
+        (
+            decision
+            for decision in reversed(decisions)
+            if isinstance(decision, Mapping)
+            and decision.get("status") == BinaryTransferStatus.HOLD.value
+            and decision.get("reason") == replay.decision_reason
+        ),
+        None,
+    )
+    if matching is None or not _is_finite_number(matching.get("normalized_margin")):
+        return False
+    if replay.decision_reason == "pair_ambiguous":
+        pair_count = matching.get("pair_count")
+        return isinstance(pair_count, int) and not isinstance(pair_count, bool) and pair_count >= 2
+    if replay.decision_reason in {"judge_disagreement", "hypothesis_ambiguous"}:
+        return _has_role_hypothesis_pair_evidence(
+            matching.get("h1"),
+            matching.get("h2"),
+        )
+    return False
+
+
+def _has_role_hypothesis_pair_evidence(left: object, right: object) -> bool:
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+        return False
+    left_target = left.get("target_candidate_id")
+    left_background = left.get("background_candidate_id")
+    right_target = right.get("target_candidate_id")
+    right_background = right.get("background_candidate_id")
+    costs = (
+        left.get("target_cost"),
+        left.get("background_cost"),
+        right.get("target_cost"),
+        right.get("background_cost"),
+    )
+    support_groups = (left.get("support_groups"), right.get("support_groups"))
+    return (
+        isinstance(left_target, str)
+        and bool(left_target)
+        and isinstance(left_background, str)
+        and bool(left_background)
+        and left_target != left_background
+        and left_target == right_background
+        and left_background == right_target
+        and all(_is_finite_number(value) and float(value) >= 0.0 for value in costs)
+        and all(
+            isinstance(groups, Sequence) and not isinstance(groups, (str, bytes))
+            for groups in support_groups
+        )
+    )
 
 
 def render_binary_merge_event_markdown(
@@ -1770,6 +1920,8 @@ def _decision_diagnostic(
         "status": decision.status.value,
         "reason": decision.reason,
         "normalized_margin": decision.normalized_margin,
+        "candidate_count": decision.debug.get("candidate_count"),
+        "pair_count": decision.debug.get("pair_count"),
         "pair_cost": decision.debug.get("pair_cost"),
         "runner_up_pair_cost": decision.debug.get("runner_up_pair_cost"),
         "required_pair_margin": decision.debug.get("required_pair_margin"),
