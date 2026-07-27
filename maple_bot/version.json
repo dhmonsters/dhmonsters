@@ -1,1 +1,1 @@
-{"version":"2.3.0","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.0/Claude_v2.3.0_Setup.exe","notes":"run_integrated 기준 자동 업데이트 확인 실패 원인을 숨기지 않고 표시하도록 수정하고, 업데이트 창 한글 깨짐 및 버전 파일 인코딩 문제를 정리했습니다."}
+﻿{"version":"2.3.1","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.1/Claude_v2.3.1_Setup.exe","notes":"물약 2차 키 설정이 포함된 기존 설정을 읽을 때 실행이 중단되던 문제를 수정하고, 배포용 실행 파일의 물약 처리 로직을 최신 버전으로 맞췄습니다."}
