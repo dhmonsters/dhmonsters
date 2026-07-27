@@ -1,1 +1,1 @@
-{"version":"2.2.8","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.8/Claude_v2.2.8_Setup.exe","notes":"거탐 감지 영역을 게임창 기준 상대좌표로 보정하고, 감시 점수 로그를 시스템에도 표시하며, 빨코2 공격/텔포 입력 시간을 조정했습니다."}
+{"version":"2.2.9","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.9/Claude_v2.2.9_Setup.exe","notes":"빨코2 전용 설정이 다른 사냥터에 적용되는 문제를 수정하고, 빨코3 텔레포트 전용 사냥·회수 루틴을 추가했습니다."}
