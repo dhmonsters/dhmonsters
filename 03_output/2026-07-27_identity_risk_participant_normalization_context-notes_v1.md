@@ -17,3 +17,9 @@
 대표 실행은 물리 identity-risk 사건을 만들기 전에 frame 70의 extraction diagnostic으로 종료됐다. 결과 행은 1개이며 `event_id=-1`, `candidate_count=35`, `extraction_reason=premerge_identity_untrusted`다. 물리 사건은 0개, merged-state target decision은 0개, wrong switch는 0개다.
 
 Task 5 Gate는 정확히 한 개의 물리 사건을 요구하므로 FAIL이다. 단일 failing stage는 `event_detection`이다. 두 번째 사건, 파라미터 스윕, Studio batch, selection authority 연결은 수행하지 않았다.
+
+## 2026-07-27 최종 리뷰 보완
+
+최종 리뷰에서 physical candidate 정규화, 경과 시간 기반 위치 예측, 일시 후보 누락 HOLD, SAFE_HOLD Gate 의미의 Important 4건을 확인했다. 커밋 `643e40f`에서 네 항목을 수정했고 scoped 재검토에서 모두 ADDRESSED 판정을 받았다.
+
+관련 전체 non-CLI suite는 `178 passed, 2 deselected in 1.52s`로 다시 통과했다. 대표 trace는 실험 규칙상 재실행하지 않았으므로 기존 `premerge_identity_untrusted` Gate FAIL과 expansion 차단은 유지한다.

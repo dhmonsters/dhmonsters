@@ -33,3 +33,12 @@
 - [x] wrong switch는 0개다.
 - [ ] correct transfer 또는 specific reason이 있는 safe HOLD를 얻었다. 실제 결과는 extraction diagnostic이다.
 - [x] 단일 failing stage `event_detection`을 기록하고 추가 실행을 중단했다.
+
+## 최종 리뷰 보완
+
+- [x] physical candidate 단위로 visible contact와 premerge 참여자를 정규화했다.
+- [x] 경과 시간과 속도를 반영해 split 위치와 불확실성을 예측한다.
+- [x] 한 프레임 후보 누락을 같은 사건의 `candidate_absent` HOLD로 유지한다.
+- [x] 증거가 있는 `SAFE_HOLD`만 Gate 성공으로 인정하고 missing-event 진단은 실패로 유지한다.
+- [x] 관련 전체 non-CLI suite `178 passed, 2 deselected`를 확인했다.
+- [x] 대표 trace를 재실행하지 않았으며 `expand_allowed=false`를 유지한다.

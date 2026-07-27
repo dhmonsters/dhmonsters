@@ -44,3 +44,11 @@ suite 통과 뒤 기존 `core.puzzle.binary_merge_shadow` entrypoint를 `--event
 실패 뒤 두 번째 사건, 파라미터 스윕, Studio batch, selection authority 연결을 수행하지 않았다. post-hoc score는 runtime 사건 검출이나 결정 입력으로 사용하지 않았다.
 
 Compact event JSONL은 `03_output/2026-07-27_identity_risk_participant_normalization_validation_v1/representative_event_001/binary_merge_events.jsonl`에 있다.
+
+## 최종 리뷰 보완 이후 상태
+
+- 최종 리뷰의 Important 4건을 커밋 `643e40f`에서 수정했다.
+- 관련 전체 non-CLI suite를 다시 실행해 `178 passed, 2 deselected in 1.52s`를 확인했다.
+- 대표 사건은 실험 규칙에 따라 두 번째로 실행하지 않았다.
+- 따라서 위의 `premerge_identity_untrusted` Gate FAIL 기록은 유효하며 `expand_allowed=false`도 유지한다.
+- 최종 수정은 합성 및 회귀 테스트에서 승인됐지만, 새 코드의 대표 trace Gate 통과를 의미하지 않는다.
