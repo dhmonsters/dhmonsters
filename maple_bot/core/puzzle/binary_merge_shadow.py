@@ -550,6 +550,8 @@ def _candidate_velocity(candidate: Candidate, frame: _FrameRuntime, all_frames: 
 def _premerge_identity_is_trusted(frame: _FrameRuntime) -> bool:
     if frame.identity_state == "TRACK_CONFIDENT":
         return True
+    if frame.identity_state == "IDENTITY_HOLD":
+        return False
     if frame.white_anchor_point is None or frame.target_point is None:
         return False
     anchor_candidate = _selected_candidate(frame.candidates, frame.white_anchor_point)

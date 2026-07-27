@@ -517,6 +517,20 @@ def test_premerge_velocity_ignores_untrusted_hold_selection() -> None:
         (0.90, 0.50),
         identity_state="IDENTITY_HOLD",
     )
+    rows.append(
+        {
+            "type": "TEMPORAL_SELECTOR",
+            "frame_index": 5,
+            "payload": {
+                "debug": {
+                    "kinematic_wide_beam_debug": {
+                        "reason": "white_anchor",
+                        "point": [0.90 * FRAME_SHAPE[1], 0.50 * FRAME_SHAPE[0]],
+                    }
+                }
+            },
+        }
+    )
     rows += _rows_for_frame(
         6,
         [
