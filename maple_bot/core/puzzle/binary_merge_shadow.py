@@ -129,7 +129,7 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
             event_id = state_event.event_id
         in_merge = state_event.state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
 
-        if open_event is None and detector.pending_merge_state is not None and pending_premerge is None:
+        if detector.pending_merge_state is not None and pending_premerge is None:
             pending_premerge = prior
 
         if open_event is not None and event_id != open_event.event_id:

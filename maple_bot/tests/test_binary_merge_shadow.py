@@ -392,6 +392,57 @@ def test_binary_event_finalizes_unresolved_prior_event_before_new_event_id() -> 
     assert any(row.reason == "missing_split_children" for row in extraction.diagnostics)
 
 
+def test_second_event_uses_separate_frame_before_its_pending_confirmation() -> None:
+    rows: list[dict[str, object]] = []
+    rows += _rows_for_frame(
+        0,
+        [_candidate("first_target", 0, (0.42, 0.50)), _candidate("first_background", 0, (0.58, 0.50))],
+        (0.42, 0.50),
+    )
+    for frame_index in (1, 2):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"first_merge_target_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"first_merge_background_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+        )
+    rows += _rows_for_frame(
+        3,
+        [
+            _candidate("second_premerge_target", 3, (0.42, 0.50)),
+            _candidate("second_premerge_background", 3, (0.58, 0.50)),
+        ],
+        (0.42, 0.50),
+    )
+    for frame_index in (4, 5):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"second_merge_target_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"second_merge_background_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+        )
+    for frame_index in (6, 7):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"second_child_target_{frame_index}", frame_index, (0.42, 0.50)),
+                _candidate(f"second_child_background_{frame_index}", frame_index, (0.58, 0.50)),
+            ],
+            (0.42, 0.50),
+        )
+
+    extraction = extract_binary_merge_events(rows)
+    second_event = next(event for event in extraction.events if event.event_id == 2)
+
+    assert second_event.premerge.frame_index == 3
+    assert second_event.premerge.target_candidate_id == "second_premerge_target"
+    assert second_event.premerge.background_candidate_id == "second_premerge_background"
+
+
 def test_binary_event_white_anchor_must_match_snapshot_target() -> None:
     rows = _two_frame_overlap_then_two_frame_split_rows()
     for row in rows:
