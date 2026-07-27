@@ -1,13 +1,21 @@
 # 런타임 추적에서 이진 병합 사건과 자식 역할 증거를 구성합니다.
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from enum import Enum
 from math import hypot, isfinite
+from pathlib import Path
 from statistics import median
 from typing import Any, Mapping, Sequence
 
-from .binary_merge_background import BackgroundFlowProfile
-from .binary_merge_identity import BinaryRoleEvidence
+from .binary_merge_background import BackgroundFlowProfile, build_background_flow_profile
+from .binary_merge_identity import (
+    BinaryMergeIdentityResolver,
+    BinaryRoleEvidence,
+    BinaryTransferDecision,
+    BinaryTransferStatus,
+)
 from .merge_split_relative import MergeSplitEventDetector, MergeState
 from .models import Candidate, CandidateEvidence
 
@@ -66,6 +74,54 @@ class BinaryEventExtractionDiagnostic:
 class BinaryEventExtractionResult:
     events: tuple[BinaryMergeEventWindow, ...]
     diagnostics: tuple[BinaryEventExtractionDiagnostic, ...]
+
+
+class BinaryEventOutcome(str, Enum):
+    CORRECT_TRANSFER = "correct_transfer"
+    WRONG_SWITCH = "wrong_switch"
+    SAFE_HOLD = "safe_hold"
+    LATE_RECOVERY = "late_recovery"
+    TARGET_NOT_IN_CANDIDATES = "target_not_in_candidates"
+    EVENT_DETECTION_FAILURE = "event_detection_failure"
+    DUPLICATE_DETECTION_UNRESOLVED = "duplicate_detection_unresolved"
+
+
+@dataclass(frozen=True)
+class BinaryEventReplay:
+    event_id: int
+    premerge_frame: int
+    split_frame: int | None
+    decision_frame: int | None
+    split_observations_evaluated: int
+    selected_target_candidate_id: str | None
+    selected_background_candidate_id: str | None
+    decision_reason: str
+    hold: bool
+    diagnostics: dict[str, object]
+
+
+@dataclass(frozen=True)
+class BinaryEventScore:
+    event_id: int
+    outcome: BinaryEventOutcome
+    target_candidate_id: str | None
+    selected_candidate_id: str | None
+    recovery_delay_ratio: float | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class BinaryEventSummary:
+    total_events: int
+    correct_transfer: int
+    wrong_switches: int
+    safe_hold: int
+    late_recovery: int
+    target_not_in_candidates: int
+    event_detection_failure: int
+    duplicate_detection_unresolved: int
+    resolved_events: int
+    median_normalized_recovery_delay: float | None
 
 
 @dataclass
@@ -679,3 +735,477 @@ def _bbox_from_value(value: object) -> tuple[float, float, float, float] | None:
     if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
         return None
     return bbox
+
+
+def replay_binary_merge_events(trace_jsonl: str | Path) -> tuple[BinaryEventReplay, ...]:
+    """Replay binary merge decisions from runtime trace data only."""
+    rows = _read_jsonl(Path(trace_jsonl))
+    frame_shape = _board_frame_shape(rows)
+    profile = _profile_from_preparation_rows(rows, frame_shape)
+    extraction = extract_binary_merge_events(rows)
+    resolver = BinaryMergeIdentityResolver()
+    replays: list[BinaryEventReplay] = []
+
+    for event in extraction.events:
+        decisions: list[tuple[int, BinaryTransferDecision]] = []
+        for observation in event.split_observations:
+            child_a, child_b = observation.children
+            evidence = _evidence_for_frame(rows, observation.frame_index)
+            decision = resolver.evaluate(
+                event_id=event.event_id,
+                child_a=build_child_evidence(
+                    event=event,
+                    child=child_a,
+                    other_child=child_b,
+                    context_candidates=observation.context_candidates,
+                    flow_profile=profile,
+                    evidence=evidence,
+                    frame_shape=frame_shape,
+                ),
+                child_b=build_child_evidence(
+                    event=event,
+                    child=child_b,
+                    other_child=child_a,
+                    context_candidates=observation.context_candidates,
+                    flow_profile=profile,
+                    evidence=evidence,
+                    frame_shape=frame_shape,
+                ),
+            )
+            decisions.append((observation.frame_index, decision))
+            if decision.status is BinaryTransferStatus.RESOLVED:
+                break
+        replays.append(_event_replay_from_decisions(event, decisions))
+
+    for index, diagnostic in enumerate(extraction.diagnostics, start=1):
+        replays.append(
+            BinaryEventReplay(
+                event_id=-index,
+                premerge_frame=diagnostic.frame_index,
+                split_frame=diagnostic.frame_index,
+                decision_frame=None,
+                split_observations_evaluated=0,
+                selected_target_candidate_id=None,
+                selected_background_candidate_id=None,
+                decision_reason=diagnostic.reason,
+                hold=True,
+                diagnostics={
+                    "source": "extraction",
+                    "extraction_reason": diagnostic.reason,
+                    "candidate_count": diagnostic.candidate_count,
+                },
+            )
+        )
+    return tuple(sorted(replays, key=lambda replay: (replay.premerge_frame, replay.event_id)))
+
+
+def score_binary_merge_events(
+    replays: Sequence[BinaryEventReplay],
+    score_jsonl: str | Path,
+    trace_jsonl: str | Path,
+) -> tuple[BinaryEventScore, ...]:
+    """Associate ground truth with completed runtime replay rows only after replay."""
+    score_rows = _read_jsonl(Path(score_jsonl))
+    candidate_rows = _candidate_rows_by_frame(_read_jsonl(Path(trace_jsonl)))
+    results: list[BinaryEventScore] = []
+    for replay in replays:
+        scoring_frame = replay.decision_frame or replay.split_frame
+        target_point = _aligned_target_point(score_rows, scoring_frame)
+        target_candidate_id = _target_child_id(target_point, scoring_frame, candidate_rows)
+        results.append(_score_one_event(replay, target_candidate_id))
+    return tuple(results)
+
+
+def summarize_binary_merge_events(scores: Sequence[BinaryEventScore]) -> BinaryEventSummary:
+    counts = {outcome: 0 for outcome in BinaryEventOutcome}
+    for score in scores:
+        counts[score.outcome] += 1
+    delays = [
+        score.recovery_delay_ratio
+        for score in scores
+        if score.recovery_delay_ratio is not None
+    ]
+    resolved_outcomes = {
+        BinaryEventOutcome.CORRECT_TRANSFER,
+        BinaryEventOutcome.WRONG_SWITCH,
+        BinaryEventOutcome.LATE_RECOVERY,
+    }
+    return BinaryEventSummary(
+        total_events=len(scores),
+        correct_transfer=counts[BinaryEventOutcome.CORRECT_TRANSFER],
+        wrong_switches=counts[BinaryEventOutcome.WRONG_SWITCH],
+        safe_hold=counts[BinaryEventOutcome.SAFE_HOLD],
+        late_recovery=counts[BinaryEventOutcome.LATE_RECOVERY],
+        target_not_in_candidates=counts[BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES],
+        event_detection_failure=counts[BinaryEventOutcome.EVENT_DETECTION_FAILURE],
+        duplicate_detection_unresolved=counts[BinaryEventOutcome.DUPLICATE_DETECTION_UNRESOLVED],
+        resolved_events=sum(1 for score in scores if score.outcome in resolved_outcomes),
+        median_normalized_recovery_delay=median(delays) if delays else None,
+    )
+
+
+def render_binary_merge_event_markdown(
+    replays: Sequence[BinaryEventReplay],
+    scores: Sequence[BinaryEventScore],
+) -> str:
+    """Render one compact diagnostic section per binary merge event."""
+    summary = summarize_binary_merge_events(scores)
+    score_by_event = {score.event_id: score for score in scores}
+    lines = [
+        "# Binary Merge Event Summary",
+        "",
+        f"- total_events: {summary.total_events}",
+        f"- resolved_events: {summary.resolved_events}",
+        f"- correct_transfer: {summary.correct_transfer}",
+        f"- wrong_switches: {summary.wrong_switches}",
+        f"- safe_hold: {summary.safe_hold}",
+        f"- late_recovery: {summary.late_recovery}",
+        f"- target_not_in_candidates: {summary.target_not_in_candidates}",
+        f"- event_detection_failure: {summary.event_detection_failure}",
+        f"- duplicate_detection_unresolved: {summary.duplicate_detection_unresolved}",
+        "",
+    ]
+    for replay in replays:
+        score = score_by_event.get(replay.event_id)
+        decisions = replay.diagnostics.get("decisions")
+        final_decision = decisions[-1] if isinstance(decisions, tuple) and decisions else None
+        lines.extend(
+            [
+                f"## Event {replay.event_id}",
+                "",
+                f"- outcome: {score.outcome.value if score else 'unscored'}",
+                f"- runtime_decision: {replay.decision_reason}",
+                f"- selected_target: {replay.selected_target_candidate_id or 'none'}",
+                f"- ground_truth_target: {score.target_candidate_id if score and score.target_candidate_id else 'none'}",
+            ]
+        )
+        if replay.hold:
+            lines.append(f"- HOLD: {replay.decision_reason}")
+        lines.append(f"- H1: {_render_hypothesis_contribution(final_decision, 'h1')}")
+        lines.append(f"- H2: {_render_hypothesis_contribution(final_decision, 'h2')}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
+def _board_frame_shape(rows: Sequence[dict[str, Any]]) -> tuple[int, int]:
+    for row in rows:
+        payload = row.get("payload")
+        if not isinstance(payload, Mapping):
+            continue
+        frame_shape = _frame_shape_from_value(payload.get("frame_shape"))
+        if frame_shape is not None:
+            return frame_shape
+    return (1, 1)
+
+
+def _profile_from_preparation_rows(
+    rows: Sequence[dict[str, Any]],
+    frame_shape: tuple[int, int],
+) -> BackgroundFlowProfile:
+    preparation_frames: list[tuple[int, tuple[Candidate, ...]]] = []
+    for frame in _index_runtime_rows(rows):
+        if len(frame.candidates) < 3:
+            if preparation_frames:
+                break
+            continue
+        preparation_frames.append((frame.frame_index, frame.candidates))
+    return build_background_flow_profile(tuple(preparation_frames), frame_shape=frame_shape)
+
+
+def _evidence_for_frame(
+    rows: Sequence[dict[str, Any]],
+    frame_index: int,
+) -> dict[str, CandidateEvidence]:
+    evidence: dict[str, CandidateEvidence] = {}
+    for row in rows:
+        if row.get("type") != "EVIDENCE" or row.get("frame_index") != frame_index:
+            continue
+        payload = row.get("payload")
+        raw_evidence = payload.get("evidence") if isinstance(payload, Mapping) else None
+        if not isinstance(raw_evidence, Sequence) or isinstance(raw_evidence, (str, bytes)):
+            continue
+        for raw in raw_evidence:
+            if not isinstance(raw, Mapping):
+                continue
+            candidate_id = raw.get("candidate_id")
+            if not isinstance(candidate_id, str) or not candidate_id:
+                continue
+            notes = raw.get("notes")
+            evidence[candidate_id] = CandidateEvidence(
+                candidate_id=candidate_id,
+                bg_score=_nonnegative_float(raw.get("bg_score")),
+                motion_divergence=_nonnegative_float(raw.get("motion_divergence")),
+                rigid_violation=_nonnegative_float(raw.get("rigid_violation")),
+                local_rigid_residual=_nonnegative_float(raw.get("local_rigid_residual")),
+                phase_similarity=_nonnegative_float(raw.get("phase_similarity")),
+                texture_bg_score=_nonnegative_float(raw.get("texture_bg_score")),
+                color_residual=_nonnegative_float(raw.get("color_residual")),
+                merge_likelihood=_nonnegative_float(raw.get("merge_likelihood")),
+                notes=tuple(note for note in notes if isinstance(note, str))
+                if isinstance(notes, Sequence) and not isinstance(notes, (str, bytes))
+                else (),
+            )
+    return evidence
+
+
+def _event_replay_from_decisions(
+    event: BinaryMergeEventWindow,
+    decisions: Sequence[tuple[int, BinaryTransferDecision]],
+) -> BinaryEventReplay:
+    resolved = next(
+        ((frame_index, decision) for frame_index, decision in decisions if decision.status is BinaryTransferStatus.RESOLVED),
+        None,
+    )
+    final_decision = decisions[-1][1] if decisions else None
+    return BinaryEventReplay(
+        event_id=event.event_id,
+        premerge_frame=event.premerge.frame_index,
+        split_frame=event.split_observations[0].frame_index if event.split_observations else None,
+        decision_frame=resolved[0] if resolved is not None else None,
+        split_observations_evaluated=len(decisions),
+        selected_target_candidate_id=resolved[1].target_candidate_id if resolved is not None else None,
+        selected_background_candidate_id=resolved[1].background_candidate_id if resolved is not None else None,
+        decision_reason=final_decision.reason if final_decision is not None else "missing_split_observations",
+        hold=resolved is None,
+        diagnostics={
+            "source": "runtime_replay",
+            "event_reason": event.reason,
+            "physical_child_ids_by_frame": {
+                observation.frame_index: tuple(child.candidate_id for child in observation.children)
+                for observation in event.split_observations
+            },
+            "decisions": tuple(
+                _decision_diagnostic(frame_index, decision) for frame_index, decision in decisions
+            ),
+        },
+    )
+
+
+def _candidate_rows_by_frame(rows: Sequence[dict[str, Any]]) -> dict[int, tuple[Candidate, ...]]:
+    candidates_by_frame: dict[int, tuple[Candidate, ...]] = {}
+    for row in rows:
+        if row.get("type") != "CANDIDATES":
+            continue
+        frame_index = row.get("frame_index")
+        payload = row.get("payload")
+        if not isinstance(frame_index, int) or not isinstance(payload, Mapping):
+            continue
+        raw_candidates = payload.get("candidates")
+        if not isinstance(raw_candidates, Sequence) or isinstance(raw_candidates, (str, bytes)):
+            continue
+        candidates_by_frame[frame_index] = tuple(
+            candidate
+            for candidate in (
+                _candidate_from_trace(raw_candidate, frame_index) for raw_candidate in raw_candidates
+            )
+            if candidate is not None
+        )
+    return candidates_by_frame
+
+
+def _aligned_target_point(
+    score_rows: Sequence[dict[str, Any]],
+    frame_index: int | None,
+) -> tuple[float, float] | None:
+    if frame_index is None:
+        return None
+    for row in score_rows:
+        score_frame = row.get("solver_frame_index", row.get("frame_index"))
+        if score_frame != frame_index:
+            continue
+        target_point = _point_from_value(row.get("target_point"))
+        if target_point is not None:
+            return target_point
+        target_x = row.get("target_x")
+        target_y = row.get("target_y")
+        if _is_finite_number(target_x) and _is_finite_number(target_y):
+            return float(target_x), float(target_y)
+    return None
+
+
+def _target_child_id(
+    target_point: tuple[float, float] | None,
+    frame_index: int | None,
+    candidate_rows: Mapping[int, Sequence[Candidate]],
+) -> str | None:
+    if target_point is None or frame_index is None:
+        return None
+    candidates = candidate_rows.get(frame_index, ())
+    covered = [candidate for candidate in candidates if _point_in_bbox(target_point, candidate.bbox)]
+    if covered:
+        return min(
+            covered,
+            key=lambda candidate: (_point_distance(target_point, candidate.center), candidate.candidate_id),
+        ).candidate_id
+    centered = [
+        candidate
+        for candidate in candidates
+        if _point_distance(target_point, candidate.center) <= 1e-6
+    ]
+    return min(centered, key=lambda candidate: candidate.candidate_id).candidate_id if centered else None
+
+
+def _score_one_event(
+    replay: BinaryEventReplay,
+    target_candidate_id: str | None,
+) -> BinaryEventScore:
+    extraction_reason = replay.diagnostics.get("extraction_reason")
+    if isinstance(extraction_reason, str):
+        outcome = (
+            BinaryEventOutcome.DUPLICATE_DETECTION_UNRESOLVED
+            if extraction_reason == "duplicate_detection_unresolved"
+            else BinaryEventOutcome.EVENT_DETECTION_FAILURE
+        )
+        return BinaryEventScore(
+            event_id=replay.event_id,
+            outcome=outcome,
+            target_candidate_id=None,
+            selected_candidate_id=None,
+            recovery_delay_ratio=None,
+            reason=extraction_reason,
+        )
+
+    scoring_frame = replay.decision_frame or replay.split_frame
+    if target_candidate_id not in _physical_child_ids(replay, scoring_frame):
+        return BinaryEventScore(
+            event_id=replay.event_id,
+            outcome=BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES,
+            target_candidate_id=target_candidate_id,
+            selected_candidate_id=replay.selected_target_candidate_id,
+            recovery_delay_ratio=_recovery_delay_ratio(replay),
+            reason="target_not_in_physical_children",
+        )
+    if replay.hold or replay.selected_target_candidate_id is None:
+        return BinaryEventScore(
+            event_id=replay.event_id,
+            outcome=BinaryEventOutcome.SAFE_HOLD,
+            target_candidate_id=target_candidate_id,
+            selected_candidate_id=None,
+            recovery_delay_ratio=None,
+            reason=replay.decision_reason,
+        )
+
+    delay = _recovery_delay_ratio(replay)
+    if replay.selected_target_candidate_id != target_candidate_id:
+        return BinaryEventScore(
+            event_id=replay.event_id,
+            outcome=BinaryEventOutcome.WRONG_SWITCH,
+            target_candidate_id=target_candidate_id,
+            selected_candidate_id=replay.selected_target_candidate_id,
+            recovery_delay_ratio=delay,
+            reason="selected_wrong_split_child",
+        )
+    return BinaryEventScore(
+        event_id=replay.event_id,
+        outcome=(
+            BinaryEventOutcome.LATE_RECOVERY
+            if delay is not None and delay > 0.0
+            else BinaryEventOutcome.CORRECT_TRANSFER
+        ),
+        target_candidate_id=target_candidate_id,
+        selected_candidate_id=replay.selected_target_candidate_id,
+        recovery_delay_ratio=delay,
+        reason="target_identity_transferred",
+    )
+
+
+def _decision_diagnostic(
+    frame_index: int,
+    decision: BinaryTransferDecision,
+) -> dict[str, object]:
+    return {
+        "frame_index": frame_index,
+        "status": decision.status.value,
+        "reason": decision.reason,
+        "normalized_margin": decision.normalized_margin,
+        "h1": _hypothesis_diagnostic(decision.debug.get("h1")),
+        "h2": _hypothesis_diagnostic(decision.debug.get("h2")),
+    }
+
+
+def _hypothesis_diagnostic(hypothesis: object) -> dict[str, object] | None:
+    if hypothesis is None:
+        return None
+    support_groups = getattr(hypothesis, "support_groups", ())
+    if not isinstance(support_groups, tuple):
+        return None
+    return {
+        "target_candidate_id": getattr(hypothesis, "target_candidate_id", None),
+        "background_candidate_id": getattr(hypothesis, "background_candidate_id", None),
+        "target_cost": getattr(hypothesis, "target_cost", None),
+        "background_cost": getattr(hypothesis, "background_cost", None),
+        "support_groups": support_groups,
+    }
+
+
+def _physical_child_ids(replay: BinaryEventReplay, frame_index: int | None) -> tuple[str, ...]:
+    if frame_index is None:
+        return ()
+    frames = replay.diagnostics.get("physical_child_ids_by_frame")
+    if not isinstance(frames, Mapping):
+        return ()
+    candidate_ids = frames.get(frame_index)
+    if not isinstance(candidate_ids, Sequence) or isinstance(candidate_ids, (str, bytes)):
+        return ()
+    return tuple(candidate_id for candidate_id in candidate_ids if isinstance(candidate_id, str))
+
+
+def _recovery_delay_ratio(replay: BinaryEventReplay) -> float | None:
+    if replay.decision_frame is None or replay.split_observations_evaluated <= 0:
+        return None
+    return (replay.split_observations_evaluated - 1) / max(
+        1,
+        replay.split_observations_evaluated - 1,
+    )
+
+
+def _render_hypothesis_contribution(decision: object, name: str) -> str:
+    if not isinstance(decision, Mapping):
+        return "unavailable"
+    hypothesis = decision.get(name)
+    if not isinstance(hypothesis, Mapping):
+        return "unavailable"
+    support_groups = hypothesis.get("support_groups")
+    support = ", ".join(group for group in support_groups if isinstance(group, str)) if isinstance(support_groups, Sequence) else ""
+    return (
+        f"target={hypothesis.get('target_candidate_id') or 'none'}, "
+        f"background={hypothesis.get('background_candidate_id') or 'none'}, "
+        f"target_cost={hypothesis.get('target_cost')}, "
+        f"background_cost={hypothesis.get('background_cost')}, "
+        f"support={support or 'none'}"
+    )
+
+
+def _frame_shape_from_value(value: object) -> tuple[int, int] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) != 2:
+        return None
+    height, width = value
+    if not _is_finite_number(height) or not _is_finite_number(width):
+        return None
+    if height <= 0 or width <= 0:
+        return None
+    return int(height), int(width)
+
+
+def _point_in_bbox(point: tuple[float, float], bbox: tuple[float, float, float, float]) -> bool:
+    return bbox[0] <= point[0] <= bbox[2] and bbox[1] <= point[1] <= bbox[3]
+
+
+def _is_finite_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
+
+
+def _nonnegative_float(value: object) -> float:
+    return float(value) if _is_finite_number(value) and value >= 0.0 else 0.0

@@ -1,24 +1,41 @@
 # 런타임 추적 기반 이진 병합 사건 추출과 자식 증거 계산을 검증합니다.
 from __future__ import annotations
 
+import json
 import math
+from dataclasses import asdict
+from pathlib import Path
 
 import pytest
 
 from core.puzzle.binary_merge_background import BackgroundFlowProfile
 from core.puzzle.binary_merge_identity import BinaryMergeIdentityResolver, BinaryTransferStatus
 from core.puzzle.binary_merge_shadow import (
+    BinaryEventOutcome,
+    BinaryEventReplay,
+    BinaryEventScore,
     BinaryMergeEventWindow,
     BinaryPremergeSnapshot,
     BackgroundRelationSnapshot,
     build_child_evidence,
     collapse_physical_candidates,
     extract_binary_merge_events,
+    render_binary_merge_event_markdown,
+    replay_binary_merge_events,
+    score_binary_merge_events,
+    summarize_binary_merge_events,
 )
 from core.puzzle.models import Candidate
 
 
 FRAME_SHAPE = (200, 400)
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
 
 
 def _candidate(
@@ -562,3 +579,139 @@ def test_same_event_id_keeps_first_physical_pair_hold_then_later_resolves() -> N
     assert first.status is BinaryTransferStatus.HOLD
     assert later.status is BinaryTransferStatus.RESOLVED
     assert later.target_candidate_id == "later_target"
+
+
+def test_event_replay_stays_byte_equivalent_when_post_hoc_gt_changes(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    target_score_path = tmp_path / "target-score.jsonl"
+    background_score_path = tmp_path / "background-score.jsonl"
+    _write_jsonl(trace_path, make_trace_rows_for_separate_overlap_merged_split())
+    _write_jsonl(
+        target_score_path,
+        [{"solver_frame_index": 4, "target_x": 168.0, "target_y": 100.0}],
+    )
+    _write_jsonl(
+        background_score_path,
+        [{"solver_frame_index": 4, "target_x": 232.0, "target_y": 100.0}],
+    )
+
+    before_scoring = replay_binary_merge_events(trace_path)
+    target_scores = score_binary_merge_events(before_scoring, target_score_path, trace_path)
+    after_scoring = replay_binary_merge_events(trace_path)
+    background_scores = score_binary_merge_events(after_scoring, background_score_path, trace_path)
+
+    assert json.dumps([asdict(row) for row in before_scoring], sort_keys=True) == json.dumps(
+        [asdict(row) for row in after_scoring],
+        sort_keys=True,
+    )
+    assert target_scores[0].outcome is BinaryEventOutcome.CORRECT_TRANSFER
+    assert background_scores[0].outcome is BinaryEventOutcome.WRONG_SWITCH
+
+
+def test_event_replay_stops_after_the_first_resolved_split_observation(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, _two_frame_overlap_then_two_frame_split_rows())
+
+    (replay,) = replay_binary_merge_events(trace_path)
+
+    assert replay.split_frame == 3
+    assert replay.decision_frame == 3
+    assert replay.split_observations_evaluated == 1
+    assert not replay.hold
+
+
+def test_event_replay_holds_after_all_ambiguous_split_observations(tmp_path: Path) -> None:
+    rows: list[dict[str, object]] = []
+    rows += _rows_for_frame(
+        0,
+        [_candidate("target_before", 0, (0.42, 0.50)), _candidate("background_before", 0, (0.58, 0.50))],
+        (0.42, 0.50),
+    )
+    for frame_index in (1, 2):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"target_overlap_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"background_overlap_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+        )
+    for frame_index in (3, 4):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"target_child_{frame_index}", frame_index, (0.42, 0.50)),
+                _candidate(f"background_child_{frame_index}", frame_index, (0.58, 0.50)),
+            ],
+            (0.42, 0.50),
+        )
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    (replay,) = replay_binary_merge_events(trace_path)
+
+    assert replay.split_frame == 3
+    assert replay.decision_frame is None
+    assert replay.split_observations_evaluated == 2
+    assert replay.hold
+
+
+def test_extraction_diagnostics_remain_scored_event_rows(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    score_path = tmp_path / "score.jsonl"
+    _write_jsonl(
+        trace_path,
+        make_trace_rows_for_separate_overlap_merged_split(identity_state="IDENTITY_HOLD"),
+    )
+    _write_jsonl(score_path, [])
+
+    (replay,) = replay_binary_merge_events(trace_path)
+    (score,) = score_binary_merge_events((replay,), score_path, trace_path)
+
+    assert replay.selected_target_candidate_id is None
+    assert replay.selected_background_candidate_id is None
+    assert score.outcome is BinaryEventOutcome.EVENT_DETECTION_FAILURE
+
+
+def test_event_summary_and_markdown_are_compact_and_event_scoped() -> None:
+    scores = (
+        BinaryEventScore(1, BinaryEventOutcome.CORRECT_TRANSFER, "a", "a", 0.0, "correct"),
+        BinaryEventScore(2, BinaryEventOutcome.WRONG_SWITCH, "a", "b", 0.5, "wrong"),
+        BinaryEventScore(3, BinaryEventOutcome.SAFE_HOLD, "a", None, None, "hold"),
+        BinaryEventScore(4, BinaryEventOutcome.LATE_RECOVERY, "a", "a", 1.0, "late"),
+        BinaryEventScore(5, BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES, None, "a", None, "absent"),
+        BinaryEventScore(6, BinaryEventOutcome.EVENT_DETECTION_FAILURE, None, None, None, "detection"),
+        BinaryEventScore(7, BinaryEventOutcome.DUPLICATE_DETECTION_UNRESOLVED, None, None, None, "duplicate"),
+    )
+    replay = BinaryEventReplay(
+        event_id=3,
+        premerge_frame=10,
+        split_frame=11,
+        decision_frame=None,
+        split_observations_evaluated=2,
+        selected_target_candidate_id=None,
+        selected_background_candidate_id=None,
+        decision_reason="hypothesis_ambiguous",
+        hold=True,
+        diagnostics={
+            "decisions": (
+                {
+                    "h1": {"target_candidate_id": "a", "background_candidate_id": "b", "target_cost": 1.0, "background_cost": 2.0, "support_groups": ("target_motion",)},
+                    "h2": {"target_candidate_id": "b", "background_candidate_id": "a", "target_cost": 2.0, "background_cost": 1.0, "support_groups": ("background_motion",)},
+                },
+            ),
+        },
+    )
+
+    summary = summarize_binary_merge_events(scores)
+    markdown = render_binary_merge_event_markdown((replay,), scores)
+
+    assert summary.total_events == 7
+    assert summary.resolved_events == 3
+    assert summary.wrong_switches == 1
+    assert summary.median_normalized_recovery_delay == pytest.approx(0.5)
+    assert "## Event 3" in markdown
+    assert "- HOLD: hypothesis_ambiguous" in markdown
+    assert "- H1: target=a" in markdown
+    assert "- H2: target=b" in markdown
+    assert "## Frame" not in markdown
