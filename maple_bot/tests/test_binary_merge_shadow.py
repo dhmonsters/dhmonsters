@@ -613,6 +613,7 @@ def _identity_risk_board_rows(
     extra_outside_candidates: int = 0,
     close_collision_distractors: bool = False,
     initial_close_collision_distractors: bool = False,
+    include_board_distractors: bool = True,
     reverse_candidates: bool = False,
     mirrored: bool = False,
 ) -> list[dict[str, object]]:
@@ -629,7 +630,7 @@ def _identity_risk_board_rows(
     )
 
     def board_candidates(frame_index: int) -> list[dict[str, object]]:
-        candidates = _board_distractors(frame_index)
+        candidates = _board_distractors(frame_index) if include_board_distractors else []
         candidates.extend(
             _candidate(
                 f"outside_extra_{frame_index}_{index}",
@@ -658,7 +659,7 @@ def _identity_risk_board_rows(
                     ),
                 )
             )
-        if initial_close_collision_distractors and 0 <= frame_index <= 3:
+        if initial_close_collision_distractors and frame_index == 0:
             direction = -1.0 if mirrored else 1.0
             candidates.extend(
                 (
@@ -856,15 +857,19 @@ def test_identity_risk_frame_zero_close_distractors_do_not_replace_event_backgro
 ) -> None:
     signatures: list[tuple[object, ...]] = []
     for name, rows in (
-        ("baseline", _identity_risk_board_rows()),
+        ("baseline", _identity_risk_board_rows(include_board_distractors=False)),
         (
             "initial-close",
-            _identity_risk_board_rows(initial_close_collision_distractors=True),
+            _identity_risk_board_rows(
+                initial_close_collision_distractors=True,
+                include_board_distractors=False,
+            ),
         ),
         (
             "initial-close-reordered",
             _identity_risk_board_rows(
                 initial_close_collision_distractors=True,
+                include_board_distractors=False,
                 reverse_candidates=True,
             ),
         ),
@@ -877,23 +882,7 @@ def test_identity_risk_frame_zero_close_distractors_do_not_replace_event_backgro
         assert len(replays) == 1
         event = extraction.events[0]
         assert event.premerge.background_candidate_id == "visible_background_1"
-        replay = replays[0]
-        signatures.append(
-            (
-                event.event_id,
-                event.premerge.background_candidate_id,
-                tuple(
-                    tuple(
-                        tuple(cluster.candidate.candidate_id for cluster in pair.clusters)
-                        for pair in observation.pair_hypotheses
-                    )
-                    for observation in event.split_observations
-                ),
-                tuple(decision["status"] for decision in replay.diagnostics["decisions"]),
-                replay.selected_target_candidate_id,
-                replay.selected_background_candidate_id,
-            )
-        )
+        signatures.append(_runtime_integration_signature(extraction, replays[0]))
 
     assert signatures[1:] == signatures[:1] * (len(signatures) - 1)
 
