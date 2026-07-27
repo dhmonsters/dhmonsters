@@ -82,36 +82,64 @@ class _OpenEvent:
 def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventExtractionResult:
     """Extract scoreable binary events from runtime trace rows only."""
     frame_rows = _index_runtime_rows(rows)
-    detector = MergeSplitEventDetector(confirm_observations=1)
+    detector = MergeSplitEventDetector()
     events: list[BinaryMergeEventWindow] = []
     diagnostics: list[BinaryEventExtractionDiagnostic] = []
     open_event: _OpenEvent | None = None
     suppressed_event_id: int | None = None
+    pending_premerge: _FrameRuntime | None = None
     prior: _FrameRuntime | None = None
+    stable_area = 0.0
 
     for frame in frame_rows:
-        target_candidate = _selected_candidate(frame.candidates, frame.target_point)
-        stable_target = (
-            open_event.premerge.target_bbox
-            if open_event is not None
-            else (
-                _selected_candidate(prior.candidates, prior.target_point).bbox
-                if prior is not None and _selected_candidate(prior.candidates, prior.target_point) is not None
-                else None
+        previous_detector_state = detector.state
+        previous_event_id = detector.event_id
+        selected_candidate = _selected_candidate(frame.candidates, frame.target_point)
+        target_candidate = (
+            selected_candidate
+            if selected_candidate is not None
+            and (
+                stable_area <= 0.0
+                or _bbox_area(selected_candidate.bbox) / max(1.0, stable_area) <= 1.25
             )
+            else None
         )
-        stable_area = _bbox_area(stable_target) if stable_target is not None else 0.0
-        predicted_point = frame.target_point or (target_candidate.center if target_candidate else (0.0, 0.0))
+        collision_candidate = _nearest_other_candidate(target_candidate, frame.candidates)
+        event_candidates = tuple(frame.candidates)
+        if target_candidate is not None:
+            event_candidates = (
+                (target_candidate, collision_candidate)
+                if collision_candidate is not None
+                else (target_candidate,)
+            )
+        predicted_point = frame.target_point or (selected_candidate.center if selected_candidate else (0.0, 0.0))
         state_event = detector.update(
             target_candidate=target_candidate,
-            candidates=frame.candidates,
+            candidates=event_candidates,
             stable_area=stable_area,
             predicted_target_point=predicted_point,
         )
+        if (
+            previous_detector_state is MergeState.SPLITTING
+            and state_event.state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
+            and state_event.event_id == previous_event_id
+        ):
+            event_id = detector.open_confirmed_merge_event()
+        else:
+            event_id = state_event.event_id
         in_merge = state_event.state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
 
-        if open_event is None and in_merge and suppressed_event_id != state_event.event_id:
-            if prior is None or not _premerge_identity_is_trusted(prior):
+        if open_event is None and detector.pending_merge_state is not None and pending_premerge is None:
+            pending_premerge = prior
+
+        if open_event is not None and event_id != open_event.event_id:
+            _finalize_open_event(open_event, events, diagnostics, frame.frame_index)
+            open_event = None
+
+        if open_event is None and in_merge and suppressed_event_id != event_id:
+            premerge = pending_premerge or prior
+            pending_premerge = None
+            if premerge is None or not _premerge_identity_is_trusted(premerge):
                 diagnostics.append(
                     BinaryEventExtractionDiagnostic(
                         frame.frame_index,
@@ -119,9 +147,9 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
                         len(frame.candidates),
                     )
                 )
-                suppressed_event_id = state_event.event_id
+                suppressed_event_id = event_id
             else:
-                snapshot = _build_premerge_snapshot(prior, frame_rows)
+                snapshot = _build_premerge_snapshot(premerge, frame_rows)
                 if snapshot is None:
                     diagnostics.append(
                         BinaryEventExtractionDiagnostic(
@@ -130,10 +158,10 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
                             len(frame.candidates),
                         )
                     )
-                    suppressed_event_id = state_event.event_id
+                    suppressed_event_id = event_id
                 else:
                     open_event = _OpenEvent(
-                        event_id=state_event.event_id,
+                        event_id=event_id,
                         premerge=snapshot,
                         merge_frame_indices=[],
                         split_frame_indices=[],
@@ -145,10 +173,10 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
         if open_event is not None:
             if in_merge:
                 open_event.merge_frame_indices.append(frame.frame_index)
-                parent = _merge_parent_bbox(frame.candidates, target_candidate)
+                parent = _merge_parent_bbox(frame.candidates, target_candidate or selected_candidate)
                 if parent is not None:
                     open_event.parent_bboxes.append(parent)
-            elif len(frame.candidates) >= 2:
+            elif len(frame.candidates) >= 2 and detector.pending_merge_state is None:
                 children, reason = collapse_physical_candidates(
                     frame.candidates,
                     open_event.parent_bboxes,
@@ -169,26 +197,22 @@ def extract_binary_merge_events(rows: Sequence[dict[str, Any]]) -> BinaryEventEx
                             ),
                         )
                     )
-                    events.append(_freeze_event(open_event))
-                    detector.complete_split_recovery()
-                    open_event = None
 
-        if not in_merge and open_event is None and state_event.event_id == suppressed_event_id:
+        if not in_merge and open_event is None and event_id == suppressed_event_id:
             suppressed_event_id = None
+        if not in_merge and detector.pending_merge_state is None:
+            pending_premerge = None
+        if (
+            target_candidate is not None
+            and previous_detector_state in (MergeState.SEPARATE, MergeState.REACQUIRED)
+            and detector.pending_merge_state is None
+        ):
+            stable_area = _bbox_area(target_candidate.bbox)
 
         prior = frame
 
     if open_event is not None:
-        if not open_event.split_observations:
-            diagnostics.append(
-                BinaryEventExtractionDiagnostic(
-                    open_event.merge_frame_indices[-1],
-                    "missing_split_children",
-                    0,
-                )
-            )
-        else:
-            events.append(_freeze_event(open_event))
+        _finalize_open_event(open_event, events, diagnostics, frame_rows[-1].frame_index)
     return BinaryEventExtractionResult(tuple(events), tuple(diagnostics))
 
 
@@ -211,18 +235,18 @@ def collapse_physical_candidates(
 
     clusters: list[list[Candidate]] = []
     for candidate in sorted(in_region, key=lambda row: (-row.score, row.candidate_id)):
-        matching = next(
-            (
-                cluster
-                for cluster in clusters
-                if any(_is_physical_duplicate(candidate, representative) for representative in cluster)
-            ),
-            None,
-        )
-        if matching is None:
+        matching_indices = [
+            index
+            for index, cluster in enumerate(clusters)
+            if any(_is_physical_duplicate(candidate, representative) for representative in cluster)
+        ]
+        if not matching_indices:
             clusters.append([candidate])
         else:
-            matching.append(candidate)
+            primary_index = matching_indices[0]
+            clusters[primary_index].append(candidate)
+            for index in reversed(matching_indices[1:]):
+                clusters[primary_index].extend(clusters.pop(index))
     representatives = tuple(
         max(cluster, key=lambda row: (row.score, row.candidate_id)) for cluster in clusters
     )
@@ -301,7 +325,7 @@ class _FrameRuntime:
     candidates: tuple[Candidate, ...]
     target_point: tuple[float, float] | None
     identity_state: str | None
-    white_anchor: bool
+    white_anchor_point: tuple[float, float] | None
 
 
 def _index_runtime_rows(rows: Sequence[dict[str, Any]]) -> tuple[_FrameRuntime, ...]:
@@ -327,14 +351,14 @@ def _index_runtime_rows(rows: Sequence[dict[str, Any]]) -> tuple[_FrameRuntime, 
             state = payload.get("state")
             current["identity_state"] = state if isinstance(state, str) else None
         elif row_type == "TEMPORAL_SELECTOR":
-            current["white_anchor"] = _has_visible_white_anchor(payload)
+            current["white_anchor_point"] = _visible_white_anchor_point(payload)
     return tuple(
         _FrameRuntime(
             frame_index=frame_index,
             candidates=tuple(values.get("candidates", ())),
             target_point=values.get("target_point"),
             identity_state=values.get("identity_state"),
-            white_anchor=bool(values.get("white_anchor")),
+            white_anchor_point=values.get("white_anchor_point"),
         )
         for frame_index, values in sorted(indexed.items())
         if values.get("candidates") is not None
@@ -418,7 +442,17 @@ def _candidate_velocity(candidate: Candidate, frame: _FrameRuntime, all_frames: 
 
 
 def _premerge_identity_is_trusted(frame: _FrameRuntime) -> bool:
-    return frame.identity_state == "TRACK_CONFIDENT" or frame.white_anchor
+    if frame.identity_state == "TRACK_CONFIDENT":
+        return True
+    if frame.white_anchor_point is None or frame.target_point is None:
+        return False
+    anchor_candidate = _selected_candidate(frame.candidates, frame.white_anchor_point)
+    selected_candidate = _selected_candidate(frame.candidates, frame.target_point)
+    return (
+        anchor_candidate is not None
+        and selected_candidate is not None
+        and anchor_candidate.candidate_id == selected_candidate.candidate_id
+    )
 
 
 def _merge_parent_bbox(candidates: Sequence[Candidate], target: Candidate | None) -> tuple[float, float, float, float] | None:
@@ -450,6 +484,24 @@ def _freeze_event(event: _OpenEvent) -> BinaryMergeEventWindow:
     )
 
 
+def _finalize_open_event(
+    event: _OpenEvent,
+    events: list[BinaryMergeEventWindow],
+    diagnostics: list[BinaryEventExtractionDiagnostic],
+    frame_index: int,
+) -> None:
+    if event.split_observations:
+        events.append(_freeze_event(event))
+        return
+    diagnostics.append(
+        BinaryEventExtractionDiagnostic(
+            frame_index,
+            "missing_split_children",
+            0,
+        )
+    )
+
+
 def _selected_candidate(candidates: Sequence[Candidate], point: tuple[float, float] | None) -> Candidate | None:
     if point is None:
         return None
@@ -460,7 +512,9 @@ def _nearest_candidate(point: tuple[float, float], candidates: Sequence[Candidat
     return min(candidates, key=lambda candidate: _point_distance(point, candidate.center), default=None)
 
 
-def _nearest_other_candidate(target: Candidate, candidates: Sequence[Candidate]) -> Candidate | None:
+def _nearest_other_candidate(target: Candidate | None, candidates: Sequence[Candidate]) -> Candidate | None:
+    if target is None:
+        return None
     return min(
         (candidate for candidate in candidates if candidate.candidate_id != target.candidate_id),
         key=lambda candidate: _point_distance(target.center, candidate.center),
@@ -468,12 +522,14 @@ def _nearest_other_candidate(target: Candidate, candidates: Sequence[Candidate])
     )
 
 
-def _has_visible_white_anchor(payload: Mapping[str, Any]) -> bool:
+def _visible_white_anchor_point(payload: Mapping[str, Any]) -> tuple[float, float] | None:
     debug = payload.get("debug")
     if not isinstance(debug, Mapping):
-        return False
+        return None
     gate = debug.get("kinematic_wide_beam_debug")
-    return isinstance(gate, Mapping) and gate.get("reason") == "white_anchor"
+    if not isinstance(gate, Mapping) or gate.get("reason") != "white_anchor":
+        return None
+    return _point_from_value(gate.get("point"))
 
 
 def _children_parent_union_residual(
@@ -486,7 +542,11 @@ def _children_parent_union_residual(
     if parent_union is None:
         return float("inf")
     child_union = _bbox_union(child.bbox, other_child.bbox)
-    return sum(abs(left - right) for left, right in zip(child_union, parent_union)) / (4.0 * scale)
+    parent_width = parent_union[2] - parent_union[0]
+    parent_height = parent_union[3] - parent_union[1]
+    child_width = child_union[2] - child_union[0]
+    child_height = child_union[3] - child_union[1]
+    return (abs(child_width - parent_width) + abs(child_height - parent_height)) / (2.0 * scale)
 
 
 def _bbox_shape_residual(
@@ -519,20 +579,33 @@ def _neighbor_relation_residual(
     height = max(1.0, float(frame_shape[0]))
     flow_x, flow_y = flow_profile.velocity_ratio
     residuals: list[float] = []
+    used_anchor_ids: set[str] = set()
     for relation in relations:
         predicted_anchor = (
             relation.anchor_center[0] + elapsed * flow_x * width,
             relation.anchor_center[1] + elapsed * flow_y * height,
         )
-        anchor = _nearest_candidate(predicted_anchor, context_candidates)
-        if anchor is None or _point_distance(anchor.center, predicted_anchor) > scale:
-            continue
+        ranked = sorted(
+            (
+                (_point_distance(candidate.center, predicted_anchor), candidate)
+                for candidate in context_candidates
+            ),
+            key=lambda row: (row[0], row[1].candidate_id),
+        )
+        if not ranked or ranked[0][0] > scale:
+            return None
+        if len(ranked) > 1 and ranked[1][0] - ranked[0][0] <= 0.10 * scale:
+            return None
+        anchor = ranked[0][1]
+        if anchor.candidate_id in used_anchor_ids:
+            return None
+        used_anchor_ids.add(anchor.candidate_id)
         current_ratio = (
             (anchor.center[0] - assumed_background_child.center[0]) / scale,
             (anchor.center[1] - assumed_background_child.center[1]) / scale,
         )
         residuals.append(_point_distance(current_ratio, relation.relative_vector_ratio))
-    return median(residuals) if residuals else None
+    return median(residuals) if len(residuals) == len(relations) else None
 
 
 def _relative_yolo_floor(children: tuple[Candidate, Candidate]) -> float:
