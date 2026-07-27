@@ -186,7 +186,7 @@ def extract_binary_merge_events(
             target_candidate,
             collision_candidate,
         )
-        if _identity_observable(frame):
+        if _identity_observable(frame) and open_event is None:
             if visible_contact:
                 last_visible_contact = frame
             else:

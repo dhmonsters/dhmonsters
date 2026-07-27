@@ -406,6 +406,56 @@ def test_identity_risk_after_visible_contact_uses_last_visible_contact_snapshot(
     assert extraction.events[0].premerge.background_candidate_id == "visible_background_2"
 
 
+def test_open_identity_risk_event_collects_visible_separated_children() -> None:
+    rows: list[dict[str, object]] = []
+    rows += _rows_for_frame(
+        0,
+        [
+            _candidate("visible_target_0", 0, (0.42, 0.50)),
+            _candidate("visible_background_0", 0, (0.58, 0.50)),
+        ],
+        (0.42, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(0, (0.42, 0.50)))
+    rows += _rows_for_frame(
+        1,
+        [
+            _candidate("visible_target_1", 1, (0.455, 0.50), half_ratio=0.06),
+            _candidate("visible_background_1", 1, (0.545, 0.50), half_ratio=0.06),
+        ],
+        (0.455, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(1, (0.455, 0.50)))
+    for frame_index in (2, 3):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"risk_target_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"risk_background_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+            identity_state="IDENTITY_HOLD",
+        )
+    rows += _rows_for_frame(
+        4,
+        [
+            _candidate("visible_target_child", 4, (0.42, 0.50)),
+            _candidate("visible_background_child", 4, (0.58, 0.50)),
+        ],
+        (0.42, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(4, (0.42, 0.50)))
+
+    extraction = extract_binary_merge_events(rows)
+
+    assert len(extraction.events) == 1
+    assert not extraction.diagnostics
+    assert tuple(row.frame_index for row in extraction.events[0].split_observations) == (4,)
+
+
 def test_binary_event_ambiguous_first_split_keeps_same_event_for_later_pair() -> None:
     extraction = extract_binary_merge_events(
         make_trace_rows_for_separate_overlap_merged_split(first_split_ambiguous=True)
