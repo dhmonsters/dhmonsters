@@ -456,15 +456,106 @@ def test_open_identity_risk_event_collects_visible_separated_children() -> None:
     assert tuple(row.frame_index for row in extraction.events[0].split_observations) == (4,)
 
 
-def test_binary_event_ambiguous_first_split_keeps_same_event_for_later_pair() -> None:
-    extraction = extract_binary_merge_events(
-        make_trace_rows_for_separate_overlap_merged_split(first_split_ambiguous=True)
-    )
+def _two_pair_split_rows() -> list[dict[str, object]]:
+    rows = make_trace_rows_for_separate_overlap_merged_split(first_split_ambiguous=True)
+    for row in rows:
+        if row["type"] == "CANDIDATES" and row["frame_index"] in (-2, -1):
+            row["payload"]["candidates"][0]["bbox"] = [148.0, 90.0, 188.0, 110.0]
+        if row["type"] == "CANDIDATES" and row["frame_index"] == 0:
+            row["payload"]["candidates"][0]["bbox"] = [148.0, 90.0, 188.0, 110.0]
+            row["payload"]["candidates"][1]["bbox"] = [212.0, 90.0, 252.0, 110.0]
+        if row["type"] == "CANDIDATES" and row["frame_index"] == 1:
+            row["payload"]["candidates"][0]["bbox"] = [185.0, 50.0, 205.0, 150.0]
+            row["payload"]["candidates"][1]["bbox"] = [200.0, 50.0, 215.0, 150.0]
+        if row["type"] == "CANDIDATES" and row["frame_index"] == 2:
+            row["payload"]["candidates"][0]["bbox"] = [185.0, 50.0, 215.0, 150.0]
+        if row["type"] == "CANDIDATES" and row["frame_index"] == 4:
+            row["payload"]["candidates"][0]["bbox"] = [148.0, 75.0, 188.0, 100.0]
+            row["payload"]["candidates"][1]["bbox"] = [212.0, 100.0, 252.0, 125.0]
+    return rows
+
+
+def test_replay_holds_pair_ambiguous_when_first_split_has_two_plausible_pairs(tmp_path: Path) -> None:
+    # RED at ed04a19: replay returned two diagnostic rows instead of one event HOLD.
+    rows = [
+        row
+        for row in _two_pair_split_rows()
+        if row["frame_index"] != 4
+    ]
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    extraction = extract_binary_merge_events(rows)
+    (replay,) = replay_binary_merge_events(trace_path)
+
+    assert len(extraction.events) == 1
+    assert len(extraction.events[0].split_observations[0].pair_hypotheses) == 2
+    assert replay.event_id == 1
+    assert replay.hold
+    assert replay.decision_reason == "pair_ambiguous"
+
+
+def test_replay_resolves_later_unique_pair_under_the_same_event_id(tmp_path: Path) -> None:
+    # RED at ed04a19: replay returned two rows after dropping the ambiguous first split.
+    rows = _two_pair_split_rows()
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    extraction = extract_binary_merge_events(rows)
+    (replay,) = replay_binary_merge_events(trace_path)
 
     assert len(extraction.events) == 1
     assert extraction.events[0].event_id == 1
-    assert extraction.events[0].split_observations[0].frame_index == 4
-    assert any(row.reason == "duplicate_detection_unresolved" for row in extraction.diagnostics)
+    assert tuple(observation.frame_index for observation in extraction.events[0].split_observations) == (3, 4)
+    assert len(extraction.events[0].split_observations[0].pair_hypotheses) == 2
+    assert len(extraction.events[0].split_observations[1].pair_hypotheses) == 1
+    assert replay.event_id == 1
+    assert replay.decision_frame == 4
+    assert replay.split_observations_evaluated == 2
+    assert not replay.hold
+
+
+def test_replay_holds_judge_disagreement_for_a_unique_pair(tmp_path: Path) -> None:
+    # RED at ed04a19: BinarySplitObservation did not retain pair_hypotheses.
+    rows = make_trace_rows_for_separate_overlap_merged_split()
+    for row in rows:
+        if row["type"] == "CANDIDATES" and row["frame_index"] == 4:
+            row["payload"]["candidates"] = [
+                _candidate("upper_child", 4, (0.50, 0.45), half_ratio=0.04),
+                _candidate("lower_child", 4, (0.50, 0.55), half_ratio=0.04),
+            ]
+        if row["type"] == "TARGET_SELECTION" and row["frame_index"] == 4:
+            row["payload"]["point"] = [200.0, 100.0]
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    extraction = extract_binary_merge_events(rows)
+    (replay,) = replay_binary_merge_events(trace_path)
+
+    assert len(extraction.events) == 1
+    assert len(extraction.events[0].split_observations[0].pair_hypotheses) == 1
+    assert replay.hold
+    assert replay.decision_reason == "judge_disagreement"
+
+
+def test_split_observation_excludes_all_pair_cluster_members_from_context() -> None:
+    # RED: duplicate cluster members leaked into context_candidates.
+    rows = make_trace_rows_for_separate_overlap_merged_split()
+    for row in rows:
+        if row["type"] == "CANDIDATES" and row["frame_index"] == 4:
+            row["payload"]["candidates"].extend(
+                [
+                    _candidate("target_child_duplicate", 4, (0.421, 0.50), score=0.7),
+                    _candidate("background_child_duplicate", 4, (0.581, 0.50), score=0.7),
+                ]
+            )
+
+    extraction = extract_binary_merge_events(rows)
+
+    observation = extraction.events[0].split_observations[0]
+    assert tuple(candidate.candidate_id for candidate in observation.context_candidates) == (
+        "anchor_child",
+    )
 
 
 def test_child_evidence_uses_premerge_motion_not_parent_center() -> None:
@@ -862,8 +953,8 @@ def test_binary_event_finalizes_unresolved_prior_event_before_new_event_id() -> 
 
     extraction = extract_binary_merge_events(rows)
 
-    assert tuple(event.event_id for event in extraction.events) == (2,)
-    assert any(row.reason == "missing_split_children" for row in extraction.diagnostics)
+    assert tuple(event.event_id for event in extraction.events) == (1, 2)
+    assert not extraction.diagnostics
 
 
 def test_second_event_uses_separate_frame_before_its_pending_confirmation() -> None:
@@ -1184,7 +1275,10 @@ def test_extraction_diagnostics_remain_scored_event_rows(tmp_path: Path) -> None
         trace_path,
         make_trace_rows_for_separate_overlap_merged_split(identity_state="IDENTITY_HOLD"),
     )
-    _write_jsonl(score_path, [])
+    _write_jsonl(
+        score_path,
+        [{"solver_frame_index": 3, "target_x": 168.0, "target_y": 100.0}],
+    )
 
     (replay,) = replay_binary_merge_events(trace_path)
     (score,) = score_binary_merge_events((replay,), score_path, trace_path)
@@ -1293,15 +1387,14 @@ def test_cli_dry_run_writes_one_event_with_runtime_and_post_hoc_diagnostics(tmp_
     assert "- expand_allowed: true" in markdown
 
 
-def test_event_limit_stops_at_first_diagnostic_before_later_valid_event() -> None:
+def test_event_limit_preserves_first_ambiguous_event_before_later_observations() -> None:
     extraction = extract_binary_merge_events(
         make_trace_rows_for_separate_overlap_merged_split(first_split_ambiguous=True),
         event_limit=1,
     )
 
-    assert not extraction.events
-    assert len(extraction.diagnostics) == 1
-    assert extraction.diagnostics[0].reason == "duplicate_detection_unresolved"
+    assert tuple(event.event_id for event in extraction.events) == (1,)
+    assert not extraction.diagnostics
 
 
 def test_replay_event_limit_does_not_resolve_second_scoreable_event(
@@ -1335,13 +1428,17 @@ def test_replay_event_limit_does_not_resolve_second_scoreable_event(
     assert resolver_calls == [1]
 
 
-def test_cli_failure_maps_duplicate_normalization_to_canonical_gate(tmp_path: Path) -> None:
+def test_cli_failure_maps_pair_ambiguity_to_canonical_gate(tmp_path: Path) -> None:
     trace_path = tmp_path / "trace.jsonl"
     score_path = tmp_path / "score.jsonl"
     output_path = tmp_path / "failed_event"
     _write_jsonl(
         trace_path,
-        make_trace_rows_for_separate_overlap_merged_split(first_split_ambiguous=True),
+        [
+            row
+            for row in _two_pair_split_rows()
+            if row["frame_index"] != 4
+        ],
     )
     _write_jsonl(score_path, [])
 
@@ -1371,12 +1468,12 @@ def test_cli_failure_maps_duplicate_normalization_to_canonical_gate(tmp_path: Pa
         "binary_merge_validation.md",
     }
     event = json.loads((output_path / "binary_merge_events.jsonl").read_text(encoding="utf-8"))
-    assert event["judge_diagnostics"]["extraction_reason"] == "duplicate_detection_unresolved"
+    assert event["runtime_decision"]["reason"] == "pair_ambiguous"
     assert event["gate_verdict"] == "GATE_FAILED"
-    assert event["failure_stage"] == "candidate_normalization"
+    assert event["failure_stage"] == "ambiguity"
     assert event["expand_allowed"] is False
     assert "mouse_action" not in json.dumps(event, sort_keys=True)
     markdown = (output_path / "binary_merge_validation.md").read_text(encoding="utf-8")
     assert "- gate_verdict: GATE_FAILED" in markdown
-    assert "- failure_stage: candidate_normalization" in markdown
+    assert "- failure_stage: ambiguity" in markdown
     assert "- expand_allowed: false" in markdown

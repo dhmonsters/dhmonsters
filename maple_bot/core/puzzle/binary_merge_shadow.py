@@ -11,6 +11,11 @@ from statistics import median
 from typing import Any, Mapping, Sequence
 
 from .binary_merge_background import BackgroundFlowProfile, build_background_flow_profile
+from .binary_merge_candidates import (
+    CandidateLocalizationContext,
+    CandidatePairHypothesis,
+    localize_candidate_pairs,
+)
 from .binary_merge_identity import (
     BinaryMergeIdentityResolver,
     BinaryRoleEvidence,
@@ -49,8 +54,14 @@ class BinaryPremergeSnapshot:
 @dataclass(frozen=True)
 class BinarySplitObservation:
     frame_index: int
-    children: tuple[Candidate, Candidate]
+    pair_hypotheses: tuple[CandidatePairHypothesis, ...]
     context_candidates: tuple[Candidate, ...]
+
+    @property
+    def children(self) -> tuple[Candidate, Candidate] | None:
+        if len(self.pair_hypotheses) != 1:
+            return None
+        return tuple(cluster.candidate for cluster in self.pair_hypotheses[0].clusters)
 
 
 @dataclass(frozen=True)
@@ -281,25 +292,34 @@ def extract_binary_merge_events(
                 if parent is not None:
                     open_event.parent_bboxes.append(parent)
             elif len(frame.candidates) >= 2 and detector.pending_merge_state is None:
-                children, reason = collapse_physical_candidates(
+                localization = localize_candidate_pairs(
                     frame.candidates,
-                    open_event.parent_bboxes,
+                    _candidate_localization_context(open_event),
                 )
-                if children is None:
+                if not localization.pairs:
                     diagnostics.append(
-                        BinaryEventExtractionDiagnostic(frame.frame_index, reason, len(frame.candidates))
+                        BinaryEventExtractionDiagnostic(
+                            frame.frame_index,
+                            localization.reason,
+                            len(frame.candidates),
+                        )
                     )
                     if result_limit_reached():
                         return result()
                 else:
-                    child_ids = {child.candidate_id for child in children}
+                    physical_ids = {
+                        member.candidate_id
+                        for pair in localization.pairs
+                        for cluster in pair.clusters
+                        for member in cluster.members
+                    }
                     open_event.split_frame_indices.append(frame.frame_index)
                     open_event.split_observations.append(
                         BinarySplitObservation(
                             frame_index=frame.frame_index,
-                            children=children,
+                            pair_hypotheses=localization.pairs,
                             context_candidates=tuple(
-                                candidate for candidate in frame.candidates if candidate.candidate_id not in child_ids
+                                candidate for candidate in frame.candidates if candidate.candidate_id not in physical_ids
                             ),
                         )
                     )
@@ -367,6 +387,19 @@ def collapse_physical_candidates(
     if len(representatives) != 2:
         return None, "duplicate_detection_unresolved"
     return (representatives[0], representatives[1]), "available"
+
+
+def _candidate_localization_context(
+    event: _OpenEvent,
+) -> CandidateLocalizationContext:
+    return CandidateLocalizationContext(
+        target_center=event.premerge.target_center,
+        background_center=event.premerge.background_center,
+        target_bbox=event.premerge.target_bbox,
+        background_bbox=event.premerge.background_bbox,
+        parent_bboxes=tuple(event.parent_bboxes),
+        uncertainty_ratio=_PARENT_REGION_TOLERANCE,
+    )
 
 
 def build_child_evidence(
@@ -852,34 +885,31 @@ def replay_binary_merge_events(
             before_frame_index=event.premerge.frame_index,
         )
         decisions: list[tuple[int, BinaryTransferDecision]] = []
+        pair_decisions_by_frame: dict[int, tuple[BinaryTransferDecision, ...]] = {}
         for observation in event.split_observations:
-            child_a, child_b = observation.children
             evidence = _evidence_for_frame(rows, observation.frame_index)
-            decision = resolver.evaluate(
-                event_id=event.event_id,
-                child_a=build_child_evidence(
+            pair_decisions = tuple(
+                _resolve_pair_hypothesis(
+                    resolver=resolver,
                     event=event,
-                    child=child_a,
-                    other_child=child_b,
-                    context_candidates=observation.context_candidates,
+                    observation=observation,
+                    pair=pair,
                     flow_profile=profile,
                     evidence=evidence,
                     frame_shape=frame_shape,
-                ),
-                child_b=build_child_evidence(
-                    event=event,
-                    child=child_b,
-                    other_child=child_a,
-                    context_candidates=observation.context_candidates,
-                    flow_profile=profile,
-                    evidence=evidence,
-                    frame_shape=frame_shape,
-                ),
+                )
+                for pair in observation.pair_hypotheses
+            )
+            pair_decisions_by_frame[observation.frame_index] = pair_decisions
+            decision = (
+                pair_decisions[0]
+                if len(pair_decisions) == 1
+                else _pair_ambiguity_hold(event.event_id, pair_decisions)
             )
             decisions.append((observation.frame_index, decision))
             if decision.status is BinaryTransferStatus.RESOLVED:
                 break
-        replays.append(_event_replay_from_decisions(event, decisions))
+        replays.append(_event_replay_from_decisions(event, decisions, pair_decisions_by_frame))
 
     for index, diagnostic in enumerate(extraction.diagnostics, start=1):
         replays.append(
@@ -901,6 +931,56 @@ def replay_binary_merge_events(
             )
         )
     return tuple(sorted(replays, key=lambda replay: (replay.premerge_frame, replay.event_id)))
+
+
+def _resolve_pair_hypothesis(
+    *,
+    resolver: BinaryMergeIdentityResolver,
+    event: BinaryMergeEventWindow,
+    observation: BinarySplitObservation,
+    pair: CandidatePairHypothesis,
+    flow_profile: BackgroundFlowProfile,
+    evidence: Mapping[str, CandidateEvidence],
+    frame_shape: tuple[int, int],
+) -> BinaryTransferDecision:
+    child_a, child_b = (cluster.candidate for cluster in pair.clusters)
+    return resolver.evaluate(
+        event_id=event.event_id,
+        child_a=build_child_evidence(
+            event=event,
+            child=child_a,
+            other_child=child_b,
+            context_candidates=observation.context_candidates,
+            flow_profile=flow_profile,
+            evidence=evidence,
+            frame_shape=frame_shape,
+        ),
+        child_b=build_child_evidence(
+            event=event,
+            child=child_b,
+            other_child=child_a,
+            context_candidates=observation.context_candidates,
+            flow_profile=flow_profile,
+            evidence=evidence,
+            frame_shape=frame_shape,
+        ),
+    )
+
+
+def _pair_ambiguity_hold(
+    event_id: int,
+    pair_decisions: Sequence[BinaryTransferDecision],
+) -> BinaryTransferDecision:
+    return BinaryTransferDecision(
+        event_id=event_id,
+        status=BinaryTransferStatus.HOLD,
+        target_candidate_id=None,
+        background_candidate_id=None,
+        selected_hypothesis=None,
+        normalized_margin=0.0,
+        reason="pair_ambiguous",
+        debug={"pair_count": len(pair_decisions)},
+    )
 
 
 def score_binary_merge_events(
@@ -972,14 +1052,14 @@ def evaluate_binary_merge_gate(
         return BinaryGateDecision("GATE_FAILED", "event_detection", False)
     if replay.decision_frame is not None and replay.decision_frame < replay.split_frame:
         return BinaryGateDecision("GATE_FAILED", "target_judge", False)
-    if score.outcome is BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES:
-        return BinaryGateDecision("GATE_FAILED", "candidate_absence", False)
     if replay.hold:
         return BinaryGateDecision(
             "GATE_FAILED",
             _canonical_failure_stage(replay.decision_reason, score.outcome),
             False,
         )
+    if score.outcome is BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES:
+        return BinaryGateDecision("GATE_FAILED", "candidate_absence", False)
     correct_outcomes = {
         BinaryEventOutcome.CORRECT_TRANSFER,
         BinaryEventOutcome.LATE_RECOVERY,
@@ -1205,6 +1285,7 @@ def _evidence_for_frame(
 def _event_replay_from_decisions(
     event: BinaryMergeEventWindow,
     decisions: Sequence[tuple[int, BinaryTransferDecision]],
+    pair_decisions_by_frame: Mapping[int, Sequence[BinaryTransferDecision]] | None = None,
 ) -> BinaryEventReplay:
     resolved = next(
         ((frame_index, decision) for frame_index, decision in decisions if decision.status is BinaryTransferStatus.RESOLVED),
@@ -1212,7 +1293,7 @@ def _event_replay_from_decisions(
     )
     final_decision = decisions[-1][1] if decisions else None
     split_child_ids = {
-        observation.frame_index: tuple(child.candidate_id for child in observation.children)
+        observation.frame_index: _observation_candidate_ids(observation)
         for observation in event.split_observations
     }
     return BinaryEventReplay(
@@ -1233,8 +1314,43 @@ def _event_replay_from_decisions(
             "decisions": tuple(
                 _decision_diagnostic(frame_index, decision) for frame_index, decision in decisions
             ),
+            "pair_hypotheses": {
+                observation.frame_index: tuple(
+                    _pair_hypothesis_diagnostic(pair) for pair in observation.pair_hypotheses
+                )
+                for observation in event.split_observations
+            },
+            "pair_decisions": tuple(
+                {
+                    "frame_index": frame_index,
+                    "decisions": tuple(
+                        _decision_diagnostic(frame_index, decision)
+                        for decision in pair_decisions
+                    ),
+                }
+                for frame_index, pair_decisions in (pair_decisions_by_frame or {}).items()
+            ),
         },
     )
+
+
+def _observation_candidate_ids(observation: BinarySplitObservation) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            cluster.candidate.candidate_id
+            for pair in observation.pair_hypotheses
+            for cluster in pair.clusters
+        )
+    )
+
+
+def _pair_hypothesis_diagnostic(pair: CandidatePairHypothesis) -> dict[str, object]:
+    return {
+        "candidate_ids": tuple(cluster.candidate.candidate_id for cluster in pair.clusters),
+        "target_residual": pair.target_residual,
+        "background_residual": pair.background_residual,
+        "parent_residual": pair.parent_residual,
+    }
 
 
 def _candidate_rows_by_frame(rows: Sequence[dict[str, Any]]) -> dict[int, tuple[Candidate, ...]]:
@@ -1381,6 +1497,8 @@ def _canonical_failure_stage(
         "missing_merge_parent",
     }:
         return "candidate_normalization"
+    if "ambiguous" in reason:
+        return "ambiguity"
     if outcome is BinaryEventOutcome.TARGET_NOT_IN_CANDIDATES:
         return "candidate_absence"
     if outcome in {
@@ -1392,8 +1510,6 @@ def _canonical_failure_stage(
         return "background_judge"
     if "ancestry" in reason:
         return "ancestry"
-    if "ambiguous" in reason:
-        return "ambiguity"
     return "target_judge"
 
 
