@@ -130,6 +130,14 @@ class CharScanner(Scanner):
         """맵별 HSV 오버라이드 (C set_hsv_override)."""
         self._lo, self._hi = lower, upper
 
+    def set_filters(self, lower, upper, min_area: float | None = None, max_area: float | None = None) -> None:
+        """HSV와 점 크기 필터를 함께 갱신한다."""
+        self._lo, self._hi = lower, upper
+        if min_area is not None:
+            self._min_area = float(min_area)
+        if max_area is not None:
+            self._max_area = float(max_area)
+
     def sample(self) -> tuple[tuple[int, int] | None, float | None]:
         with self._position_lock:
             return self._last_position, self._last_position_at

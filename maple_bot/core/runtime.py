@@ -143,6 +143,11 @@ class RuntimeConfig:
     game_window_title: str = ""
     coord_anchor: list | None = None      # ?곸뿭 吏???쒖젏 李??먯젏 [ox, oy]
     char_rgb: tuple | None = None          # 誘몃땲留?罹먮┃??????RGB). None?대㈃ 湲곕낯 ?몃옉
+    char_h_tol: int = 10
+    char_s_min: int = 100
+    char_v_min: int = 200
+    char_area_min: float = 3.0
+    char_area_max: float = 100.0
     # 紐ъ뒪??媛먯?(image 紐⑤뱶, B 硫붿빱?덉쬁: ?됰꽕??諛뺤뒪 ??紐ъ뒪??
     hunt_mode: str = "key"
     name_template: str = ""        # ?됰꽕???쒗뵆由?寃쎈줈
@@ -345,8 +350,18 @@ class BotRuntime:
         # ?ㅼ젙??罹먮┃?곗깋(char_r/g/b)???먯뒯??HSV濡?媛먯???諛섏쁺(誘몃땲留??몃????몄떇瑜졻넁)
         if config.char_rgb:
             from core.sensing.char_scanner import hsv_range_from_rgb
-            lo, hi = hsv_range_from_rgb(*config.char_rgb)
-            self.char_scanner.set_hsv(lo, hi)
+            lo, hi = hsv_range_from_rgb(
+                *config.char_rgb,
+                h_tol=int(getattr(config, "char_h_tol", 10)),
+                s_min=int(getattr(config, "char_s_min", 100)),
+                v_min=int(getattr(config, "char_v_min", 200)),
+            )
+            self.char_scanner.set_filters(
+                lo,
+                hi,
+                min_area=float(getattr(config, "char_area_min", 3.0)),
+                max_area=float(getattr(config, "char_area_max", 100.0)),
+            )
         self.combat = Combat(
             self.humanizer,
             hp_rule=config.hp_rule,

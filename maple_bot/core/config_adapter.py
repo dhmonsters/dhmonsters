@@ -157,7 +157,13 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     forced = {
         "enabled": True,
         "use_fixed_minimap_region": True,
-        "fixed_minimap_region": {"left": 38, "top": 129, "width": 172, "height": 103},
+        "fixed_minimap_region": {
+            "x_ratio": 38 / 1366,
+            "y_ratio": 129 / 768,
+            "w_ratio": 172 / 1366,
+            "h_ratio": 103 / 768,
+            "base_region": [38, 129, 172, 103],
+        },
         "attack_key": "end",
         "teleport_key": "x",
         "attack_hold_sec": 0.9,
@@ -226,7 +232,13 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
     forced = {
         "enabled": True,
         "use_fixed_minimap_region": True,
-        "fixed_minimap_region": {"left": 38, "top": 129, "width": 172, "height": 103},
+        "fixed_minimap_region": {
+            "x_ratio": 38 / 1366,
+            "y_ratio": 129 / 768,
+            "w_ratio": 172 / 1366,
+            "h_ratio": 103 / 768,
+            "base_region": [38, 129, 172, 103],
+        },
         "attack_key": "end",
         "teleport_key": "x",
         "jump_key": str(mm.get("jump_key", "alt") or "alt"),
@@ -426,16 +438,19 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         fixed_rednose_enabled
         and isinstance(fixed_rednose_mm, dict)
     ):
-        minimap_region = {
-            "left": int(fixed_rednose_mm.get("left", minimap_region["left"])),
-            "top": int(fixed_rednose_mm.get("top", minimap_region["top"])),
-            "width": int(fixed_rednose_mm.get("width", minimap_region["width"])),
-            "height": int(fixed_rednose_mm.get("height", minimap_region["height"])),
-        }
-        rednose2_profile["minimap_width"] = minimap_region["width"]
-        rednose2_profile["minimap_height"] = minimap_region["height"]
-        rednose3_profile["minimap_width"] = minimap_region["width"]
-        rednose3_profile["minimap_height"] = minimap_region["height"]
+        if fixed_rednose_mm.get("x_ratio") is not None:
+            minimap_region = dict(fixed_rednose_mm)
+        else:
+            minimap_region = {
+                "left": int(fixed_rednose_mm.get("left", minimap_region["left"])),
+                "top": int(fixed_rednose_mm.get("top", minimap_region["top"])),
+                "width": int(fixed_rednose_mm.get("width", minimap_region["width"])),
+                "height": int(fixed_rednose_mm.get("height", minimap_region["height"])),
+            }
+            rednose2_profile["minimap_width"] = minimap_region["width"]
+            rednose2_profile["minimap_height"] = minimap_region["height"]
+            rednose3_profile["minimap_width"] = minimap_region["width"]
+            rednose3_profile["minimap_height"] = minimap_region["height"]
     junk_sell = d.get("settings2", {}).get("junk_sell", {}) or {}
 
     return RuntimeConfig(
@@ -444,6 +459,11 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         game_window_title=game_window_title,
         coord_anchor=d.get("coord_anchor"),
         char_rgb=char_rgb,
+        char_h_tol=int(mm.get("char_h_tol", 10)),
+        char_s_min=int(mm.get("char_s_min", 100)),
+        char_v_min=int(mm.get("char_v_min", 200)),
+        char_area_min=float(mm.get("char_area_min", 3)),
+        char_area_max=float(mm.get("char_area_max", 100)),
         floors=_floors(zones),
         route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
                if isinstance(b, dict) and "type" in b],

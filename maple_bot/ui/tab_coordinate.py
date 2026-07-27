@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QListWidget,
     QLineEdit, QFileDialog, QComboBox, QRadioButton,
     QButtonGroup, QScrollArea, QMessageBox, QCheckBox,
-    QDialog, QDialogButtonBox,
+    QDialog, QDialogButtonBox, QSlider,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor
@@ -65,7 +65,7 @@ class _ZoneEditDialog(QDialog):
         self.spin_sweeps.setSingleStep(0.5)
         self.spin_sweeps.setDecimals(1)
         self.spin_sweeps.setValue(float(zone.sweeps))
-        self.spin_sweeps.setToolTip("0 = ?듦낵 (?щ깷 ?놁씠 利됱떆 ?ㅼ쓬 痢?, 0.5 ?⑥쐞 媛??)
+        self.spin_sweeps.setToolTip("0 = 통과, 0.5 단위 입력 가능")
         self.spin_sweeps.setFixedWidth(70)
         row_sw.addWidget(self.spin_sweeps)
         row_sw.addWidget(QLabel("?? (0=?듦낵, 0.5 ?⑥쐞)"))
@@ -155,7 +155,7 @@ class _RopeEditDialog(QDialog):
         self._approach_grp = QButtonGroup(self)
         self.rb_left  = QRadioButton("?쇱そ")
         self.rb_both  = QRadioButton("?묒そ")
-        self.rb_right = QRadioButton("?ㅻⅨ履?)
+        self.rb_right = QRadioButton("오른쪽")
         for rb in [self.rb_left, self.rb_both, self.rb_right]:
             self._approach_grp.addButton(rb)
             row_ap.addWidget(rb)
@@ -166,7 +166,7 @@ class _RopeEditDialog(QDialog):
 
         # ?먰봽 ?ㅽ봽??
         row_off = QHBoxLayout()
-        row_off.addWidget(QLabel("?먰봽 ?ㅽ봽??))
+        row_off.addWidget(QLabel("점프 거리"))
         self.spin_offset = QSpinBox()
         self.spin_offset.setRange(1, 50)
         self.spin_offset.setValue(rope.jump_offset)
@@ -184,7 +184,7 @@ class _RopeEditDialog(QDialog):
         self.dspin_climb.setSingleStep(0.1)
         self.dspin_climb.setDecimals(1)
         self.dspin_climb.setValue(rope.climb_sec)
-        self.dspin_climb.setSuffix(" 珥?)
+        self.dspin_climb.setSuffix(" 초")
         self.dspin_climb.setFixedWidth(85)
         self.dspin_climb.setToolTip("諛㏃쨪???꾩쟾???ㅻⅤ????嫄몃━???쒓컙")
         row_cs.addWidget(self.dspin_climb)
@@ -324,29 +324,29 @@ class TabCoordinate(QWidget):
 
     # ?? 1. ?щ깷???꾨━????????????????????????????????????????????????
     def _build_preset_group(self) -> QGroupBox:
-        group = QGroupBox("?щ깷???꾨━??)
+        group = QGroupBox("사냥터 프리셋")
         layout = QVBoxLayout(group)
 
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("?대쫫"))
+        row1.addWidget(QLabel("이름"))
         self.edit_preset_name = QLineEdit()
-        self.edit_preset_name.setPlaceholderText("?щ깷???대쫫 ?낅젰")
+        self.edit_preset_name.setPlaceholderText("사냥터 이름 입력")
         row1.addWidget(self.edit_preset_name)
-        btn_save = QPushButton("???)
+        btn_save = QPushButton("저장")
         btn_save.setFixedWidth(55)
         btn_save.clicked.connect(self._save_preset)
         row1.addWidget(btn_save)
         layout.addLayout(row1)
 
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("遺덈윭?ㅺ린"))
+        row2.addWidget(QLabel("불러오기"))
         self.combo_preset = QComboBox()
         self.combo_preset.setMinimumWidth(150)
         row2.addWidget(self.combo_preset)
-        btn_load = QPushButton("遺덈윭?ㅺ린")
+        btn_load = QPushButton("불러오기")
         btn_load.setFixedWidth(70)
         btn_load.clicked.connect(self._load_preset)
-        btn_del = QPushButton("??젣")
+        btn_del = QPushButton("삭제")
         btn_del.setFixedWidth(50)
         btn_del.clicked.connect(self._delete_preset)
         row2.addWidget(btn_load)
@@ -358,16 +358,16 @@ class TabCoordinate(QWidget):
 
     # ?? 2. 誘몃땲留??ㅼ젙 ????????????????????????????????????????????????
     def _build_minimap_group(self) -> QGroupBox:
-        group = QGroupBox("誘몃땲留??ㅼ젙")
+        group = QGroupBox("미니맵 설정")
         layout = QVBoxLayout(group)
 
         # ?쒕옒洹?+ ?⑥텞??
         drag_row = QHBoxLayout()
-        btn_drag = QPushButton("?쒕옒洹몃줈 誘몃땲留??곸뿭 吏??)
+        btn_drag = QPushButton("드래그로 미니맵 영역 지정")
         btn_drag.clicked.connect(self._select_minimap_region)
         drag_row.addWidget(btn_drag)
         drag_row.addSpacing(8)
-        drag_row.addWidget(QLabel("?⑥텞??))
+        drag_row.addWidget(QLabel("단축키"))
         self.btn_mm_hotkey = HotkeyCapture("f11", self._apply_mm_hotkey)
         self.lbl_mm_hk = QLabel("")
         drag_row.addWidget(self.btn_mm_hotkey)
@@ -377,11 +377,11 @@ class TabCoordinate(QWidget):
 
         # ?꾩튂 / ?ш린
         pos_row = QHBoxLayout()
-        pos_row.addWidget(QLabel("?꾩튂/?ш린"))
+        pos_row.addWidget(QLabel("위치/크기"))
         self.spin_rx = QSpinBox(); self.spin_rx.setRange(0, 9999); self.spin_rx.setPrefix("X ")
         self.spin_ry = QSpinBox(); self.spin_ry.setRange(0, 9999); self.spin_ry.setPrefix("Y ")
-        self.spin_rw = QSpinBox(); self.spin_rw.setRange(1, 2000); self.spin_rw.setPrefix("?덈퉬 "); self.spin_rw.setValue(200)
-        self.spin_rh = QSpinBox(); self.spin_rh.setRange(1, 2000); self.spin_rh.setPrefix("?믪씠 "); self.spin_rh.setValue(120)
+        self.spin_rw = QSpinBox(); self.spin_rw.setRange(1, 2000); self.spin_rw.setPrefix("너비 "); self.spin_rw.setValue(200)
+        self.spin_rh = QSpinBox(); self.spin_rh.setRange(1, 2000); self.spin_rh.setPrefix("높이 "); self.spin_rh.setValue(120)
         for w in [self.spin_rx, self.spin_ry, self.spin_rw, self.spin_rh]:
             w.setFixedWidth(90); pos_row.addWidget(w)
         pos_row.addStretch()
@@ -389,26 +389,60 @@ class TabCoordinate(QWidget):
 
         # 罹먮┃???꾪듃 ??(?몃???湲곕낯: 255,255,0)
         color_row = QHBoxLayout()
-        color_row.addWidget(QLabel("罹먮┃????))
+        color_row.addWidget(QLabel("캐릭터 색"))
         self.spin_cr = QSpinBox(); self.spin_cr.setRange(0,255); self.spin_cr.setPrefix("R "); self.spin_cr.setValue(255)
         self.spin_cg = QSpinBox(); self.spin_cg.setRange(0,255); self.spin_cg.setPrefix("G "); self.spin_cg.setValue(255)
         self.spin_cb = QSpinBox(); self.spin_cb.setRange(0,255); self.spin_cb.setPrefix("B "); self.spin_cb.setValue(0)
-        self.spin_tol = QSpinBox(); self.spin_tol.setRange(1,100); self.spin_tol.setPrefix("?덉슜 "); self.spin_tol.setValue(40)
+        self.spin_tol = QSpinBox(); self.spin_tol.setRange(1,100); self.spin_tol.setPrefix("허용 "); self.spin_tol.setValue(40)
         for w in [self.spin_cr, self.spin_cg, self.spin_cb, self.spin_tol]:
             w.setFixedWidth(90); color_row.addWidget(w)
-        btn_eyedrop = QPushButton("?ㅽ룷?대뱶")
+        btn_eyedrop = QPushButton("스포이드")
         btn_eyedrop.setFixedWidth(70)
-        btn_eyedrop.setToolTip("?대┃ ??誘몃땲留듭쓽 罹먮┃???꾪듃瑜??대┃???됱긽???먮룞?쇰줈 媛?몄샃?덈떎")
+        btn_eyedrop.setToolTip("미니맵의 캐릭터 점을 클릭해 색상을 가져옵니다")
         btn_eyedrop.clicked.connect(self._pick_char_color)
         color_row.addWidget(btn_eyedrop)
         color_row.addStretch()
         layout.addLayout(color_row)
 
+        detect_group = QGroupBox("캐릭터 색검출 보정")
+        detect_layout = QVBoxLayout(detect_group)
+        detect_desc = QLabel(
+            "미검출이면 H 범위나 V 최소값을 조절하세요. 배경을 잡으면 S/V 최소값이나 점 크기 최대값을 올리면 됩니다."
+        )
+        detect_desc.setWordWrap(True)
+        detect_layout.addWidget(detect_desc)
+
+        def _add_slider(label: str, attr: str, min_v: int, max_v: int, value: int, suffix: str = ""):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(min_v, max_v)
+            slider.setValue(value)
+            spin = QSpinBox()
+            spin.setRange(min_v, max_v)
+            spin.setValue(value)
+            spin.setSuffix(suffix)
+            spin.setFixedWidth(80)
+            slider.valueChanged.connect(spin.setValue)
+            spin.valueChanged.connect(slider.setValue)
+            row.addWidget(slider, 1)
+            row.addWidget(spin)
+            detect_layout.addLayout(row)
+            setattr(self, f"slider_{attr}", slider)
+            setattr(self, f"spin_{attr}", spin)
+
+        _add_slider("H 색상 범위", "char_h_tol", 2, 30, 10)
+        _add_slider("S 채도 최소", "char_s_min", 40, 255, 100)
+        _add_slider("V 밝기 최소", "char_v_min", 80, 255, 200)
+        _add_slider("점 크기 최소", "char_area_min", 1, 80, 3)
+        _add_slider("점 크기 최대", "char_area_max", 10, 250, 100)
+        layout.addWidget(detect_group)
+
         # ?꾩튂 ?뺤씤
         pos_check = QHBoxLayout()
-        btn_pos = QPushButton("?꾩옱 ?꾩튂 醫뚰몴 ?뺤씤")
+        btn_pos = QPushButton("현재 위치 좌표 확인")
         btn_pos.clicked.connect(self._fetch_pos)
-        self.lbl_pos = QLabel("?꾩튂: -")
+        self.lbl_pos = QLabel("위치: -")
         self.lbl_pos.setMinimumWidth(160)
         pos_check.addWidget(btn_pos)
         pos_check.addWidget(self.lbl_pos)
@@ -419,16 +453,16 @@ class TabCoordinate(QWidget):
 
     # ?? 3. 援ъ뿭 ?ㅼ젙 ??????????????????????????????????????????????????
     def _build_zone_group(self) -> QGroupBox:
-        group = QGroupBox("援ъ뿭 ?ㅼ젙 (痢듬퀎 ?대룞 踰붿쐞)")
+        group = QGroupBox("구역 설정 (층별 이동 범위)")
         layout = QVBoxLayout(group)
 
         # ?쒕옒洹몃줈 援ъ뿭 吏??(誘몃땲留??꾩뿉???쒕옒洹????먮룞 蹂??
         drag_row = QHBoxLayout()
-        btn_drag_zone = QPushButton("?쒕옒洹몃줈 援ъ뿭 吏??)
+        btn_drag_zone = QPushButton("드래그로 구역 지정")
         btn_drag_zone.clicked.connect(self._select_zone_region)
         drag_row.addWidget(btn_drag_zone)
         drag_row.addSpacing(8)
-        drag_row.addWidget(QLabel("?⑥텞??))
+        drag_row.addWidget(QLabel("단축키"))
         self.btn_zone_hotkey = HotkeyCapture("f12", self._apply_zone_hotkey)
         self.lbl_zone_hk = QLabel("")
         drag_row.addWidget(self.btn_zone_hotkey)
@@ -438,12 +472,12 @@ class TabCoordinate(QWidget):
 
         # 寃쎄퀎 ?쒖떆 (?쒕옒洹??먮뒗 踰꾪듉?쇰줈 梨꾩썙吏?
         boundary = QHBoxLayout()
-        btn_left = QPushButton("???쇱そ 寃쎄퀎")
-        btn_right = QPushButton("???ㅻⅨ履?寃쎄퀎")
+        btn_left = QPushButton("← 왼쪽 경계")
+        btn_right = QPushButton("오른쪽 경계 →")
         btn_left.clicked.connect(self._set_left)
         btn_right.clicked.connect(self._set_right)
-        self.lbl_left = QLabel("?쇱そ X: -")
-        self.lbl_right = QLabel("?ㅻⅨ履?X: -")
+        self.lbl_left = QLabel("왼쪽 X: -")
+        self.lbl_right = QLabel("오른쪽 X: -")
         boundary.addWidget(btn_left); boundary.addWidget(self.lbl_left)
         boundary.addSpacing(8)
         boundary.addWidget(btn_right); boundary.addWidget(self.lbl_right)
@@ -452,41 +486,41 @@ class TabCoordinate(QWidget):
 
         # Y 踰붿쐞 / ?대쫫 / ?뺣났 ?잛닔
         opt = QHBoxLayout()
-        opt.addWidget(QLabel("Y 踰붿쐞"))
-        self.spin_ymin = QSpinBox(); self.spin_ymin.setRange(0, 9999); self.spin_ymin.setPrefix("理쒖냼 ")
-        self.spin_ymax = QSpinBox(); self.spin_ymax.setRange(0, 9999); self.spin_ymax.setPrefix("理쒕? "); self.spin_ymax.setValue(9999)
+        opt.addWidget(QLabel("Y 범위"))
+        self.spin_ymin = QSpinBox(); self.spin_ymin.setRange(0, 9999); self.spin_ymin.setPrefix("최소 ")
+        self.spin_ymax = QSpinBox(); self.spin_ymax.setRange(0, 9999); self.spin_ymax.setPrefix("최대 "); self.spin_ymax.setValue(9999)
         for w in [self.spin_ymin, self.spin_ymax]:
             w.setFixedWidth(90); opt.addWidget(w)
         opt.addSpacing(8)
-        opt.addWidget(QLabel("?대쫫"))
-        self.edit_zone_name = QLineEdit("1痢?); self.edit_zone_name.setFixedWidth(70)
+        opt.addWidget(QLabel("이름"))
+        self.edit_zone_name = QLineEdit("1층"); self.edit_zone_name.setFixedWidth(70)
         opt.addWidget(self.edit_zone_name)
         opt.addSpacing(8)
-        opt.addWidget(QLabel("?뺣났"))
+        opt.addWidget(QLabel("왕복"))
         self.spin_zone_sweeps = QDoubleSpinBox()
         self.spin_zone_sweeps.setRange(0, 99)
         self.spin_zone_sweeps.setSingleStep(0.5)
         self.spin_zone_sweeps.setDecimals(1)
         self.spin_zone_sweeps.setValue(2.0)
         self.spin_zone_sweeps.setFixedWidth(65)
-        self.spin_zone_sweeps.setToolTip("痢듬퀎 ?щ깷 ????痢듭뿉???뺣났???잛닔 (0 = ?듦낵, 0.5 ?⑥쐞)")
+        self.spin_zone_sweeps.setToolTip("이 구역에서 왕복할 횟수입니다. 0은 통과입니다.")
         opt.addWidget(self.spin_zone_sweeps)
-        opt.addWidget(QLabel("??))
+        opt.addWidget(QLabel("회"))
         opt.addStretch()
         layout.addLayout(opt)
 
         # 怨듦꺽 ?⑦꽩 ?좏깮
         pat_row = QHBoxLayout()
-        pat_row.addWidget(QLabel("怨듦꺽 ?⑦꽩"))
+        pat_row.addWidget(QLabel("공격 패턴"))
         self.cmb_zone_pattern = QComboBox()
         self.cmb_zone_pattern.setMinimumWidth(120)
         self.cmb_zone_pattern.setToolTip(
-            "??援ъ뿭?먯꽌 ?ъ슜????諛섎났 ?⑦꽩???좏깮?⑸땲??\n"
-            "?щ깷 ??뿉??'?꾨━?뗭쑝濡???? ???ш린???좏깮?섏꽭??"
+            "이 구역에서 사용할 반복 공격 패턴을 선택합니다.\n"
+            "전투 탭에서 프리셋으로 저장한 뒤 여기서 선택하세요."
         )
-        btn_refresh_pat = QPushButton("?봽")
+        btn_refresh_pat = QPushButton("새로고침")
         btn_refresh_pat.setFixedWidth(30)
-        btn_refresh_pat.setToolTip("?щ깷 ??뿉????ν븳 ?⑦꽩 紐⑸줉???덈줈怨좎묠?⑸땲??")
+        btn_refresh_pat.setToolTip("전투 탭에 저장한 패턴 목록을 새로고침합니다.")
         btn_refresh_pat.clicked.connect(self._refresh_pattern_combo)
         pat_row.addWidget(self.cmb_zone_pattern)
         pat_row.addWidget(btn_refresh_pat)
@@ -496,25 +530,25 @@ class TabCoordinate(QWidget):
 
         # ?쒕뜡 ?꾪솚 ?ъ쑀 ??寃쎄퀎 吏곸쟾 ?꾩쓽 嫄곕━?먯꽌 諛⑺뼢 ?꾪솚
         margin_row = QHBoxLayout()
-        margin_row.addWidget(QLabel("?쒕뜡 ?꾪솚 ?ъ쑀"))
+        margin_row.addWidget(QLabel("랜덤 전환 여유"))
         self.spin_margin_min = QSpinBox()
         self.spin_margin_min.setRange(0, 200)
-        self.spin_margin_min.setPrefix("理쒖냼 ")
+        self.spin_margin_min.setPrefix("최소 ")
         self.spin_margin_min.setSuffix(" px")
         self.spin_margin_min.setFixedWidth(95)
         self.spin_margin_max = QSpinBox()
         self.spin_margin_max.setRange(0, 200)
-        self.spin_margin_max.setPrefix("理쒕? ")
+        self.spin_margin_max.setPrefix("최대 ")
         self.spin_margin_max.setSuffix(" px")
         self.spin_margin_max.setFixedWidth(95)
         self.spin_margin_max.setValue(10)
         margin_row.addWidget(self.spin_margin_min)
         margin_row.addWidget(self.spin_margin_max)
-        margin_row.addWidget(QLabel("(0?대㈃ ??긽 ?앷퉴吏)"))
+        margin_row.addWidget(QLabel("(0이면 끝까지 이동)"))
         margin_row.addStretch()
         layout.addLayout(margin_row)
 
-        btn_add = QPushButton("+ 援ъ뿭 異붽?")
+        btn_add = QPushButton("+ 구역 추가")
         btn_add.clicked.connect(self._add_zone)
         layout.addWidget(btn_add)
 
@@ -523,9 +557,9 @@ class TabCoordinate(QWidget):
         layout.addWidget(self.zone_list)
 
         zone_btn_row = QHBoxLayout()
-        btn_del = QPushButton("??젣")
+        btn_del = QPushButton("삭제")
         btn_del.clicked.connect(self._delete_zone)
-        btn_zone_save = QPushButton("?꾨━?뗭뿉 ???)
+        btn_zone_save = QPushButton("프리셋에 저장")
         btn_zone_save.clicked.connect(self.save_to_config)
         zone_btn_row.addWidget(btn_del)
         zone_btn_row.addWidget(btn_zone_save)
@@ -536,21 +570,21 @@ class TabCoordinate(QWidget):
 
     # ?? 4. 諛㏃쨪 ?ㅼ젙 ??????????????????????????????????????????????????
     def _build_rope_group(self) -> QGroupBox:
-        group = QGroupBox("諛㏃쨪 / 濡쒗봽 ?ㅼ젙")
+        group = QGroupBox("밧줄 / 로프 설정")
         layout = QVBoxLayout(group)
 
         note = QLabel(
-            "諛㏃쨪 X 醫뚰몴: 遊뉗씠 寃쎄퀎???꾨떖?섎㈃ 諛㏃쨪 ?꾩튂濡??대룞???먰봽 ???ㅻ쫭?덈떎.\n"
-            "?먰봽 諛⑺뼢? 諛㏃쨪 湲곗??쇰줈 ?대뒓 履쎌뿉???먰봽?좎? ?좏깮?⑸땲??"
+            "밧줄 X 좌표에 도착하면 점프와 위 방향키로 올라갑니다.\n"
+            "점프 방향은 밧줄 기준 어느 쪽에서 접근할지 선택합니다."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
 
         # ?꾩옱 ?꾩튂濡?諛㏃쨪 X ?ㅼ젙
         set_row = QHBoxLayout()
-        btn_set_rope = QPushButton("?꾩옱 ?꾩튂瑜?諛㏃쨪濡??ㅼ젙")
+        btn_set_rope = QPushButton("현재 위치를 밧줄로 설정")
         btn_set_rope.clicked.connect(self._set_rope_from_pos)
-        self.lbl_rope_x = QLabel("諛㏃쨪 X: -")
+        self.lbl_rope_x = QLabel("밧줄 X: -")
         set_row.addWidget(btn_set_rope)
         set_row.addWidget(self.lbl_rope_x)
         set_row.addStretch()
@@ -558,28 +592,28 @@ class TabCoordinate(QWidget):
 
         # ?대쫫 / ?먰봽 諛⑺뼢 / ?ㅽ봽??
         opt_row = QHBoxLayout()
-        opt_row.addWidget(QLabel("?대쫫"))
-        self.edit_rope_name = QLineEdit("諛㏃쨪1"); self.edit_rope_name.setFixedWidth(70)
+        opt_row.addWidget(QLabel("이름"))
+        self.edit_rope_name = QLineEdit("밧줄1"); self.edit_rope_name.setFixedWidth(70)
         opt_row.addWidget(self.edit_rope_name)
         opt_row.addSpacing(12)
 
-        opt_row.addWidget(QLabel("?먰봽 ??))
+        opt_row.addWidget(QLabel("점프 키"))
         self.edit_jump_key = QLineEdit("alt"); self.edit_jump_key.setFixedWidth(55)
-        self.edit_jump_key.setToolTip("諛㏃쨪 ?щ씪媛????ъ슜???먰봽 ??(?? alt, space)")
+        self.edit_jump_key.setToolTip("밧줄을 탈 때 사용할 점프 키입니다. 예: alt, space")
         opt_row.addWidget(self.edit_jump_key)
         opt_row.addSpacing(12)
 
-        opt_row.addWidget(QLabel("?먰봽 諛⑺뼢"))
+        opt_row.addWidget(QLabel("점프 방향"))
         self._rope_approach_group = QButtonGroup(self)
-        self.radio_left  = QRadioButton("?쇱そ")
-        self.radio_both  = QRadioButton("?묒そ"); self.radio_both.setChecked(True)
-        self.radio_right = QRadioButton("?ㅻⅨ履?)
+        self.radio_left  = QRadioButton("왼쪽")
+        self.radio_both  = QRadioButton("양쪽"); self.radio_both.setChecked(True)
+        self.radio_right = QRadioButton("오른쪽")
         for r in [self.radio_left, self.radio_both, self.radio_right]:
             self._rope_approach_group.addButton(r)
             opt_row.addWidget(r)
         opt_row.addSpacing(12)
 
-        opt_row.addWidget(QLabel("?ㅽ봽??))
+        opt_row.addWidget(QLabel("점프 거리"))
         self.spin_rope_offset = QSpinBox()
         self.spin_rope_offset.setRange(1, 50); self.spin_rope_offset.setValue(15)
         self.spin_rope_offset.setSuffix(" px"); self.spin_rope_offset.setFixedWidth(75)
@@ -589,21 +623,21 @@ class TabCoordinate(QWidget):
 
         # ?ㅻⅤ湲??쒓컙 ?ㅼ젙
         climb_row = QHBoxLayout()
-        climb_row.addWidget(QLabel("?ㅻⅤ湲??쒓컙"))
+        climb_row.addWidget(QLabel("오르기 시간"))
         self.dspin_climb_sec = QDoubleSpinBox()
         self.dspin_climb_sec.setRange(0.3, 30.0)
         self.dspin_climb_sec.setSingleStep(0.1)
         self.dspin_climb_sec.setDecimals(1)
         self.dspin_climb_sec.setValue(2.5)
-        self.dspin_climb_sec.setSuffix(" 珥?)
+        self.dspin_climb_sec.setSuffix(" 초")
         self.dspin_climb_sec.setFixedWidth(85)
-        self.dspin_climb_sec.setToolTip("諛㏃쨪???꾩쟾???ㅻⅤ????嫄몃━???쒓컙 (留듬쭏???ㅻ쫫)")
+        self.dspin_climb_sec.setToolTip("밧줄을 완전히 오르는 데 걸리는 시간입니다.")
         climb_row.addWidget(self.dspin_climb_sec)
-        climb_row.addWidget(QLabel("(諛㏃쨪 湲몄씠??留욊쾶 議곗젙)"))
+        climb_row.addWidget(QLabel("(밧줄 길이에 맞게 조정)"))
         climb_row.addStretch()
         layout.addLayout(climb_row)
 
-        btn_add_rope = QPushButton("+ 諛㏃쨪 異붽?")
+        btn_add_rope = QPushButton("+ 밧줄 추가")
         btn_add_rope.clicked.connect(self._add_rope)
         layout.addWidget(btn_add_rope)
 
@@ -612,9 +646,9 @@ class TabCoordinate(QWidget):
         layout.addWidget(self.rope_list)
 
         rope_btn_row = QHBoxLayout()
-        btn_del_rope = QPushButton("??젣")
+        btn_del_rope = QPushButton("삭제")
         btn_del_rope.clicked.connect(self._delete_rope)
-        btn_rope_save = QPushButton("?꾨━?뗭뿉 ???)
+        btn_rope_save = QPushButton("프리셋에 저장")
         btn_rope_save.clicked.connect(self.save_to_config)
         rope_btn_row.addWidget(btn_del_rope)
         rope_btn_row.addWidget(btn_rope_save)
@@ -625,20 +659,20 @@ class TabCoordinate(QWidget):
 
     # ?? 5. 痢듬퀎 ?щ깷 ?ㅼ젙 ?????????????????????????????????????????????
     def _build_floor_hunt_group(self) -> QGroupBox:
-        group = QGroupBox("痢듬퀎 ?щ깷")
+        group = QGroupBox("층별 사냥")
         layout = QVBoxLayout(group)
 
         # ?쒖꽦??泥댄겕諛뺤뒪
         row0 = QHBoxLayout()
-        self.chk_floor_hunt = QCheckBox("痢듬퀎 ?щ깷 ?쒖꽦??)
+        self.chk_floor_hunt = QCheckBox("층별 사냥 활성화")
         row0.addWidget(self.chk_floor_hunt)
         row0.addStretch()
         layout.addLayout(row0)
 
         # 紐⑤뱶 ?좏깮
         mode_row = QHBoxLayout()
-        self.rb_auto  = QRadioButton("?먮룞 ?뺣났 (1????????)")
-        self.rb_route = QRadioButton("?섎룞 猷⑦듃 (吏곸젒 ?쒖꽌 吏??")
+        self.rb_auto  = QRadioButton("자동 왕복")
+        self.rb_route = QRadioButton("수동 루트")
         self.rb_auto.setChecked(True)
         mode_row.addWidget(self.rb_auto)
         mode_row.addWidget(self.rb_route)
@@ -650,7 +684,7 @@ class TabCoordinate(QWidget):
         route_lay = QVBoxLayout(self._route_widget)
         route_lay.setContentsMargins(0, 4, 0, 0)
 
-        note = QLabel("?쒖꽌?濡??대룞?⑸땲?? 留덉?留??④퀎 ?꾨즺 ??泥섏쓬遺??諛섎났?⑸땲??")
+        note = QLabel("위에서 아래 순서대로 이동합니다. 마지막 단계 완료 후 처음부터 반복합니다.")
         note.setStyleSheet("color: gray; font-size: 10px;")
         route_lay.addWidget(note)
 
@@ -661,12 +695,12 @@ class TabCoordinate(QWidget):
         list_row.addWidget(self.lst_route)
 
         btn_col = QVBoxLayout()
-        btn_up   = QPushButton("??)
-        btn_down = QPushButton("??)
+        btn_up   = QPushButton("▲")
+        btn_down = QPushButton("▼")
         btn_up.setFixedSize(28, 32)
         btn_down.setFixedSize(28, 32)
-        btn_up.setToolTip("?좏깮 ??ぉ ?꾨줈")
-        btn_down.setToolTip("?좏깮 ??ぉ ?꾨옒濡?)
+        btn_up.setToolTip("선택 항목 위로")
+        btn_down.setToolTip("선택 항목 아래로")
         btn_up.clicked.connect(self._route_step_up)
         btn_down.clicked.connect(self._route_step_down)
         btn_col.addWidget(btn_up)
@@ -676,19 +710,19 @@ class TabCoordinate(QWidget):
         route_lay.addLayout(list_row)
 
         add_row = QHBoxLayout()
-        add_row.addWidget(QLabel("紐⑹쟻吏"))
+        add_row.addWidget(QLabel("목적지"))
         self.cmb_route_zone = QComboBox()
         self.cmb_route_zone.setMinimumWidth(80)
         add_row.addWidget(self.cmb_route_zone)
-        add_row.addWidget(QLabel("諛㏃쨪"))
+        add_row.addWidget(QLabel("밧줄"))
         self.cmb_route_rope = QComboBox()
         self.cmb_route_rope.setMinimumWidth(80)
         add_row.addWidget(self.cmb_route_rope)
-        btn_add_step = QPushButton("+ 異붽?")
+        btn_add_step = QPushButton("+ 추가")
         btn_add_step.setFixedWidth(60)
         btn_add_step.clicked.connect(self._add_route_step)
         add_row.addWidget(btn_add_step)
-        btn_del_step = QPushButton("??젣")
+        btn_del_step = QPushButton("삭제")
         btn_del_step.setFixedWidth(50)
         btn_del_step.clicked.connect(self._del_route_step)
         add_row.addWidget(btn_del_step)
@@ -702,7 +736,7 @@ class TabCoordinate(QWidget):
         # ???踰꾪듉
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_save = QPushButton("???)
+        btn_save = QPushButton("저장")
         btn_save.setFixedWidth(55)
         btn_save.clicked.connect(self._save_floor_hunt)
         btn_row.addWidget(btn_save)
@@ -732,7 +766,7 @@ class TabCoordinate(QWidget):
         to_zone = self.cmb_route_zone.currentText()
         rope    = self.cmb_route_rope.currentText()
         if to_zone and rope:
-            self.lst_route.addItem(f"??{to_zone}  (諛㏃쨪: {rope})")
+            self.lst_route.addItem(f"→ {to_zone}  (밧줄: {rope})")
             # ?꾩씠?쒖뿉 ?곗씠?????
             item = self.lst_route.item(self.lst_route.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, {"to_zone": to_zone, "rope": rope})
@@ -773,49 +807,49 @@ class TabCoordinate(QWidget):
     # ?? ?꾩씠???섏쭛 ??대㉧ ????????????????????????????????????????????
     def _build_pickup_timer_group(self) -> QGroupBox:
         """?꾩씠???섏쭛 ??대㉧ UI."""
-        group = QGroupBox("?꾩씠???섏쭛 ??대㉧")
+        group = QGroupBox("아이템 수집 타이머")
         layout = QVBoxLayout(group)
 
         note = QLabel(
-            "?ㅼ젙??二쇨린留덈떎 ?щ깷???좎떆 硫덉텛怨??섏쭛 猷⑦듃瑜??쒗쉶?섎ŉ ?꾩씠?쒖쓣 以띿뒿?덈떎.\n"
-            "?섏쭛 猷⑦듃???꾨옒?먯꽌 吏곸젒 吏?뺥븯?몄슂 (援ъ뿭 + 諛㏃쨪 議고빀)."
+            "설정한 주기마다 사냥을 잠시 멈추고 수집 루트를 실행합니다.\n"
+            "수집 루트는 아래에서 구역과 밧줄 조합으로 지정합니다."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(note)
 
         row0 = QHBoxLayout()
-        self.chk_pickup = QCheckBox("??대㉧ ?쒖꽦??)
+        self.chk_pickup = QCheckBox("타이머 활성화")
         row0.addWidget(self.chk_pickup)
         row0.addStretch()
         layout.addLayout(row0)
 
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("?섏쭛 二쇨린"))
+        row1.addWidget(QLabel("수집 주기"))
         self.spin_pickup_interval = QSpinBox()
         self.spin_pickup_interval.setRange(10, 600)
         self.spin_pickup_interval.setValue(110)
-        self.spin_pickup_interval.setSuffix(" 珥?)
+        self.spin_pickup_interval.setSuffix(" 초")
         self.spin_pickup_interval.setFixedWidth(80)
         row1.addWidget(self.spin_pickup_interval)
         row1.addSpacing(16)
-        row1.addWidget(QLabel("?쎌뾽 ??))
+        row1.addWidget(QLabel("픽업 키"))
         self.edit_pickup_key = QLineEdit("z")
         self.edit_pickup_key.setFixedWidth(45)
         row1.addWidget(self.edit_pickup_key)
         row1.addSpacing(16)
-        row1.addWidget(QLabel("???좎?"))
+        row1.addWidget(QLabel("키 유지"))
         self.dspin_pickup_hold = QDoubleSpinBox()
         self.dspin_pickup_hold.setRange(0.1, 10.0)
         self.dspin_pickup_hold.setSingleStep(0.1)
         self.dspin_pickup_hold.setValue(1.5)
-        self.dspin_pickup_hold.setSuffix(" 珥?)
+        self.dspin_pickup_hold.setSuffix(" 초")
         self.dspin_pickup_hold.setFixedWidth(75)
         row1.addWidget(self.dspin_pickup_hold)
         row1.addStretch()
         layout.addLayout(row1)
 
-        layout.addWidget(QLabel("?섏쭛 猷⑦듃 (?쒖꽌?濡?諛⑸Ц)"))
+        layout.addWidget(QLabel("수집 루트 (위에서 아래 순서 실행)"))
 
         list_row = QHBoxLayout()
         self.lst_pickup_route = QListWidget()
@@ -823,8 +857,8 @@ class TabCoordinate(QWidget):
         list_row.addWidget(self.lst_pickup_route)
 
         btn_col = QVBoxLayout()
-        btn_pu = QPushButton("??); btn_pu.setFixedSize(28, 32)
-        btn_pd = QPushButton("??); btn_pd.setFixedSize(28, 32)
+        btn_pu = QPushButton("▲"); btn_pu.setFixedSize(28, 32)
+        btn_pd = QPushButton("▼"); btn_pd.setFixedSize(28, 32)
         btn_pu.clicked.connect(self._pickup_step_up)
         btn_pd.clicked.connect(self._pickup_step_down)
         btn_col.addWidget(btn_pu)
@@ -834,17 +868,17 @@ class TabCoordinate(QWidget):
         layout.addLayout(list_row)
 
         add_row = QHBoxLayout()
-        add_row.addWidget(QLabel("紐⑹쟻吏"))
+        add_row.addWidget(QLabel("목적지"))
         self.cmb_pickup_zone = QComboBox()
         self.cmb_pickup_zone.setMinimumWidth(80)
         add_row.addWidget(self.cmb_pickup_zone)
-        add_row.addWidget(QLabel("諛㏃쨪"))
+        add_row.addWidget(QLabel("밧줄"))
         self.cmb_pickup_rope = QComboBox()
         self.cmb_pickup_rope.setMinimumWidth(80)
         add_row.addWidget(self.cmb_pickup_rope)
-        btn_add_pu = QPushButton("+ 異붽?")
+        btn_add_pu = QPushButton("+ 추가")
         btn_add_pu.setFixedWidth(60)
-        btn_del_pu = QPushButton("??젣")
+        btn_del_pu = QPushButton("삭제")
         btn_del_pu.setFixedWidth(50)
         btn_add_pu.clicked.connect(self._add_pickup_step)
         btn_del_pu.clicked.connect(self._del_pickup_step)
@@ -855,7 +889,7 @@ class TabCoordinate(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_save_pu = QPushButton("???)
+        btn_save_pu = QPushButton("저장")
         btn_save_pu.setFixedWidth(55)
         btn_save_pu.clicked.connect(self._save_pickup_timer)
         btn_row.addWidget(btn_save_pu)
@@ -867,7 +901,7 @@ class TabCoordinate(QWidget):
         to_zone = self.cmb_pickup_zone.currentText()
         rope    = self.cmb_pickup_rope.currentText()
         if to_zone and rope:
-            self.lst_pickup_route.addItem(f"??{to_zone}  (諛㏃쨪: {rope})")
+            self.lst_pickup_route.addItem(f"→ {to_zone}  (밧줄: {rope})")
             item = self.lst_pickup_route.item(self.lst_pickup_route.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, {"to_zone": to_zone, "rope": rope})
 
@@ -946,14 +980,14 @@ class TabCoordinate(QWidget):
             "}"
         )
 
-        mode = " [鍮꾩쑉???" if cw > 0 else ""
+        mode = " [비율 저장]" if cw > 0 else ""
         self.lbl_mm_hk.setText(f"({rx},{ry}) {pw}횞{ph}{mode}")
 
     def _apply_mm_hotkey(self, key: str) -> None:
         if not self._hk:
             return
         err = self._hk.register("coord_minimap", key, self._select_minimap_region)
-        self.lbl_mm_hk.setText("?깅줉?? if not err else f"?ㅻ쪟:{err}")
+        self.lbl_mm_hk.setText("등록됨" if not err else f"오류: {err}")
 
     def _select_zone_region(self) -> None:
         """?쒕옒洹??ㅻ쾭?덉씠濡?援ъ뿭??吏?뺥븳?? ?붾㈃ 醫뚰몴瑜?誘몃땲留??곷? 醫뚰몴濡?蹂??"""
@@ -973,8 +1007,8 @@ class TabCoordinate(QWidget):
         y_max   = max(0, py + ph - mm_y)
         self._pending_left_x  = left_x
         self._pending_right_x = right_x
-        self.lbl_left.setText(f"?쇱そ X: {left_x}")
-        self.lbl_right.setText(f"?ㅻⅨ履?X: {right_x}")
+        self.lbl_left.setText(f"왼쪽 X: {left_x}")
+        self.lbl_right.setText(f"오른쪽 X: {right_x}")
         self.spin_ymin.setValue(y_min)
         self.spin_ymax.setValue(y_max)
         self.lbl_zone_hk.setText(f"X {left_x}~{right_x}  Y {y_min}~{y_max}")
@@ -983,7 +1017,7 @@ class TabCoordinate(QWidget):
         if not self._hk:
             return
         err = self._hk.register("coord_zone", key, self._select_zone_region)
-        self.lbl_zone_hk.setText("?깅줉?? if not err else f"?ㅻ쪟:{err}")
+        self.lbl_zone_hk.setText("등록됨" if not err else f"오류: {err}")
 
     def set_hotkey_manager(self, hk) -> None:
         self._hk = hk
@@ -1004,12 +1038,28 @@ class TabCoordinate(QWidget):
         self.spin_cr.setValue(r)
         self.spin_cg.setValue(g)
         self.spin_cb.setValue(b)
-        self.lbl_pos.setText(f"?됱긽 ?곸슜: R{r} G{g} B{b}")
+        self.lbl_pos.setText(f"색상 적용: R{r} G{g} B{b}")
 
     # ?? 罹먮┃???꾩튂 ???????????????????????????????????????????????????
     def _fetch_pos(self) -> None:
         self._sync_minimap_config()
-        pos = self._minimap_reader.get_character_pos()
+        pos = None
+        try:
+            from core.sensing.char_scanner import find_char_in_hsv, hsv_range_from_rgb
+            frame = self._minimap_reader.capture_minimap()
+            area_min = min(self.spin_char_area_min.value(), self.spin_char_area_max.value())
+            area_max = max(self.spin_char_area_min.value(), self.spin_char_area_max.value())
+            lo, hi = hsv_range_from_rgb(
+                self.spin_cr.value(),
+                self.spin_cg.value(),
+                self.spin_cb.value(),
+                h_tol=self.spin_char_h_tol.value(),
+                s_min=self.spin_char_s_min.value(),
+                v_min=self.spin_char_v_min.value(),
+            )
+            pos = find_char_in_hsv(frame, lo, hi, area_min, area_max, previous_position=self._last_pos)
+        except Exception:
+            pos = self._minimap_reader.get_character_pos()
         if pos:
             self._last_pos = pos
             x, y = int(pos[0]), int(pos[1])
@@ -1017,7 +1067,7 @@ class TabCoordinate(QWidget):
             mm_h = max(1, int(self.spin_rh.value()))
             rx = x / mm_w
             ry = y / mm_h
-            text = f"?꾩옱 ?꾩튂: X={x}  Y={y} / ?곷? X={rx:.4f}, Y={ry:.4f}"
+            text = f"현재 위치: X={x}  Y={y} / 상대 X={rx:.4f}, Y={ry:.4f}"
             self.lbl_pos.setText(text)
             try:
                 from PyQt6.QtWidgets import QApplication
@@ -1027,7 +1077,7 @@ class TabCoordinate(QWidget):
             except Exception:
                 pass
         else:
-            self.lbl_pos.setText("?꾩옱 ?꾩튂: 媛먯? ?ㅽ뙣 - 誘몃땲留??곸뿭/罹먮┃?????뺤씤 ?꾩슂")
+            self.lbl_pos.setText("현재 위치: 감지 실패 - H/S/V/점 크기 보정값을 조절해 주세요")
 
     def _sync_minimap_config(self) -> None:
         from core.config_manager import resolve_minimap_coords
@@ -1044,18 +1094,18 @@ class TabCoordinate(QWidget):
     def _set_left(self) -> None:
         if self._last_pos:
             self._pending_left_x = self._last_pos[0]
-            self.lbl_left.setText(f"?쇱そ X: {self._pending_left_x}")
+            self.lbl_left.setText(f"왼쪽 X: {self._pending_left_x}")
 
     def _set_right(self) -> None:
         if self._last_pos:
             self._pending_right_x = self._last_pos[0]
-            self.lbl_right.setText(f"?ㅻⅨ履?X: {self._pending_right_x}")
+            self.lbl_right.setText(f"오른쪽 X: {self._pending_right_x}")
 
     def _refresh_pattern_combo(self) -> None:
         """key_patterns.presets 紐⑸줉??怨듦꺽 ?⑦꽩 肄ㅻ낫諛뺤뒪??梨꾩슫??"""
         current = self.cmb_zone_pattern.currentText()
         self.cmb_zone_pattern.clear()
-        self.cmb_zone_pattern.addItem("(湲곕낯)")
+        self.cmb_zone_pattern.addItem("(기본)")
         presets = self.config.get("key_patterns", "presets") or {}
         for name in sorted(presets.keys()):
             self.cmb_zone_pattern.addItem(name)
@@ -1182,6 +1232,11 @@ class TabCoordinate(QWidget):
             "width": self.spin_rw.value(), "height": self.spin_rh.value(),
             "char_r": self.spin_cr.value(), "char_g": self.spin_cg.value(),
             "char_b": self.spin_cb.value(), "tolerance": self.spin_tol.value(),
+            "char_h_tol": self.spin_char_h_tol.value(),
+            "char_s_min": self.spin_char_s_min.value(),
+            "char_v_min": self.spin_char_v_min.value(),
+            "char_area_min": self.spin_char_area_min.value(),
+            "char_area_max": self.spin_char_area_max.value(),
             "jump_key": self.edit_jump_key.text().strip() or "alt",
             "hotkey_region": self.btn_mm_hotkey.current_key(),
             "hotkey_zone":   self.btn_zone_hotkey.current_key(),
@@ -1226,6 +1281,11 @@ class TabCoordinate(QWidget):
         self.spin_cg.setValue(mm.get("char_g", 255))
         self.spin_cb.setValue(mm.get("char_b", 0))
         self.spin_tol.setValue(mm.get("tolerance", 40))
+        self.spin_char_h_tol.setValue(int(mm.get("char_h_tol", 10)))
+        self.spin_char_s_min.setValue(int(mm.get("char_s_min", 100)))
+        self.spin_char_v_min.setValue(int(mm.get("char_v_min", 200)))
+        self.spin_char_area_min.setValue(int(mm.get("char_area_min", 3)))
+        self.spin_char_area_max.setValue(int(mm.get("char_area_max", 100)))
         self.edit_jump_key.setText(mm.get("jump_key", "alt"))
         self.btn_mm_hotkey.set_key(mm.get("hotkey_region", "f11"))
         self.btn_zone_hotkey.set_key(mm.get("hotkey_zone", "f12"))
@@ -1332,6 +1392,11 @@ class TabCoordinate(QWidget):
             self.spin_cg.setValue(mm.get("char_g", 255))
             self.spin_cb.setValue(mm.get("char_b", 0))
             self.spin_tol.setValue(mm.get("tolerance", 40))
+            self.spin_char_h_tol.setValue(int(mm.get("char_h_tol", 10)))
+            self.spin_char_s_min.setValue(int(mm.get("char_s_min", 100)))
+            self.spin_char_v_min.setValue(int(mm.get("char_v_min", 200)))
+            self.spin_char_area_min.setValue(int(mm.get("char_area_min", 3)))
+            self.spin_char_area_max.setValue(int(mm.get("char_area_max", 100)))
             self.btn_mm_hotkey.set_key(mm.get("hotkey_region", "f11"))
             self.btn_zone_hotkey.set_key(mm.get("hotkey_zone", "f12"))
 

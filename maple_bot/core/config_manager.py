@@ -151,6 +151,8 @@ DEFAULT_CONFIG = {
     "minimap": {
         "region_x": 0, "region_y": 0, "width": 200, "height": 120,
         "char_r": 255, "char_g": 255, "char_b": 255, "tolerance": 30,
+        "char_h_tol": 10, "char_s_min": 100, "char_v_min": 200,
+        "char_area_min": 3, "char_area_max": 100,
         "attack_key": "ctrl", "monster_template": "",
     },
     "zones": [],   # Zone.to_dict() 목록
