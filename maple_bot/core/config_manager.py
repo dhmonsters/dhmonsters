@@ -1,8 +1,9 @@
-# 봇 설정을 JSON 파일로 저장/로드하는 ConfigManager
+﻿# 봇 설정을 JSON 파일로 저장/로드하는 ConfigManager
 import json
 import os
 import sys
 import time
+import copy
 
 
 def _get_config_path() -> str:
@@ -41,8 +42,22 @@ DEFAULT_CONFIG = {
             "close_maple": False,
             "shutdown_pc": False,
             "reconnect_after": False,
-            # ── 고정 기본값: 거짓말탐지기 감지 영역 (절대좌표 — 항상 동일) ──
-            "region": [1126, 297, 296, 130],
+            # ── 고정 기본값: 거짓말탐지기 감지 영역 (게임창 기준 상대좌표) ──
+            "region": {
+                "x_ratio": 0.724219,
+                "y_ratio": 0.491959,
+                "w_ratio": 0.250781,
+                "h_ratio": 0.453947,
+                "source": "00409.png game-client relative lie detector panel",
+            },
+            "template_path": "templates\\lie_detector\\title.png",
+            "threshold": 0.65,
+            "check_interval_sec": 0.2,
+            "cooldown_sec": 10.0,
+            "alert_enabled": False,
+            "tg_enabled": False,
+            "tg_token": "",
+            "tg_chat_id": "",
         },
         "transparent_shape": {
             "enabled": False,
@@ -71,8 +86,20 @@ DEFAULT_CONFIG = {
         "start": "f1",
         "stop":  "f2",
     },
+    "world_map": {
+        "enabled": False,
+        "image_path": "",
+        "image_width": 0,
+        "image_height": 0,
+        "calibration": None,
+        "tracking_policy": "continue_estimated",
+        "migration_completed": False,
+        "legacy_backup_path": "",
+    },
+    "navigation": {"nodes": [], "edges": [], "routes": []},
     "attack": {
         "key":               "ctrl",
+        "sequences":         [],
         "monster_template":  "",
         "monster_folder":    "",     # 몬스터 이미지 폴더 경로 (비우면 monsters/ 루트 사용)
         "jump_before_attack": False,
@@ -100,8 +127,23 @@ DEFAULT_CONFIG = {
         "density_stay":        3,     # 이 마리수 이상이면 멈춰 사냥(밀집)
         "density_leave":       1,     # 이 마리수 이하로 줄면 이동(희소)
         "density_max_dwell_sec": 8.0, # 한 자리 최대 체류(밀집이어도 초과 시 강제 이동)
+        "hunt_area": {"x": 0, "y": 0, "w": 0, "h": 0},
+        "image_trigger": {
+            "enabled": False,
+            "template_path": "",
+            "threshold": 0.8,
+            "check_interval_sec": 0.1,
+            "cooldown_sec": 2.0,
+            "action": {
+                "key": "space",
+                "hold_sec": 0.1,
+                "repeat": 1,
+                "repeat_interval_sec": 0.0,
+                "wait_after_sec": 0.0,
+            },
+        },
     },
-    "hunt_mode": "key",   # "key" | "image" | "coordinate"
+    "hunt_mode": "key",   # "key" | "image"
     "hunt_grounds": {
         "active": "",       # 현재 활성 프리셋 이름
         "presets": {},      # name → {minimap, zones, ropes, attack_key, monster_template}
@@ -109,6 +151,8 @@ DEFAULT_CONFIG = {
     "minimap": {
         "region_x": 0, "region_y": 0, "width": 200, "height": 120,
         "char_r": 255, "char_g": 255, "char_b": 255, "tolerance": 30,
+        "char_h_tol": 10, "char_s_min": 100, "char_v_min": 200,
+        "char_area_min": 3, "char_area_max": 100,
         "attack_key": "ctrl", "monster_template": "",
     },
     "zones": [],   # Zone.to_dict() 목록
@@ -131,12 +175,14 @@ DEFAULT_CONFIG = {
             "enabled": False,
             "threshold": 70,
             "key": "9",
+            "secondary_key": "",
             "cooldown_sec": 3.0,
         },
         "mp_potion": {
             "enabled": False,
             "threshold": 50,
             "key": "0",
+            "secondary_key": "",
             "cooldown_sec": 3.0,
         },
         "potion_count": {
@@ -263,15 +309,101 @@ def _deep_merge(base: dict, override: dict) -> None:
             base[k] = v
 
 
+def _get_bundled_config_path() -> str:
+    """EXE 또는 개발 폴더에 포함된 기본 config.json 경로를 찾는다."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "config.json"))
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(os.path.join(meipass, "config.json"))
+    else:
+        candidates.append("config.json")
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return ""
+
+
+def _load_json_safe(path: str) -> dict:
+    """설정 파일을 읽되 실패하면 빈 dict를 돌려준다."""
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _ensure_required_presets(data: dict) -> bool:
+    """기존 사용자 설정에 배포 필수 사냥터 프리셋을 보강한다."""
+    bundled = _load_json_safe(_get_bundled_config_path())
+    bundled_presets = ((bundled.get("hunt_grounds") or {}).get("presets") or {})
+    if not isinstance(bundled_presets, dict):
+        return False
+
+    changed = False
+    hunt_grounds = data.setdefault("hunt_grounds", {})
+    presets = hunt_grounds.setdefault("presets", {})
+    if not isinstance(presets, dict):
+        presets = {}
+        hunt_grounds["presets"] = presets
+        changed = True
+
+    if "rednose2_v5" in bundled and "rednose2_v5" not in data:
+        data["rednose2_v5"] = copy.deepcopy(bundled["rednose2_v5"])
+        changed = True
+
+    if "빨코2" not in presets:
+        presets["빨코2"] = {
+            "name": "빨코2",
+            "mapping_completed": True,
+            "note": "빨코2 v5/new 전용 하드코딩 사냥터. 전용 동작값으로 실행합니다.",
+        }
+        changed = True
+
+    if "빨코3" not in presets:
+        presets["빨코3"] = {
+            "name": "빨코3",
+            "mapping_completed": True,
+            "note": "텔레포트 전용 하드코딩 사냥터. 좌표 블록 없이 전용 루틴으로 실행합니다.",
+        }
+        changed = True
+
+    attack = data.setdefault("attack", {})
+    bundled_attack = bundled.get("attack") or {}
+    if not attack.get("normal_buffs") and bundled_attack.get("normal_buffs"):
+        attack["normal_buffs"] = copy.deepcopy(bundled_attack["normal_buffs"])
+        changed = True
+    if "toggle_buffs" not in attack and "toggle_buffs" in bundled_attack:
+        attack["toggle_buffs"] = copy.deepcopy(bundled_attack.get("toggle_buffs") or [])
+        changed = True
+
+    lie_detector = data.setdefault("settings1", {}).setdefault("lie_detector", {})
+    lie_template = str(lie_detector.get("template_path") or "")
+    lie_template_name = lie_template.replace("\\", "/").rsplit("/", 1)[-1]
+    if not lie_template or lie_template_name == "transparent_shape_title.png":
+        lie_detector["template_path"] = "templates\\lie_detector\\title.png"
+        changed = True
+    fixed_lie_region = copy.deepcopy(DEFAULT_CONFIG["settings1"]["lie_detector"]["region"])
+    if lie_detector.get("region") != fixed_lie_region:
+        lie_detector["region"] = fixed_lie_region
+        changed = True
+
+    return changed
+
+
 class ConfigManager:
     def __init__(self):
         self._data = {}
         self.load()
 
     def load(self):
-        # 구버전 마이그레이션: exe 폴더 config.json → AppData (권한 문제 해결)
+        # 구버전 마이그레이션: exe 폴더 config.json -> AppData (권한 문제 해결)
         if getattr(sys, "frozen", False) and not os.path.exists(CONFIG_PATH):
-            old = "config.json"   # main.py의 os.chdir로 exe 폴더 = cwd
+            old = "config.json"
             if os.path.exists(old):
                 try:
                     import shutil
@@ -279,14 +411,41 @@ class ConfigManager:
                 except Exception:
                     pass
 
-        import copy
         self._data = copy.deepcopy(DEFAULT_CONFIG)
+        changed = False
         if os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
                 saved = json.load(f)
-            # 저장된 값을 기본값 위에 덮어씌움 — 새 기본값 키는 자동으로 추가됨
-            _deep_merge(self._data, saved)
+            world = saved.get("world_map", {})
+            calibration_data = world.get("calibration")
+            if calibration_data and not world.get("migration_completed"):
+                from datetime import datetime
+                from core.navigation.world_map import Calibration, WorldPoint
+                from core.navigation.world_migration import backup_config, migrate_legacy_data
 
+                offset = calibration_data.get("offset", [0.0, 0.0])
+                calibration = Calibration(
+                    float(calibration_data["scale"]),
+                    float(offset[0]),
+                    float(offset[1]),
+                )
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_path = backup_config(CONFIG_PATH, timestamp)
+                saved = migrate_legacy_data(
+                    saved,
+                    calibration,
+                    WorldPoint(calibration.offset_x, calibration.offset_y),
+                )
+                saved["world_map"]["legacy_backup_path"] = str(backup_path)
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(saved, f, ensure_ascii=False, indent=2)
+            # 저장된 값을 기본값 위에 덮어쓰며, 새 기본값은 자동으로 유지한다.
+            _deep_merge(self._data, saved)
+            changed = _ensure_required_presets(self._data)
+        else:
+            changed = _ensure_required_presets(self._data)
+        if changed:
+            self.save()
     def save(self):
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(self._data, f, ensure_ascii=False, indent=2)
@@ -472,3 +631,5 @@ def get_game_window_rect(config: "ConfigManager") -> tuple[int, int, int, int]:
     except Exception:
         pass
     return (0, 0, 0, 0)
+
+

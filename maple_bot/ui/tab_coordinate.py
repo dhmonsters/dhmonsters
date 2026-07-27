@@ -1,11 +1,11 @@
-# 좌표 탭 - 사냥터 프리셋 / 미니맵 / 구역 / 밧줄 / 공격 설정 UI
+﻿# 醫뚰몴 ??- ?щ깷???꾨━??/ 誘몃땲留?/ 援ъ뿭 / 諛㏃쨪 / 怨듦꺽 ?ㅼ젙 UI
 from __future__ import annotations
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QListWidget,
     QLineEdit, QFileDialog, QComboBox, QRadioButton,
     QButtonGroup, QScrollArea, QMessageBox, QCheckBox,
-    QDialog, QDialogButtonBox,
+    QDialog, QDialogButtonBox, QSlider,
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor
@@ -17,88 +17,88 @@ from ui.widgets import HotkeyCapture
 
 
 class _ZoneEditDialog(QDialog):
-    """구역 속성을 편집하는 다이얼로그."""
+    """援ъ뿭 ?띿꽦???몄쭛?섎뒗 ?ㅼ씠?쇰줈洹?"""
 
     def __init__(self, zone: Zone, pattern_presets: list[str], parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"구역 편집 — {zone.name}")
+        self.setWindowTitle(f"援ъ뿭 ?몄쭛 ??{zone.name}")
         self.setMinimumWidth(380)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         lay = QVBoxLayout(self)
         lay.setSpacing(8)
 
-        # 이름
+        # ?대쫫
         row_name = QHBoxLayout()
-        row_name.addWidget(QLabel("이름"))
+        row_name.addWidget(QLabel("?대쫫"))
         self.edit_name = QLineEdit(zone.name)
         self.edit_name.setFixedWidth(100)
         row_name.addWidget(self.edit_name)
         row_name.addStretch()
         lay.addLayout(row_name)
 
-        # X 범위
+        # X 踰붿쐞
         row_x = QHBoxLayout()
-        row_x.addWidget(QLabel("X 범위"))
-        self.spin_lx = QSpinBox(); self.spin_lx.setRange(0, 9999); self.spin_lx.setValue(zone.left_x); self.spin_lx.setPrefix("왼쪽 ")
-        self.spin_rx = QSpinBox(); self.spin_rx.setRange(0, 9999); self.spin_rx.setValue(zone.right_x); self.spin_rx.setPrefix("오른쪽 ")
+        row_x.addWidget(QLabel("X 踰붿쐞"))
+        self.spin_lx = QSpinBox(); self.spin_lx.setRange(0, 9999); self.spin_lx.setValue(zone.left_x); self.spin_lx.setPrefix("?쇱そ ")
+        self.spin_rx = QSpinBox(); self.spin_rx.setRange(0, 9999); self.spin_rx.setValue(zone.right_x); self.spin_rx.setPrefix("?ㅻⅨ履?")
         for w in [self.spin_lx, self.spin_rx]:
             w.setFixedWidth(105); row_x.addWidget(w)
         row_x.addStretch()
         lay.addLayout(row_x)
 
-        # Y 범위
+        # Y 踰붿쐞
         row_y = QHBoxLayout()
-        row_y.addWidget(QLabel("Y 범위"))
-        self.spin_ymin = QSpinBox(); self.spin_ymin.setRange(0, 9999); self.spin_ymin.setValue(zone.y_min); self.spin_ymin.setPrefix("최소 ")
-        self.spin_ymax = QSpinBox(); self.spin_ymax.setRange(0, 9999); self.spin_ymax.setValue(zone.y_max); self.spin_ymax.setPrefix("최대 ")
+        row_y.addWidget(QLabel("Y 踰붿쐞"))
+        self.spin_ymin = QSpinBox(); self.spin_ymin.setRange(0, 9999); self.spin_ymin.setValue(zone.y_min); self.spin_ymin.setPrefix("理쒖냼 ")
+        self.spin_ymax = QSpinBox(); self.spin_ymax.setRange(0, 9999); self.spin_ymax.setValue(zone.y_max); self.spin_ymax.setPrefix("理쒕? ")
         for w in [self.spin_ymin, self.spin_ymax]:
             w.setFixedWidth(100); row_y.addWidget(w)
         row_y.addStretch()
         lay.addLayout(row_y)
 
-        # 왕복 횟수
+        # ?뺣났 ?잛닔
         row_sw = QHBoxLayout()
-        row_sw.addWidget(QLabel("왕복 횟수"))
+        row_sw.addWidget(QLabel("?뺣났 ?잛닔"))
         self.spin_sweeps = QDoubleSpinBox()
         self.spin_sweeps.setRange(0, 99)
         self.spin_sweeps.setSingleStep(0.5)
         self.spin_sweeps.setDecimals(1)
         self.spin_sweeps.setValue(float(zone.sweeps))
-        self.spin_sweeps.setToolTip("0 = 통과 (사냥 없이 즉시 다음 층), 0.5 단위 가능")
+        self.spin_sweeps.setToolTip("0 = 통과, 0.5 단위 입력 가능")
         self.spin_sweeps.setFixedWidth(70)
         row_sw.addWidget(self.spin_sweeps)
-        row_sw.addWidget(QLabel("회  (0=통과, 0.5 단위)"))
+        row_sw.addWidget(QLabel("?? (0=?듦낵, 0.5 ?⑥쐞)"))
         row_sw.addStretch()
         lay.addLayout(row_sw)
 
-        # 랜덤 전환 여유
+        # ?쒕뜡 ?꾪솚 ?ъ쑀
         row_mg = QHBoxLayout()
-        row_mg.addWidget(QLabel("랜덤 전환 여유"))
-        self.spin_mg_min = QSpinBox(); self.spin_mg_min.setRange(0, 200); self.spin_mg_min.setValue(zone.random_margin_min); self.spin_mg_min.setPrefix("최소 "); self.spin_mg_min.setSuffix("px"); self.spin_mg_min.setFixedWidth(90)
-        self.spin_mg_max = QSpinBox(); self.spin_mg_max.setRange(0, 200); self.spin_mg_max.setValue(zone.random_margin_max); self.spin_mg_max.setPrefix("최대 "); self.spin_mg_max.setSuffix("px"); self.spin_mg_max.setFixedWidth(90)
+        row_mg.addWidget(QLabel("?쒕뜡 ?꾪솚 ?ъ쑀"))
+        self.spin_mg_min = QSpinBox(); self.spin_mg_min.setRange(0, 200); self.spin_mg_min.setValue(zone.random_margin_min); self.spin_mg_min.setPrefix("理쒖냼 "); self.spin_mg_min.setSuffix("px"); self.spin_mg_min.setFixedWidth(90)
+        self.spin_mg_max = QSpinBox(); self.spin_mg_max.setRange(0, 200); self.spin_mg_max.setValue(zone.random_margin_max); self.spin_mg_max.setPrefix("理쒕? "); self.spin_mg_max.setSuffix("px"); self.spin_mg_max.setFixedWidth(90)
         row_mg.addWidget(self.spin_mg_min)
         row_mg.addWidget(self.spin_mg_max)
         row_mg.addStretch()
         lay.addLayout(row_mg)
 
-        # 공격 패턴
+        # 怨듦꺽 ?⑦꽩
         row_pat = QHBoxLayout()
-        row_pat.addWidget(QLabel("공격 패턴"))
+        row_pat.addWidget(QLabel("怨듦꺽 ?⑦꽩"))
         self.cmb_pattern = QComboBox()
         self.cmb_pattern.setMinimumWidth(130)
-        self.cmb_pattern.addItem("(기본)")
+        self.cmb_pattern.addItem("(湲곕낯)")
         for p in sorted(pattern_presets):
             self.cmb_pattern.addItem(p)
-        # 현재 값 선택
-        cur = zone.key_pattern or "(기본)"
+        # ?꾩옱 媛??좏깮
+        cur = zone.key_pattern or "(湲곕낯)"
         idx = self.cmb_pattern.findText(cur)
         self.cmb_pattern.setCurrentIndex(idx if idx >= 0 else 0)
         row_pat.addWidget(self.cmb_pattern)
         row_pat.addStretch()
         lay.addLayout(row_pat)
 
-        # 확인 / 취소
+        # ?뺤씤 / 痍⑥냼
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -107,10 +107,10 @@ class _ZoneEditDialog(QDialog):
         lay.addWidget(btns)
 
     def get_zone_data(self) -> dict:
-        """편집된 값을 dict로 반환한다."""
+        """?몄쭛??媛믪쓣 dict濡?諛섑솚?쒕떎."""
         pat = self.cmb_pattern.currentText()
         return {
-            "name":               self.edit_name.text().strip() or "구역",
+            "name":               self.edit_name.text().strip() or "援ъ뿭",
             "left_x":             self.spin_lx.value(),
             "right_x":            self.spin_rx.value(),
             "y_min":              self.spin_ymin.value(),
@@ -118,55 +118,55 @@ class _ZoneEditDialog(QDialog):
             "sweeps":             float(self.spin_sweeps.value()),
             "random_margin_min":  self.spin_mg_min.value(),
             "random_margin_max":  self.spin_mg_max.value(),
-            "key_pattern":        "" if pat == "(기본)" else pat,
+            "key_pattern":        "" if pat == "(湲곕낯)" else pat,
         }
 
 
 class _RopeEditDialog(QDialog):
-    """밧줄 속성을 편집하는 다이얼로그."""
+    """諛㏃쨪 ?띿꽦???몄쭛?섎뒗 ?ㅼ씠?쇰줈洹?"""
 
     def __init__(self, rope: RopePoint, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"밧줄 편집 — {rope.name}")
+        self.setWindowTitle(f"諛㏃쨪 ?몄쭛 ??{rope.name}")
         self.setMinimumWidth(340)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         lay = QVBoxLayout(self)
         lay.setSpacing(8)
 
-        # 이름
+        # ?대쫫
         row_name = QHBoxLayout()
-        row_name.addWidget(QLabel("이름"))
+        row_name.addWidget(QLabel("?대쫫"))
         self.edit_name = QLineEdit(rope.name)
         self.edit_name.setFixedWidth(100)
         row_name.addWidget(self.edit_name)
         row_name.addStretch()
         lay.addLayout(row_name)
 
-        # X 좌표 (읽기 전용 표시)
+        # X 醫뚰몴 (?쎄린 ?꾩슜 ?쒖떆)
         row_x = QHBoxLayout()
-        row_x.addWidget(QLabel(f"X 좌표  {rope.x}  (변경하려면 재추가)"))
+        row_x.addWidget(QLabel(f"X 醫뚰몴  {rope.x}  (蹂寃쏀븯?ㅻ㈃ ?ъ텛媛)"))
         row_x.addStretch()
         lay.addLayout(row_x)
 
-        # 점프 방향
+        # ?먰봽 諛⑺뼢
         row_ap = QHBoxLayout()
-        row_ap.addWidget(QLabel("점프 방향"))
+        row_ap.addWidget(QLabel("?먰봽 諛⑺뼢"))
         self._approach_grp = QButtonGroup(self)
-        self.rb_left  = QRadioButton("왼쪽")
-        self.rb_both  = QRadioButton("양쪽")
+        self.rb_left  = QRadioButton("?쇱そ")
+        self.rb_both  = QRadioButton("?묒そ")
         self.rb_right = QRadioButton("오른쪽")
         for rb in [self.rb_left, self.rb_both, self.rb_right]:
             self._approach_grp.addButton(rb)
             row_ap.addWidget(rb)
-        # 현재 값 선택
+        # ?꾩옱 媛??좏깮
         {"left": self.rb_left, "right": self.rb_right}.get(rope.approach, self.rb_both).setChecked(True)
         row_ap.addStretch()
         lay.addLayout(row_ap)
 
-        # 점프 오프셋
+        # ?먰봽 ?ㅽ봽??
         row_off = QHBoxLayout()
-        row_off.addWidget(QLabel("점프 오프셋"))
+        row_off.addWidget(QLabel("점프 거리"))
         self.spin_offset = QSpinBox()
         self.spin_offset.setRange(1, 50)
         self.spin_offset.setValue(rope.jump_offset)
@@ -176,9 +176,9 @@ class _RopeEditDialog(QDialog):
         row_off.addStretch()
         lay.addLayout(row_off)
 
-        # 오르기 시간
+        # ?ㅻⅤ湲??쒓컙
         row_cs = QHBoxLayout()
-        row_cs.addWidget(QLabel("오르기 시간"))
+        row_cs.addWidget(QLabel("?ㅻⅤ湲??쒓컙"))
         self.dspin_climb = QDoubleSpinBox()
         self.dspin_climb.setRange(0.3, 30.0)
         self.dspin_climb.setSingleStep(0.1)
@@ -186,12 +186,12 @@ class _RopeEditDialog(QDialog):
         self.dspin_climb.setValue(rope.climb_sec)
         self.dspin_climb.setSuffix(" 초")
         self.dspin_climb.setFixedWidth(85)
-        self.dspin_climb.setToolTip("밧줄을 완전히 오르는 데 걸리는 시간")
+        self.dspin_climb.setToolTip("諛㏃쨪???꾩쟾???ㅻⅤ????嫄몃━???쒓컙")
         row_cs.addWidget(self.dspin_climb)
         row_cs.addStretch()
         lay.addLayout(row_cs)
 
-        # 확인 / 취소
+        # ?뺤씤 / 痍⑥냼
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -200,12 +200,12 @@ class _RopeEditDialog(QDialog):
         lay.addWidget(btns)
 
     def get_rope_data(self) -> dict:
-        """편집된 값을 dict로 반환한다."""
+        """?몄쭛??媛믪쓣 dict濡?諛섑솚?쒕떎."""
         if self.rb_left.isChecked():   approach = "left"
         elif self.rb_right.isChecked(): approach = "right"
         else:                           approach = "both"
         return {
-            "name":        self.edit_name.text().strip() or "밧줄",
+            "name":        self.edit_name.text().strip() or "諛㏃쨪",
             "approach":    approach,
             "jump_offset": self.spin_offset.value(),
             "climb_sec":   self.dspin_climb.value(),
@@ -213,10 +213,10 @@ class _RopeEditDialog(QDialog):
 
 
 class _ColorPickerOverlay(QWidget):
-    """전화면 투명 오버레이 — 클릭한 픽셀 RGB를 반환하는 스포이드.
+    """?꾪솕硫??щ챸 ?ㅻ쾭?덉씠 ???대┃???쎌? RGB瑜?諛섑솚?섎뒗 ?ㅽ룷?대뱶.
 
-    모든 모니터를 커버하는 가상 데스크톱 전체 영역에 오버레이를 띄운다.
-    grabKeyboard()로 ESC 입력을 보장한다.
+    紐⑤뱺 紐⑤땲?곕? 而ㅻ쾭?섎뒗 媛???곗뒪?ы넲 ?꾩껜 ?곸뿭???ㅻ쾭?덉씠瑜??꾩슫??
+    grabKeyboard()濡?ESC ?낅젰??蹂댁옣?쒕떎.
     """
     color_picked = pyqtSignal(int, int, int)
 
@@ -233,7 +233,7 @@ class _ColorPickerOverlay(QWidget):
         import mss as _mss
         self._sct = _mss.mss()
 
-        # 모든 모니터를 합친 가상 데스크톱 전체 영역에 오버레이 배치
+        # 紐⑤뱺 紐⑤땲?곕? ?⑹튇 媛???곗뒪?ы넲 ?꾩껜 ?곸뿭???ㅻ쾭?덉씠 諛곗튂
         from PyQt6.QtWidgets import QApplication
         from PyQt6.QtCore import QRect
         total = QRect()
@@ -243,7 +243,7 @@ class _ColorPickerOverlay(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        self.grabKeyboard()   # ESC 입력 보장
+        self.grabKeyboard()   # ESC ?낅젰 蹂댁옣
 
     def closeEvent(self, event):
         self.releaseKeyboard()
@@ -254,24 +254,24 @@ class _ColorPickerOverlay(QWidget):
         painter.fillRect(self.rect(), QColor(0, 0, 0, 18))
         painter.setPen(QColor(255, 255, 255, 180))
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
-                         "미니맵의 캐릭터 도트를 클릭하세요\n(ESC: 취소)")
+                         "誘몃땲留듭쓽 罹먮┃???꾪듃瑜??대┃?섏꽭??n(ESC: 痍⑥냼)")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             x = int(event.globalPosition().x())
             y = int(event.globalPosition().y())
-            # 오버레이를 먼저 숨긴 뒤 50ms 후 픽셀 캡처 (오버레이가 화면에서 사라진 후 캡처)
+            # ?ㅻ쾭?덉씠瑜?癒쇱? ?④릿 ??50ms ???쎌? 罹≪쿂 (?ㅻ쾭?덉씠媛 ?붾㈃?먯꽌 ?щ씪吏???罹≪쿂)
             self.hide()
             QTimer.singleShot(50, lambda: self._capture_pixel(x, y))
         else:
             self.close()
 
     def _capture_pixel(self, x: int, y: int) -> None:
-        """오버레이 없는 상태에서 픽셀 색상을 캡처해 시그널로 전달한다."""
+        """?ㅻ쾭?덉씠 ?녿뒗 ?곹깭?먯꽌 ?쎌? ?됱긽??罹≪쿂???쒓렇?먮줈 ?꾨떖?쒕떎."""
         try:
             region = {"left": x, "top": y, "width": 1, "height": 1}
             img = self._sct.grab(region)
-            # mss raw 바이트 순서: B, G, R, A
+            # mss raw 諛붿씠???쒖꽌: B, G, R, A
             b, g, r = img.raw[0], img.raw[1], img.raw[2]
             self.color_picked.emit(r, g, b)
         except Exception:
@@ -322,7 +322,7 @@ class TabCoordinate(QWidget):
 
         self.load_from_config()
 
-    # ── 1. 사냥터 프리셋 ──────────────────────────────────────────────
+    # ?? 1. ?щ깷???꾨━????????????????????????????????????????????????
     def _build_preset_group(self) -> QGroupBox:
         group = QGroupBox("사냥터 프리셋")
         layout = QVBoxLayout(group)
@@ -356,12 +356,12 @@ class TabCoordinate(QWidget):
 
         return group
 
-    # ── 2. 미니맵 설정 ────────────────────────────────────────────────
+    # ?? 2. 誘몃땲留??ㅼ젙 ????????????????????????????????????????????????
     def _build_minimap_group(self) -> QGroupBox:
         group = QGroupBox("미니맵 설정")
         layout = QVBoxLayout(group)
 
-        # 드래그 + 단축키
+        # ?쒕옒洹?+ ?⑥텞??
         drag_row = QHBoxLayout()
         btn_drag = QPushButton("드래그로 미니맵 영역 지정")
         btn_drag.clicked.connect(self._select_minimap_region)
@@ -375,7 +375,7 @@ class TabCoordinate(QWidget):
         drag_row.addStretch()
         layout.addLayout(drag_row)
 
-        # 위치 / 크기
+        # ?꾩튂 / ?ш린
         pos_row = QHBoxLayout()
         pos_row.addWidget(QLabel("위치/크기"))
         self.spin_rx = QSpinBox(); self.spin_rx.setRange(0, 9999); self.spin_rx.setPrefix("X ")
@@ -387,7 +387,7 @@ class TabCoordinate(QWidget):
         pos_row.addStretch()
         layout.addLayout(pos_row)
 
-        # 캐릭터 도트 색 (노란색 기본: 255,255,0)
+        # 罹먮┃???꾪듃 ??(?몃???湲곕낯: 255,255,0)
         color_row = QHBoxLayout()
         color_row.addWidget(QLabel("캐릭터 색"))
         self.spin_cr = QSpinBox(); self.spin_cr.setRange(0,255); self.spin_cr.setPrefix("R "); self.spin_cr.setValue(255)
@@ -398,15 +398,49 @@ class TabCoordinate(QWidget):
             w.setFixedWidth(90); color_row.addWidget(w)
         btn_eyedrop = QPushButton("스포이드")
         btn_eyedrop.setFixedWidth(70)
-        btn_eyedrop.setToolTip("클릭 후 미니맵의 캐릭터 도트를 클릭해 색상을 자동으로 가져옵니다")
+        btn_eyedrop.setToolTip("미니맵의 캐릭터 점을 클릭해 색상을 가져옵니다")
         btn_eyedrop.clicked.connect(self._pick_char_color)
         color_row.addWidget(btn_eyedrop)
         color_row.addStretch()
         layout.addLayout(color_row)
 
-        # 위치 확인
+        detect_group = QGroupBox("캐릭터 색검출 보정")
+        detect_layout = QVBoxLayout(detect_group)
+        detect_desc = QLabel(
+            "미검출이면 H 범위나 V 최소값을 조절하세요. 배경을 잡으면 S/V 최소값이나 점 크기 최대값을 올리면 됩니다."
+        )
+        detect_desc.setWordWrap(True)
+        detect_layout.addWidget(detect_desc)
+
+        def _add_slider(label: str, attr: str, min_v: int, max_v: int, value: int, suffix: str = ""):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(min_v, max_v)
+            slider.setValue(value)
+            spin = QSpinBox()
+            spin.setRange(min_v, max_v)
+            spin.setValue(value)
+            spin.setSuffix(suffix)
+            spin.setFixedWidth(80)
+            slider.valueChanged.connect(spin.setValue)
+            spin.valueChanged.connect(slider.setValue)
+            row.addWidget(slider, 1)
+            row.addWidget(spin)
+            detect_layout.addLayout(row)
+            setattr(self, f"slider_{attr}", slider)
+            setattr(self, f"spin_{attr}", spin)
+
+        _add_slider("H 색상 범위", "char_h_tol", 2, 30, 10)
+        _add_slider("S 채도 최소", "char_s_min", 40, 255, 100)
+        _add_slider("V 밝기 최소", "char_v_min", 80, 255, 200)
+        _add_slider("점 크기 최소", "char_area_min", 1, 80, 3)
+        _add_slider("점 크기 최대", "char_area_max", 10, 250, 100)
+        layout.addWidget(detect_group)
+
+        # ?꾩튂 ?뺤씤
         pos_check = QHBoxLayout()
-        btn_pos = QPushButton("캐릭터 위치 확인")
+        btn_pos = QPushButton("현재 위치 좌표 확인")
         btn_pos.clicked.connect(self._fetch_pos)
         self.lbl_pos = QLabel("위치: -")
         self.lbl_pos.setMinimumWidth(160)
@@ -417,12 +451,12 @@ class TabCoordinate(QWidget):
 
         return group
 
-    # ── 3. 구역 설정 ──────────────────────────────────────────────────
+    # ?? 3. 援ъ뿭 ?ㅼ젙 ??????????????????????????????????????????????????
     def _build_zone_group(self) -> QGroupBox:
         group = QGroupBox("구역 설정 (층별 이동 범위)")
         layout = QVBoxLayout(group)
 
-        # 드래그로 구역 지정 (미니맵 위에서 드래그 → 자동 변환)
+        # ?쒕옒洹몃줈 援ъ뿭 吏??(誘몃땲留??꾩뿉???쒕옒洹????먮룞 蹂??
         drag_row = QHBoxLayout()
         btn_drag_zone = QPushButton("드래그로 구역 지정")
         btn_drag_zone.clicked.connect(self._select_zone_region)
@@ -436,10 +470,10 @@ class TabCoordinate(QWidget):
         drag_row.addStretch()
         layout.addLayout(drag_row)
 
-        # 경계 표시 (드래그 또는 버튼으로 채워짐)
+        # 寃쎄퀎 ?쒖떆 (?쒕옒洹??먮뒗 踰꾪듉?쇰줈 梨꾩썙吏?
         boundary = QHBoxLayout()
         btn_left = QPushButton("← 왼쪽 경계")
-        btn_right = QPushButton("→ 오른쪽 경계")
+        btn_right = QPushButton("오른쪽 경계 →")
         btn_left.clicked.connect(self._set_left)
         btn_right.clicked.connect(self._set_right)
         self.lbl_left = QLabel("왼쪽 X: -")
@@ -450,7 +484,7 @@ class TabCoordinate(QWidget):
         boundary.addStretch()
         layout.addLayout(boundary)
 
-        # Y 범위 / 이름 / 왕복 횟수
+        # Y 踰붿쐞 / ?대쫫 / ?뺣났 ?잛닔
         opt = QHBoxLayout()
         opt.addWidget(QLabel("Y 범위"))
         self.spin_ymin = QSpinBox(); self.spin_ymin.setRange(0, 9999); self.spin_ymin.setPrefix("최소 ")
@@ -469,24 +503,24 @@ class TabCoordinate(QWidget):
         self.spin_zone_sweeps.setDecimals(1)
         self.spin_zone_sweeps.setValue(2.0)
         self.spin_zone_sweeps.setFixedWidth(65)
-        self.spin_zone_sweeps.setToolTip("층별 사냥 시 이 층에서 왕복할 횟수 (0 = 통과, 0.5 단위)")
+        self.spin_zone_sweeps.setToolTip("이 구역에서 왕복할 횟수입니다. 0은 통과입니다.")
         opt.addWidget(self.spin_zone_sweeps)
         opt.addWidget(QLabel("회"))
         opt.addStretch()
         layout.addLayout(opt)
 
-        # 공격 패턴 선택
+        # 怨듦꺽 ?⑦꽩 ?좏깮
         pat_row = QHBoxLayout()
         pat_row.addWidget(QLabel("공격 패턴"))
         self.cmb_zone_pattern = QComboBox()
         self.cmb_zone_pattern.setMinimumWidth(120)
         self.cmb_zone_pattern.setToolTip(
-            "이 구역에서 사용할 키 반복 패턴을 선택합니다.\n"
-            "사냥 탭에서 '프리셋으로 저장' 후 여기서 선택하세요."
+            "이 구역에서 사용할 반복 공격 패턴을 선택합니다.\n"
+            "전투 탭에서 프리셋으로 저장한 뒤 여기서 선택하세요."
         )
-        btn_refresh_pat = QPushButton("🔄")
+        btn_refresh_pat = QPushButton("새로고침")
         btn_refresh_pat.setFixedWidth(30)
-        btn_refresh_pat.setToolTip("사냥 탭에서 저장한 패턴 목록을 새로고침합니다.")
+        btn_refresh_pat.setToolTip("전투 탭에 저장한 패턴 목록을 새로고침합니다.")
         btn_refresh_pat.clicked.connect(self._refresh_pattern_combo)
         pat_row.addWidget(self.cmb_zone_pattern)
         pat_row.addWidget(btn_refresh_pat)
@@ -494,7 +528,7 @@ class TabCoordinate(QWidget):
         layout.addLayout(pat_row)
         self._refresh_pattern_combo()
 
-        # 랜덤 전환 여유 — 경계 직전 임의 거리에서 방향 전환
+        # ?쒕뜡 ?꾪솚 ?ъ쑀 ??寃쎄퀎 吏곸쟾 ?꾩쓽 嫄곕━?먯꽌 諛⑺뼢 ?꾪솚
         margin_row = QHBoxLayout()
         margin_row.addWidget(QLabel("랜덤 전환 여유"))
         self.spin_margin_min = QSpinBox()
@@ -510,7 +544,7 @@ class TabCoordinate(QWidget):
         self.spin_margin_max.setValue(10)
         margin_row.addWidget(self.spin_margin_min)
         margin_row.addWidget(self.spin_margin_max)
-        margin_row.addWidget(QLabel("(0이면 항상 끝까지)"))
+        margin_row.addWidget(QLabel("(0이면 끝까지 이동)"))
         margin_row.addStretch()
         layout.addLayout(margin_row)
 
@@ -534,19 +568,19 @@ class TabCoordinate(QWidget):
 
         return group
 
-    # ── 4. 밧줄 설정 ──────────────────────────────────────────────────
+    # ?? 4. 諛㏃쨪 ?ㅼ젙 ??????????????????????????????????????????????????
     def _build_rope_group(self) -> QGroupBox:
         group = QGroupBox("밧줄 / 로프 설정")
         layout = QVBoxLayout(group)
 
         note = QLabel(
-            "밧줄 X 좌표: 봇이 경계에 도달하면 밧줄 위치로 이동해 점프 후 오릅니다.\n"
-            "점프 방향은 밧줄 기준으로 어느 쪽에서 점프할지 선택합니다."
+            "밧줄 X 좌표에 도착하면 점프와 위 방향키로 올라갑니다.\n"
+            "점프 방향은 밧줄 기준 어느 쪽에서 접근할지 선택합니다."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
 
-        # 현재 위치로 밧줄 X 설정
+        # ?꾩옱 ?꾩튂濡?諛㏃쨪 X ?ㅼ젙
         set_row = QHBoxLayout()
         btn_set_rope = QPushButton("현재 위치를 밧줄로 설정")
         btn_set_rope.clicked.connect(self._set_rope_from_pos)
@@ -556,7 +590,7 @@ class TabCoordinate(QWidget):
         set_row.addStretch()
         layout.addLayout(set_row)
 
-        # 이름 / 점프 방향 / 오프셋
+        # ?대쫫 / ?먰봽 諛⑺뼢 / ?ㅽ봽??
         opt_row = QHBoxLayout()
         opt_row.addWidget(QLabel("이름"))
         self.edit_rope_name = QLineEdit("밧줄1"); self.edit_rope_name.setFixedWidth(70)
@@ -565,7 +599,7 @@ class TabCoordinate(QWidget):
 
         opt_row.addWidget(QLabel("점프 키"))
         self.edit_jump_key = QLineEdit("alt"); self.edit_jump_key.setFixedWidth(55)
-        self.edit_jump_key.setToolTip("밧줄 올라갈 때 사용할 점프 키 (예: alt, space)")
+        self.edit_jump_key.setToolTip("밧줄을 탈 때 사용할 점프 키입니다. 예: alt, space")
         opt_row.addWidget(self.edit_jump_key)
         opt_row.addSpacing(12)
 
@@ -579,7 +613,7 @@ class TabCoordinate(QWidget):
             opt_row.addWidget(r)
         opt_row.addSpacing(12)
 
-        opt_row.addWidget(QLabel("오프셋"))
+        opt_row.addWidget(QLabel("점프 거리"))
         self.spin_rope_offset = QSpinBox()
         self.spin_rope_offset.setRange(1, 50); self.spin_rope_offset.setValue(15)
         self.spin_rope_offset.setSuffix(" px"); self.spin_rope_offset.setFixedWidth(75)
@@ -587,7 +621,7 @@ class TabCoordinate(QWidget):
         opt_row.addStretch()
         layout.addLayout(opt_row)
 
-        # 오르기 시간 설정
+        # ?ㅻⅤ湲??쒓컙 ?ㅼ젙
         climb_row = QHBoxLayout()
         climb_row.addWidget(QLabel("오르기 시간"))
         self.dspin_climb_sec = QDoubleSpinBox()
@@ -597,7 +631,7 @@ class TabCoordinate(QWidget):
         self.dspin_climb_sec.setValue(2.5)
         self.dspin_climb_sec.setSuffix(" 초")
         self.dspin_climb_sec.setFixedWidth(85)
-        self.dspin_climb_sec.setToolTip("밧줄을 완전히 오르는 데 걸리는 시간 (맵마다 다름)")
+        self.dspin_climb_sec.setToolTip("밧줄을 완전히 오르는 데 걸리는 시간입니다.")
         climb_row.addWidget(self.dspin_climb_sec)
         climb_row.addWidget(QLabel("(밧줄 길이에 맞게 조정)"))
         climb_row.addStretch()
@@ -623,46 +657,46 @@ class TabCoordinate(QWidget):
 
         return group
 
-    # ── 5. 층별 사냥 설정 ─────────────────────────────────────────────
+    # ?? 5. 痢듬퀎 ?щ깷 ?ㅼ젙 ?????????????????????????????????????????????
     def _build_floor_hunt_group(self) -> QGroupBox:
         group = QGroupBox("층별 사냥")
         layout = QVBoxLayout(group)
 
-        # 활성화 체크박스
+        # ?쒖꽦??泥댄겕諛뺤뒪
         row0 = QHBoxLayout()
         self.chk_floor_hunt = QCheckBox("층별 사냥 활성화")
         row0.addWidget(self.chk_floor_hunt)
         row0.addStretch()
         layout.addLayout(row0)
 
-        # 모드 선택
+        # 紐⑤뱶 ?좏깮
         mode_row = QHBoxLayout()
-        self.rb_auto  = QRadioButton("자동 왕복 (1→2→3→2→1)")
-        self.rb_route = QRadioButton("수동 루트 (직접 순서 지정)")
+        self.rb_auto  = QRadioButton("자동 왕복")
+        self.rb_route = QRadioButton("수동 루트")
         self.rb_auto.setChecked(True)
         mode_row.addWidget(self.rb_auto)
         mode_row.addWidget(self.rb_route)
         mode_row.addStretch()
         layout.addLayout(mode_row)
 
-        # 수동 루트 영역
+        # ?섎룞 猷⑦듃 ?곸뿭
         self._route_widget = QWidget()
         route_lay = QVBoxLayout(self._route_widget)
         route_lay.setContentsMargins(0, 4, 0, 0)
 
-        note = QLabel("순서대로 이동합니다. 마지막 단계 완료 후 처음부터 반복합니다.")
+        note = QLabel("위에서 아래 순서대로 이동합니다. 마지막 단계 완료 후 처음부터 반복합니다.")
         note.setStyleSheet("color: gray; font-size: 10px;")
         route_lay.addWidget(note)
 
-        # 리스트 + 우측 ↑↓ 버튼
+        # 由ъ뒪??+ ?곗륫 ?묅넃 踰꾪듉
         list_row = QHBoxLayout()
         self.lst_route = QListWidget()
         self.lst_route.setMaximumHeight(120)
         list_row.addWidget(self.lst_route)
 
         btn_col = QVBoxLayout()
-        btn_up   = QPushButton("↑")
-        btn_down = QPushButton("↓")
+        btn_up   = QPushButton("▲")
+        btn_down = QPushButton("▼")
         btn_up.setFixedSize(28, 32)
         btn_down.setFixedSize(28, 32)
         btn_up.setToolTip("선택 항목 위로")
@@ -699,7 +733,7 @@ class TabCoordinate(QWidget):
 
         self.rb_route.toggled.connect(self._route_widget.setVisible)
 
-        # 저장 버튼
+        # ???踰꾪듉
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn_save = QPushButton("저장")
@@ -711,7 +745,7 @@ class TabCoordinate(QWidget):
         return group
 
     def _refresh_route_combos(self) -> None:
-        """구역/밧줄 목록을 콤보박스에 채운다."""
+        """援ъ뿭/諛㏃쨪 紐⑸줉??肄ㅻ낫諛뺤뒪??梨꾩슫??"""
         zones = self.config.get("zones") or []
         ropes = self.config.get("ropes") or []
         self.cmb_route_zone.clear()
@@ -720,7 +754,7 @@ class TabCoordinate(QWidget):
         self.cmb_route_rope.clear()
         for r in ropes:
             self.cmb_route_rope.addItem(r.get("name", ""))
-        # 픽업 타이머 콤보도 동일하게 갱신
+        # ?쎌뾽 ??대㉧ 肄ㅻ낫???숈씪?섍쾶 媛깆떊
         self.cmb_pickup_zone.clear()
         for z in sorted(zones, key=lambda x: x.get("name", "")):
             self.cmb_pickup_zone.addItem(z.get("name", ""))
@@ -733,7 +767,7 @@ class TabCoordinate(QWidget):
         rope    = self.cmb_route_rope.currentText()
         if to_zone and rope:
             self.lst_route.addItem(f"→ {to_zone}  (밧줄: {rope})")
-            # 아이템에 데이터 저장
+            # ?꾩씠?쒖뿉 ?곗씠?????
             item = self.lst_route.item(self.lst_route.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, {"to_zone": to_zone, "rope": rope})
 
@@ -770,15 +804,15 @@ class TabCoordinate(QWidget):
         self.config.set("floor_hunt", "route",      route)
         self.config.save()
 
-    # ── 아이템 수집 타이머 ────────────────────────────────────────────
+    # ?? ?꾩씠???섏쭛 ??대㉧ ????????????????????????????????????????????
     def _build_pickup_timer_group(self) -> QGroupBox:
-        """아이템 수집 타이머 UI."""
+        """?꾩씠???섏쭛 ??대㉧ UI."""
         group = QGroupBox("아이템 수집 타이머")
         layout = QVBoxLayout(group)
 
         note = QLabel(
-            "설정한 주기마다 사냥을 잠시 멈추고 수집 루트를 순회하며 아이템을 줍습니다.\n"
-            "수집 루트는 아래에서 직접 지정하세요 (구역 + 밧줄 조합)."
+            "설정한 주기마다 사냥을 잠시 멈추고 수집 루트를 실행합니다.\n"
+            "수집 루트는 아래에서 구역과 밧줄 조합으로 지정합니다."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: gray; font-size: 10px;")
@@ -815,7 +849,7 @@ class TabCoordinate(QWidget):
         row1.addStretch()
         layout.addLayout(row1)
 
-        layout.addWidget(QLabel("수집 루트 (순서대로 방문)"))
+        layout.addWidget(QLabel("수집 루트 (위에서 아래 순서 실행)"))
 
         list_row = QHBoxLayout()
         self.lst_pickup_route = QListWidget()
@@ -823,8 +857,8 @@ class TabCoordinate(QWidget):
         list_row.addWidget(self.lst_pickup_route)
 
         btn_col = QVBoxLayout()
-        btn_pu = QPushButton("↑"); btn_pu.setFixedSize(28, 32)
-        btn_pd = QPushButton("↓"); btn_pd.setFixedSize(28, 32)
+        btn_pu = QPushButton("▲"); btn_pu.setFixedSize(28, 32)
+        btn_pd = QPushButton("▼"); btn_pd.setFixedSize(28, 32)
         btn_pu.clicked.connect(self._pickup_step_up)
         btn_pd.clicked.connect(self._pickup_step_down)
         btn_col.addWidget(btn_pu)
@@ -905,13 +939,13 @@ class TabCoordinate(QWidget):
         self.config.set("pickup_timer", "route",        route)
         self.config.save()
 
-    # ── 드래그 / 단축키 ───────────────────────────────────────────────
+    # ?? ?쒕옒洹?/ ?⑥텞?????????????????????????????????????????????????
     def _select_minimap_region(self) -> None:
         self._selector = RegionSelector()
         self._selector.region_selected.connect(self._apply_minimap_region)
 
     def _apply_minimap_region(self, x: int, y: int, w: int, h: int) -> None:
-        from ui.region_selector import logical_to_physical
+        from ui.region_selector import logical_to_physical, _copy_text_to_clipboard
         from core.config_manager import get_game_window_rect
         px, py, pw, ph = logical_to_physical(x, y, w, h)
         ox, oy, cw, ch = get_game_window_rect(self.config)
@@ -920,7 +954,7 @@ class TabCoordinate(QWidget):
         self.spin_rx.setValue(rx); self.spin_ry.setValue(ry)
         self.spin_rw.setValue(pw); self.spin_rh.setValue(ph)
 
-        # minimap 섹션에 즉시 저장 (비율 포함)
+        # minimap ?뱀뀡??利됱떆 ???(鍮꾩쑉 ?ы븿)
         mm = dict(self.config.get("minimap") or {})
         mm.update({"region_x": rx, "region_y": ry, "width": pw, "height": ph})
         if cw > 0 and ch > 0:
@@ -931,24 +965,38 @@ class TabCoordinate(QWidget):
                 "height_ratio":   ph / ch,
             })
         self.config.set("minimap", mm)
+        _copy_text_to_clipboard(
+            "minimap={"
+            f"'region_x': {rx}, 'region_y': {ry}, "
+            f"'width': {pw}, 'height': {ph}"
+            "}\n"
+            "runtime={"
+            f"'left': {rx}, 'top': {ry}, "
+            f"'width': {pw}, 'height': {ph}"
+            "}\n"
+            "screen={"
+            f"'left': {px}, 'top': {py}, "
+            f"'width': {pw}, 'height': {ph}"
+            "}"
+        )
 
-        mode = " [비율저장]" if cw > 0 else ""
-        self.lbl_mm_hk.setText(f"({rx},{ry}) {pw}×{ph}{mode}")
+        mode = " [비율 저장]" if cw > 0 else ""
+        self.lbl_mm_hk.setText(f"({rx},{ry}) {pw}횞{ph}{mode}")
 
     def _apply_mm_hotkey(self, key: str) -> None:
         if not self._hk:
             return
         err = self._hk.register("coord_minimap", key, self._select_minimap_region)
-        self.lbl_mm_hk.setText("등록됨" if not err else f"오류:{err}")
+        self.lbl_mm_hk.setText("등록됨" if not err else f"오류: {err}")
 
     def _select_zone_region(self) -> None:
-        """드래그 오버레이로 구역을 지정한다. 화면 좌표를 미니맵 상대 좌표로 변환."""
+        """?쒕옒洹??ㅻ쾭?덉씠濡?援ъ뿭??吏?뺥븳?? ?붾㈃ 醫뚰몴瑜?誘몃땲留??곷? 醫뚰몴濡?蹂??"""
         self._selector = RegionSelector()
         self._selector.region_selected.connect(self._apply_zone_region)
 
     def _apply_zone_region(self, x: int, y: int, w: int, h: int) -> None:
-        """드래그된 화면 영역을 미니맵 기준 좌표로 변환해 경계값을 채운다."""
-        from ui.region_selector import logical_to_physical
+        """?쒕옒洹몃맂 ?붾㈃ ?곸뿭??誘몃땲留?湲곗? 醫뚰몴濡?蹂?섑빐 寃쎄퀎媛믪쓣 梨꾩슫??"""
+        from ui.region_selector import logical_to_physical, _copy_text_to_clipboard
         from core.config_manager import resolve_minimap_coords
         px, py, pw, ph = logical_to_physical(x, y, w, h)
         stored_mm = self.config.get("minimap") or {}
@@ -969,7 +1017,7 @@ class TabCoordinate(QWidget):
         if not self._hk:
             return
         err = self._hk.register("coord_zone", key, self._select_zone_region)
-        self.lbl_zone_hk.setText("등록됨" if not err else f"오류:{err}")
+        self.lbl_zone_hk.setText("등록됨" if not err else f"오류: {err}")
 
     def set_hotkey_manager(self, hk) -> None:
         self._hk = hk
@@ -980,10 +1028,10 @@ class TabCoordinate(QWidget):
         if zone_key:
             self._apply_zone_hotkey(zone_key)
 
-    # ── 스포이드 색상 선택 ────────────────────────────────────────────
+    # ?? ?ㅽ룷?대뱶 ?됱긽 ?좏깮 ????????????????????????????????????????????
     def _pick_char_color(self) -> None:
-        """전화면 오버레이를 띄워 클릭한 픽셀 색상을 캐릭터 색으로 설정한다."""
-        self._overlay = _ColorPickerOverlay()  # GC 방지를 위해 인스턴스 변수로 저장
+        """?꾪솕硫??ㅻ쾭?덉씠瑜??꾩썙 ?대┃???쎌? ?됱긽??罹먮┃???됱쑝濡??ㅼ젙?쒕떎."""
+        self._overlay = _ColorPickerOverlay()  # GC 諛⑹?瑜??꾪빐 ?몄뒪?댁뒪 蹂?섎줈 ???
         self._overlay.color_picked.connect(self._apply_char_color)
 
     def _apply_char_color(self, r: int, g: int, b: int) -> None:
@@ -992,15 +1040,44 @@ class TabCoordinate(QWidget):
         self.spin_cb.setValue(b)
         self.lbl_pos.setText(f"색상 적용: R{r} G{g} B{b}")
 
-    # ── 캐릭터 위치 ───────────────────────────────────────────────────
+    # ?? 罹먮┃???꾩튂 ???????????????????????????????????????????????????
     def _fetch_pos(self) -> None:
         self._sync_minimap_config()
-        pos = self._minimap_reader.get_character_pos()
+        pos = None
+        try:
+            from core.sensing.char_scanner import find_char_in_hsv, hsv_range_from_rgb
+            frame = self._minimap_reader.capture_minimap()
+            area_min = min(self.spin_char_area_min.value(), self.spin_char_area_max.value())
+            area_max = max(self.spin_char_area_min.value(), self.spin_char_area_max.value())
+            lo, hi = hsv_range_from_rgb(
+                self.spin_cr.value(),
+                self.spin_cg.value(),
+                self.spin_cb.value(),
+                h_tol=self.spin_char_h_tol.value(),
+                s_min=self.spin_char_s_min.value(),
+                v_min=self.spin_char_v_min.value(),
+            )
+            pos = find_char_in_hsv(frame, lo, hi, area_min, area_max, previous_position=self._last_pos)
+        except Exception:
+            pos = self._minimap_reader.get_character_pos()
         if pos:
             self._last_pos = pos
-            self.lbl_pos.setText(f"위치: X={pos[0]}  Y={pos[1]}")
+            x, y = int(pos[0]), int(pos[1])
+            mm_w = max(1, int(self.spin_rw.value()))
+            mm_h = max(1, int(self.spin_rh.value()))
+            rx = x / mm_w
+            ry = y / mm_h
+            text = f"현재 위치: X={x}  Y={y} / 상대 X={rx:.4f}, Y={ry:.4f}"
+            self.lbl_pos.setText(text)
+            try:
+                from PyQt6.QtWidgets import QApplication
+                QApplication.clipboard().setText(
+                    f"X={x}, Y={y}, x_ratio={rx:.4f}, y_ratio={ry:.4f}"
+                )
+            except Exception:
+                pass
         else:
-            self.lbl_pos.setText("위치: 감지 실패")
+            self.lbl_pos.setText("현재 위치: 감지 실패 - H/S/V/점 크기 보정값을 조절해 주세요")
 
     def _sync_minimap_config(self) -> None:
         from core.config_manager import resolve_minimap_coords
@@ -1013,7 +1090,7 @@ class TabCoordinate(QWidget):
             char_b=self.spin_cb.value(), tolerance=self.spin_tol.value(),
         ))
 
-    # ── 구역 버튼 ─────────────────────────────────────────────────────
+    # ?? 援ъ뿭 踰꾪듉 ?????????????????????????????????????????????????????
     def _set_left(self) -> None:
         if self._last_pos:
             self._pending_left_x = self._last_pos[0]
@@ -1025,14 +1102,14 @@ class TabCoordinate(QWidget):
             self.lbl_right.setText(f"오른쪽 X: {self._pending_right_x}")
 
     def _refresh_pattern_combo(self) -> None:
-        """key_patterns.presets 목록을 공격 패턴 콤보박스에 채운다."""
+        """key_patterns.presets 紐⑸줉??怨듦꺽 ?⑦꽩 肄ㅻ낫諛뺤뒪??梨꾩슫??"""
         current = self.cmb_zone_pattern.currentText()
         self.cmb_zone_pattern.clear()
         self.cmb_zone_pattern.addItem("(기본)")
         presets = self.config.get("key_patterns", "presets") or {}
         for name in sorted(presets.keys()):
             self.cmb_zone_pattern.addItem(name)
-        # 이전 선택값 복원
+        # ?댁쟾 ?좏깮媛?蹂듭썝
         idx = self.cmb_zone_pattern.findText(current)
         if idx >= 0:
             self.cmb_zone_pattern.setCurrentIndex(idx)
@@ -1044,9 +1121,9 @@ class TabCoordinate(QWidget):
         if lx > rx:
             lx, rx = rx, lx
         pat_text = self.cmb_zone_pattern.currentText()
-        key_pattern = "" if pat_text == "(기본)" else pat_text
+        key_pattern = "" if pat_text == "(湲곕낯)" else pat_text
         zone = Zone(
-            name=self.edit_zone_name.text() or "구역",
+            name=self.edit_zone_name.text() or "援ъ뿭",
             left_x=lx, right_x=rx,
             y_min=self.spin_ymin.value(), y_max=self.spin_ymax.value(),
             random_margin_min=self.spin_margin_min.value(),
@@ -1064,7 +1141,7 @@ class TabCoordinate(QWidget):
         del self._zones[row]
 
     def _edit_zone(self, item) -> None:
-        """구역 아이템 더블클릭 시 편집 다이얼로그를 연다."""
+        """援ъ뿭 ?꾩씠???붾툝?대┃ ???몄쭛 ?ㅼ씠?쇰줈洹몃? ?곕떎."""
         row = self.zone_list.row(item)
         if row < 0 or row >= len(self._zones):
             return
@@ -1074,7 +1151,7 @@ class TabCoordinate(QWidget):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         data = dlg.get_zone_data()
-        # rope_x 는 기존 값 유지 (편집 다이얼로그 범위 밖)
+        # rope_x ??湲곗〈 媛??좎? (?몄쭛 ?ㅼ씠?쇰줈洹?踰붿쐞 諛?
         updated = Zone(
             name=data["name"],
             left_x=data["left_x"],
@@ -1090,18 +1167,18 @@ class TabCoordinate(QWidget):
         self._zones[row] = updated
         self.zone_list.item(row).setText(updated.label())
 
-    # ── 밧줄 버튼 ─────────────────────────────────────────────────────
+    # ?? 諛㏃쨪 踰꾪듉 ?????????????????????????????????????????????????????
     def _set_rope_from_pos(self) -> None:
-        # 버튼 클릭 시 실시간 캐릭터 위치를 읽어 밧줄 X로 설정
+        # 踰꾪듉 ?대┃ ???ㅼ떆媛?罹먮┃???꾩튂瑜??쎌뼱 諛㏃쨪 X濡??ㅼ젙
         self._sync_minimap_config()
         pos = self._minimap_reader.get_character_pos()
         if pos:
             self._last_pos = pos
             self._pending_rope_x = pos[0]
-            self.lbl_pos.setText(f"위치: X={pos[0]}  Y={pos[1]}")
-            self.lbl_rope_x.setText(f"밧줄 X: {self._pending_rope_x}")
+            self.lbl_pos.setText(f"?꾩튂: X={pos[0]}  Y={pos[1]}")
+            self.lbl_rope_x.setText(f"諛㏃쨪 X: {self._pending_rope_x}")
         else:
-            self.lbl_rope_x.setText("감지 실패 — 미니맵 설정 확인 필요")
+            self.lbl_rope_x.setText("媛먯? ?ㅽ뙣 ??誘몃땲留??ㅼ젙 ?뺤씤 ?꾩슂")
 
     def _approach_str(self) -> str:
         if self.radio_left.isChecked():  return "left"
@@ -1112,7 +1189,7 @@ class TabCoordinate(QWidget):
         if self._pending_rope_x is None:
             return
         rope = RopePoint(
-            name=self.edit_rope_name.text() or "밧줄",
+            name=self.edit_rope_name.text() or "諛㏃쨪",
             x=self._pending_rope_x,
             approach=self._approach_str(),
             jump_offset=self.spin_rope_offset.value(),
@@ -1122,7 +1199,7 @@ class TabCoordinate(QWidget):
         self.rope_list.addItem(rope.label())
 
     def _edit_rope(self, item) -> None:
-        """밧줄 아이템 더블클릭 시 편집 다이얼로그를 연다."""
+        """諛㏃쨪 ?꾩씠???붾툝?대┃ ???몄쭛 ?ㅼ씠?쇰줈洹몃? ?곕떎."""
         row = self.rope_list.row(item)
         if row < 0 or row >= len(self._ropes):
             return
@@ -1133,7 +1210,7 @@ class TabCoordinate(QWidget):
         data = dlg.get_rope_data()
         updated = RopePoint(
             name=data["name"],
-            x=rope.x,                      # X 좌표는 변경 불가 — 기존 값 유지
+            x=rope.x,                      # X 醫뚰몴??蹂寃?遺덇? ??湲곗〈 媛??좎?
             approach=data["approach"],
             jump_offset=data["jump_offset"],
             climb_sec=data["climb_sec"],
@@ -1147,25 +1224,30 @@ class TabCoordinate(QWidget):
         self.rope_list.takeItem(row)
         del self._ropes[row]
 
-    # ── 프리셋 관리 ───────────────────────────────────────────────────
+    # ?? ?꾨━??愿由????????????????????????????????????????????????????
     def _current_preset_dict(self) -> dict:
-        """현재 UI 상태를 프리셋 dict로 반환. 비율 키가 있으면 함께 보존."""
+        """?꾩옱 UI ?곹깭瑜??꾨━??dict濡?諛섑솚. 鍮꾩쑉 ?ㅺ? ?덉쑝硫??④퍡 蹂댁〈."""
         mm = {
             "region_x": self.spin_rx.value(), "region_y": self.spin_ry.value(),
             "width": self.spin_rw.value(), "height": self.spin_rh.value(),
             "char_r": self.spin_cr.value(), "char_g": self.spin_cg.value(),
             "char_b": self.spin_cb.value(), "tolerance": self.spin_tol.value(),
+            "char_h_tol": self.spin_char_h_tol.value(),
+            "char_s_min": self.spin_char_s_min.value(),
+            "char_v_min": self.spin_char_v_min.value(),
+            "char_area_min": self.spin_char_area_min.value(),
+            "char_area_max": self.spin_char_area_max.value(),
             "jump_key": self.edit_jump_key.text().strip() or "alt",
             "hotkey_region": self.btn_mm_hotkey.current_key(),
             "hotkey_zone":   self.btn_zone_hotkey.current_key(),
         }
-        # config에 저장된 비율 키가 있으면 프리셋에 함께 포함
+        # config????λ맂 鍮꾩쑉 ?ㅺ? ?덉쑝硫??꾨━?뗭뿉 ?④퍡 ?ы븿
         stored_mm = self.config.get("minimap") or {}
         for k in ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio"):
             if k in stored_mm:
                 mm[k] = stored_mm[k]
 
-        # 미니맵 현재 픽셀 크기로 zone/rope 비율 계산
+        # 誘몃땲留??꾩옱 ?쎌? ?ш린濡?zone/rope 鍮꾩쑉 怨꾩궛
         mm_w = self.spin_rw.value()
         mm_h = self.spin_rh.value()
         return {
@@ -1175,11 +1257,11 @@ class TabCoordinate(QWidget):
         }
 
     def _apply_preset_dict(self, p: dict) -> None:
-        """프리셋 dict를 UI에 반영. 비율 키가 있으면 현재 창 크기로 역산."""
+        """?꾨━??dict瑜?UI??諛섏쁺. 鍮꾩쑉 ?ㅺ? ?덉쑝硫??꾩옱 李??ш린濡???궛."""
         from core.config_manager import resolve_minimap_coords
         mm = p.get("minimap", {})
 
-        # 미니맵 위치/크기 — 비율이 있으면 현재 창 크기로 역산
+        # 誘몃땲留??꾩튂/?ш린 ??鍮꾩쑉???덉쑝硫??꾩옱 李??ш린濡???궛
         from core.config_manager import get_game_window_rect
         rx = mm.get("region_x", 0)
         ry = mm.get("region_y", 0)
@@ -1199,11 +1281,16 @@ class TabCoordinate(QWidget):
         self.spin_cg.setValue(mm.get("char_g", 255))
         self.spin_cb.setValue(mm.get("char_b", 0))
         self.spin_tol.setValue(mm.get("tolerance", 40))
+        self.spin_char_h_tol.setValue(int(mm.get("char_h_tol", 10)))
+        self.spin_char_s_min.setValue(int(mm.get("char_s_min", 100)))
+        self.spin_char_v_min.setValue(int(mm.get("char_v_min", 200)))
+        self.spin_char_area_min.setValue(int(mm.get("char_area_min", 3)))
+        self.spin_char_area_max.setValue(int(mm.get("char_area_max", 100)))
         self.edit_jump_key.setText(mm.get("jump_key", "alt"))
         self.btn_mm_hotkey.set_key(mm.get("hotkey_region", "f11"))
         self.btn_zone_hotkey.set_key(mm.get("hotkey_zone", "f12"))
 
-        # zone/rope — 현재 미니맵 픽셀 크기로 비율 역산
+        # zone/rope ???꾩옱 誘몃땲留??쎌? ?ш린濡?鍮꾩쑉 ??궛
         mm_w, mm_h = rw, rh
         self._zones = [Zone.from_dict(z, mm_w, mm_h) for z in p.get("zones", [])]
         self.zone_list.clear()
@@ -1244,7 +1331,7 @@ class TabCoordinate(QWidget):
         presets = self.config.get("hunt_grounds", "presets") or {}
         if name not in presets:
             return
-        reply = QMessageBox.question(self, "삭제 확인", f"'{name}' 프리셋을 삭제하시겠습니까?")
+        reply = QMessageBox.question(self, "??젣 ?뺤씤", f"'{name}' ?꾨━?뗭쓣 ??젣?섏떆寃좎뒿?덇퉴?")
         if reply != QMessageBox.StandardButton.Yes:
             return
         del presets[name]
@@ -1262,13 +1349,13 @@ class TabCoordinate(QWidget):
         if select and self.combo_preset.findText(select) >= 0:
             self.combo_preset.setCurrentText(select)
 
-    # ── 저장 / 로드 ───────────────────────────────────────────────────
+    # ?? ???/ 濡쒕뱶 ???????????????????????????????????????????????????
     def save_to_config(self) -> None:
-        """현재 UI 상태를 활성 프리셋으로 저장.
-        이름 입력란이 비어 있으면 콤보박스의 현재 선택 프리셋으로 저장."""
+        """?꾩옱 UI ?곹깭瑜??쒖꽦 ?꾨━?뗭쑝濡????
+        ?대쫫 ?낅젰???鍮꾩뼱 ?덉쑝硫?肄ㅻ낫諛뺤뒪???꾩옱 ?좏깮 ?꾨━?뗭쑝濡????"""
         name = self.edit_preset_name.text().strip()
         if not name:
-            # 콤보에 선택된 프리셋이 있으면 그것으로 저장
+            # 肄ㅻ낫???좏깮???꾨━?뗭씠 ?덉쑝硫?洹멸쾬?쇰줈 ???
             name = self.combo_preset.currentText().strip()
             if name:
                 self.edit_preset_name.setText(name)
@@ -1276,7 +1363,7 @@ class TabCoordinate(QWidget):
         if name:
             self._save_preset()
 
-        # 레거시 키에도 항상 저장 (bot_loop 및 이름 없을 때 호환)
+        # ?덇굅???ㅼ뿉????긽 ???(bot_loop 諛??대쫫 ?놁쓣 ???명솚)
         p = self._current_preset_dict()
         mm = p["minimap"]
         for k, v in mm.items():
@@ -1288,14 +1375,14 @@ class TabCoordinate(QWidget):
     def load_from_config(self) -> None:
         self._refresh_combo(self.config.get("hunt_grounds", "active") or "")
 
-        # 활성 프리셋 로드
+        # ?쒖꽦 ?꾨━??濡쒕뱶
         active = self.config.get("hunt_grounds", "active") or ""
         presets = self.config.get("hunt_grounds", "presets") or {}
         if active and active in presets:
             self._apply_preset_dict(presets[active])
             self.edit_preset_name.setText(active)
         else:
-            # 레거시 config 로드
+            # ?덇굅??config 濡쒕뱶
             mm = self.config.get("minimap") or {}
             self.spin_rx.setValue(mm.get("region_x", 0))
             self.spin_ry.setValue(mm.get("region_y", 0))
@@ -1305,6 +1392,11 @@ class TabCoordinate(QWidget):
             self.spin_cg.setValue(mm.get("char_g", 255))
             self.spin_cb.setValue(mm.get("char_b", 0))
             self.spin_tol.setValue(mm.get("tolerance", 40))
+            self.spin_char_h_tol.setValue(int(mm.get("char_h_tol", 10)))
+            self.spin_char_s_min.setValue(int(mm.get("char_s_min", 100)))
+            self.spin_char_v_min.setValue(int(mm.get("char_v_min", 200)))
+            self.spin_char_area_min.setValue(int(mm.get("char_area_min", 3)))
+            self.spin_char_area_max.setValue(int(mm.get("char_area_max", 100)))
             self.btn_mm_hotkey.set_key(mm.get("hotkey_region", "f11"))
             self.btn_zone_hotkey.set_key(mm.get("hotkey_zone", "f12"))
 
@@ -1321,7 +1413,7 @@ class TabCoordinate(QWidget):
             for r in self._ropes:
                 self.rope_list.addItem(r.label())
 
-        # 층별 사냥 설정 로드
+        # 痢듬퀎 ?щ깷 ?ㅼ젙 濡쒕뱶
         fh = self.config.get("floor_hunt") or {}
         self.chk_floor_hunt.setChecked(bool(fh.get("enabled", False)))
         route_mode = bool(fh.get("route_mode", False))
@@ -1329,20 +1421,20 @@ class TabCoordinate(QWidget):
         self.rb_auto.setChecked(not route_mode)
         self._route_widget.setVisible(route_mode)
 
-        # 루트 목록 복원
+        # 猷⑦듃 紐⑸줉 蹂듭썝
         self.lst_route.clear()
         for step in fh.get("route", []):
             to_zone = step.get("to_zone", "")
             rope    = step.get("rope", "")
-            item_text = f"→ {to_zone}  (밧줄: {rope})"
+            item_text = f"??{to_zone}  (諛㏃쨪: {rope})"
             self.lst_route.addItem(item_text)
             item = self.lst_route.item(self.lst_route.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, step)
 
-        # 콤보박스 채우기
+        # 肄ㅻ낫諛뺤뒪 梨꾩슦湲?
         self._refresh_route_combos()
 
-        # 픽업 타이머 설정 로드
+        # ?쎌뾽 ??대㉧ ?ㅼ젙 濡쒕뱶
         pt = self.config.get("pickup_timer") or {}
         self.chk_pickup.setChecked(bool(pt.get("enabled", False)))
         self.spin_pickup_interval.setValue(int(pt.get("interval_sec", 110)))
@@ -1352,7 +1444,8 @@ class TabCoordinate(QWidget):
         for step in pt.get("route", []):
             to_zone = step.get("to_zone", "")
             rope    = step.get("rope", "")
-            self.lst_pickup_route.addItem(f"→ {to_zone}  (밧줄: {rope})")
+            self.lst_pickup_route.addItem(f"??{to_zone}  (諛㏃쨪: {rope})")
             item = self.lst_pickup_route.item(self.lst_pickup_route.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, step)
+
 

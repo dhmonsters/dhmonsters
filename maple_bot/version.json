@@ -1,1 +1,1 @@
-{"version":"2.2.11","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.11/Claude_v2.2.11_Setup.exe","notes":"지금까지 반영된 빨코2 안정화, 빨코3 루틴 보정, 거탐 감지 영역 및 템플릿 스케일 개선, 자동판매 보정, 좌표 캡처 복사 개선 내용을 포함했습니다."}
+﻿{"version":"2.2.12","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.12/Claude_v2.2.12_Setup.exe","notes":"캐릭터 색검출 보정 슬라이더를 추가하고, H/S/V 및 점 크기 필터를 사냥터 설정에 저장해 미검출 상황에서 직접 조절할 수 있게 했습니다. 연속기 표시 글자 깨짐과 설치 안내 글자 깨짐 보정도 포함했습니다."}
