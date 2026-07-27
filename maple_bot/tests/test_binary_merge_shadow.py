@@ -20,6 +20,7 @@ from core.puzzle.binary_merge_shadow import (
     build_child_evidence,
     collapse_physical_candidates,
     extract_binary_merge_events,
+    _board_frame_shape,
     render_binary_merge_event_markdown,
     replay_binary_merge_events,
     score_binary_merge_events,
@@ -36,6 +37,35 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+def _session_start_row(*, height: int, width: int) -> dict[str, object]:
+    return {
+        "type": "SESSION_START",
+        "frame_index": None,
+        "payload": {
+            "source_kind": "live_screen",
+            "fps": 10.0,
+            "mouse_enabled": False,
+            "target_visual_check": True,
+            "mouse_output_forced_off": True,
+            "video_recording_enabled": False,
+            "board_roi": {
+                "name": "board",
+                "basis": "window_client",
+                "x": 120,
+                "y": 80,
+                "w": width,
+                "h": height,
+                "x_ratio": 0.1,
+                "y_ratio": 0.1,
+                "w_ratio": 0.6,
+                "h_ratio": 0.7,
+                "dpi_scale": 1.0,
+                "window_title": "MapleStory",
+            },
+        },
+    }
 
 
 def _candidate(
@@ -620,6 +650,26 @@ def test_event_replay_stops_after_the_first_resolved_split_observation(tmp_path:
     assert not replay.hold
 
 
+def test_board_frame_shape_prefers_real_session_start_board_roi_schema() -> None:
+    rows = [_session_start_row(height=538, width=460)]
+    rows += make_trace_rows_for_separate_overlap_merged_split()
+    for row in rows:
+        if row.get("type") == "CANDIDATES":
+            row["payload"]["frame_shape"] = [1, 1]
+
+    assert _board_frame_shape(rows) == (538, 460)
+
+
+def test_board_frame_shape_reads_real_session_start_without_candidate_frame_shape() -> None:
+    rows = [_session_start_row(height=538, width=460)]
+    rows += make_trace_rows_for_separate_overlap_merged_split()
+    for row in rows:
+        if row.get("type") == "CANDIDATES":
+            row["payload"].pop("frame_shape")
+
+    assert _board_frame_shape(rows) == (538, 460)
+
+
 def test_event_replay_holds_after_all_ambiguous_split_observations(tmp_path: Path) -> None:
     rows: list[dict[str, object]] = []
     rows += _rows_for_frame(
@@ -654,6 +704,50 @@ def test_event_replay_holds_after_all_ambiguous_split_observations(tmp_path: Pat
     assert replay.decision_frame is None
     assert replay.split_observations_evaluated == 2
     assert replay.hold
+    assert set(replay.diagnostics["split_child_ids"][3]) == {
+        "target_child_3",
+        "background_child_3",
+    }
+    assert set(replay.diagnostics["split_child_ids"][4]) == {
+        "target_child_4",
+        "background_child_4",
+    }
+
+
+def test_scoring_associates_gt_only_with_replayed_physical_split_children(tmp_path: Path) -> None:
+    trace_path = tmp_path / "trace.jsonl"
+    score_path = tmp_path / "score.jsonl"
+    rows = make_trace_rows_for_separate_overlap_merged_split()
+    for row in rows:
+        if row.get("type") == "CANDIDATES" and row.get("frame_index") == 4:
+            row["payload"]["candidates"].append(
+                _candidate("duplicate_target", 4, (0.44, 0.50), score=0.7)
+            )
+    _write_jsonl(trace_path, rows)
+    _write_jsonl(
+        score_path,
+        [{"solver_frame_index": 4, "target_x": 180.0, "target_y": 100.0}],
+    )
+
+    replay = BinaryEventReplay(
+        event_id=1,
+        premerge_frame=0,
+        split_frame=4,
+        decision_frame=4,
+        split_observations_evaluated=1,
+        selected_target_candidate_id="target_child",
+        selected_background_candidate_id="background_child",
+        decision_reason="binary_judges_agree",
+        hold=False,
+        diagnostics={
+            "split_child_ids": {4: ("target_child", "background_child")},
+            "physical_child_ids_by_frame": {4: ("target_child", "background_child")},
+        },
+    )
+    (score,) = score_binary_merge_events((replay,), score_path, trace_path)
+
+    assert score.target_candidate_id == "target_child"
+    assert score.outcome is BinaryEventOutcome.CORRECT_TRANSFER
 
 
 def test_extraction_diagnostics_remain_scored_event_rows(tmp_path: Path) -> None:

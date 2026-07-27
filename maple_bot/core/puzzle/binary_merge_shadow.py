@@ -811,7 +811,12 @@ def score_binary_merge_events(
     for replay in replays:
         scoring_frame = replay.decision_frame or replay.split_frame
         target_point = _aligned_target_point(score_rows, scoring_frame)
-        target_candidate_id = _target_child_id(target_point, scoring_frame, candidate_rows)
+        target_candidate_id = _target_child_id(
+            target_point,
+            scoring_frame,
+            candidate_rows,
+            _physical_child_ids(replay, scoring_frame),
+        )
         results.append(_score_one_event(replay, target_candidate_id))
     return tuple(results)
 
@@ -901,6 +906,16 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def _board_frame_shape(rows: Sequence[dict[str, Any]]) -> tuple[int, int]:
     for row in rows:
+        if row.get("type") != "SESSION_START":
+            continue
+        payload = row.get("payload")
+        board_roi = payload.get("board_roi") if isinstance(payload, Mapping) else None
+        if not isinstance(board_roi, Mapping):
+            continue
+        frame_shape = _frame_shape_from_value((board_roi.get("h"), board_roi.get("w")))
+        if frame_shape is not None:
+            return frame_shape
+    for row in rows:
         payload = row.get("payload")
         if not isinstance(payload, Mapping):
             continue
@@ -969,6 +984,10 @@ def _event_replay_from_decisions(
         None,
     )
     final_decision = decisions[-1][1] if decisions else None
+    split_child_ids = {
+        observation.frame_index: tuple(child.candidate_id for child in observation.children)
+        for observation in event.split_observations
+    }
     return BinaryEventReplay(
         event_id=event.event_id,
         premerge_frame=event.premerge.frame_index,
@@ -982,10 +1001,8 @@ def _event_replay_from_decisions(
         diagnostics={
             "source": "runtime_replay",
             "event_reason": event.reason,
-            "physical_child_ids_by_frame": {
-                observation.frame_index: tuple(child.candidate_id for child in observation.children)
-                for observation in event.split_observations
-            },
+            "split_child_ids": split_child_ids,
+            "physical_child_ids_by_frame": split_child_ids,
             "decisions": tuple(
                 _decision_diagnostic(frame_index, decision) for frame_index, decision in decisions
             ),
@@ -1039,10 +1056,16 @@ def _target_child_id(
     target_point: tuple[float, float] | None,
     frame_index: int | None,
     candidate_rows: Mapping[int, Sequence[Candidate]],
+    physical_child_ids: Sequence[str],
 ) -> str | None:
     if target_point is None or frame_index is None:
         return None
-    candidates = candidate_rows.get(frame_index, ())
+    physical_ids = set(physical_child_ids)
+    candidates = tuple(
+        candidate
+        for candidate in candidate_rows.get(frame_index, ())
+        if candidate.candidate_id in physical_ids
+    )
     covered = [candidate for candidate in candidates if _point_in_bbox(target_point, candidate.bbox)]
     if covered:
         return min(
@@ -1153,13 +1176,15 @@ def _hypothesis_diagnostic(hypothesis: object) -> dict[str, object] | None:
 def _physical_child_ids(replay: BinaryEventReplay, frame_index: int | None) -> tuple[str, ...]:
     if frame_index is None:
         return ()
-    frames = replay.diagnostics.get("physical_child_ids_by_frame")
-    if not isinstance(frames, Mapping):
-        return ()
-    candidate_ids = frames.get(frame_index)
-    if not isinstance(candidate_ids, Sequence) or isinstance(candidate_ids, (str, bytes)):
-        return ()
-    return tuple(candidate_id for candidate_id in candidate_ids if isinstance(candidate_id, str))
+    for key in ("split_child_ids", "physical_child_ids_by_frame"):
+        frames = replay.diagnostics.get(key)
+        if not isinstance(frames, Mapping):
+            continue
+        candidate_ids = frames.get(frame_index)
+        if not isinstance(candidate_ids, Sequence) or isinstance(candidate_ids, (str, bytes)):
+            continue
+        return tuple(candidate_id for candidate_id in candidate_ids if isinstance(candidate_id, str))
+    return ()
 
 
 def _recovery_delay_ratio(replay: BinaryEventReplay) -> float | None:
