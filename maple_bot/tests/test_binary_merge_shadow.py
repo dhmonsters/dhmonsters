@@ -449,9 +449,11 @@ def test_replay_builds_profile_only_from_rows_before_each_event(
             ],
             (0.42, 0.50),
         )
-    rows = _preparation_rows() + event_rows + future_rows
-    trace_path = tmp_path / "trace.jsonl"
-    _write_jsonl(trace_path, rows)
+    base_rows = _preparation_rows() + event_rows
+    base_trace_path = tmp_path / "base-trace.jsonl"
+    future_trace_path = tmp_path / "future-trace.jsonl"
+    _write_jsonl(base_trace_path, base_rows)
+    _write_jsonl(future_trace_path, base_rows + future_rows)
     captured_frames: list[tuple[int, ...]] = []
     original_builder = binary_merge_shadow.build_background_flow_profile
 
@@ -465,11 +467,35 @@ def test_replay_builds_profile_only_from_rows_before_each_event(
 
     monkeypatch.setattr(binary_merge_shadow, "build_background_flow_profile", capture_profile)
 
-    replays = replay_binary_merge_events(trace_path, event_limit=1)
+    base_replays = replay_binary_merge_events(base_trace_path, event_limit=1)
+    future_replays = replay_binary_merge_events(future_trace_path, event_limit=1)
 
-    assert len(replays) == 1
-    assert captured_frames
-    assert all(frame_index < replays[0].premerge_frame for frame_index in captured_frames[0])
+    assert len(base_replays) == len(future_replays) == 1
+    assert len(captured_frames) == 2
+    assert all(
+        frame_index < replay.premerge_frame
+        for replay, profile_frames in zip((base_replays[0], future_replays[0]), captured_frames)
+        for frame_index in profile_frames
+    )
+    assert (
+        base_replays[0].premerge_frame,
+        base_replays[0].split_frame,
+        base_replays[0].decision_frame,
+        base_replays[0].selected_target_candidate_id,
+        base_replays[0].selected_background_candidate_id,
+        base_replays[0].decision_reason,
+        base_replays[0].hold,
+        base_replays[0].split_observations_evaluated,
+    ) == (
+        future_replays[0].premerge_frame,
+        future_replays[0].split_frame,
+        future_replays[0].decision_frame,
+        future_replays[0].selected_target_candidate_id,
+        future_replays[0].selected_background_candidate_id,
+        future_replays[0].decision_reason,
+        future_replays[0].hold,
+        future_replays[0].split_observations_evaluated,
+    )
 
 
 def test_premerge_velocity_ignores_untrusted_hold_selection() -> None:
