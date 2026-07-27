@@ -211,6 +211,45 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
     return forced
 
+
+def _rednose3_profile(d: dict, attack: dict) -> dict:
+    """Build RedNose3 teleport-only runtime profile from one fixed source."""
+    mm = d.get("minimap", {}) or {}
+    forced = {
+        "enabled": True,
+        "attack_key": "end",
+        "teleport_key": "x",
+        "jump_key": str(mm.get("jump_key", "alt") or "alt"),
+        "attack_hold_sec": 0.9,
+        "attack_gap_sec": 0.05,
+        "teleport_hold_sec": 0.3,
+        "teleport_lead_sec": 0.02,
+        "vertical_teleport_lead_sec": 0.02,
+        "after_teleport_wait_sec": 0.12,
+        "down_jump_lead_sec": 0.03,
+        "down_jump_hold_sec": 0.12,
+        "after_down_jump_wait_sec": 0.25,
+        "platform1_attack_count": 16,
+        "platform2_attack_count": 4,
+        "hunt_cycle_min_sec": 92.83,
+        "hunt_cycle_max_sec": 102.483,
+        "fall_y_threshold": 70,
+        "confirm_timeout_sec": 0.55,
+        "step_attempts": 5,
+        "recover_attempts": 10,
+        "platforms": {
+            "1": {"x_min": 54, "x_max": 59, "y_min": 68, "y_max": 70},
+            "2": {"x_min": 41, "x_max": 45, "y_min": 63, "y_max": 65},
+            "3": {"x_min": 30, "x_max": 34, "y_min": 63, "y_max": 65},
+            "4": {"x_min": 30, "x_max": 34, "y_min": 52, "y_max": 54},
+            "5": {"x_min": 30, "x_max": 34, "y_min": 40, "y_max": 42},
+            "6": {"x_min": 30, "x_max": 34, "y_min": 45, "y_max": 47},
+        },
+        "base_minimap_width": int(mm.get("width", 172)),
+        "base_minimap_height": int(mm.get("height", 103)),
+    }
+    return forced
+
 def _buffs(attack: dict) -> list[Buff]:
     """attack.normal_buffs/toggle_buffs ??Buff 由ъ뒪??(?쒖꽦+???덈뒗 寃껊쭔)."""
     out: list[Buff] = []
@@ -342,10 +381,14 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
                 "width": int(lie_region[2]), "height": int(lie_region[3]),
             }
 
+    active_hunt_ground = str(d.get("hunt_grounds", {}).get("active", "") or "").strip()
     rednose2_profile = _rednose2_v5_profile(d, attack)
+    rednose3_profile = _rednose3_profile(d, attack)
+    rednose2_profile["enabled"] = active_hunt_ground == "빨코2"
+    rednose3_profile["enabled"] = active_hunt_ground == "빨코3"
     fixed_rednose_mm = rednose2_profile.get("fixed_minimap_region")
     if (
-        bool(rednose2_profile.get("enabled", True))
+        bool(rednose2_profile.get("enabled", False))
         and bool(rednose2_profile.get("use_fixed_minimap_region", False))
         and isinstance(fixed_rednose_mm, dict)
     ):
@@ -372,8 +415,9 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
                      (d.get("floor_hunt", {}).get("route_steps") or [])
                      if isinstance(s, dict) and ("step_type" in s or "type" in s)],
         route_mode=bool(d.get("floor_hunt", {}).get("route_mode", False)),
-        hunt_ground_active=str(d.get("hunt_grounds", {}).get("active", "") or ""),
+        hunt_ground_active=active_hunt_ground,
         rednose2_v5=rednose2_profile,
+        rednose3=rednose3_profile,
         attack_key=attack_key,
         attack_sequences=_attack_sequences(attack),
         hp_rule=hp_rule,

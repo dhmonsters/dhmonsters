@@ -415,6 +415,7 @@ def main():
             fresh = to_runtime_config(cm._data)
             rt.reload_monster_templates(fresh)
             rt.reload_lie_scanner(fresh)
+            rt.reload_floor_hunt_runner(fresh)
             rt._cfg.attack_key = fresh.attack_key
             rt._cfg.attack_sequences = fresh.attack_sequences
             rt.attack_sequence_runner = AttackSequenceRunner(

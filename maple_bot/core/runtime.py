@@ -39,6 +39,7 @@ from core.navigation.route_input_owner import RouteInputOwner
 from core.navigation.route_state_runner import RouteStateRunner
 from core.navigation.legacy_route_guard import LegacyRouteGuard
 from core.navigation.rednose2_runner import RedNose2RouteRunner
+from core.navigation.rednose3_runner import RedNose3RouteRunner
 from core.auto_seller import AutoSeller
 
 
@@ -52,6 +53,7 @@ class RuntimeConfig:
     route_mode: bool = False     # True硫?route瑜?floor-hunt 猷⑦듃 ?ㅽ뻾湲곕줈 諛섎났 ?ㅽ뻾(?щ떎由?紐⑤뱶)
     hunt_ground_active: str = ""
     rednose2_v5: dict = field(default_factory=dict)
+    rednose3: dict = field(default_factory=dict)
     attack_key: str = ""
     attack_sequences: list[AttackSequence] = field(default_factory=list)
     hp_rule: PotionRule | None = None
@@ -391,7 +393,19 @@ class BotRuntime:
             and bool(config.rednose2_v5.get("enabled", True))
             and config.hunt_ground_active.strip() == "\ube68\ucf542"
         )
-        if is_rednose2_route:
+        is_rednose3_route = (
+            bool(config.rednose3.get("enabled", True))
+            and config.hunt_ground_active.strip() == "\ube68\ucf543"
+        )
+        if is_rednose3_route:
+            self.floor_hunt_runner = RedNose3RouteRunner(
+                self.block_runner,
+                is_active=self._route_can_run,
+                profile=config.rednose3,
+                log_fn=lambda m: self.log(m, "?대룞"),
+                minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
+            )
+        elif is_rednose2_route:
             self.floor_hunt_runner = RedNose2RouteRunner(
                 self.block_runner,
                 get_blocks=lambda: self._cfg.route,
@@ -802,6 +816,62 @@ class BotRuntime:
             f"template={self._cfg.lie_title_template}, alert={self._cfg.lie_alert}",
             "감지",
         )
+
+    def reload_floor_hunt_runner(self, config) -> None:
+        """현재 사냥터 이름에 맞는 전용 동선 러너를 다시 구성한다."""
+        if self.floor_hunt_runner is not None:
+            self.floor_hunt_runner.stop()
+        self.floor_hunt_runner = None
+        self._cfg.minimap_region = config.minimap_region
+        self._cfg.route = config.route
+        self._cfg.route_steps = config.route_steps
+        self._cfg.route_mode = config.route_mode
+        self._cfg.hunt_ground_active = config.hunt_ground_active
+        self._cfg.rednose2_v5 = config.rednose2_v5
+        self._cfg.rednose3 = config.rednose3
+
+        is_rednose3_route = (
+            bool(config.rednose3.get("enabled", True))
+            and config.hunt_ground_active.strip() == "\ube68\ucf543"
+        )
+        is_rednose2_route = (
+            config.route_mode
+            and config.route
+            and bool(config.rednose2_v5.get("enabled", True))
+            and config.hunt_ground_active.strip() == "\ube68\ucf542"
+        )
+        if is_rednose3_route:
+            self.floor_hunt_runner = RedNose3RouteRunner(
+                self.block_runner,
+                is_active=self._route_can_run,
+                profile=config.rednose3,
+                log_fn=lambda m: self.log(m, "?대룞"),
+                minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
+            )
+        elif is_rednose2_route:
+            self.floor_hunt_runner = RedNose2RouteRunner(
+                self.block_runner,
+                get_blocks=lambda: self._cfg.route,
+                is_active=self._route_can_run,
+                profile=config.rednose2_v5,
+                log_fn=lambda m: self.log(m, "?대룞"),
+                minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
+            )
+        elif config.route_mode and config.route_steps:
+            self.route_input_owner = RouteInputOwner(self.humanizer)
+            self.floor_hunt_runner = RouteStateRunner(
+                get_steps=lambda: self._cfg.route_steps,
+                is_active=self._route_can_run,
+                position_store=self.route_position_store,
+                input_owner=self.route_input_owner,
+                block_runner=self.block_runner,
+                log_fn=lambda m: self.log(m, "?대룞"),
+            )
+        elif config.route_mode and config.route:
+            self.floor_hunt_runner = LegacyRouteGuard(
+                log_fn=lambda m: self.log(m, "?대룞"),
+            )
+
     def _check_anti_mob_profile(self) -> None:
         """珥덇툒 ?섎젴??諛⑹?紐??대?吏瑜?李얠븘 怨좎젙 ?댁젣 ?쒖꽌瑜??ㅽ뻾?쒕떎."""
         import cv2

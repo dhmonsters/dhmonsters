@@ -26,9 +26,9 @@ def _active_name(config, name: str | None = None) -> str:
     return resolved
 
 
-def save_active_preset(config, mapping_completed: bool = True) -> dict:
+def save_active_preset(config, mapping_completed: bool = True, name: str | None = None) -> dict:
     """현재 사냥터와 관련된 설정만 복사해 이름별 프리셋으로 저장한다."""
-    name = _active_name(config)
+    name = _active_name(config, name)
     snapshot = {}
     for key in PRESET_SETTING_KEYS:
         value = config.get(key, default=None)
