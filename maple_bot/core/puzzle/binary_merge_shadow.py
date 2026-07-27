@@ -5,6 +5,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from enum import Enum
+from itertools import combinations
 from math import hypot, isfinite
 from pathlib import Path
 from statistics import median
@@ -12,6 +13,7 @@ from typing import Any, Mapping, Sequence
 
 from .binary_merge_background import BackgroundFlowProfile, build_background_flow_profile
 from .binary_merge_candidates import (
+    CandidateCluster,
     CandidateLocalizationContext,
     CandidatePairHypothesis,
     localize_candidate_pairs,
@@ -55,6 +57,8 @@ class BinaryPremergeSnapshot:
 class BinarySplitObservation:
     frame_index: int
     pair_hypotheses: tuple[CandidatePairHypothesis, ...]
+    pair_competitors: tuple[CandidatePairHypothesis, ...]
+    pair_uncertainty: float
     context_candidates: tuple[Candidate, ...]
 
     @property
@@ -292,9 +296,10 @@ def extract_binary_merge_events(
                 if parent is not None:
                     open_event.parent_bboxes.append(parent)
             elif len(frame.candidates) >= 2 and detector.pending_merge_state is None:
+                localization_context = _candidate_localization_context(open_event)
                 localization = localize_candidate_pairs(
                     frame.candidates,
-                    _candidate_localization_context(open_event),
+                    localization_context,
                 )
                 if not localization.pairs:
                     diagnostics.append(
@@ -307,10 +312,19 @@ def extract_binary_merge_events(
                     if result_limit_reached():
                         return result()
                 else:
+                    pair_competitors = _candidate_pair_competitors(
+                        localization.clusters,
+                        localization_context,
+                    )
+                    participant_ids = {
+                        cluster.candidate.candidate_id
+                        for pair in pair_competitors
+                        for cluster in pair.clusters
+                    }
                     physical_ids = {
                         member.candidate_id
-                        for pair in localization.pairs
-                        for cluster in pair.clusters
+                        for cluster in localization.clusters
+                        if cluster.candidate.candidate_id in participant_ids
                         for member in cluster.members
                     }
                     open_event.split_frame_indices.append(frame.frame_index)
@@ -318,6 +332,8 @@ def extract_binary_merge_events(
                         BinarySplitObservation(
                             frame_index=frame.frame_index,
                             pair_hypotheses=localization.pairs,
+                            pair_competitors=pair_competitors,
+                            pair_uncertainty=localization_context.uncertainty_ratio,
                             context_candidates=tuple(
                                 candidate for candidate in frame.candidates if candidate.candidate_id not in physical_ids
                             ),
@@ -400,6 +416,37 @@ def _candidate_localization_context(
         parent_bboxes=tuple(event.parent_bboxes),
         uncertainty_ratio=_PARENT_REGION_TOLERANCE,
     )
+
+
+def _candidate_pair_competitors(
+    clusters: Sequence[CandidateCluster],
+    context: CandidateLocalizationContext,
+) -> tuple[CandidatePairHypothesis, ...]:
+    competitors: list[CandidatePairHypothesis] = []
+    for left, right in combinations(clusters, 2):
+        localization = localize_candidate_pairs(
+            (left.candidate, right.candidate),
+            context,
+        )
+        if not localization.pairs:
+            continue
+        pair = localization.pairs[0]
+        original_clusters = {
+            left.candidate.candidate_id: left,
+            right.candidate.candidate_id: right,
+        }
+        competitors.append(
+            CandidatePairHypothesis(
+                clusters=tuple(
+                    original_clusters[cluster.candidate.candidate_id]
+                    for cluster in pair.clusters
+                ),
+                target_residual=pair.target_residual,
+                background_residual=pair.background_residual,
+                parent_residual=pair.parent_residual,
+            )
+        )
+    return tuple(competitors)
 
 
 def build_child_evidence(
@@ -888,8 +935,12 @@ def replay_binary_merge_events(
         pair_decisions_by_frame: dict[int, tuple[BinaryTransferDecision, ...]] = {}
         for observation in event.split_observations:
             evidence = _evidence_for_frame(rows, observation.frame_index)
-            pair_decisions = tuple(
-                _resolve_pair_hypothesis(
+            pair, pair_hold = _select_pair_hypothesis(event.event_id, observation)
+            if pair is None:
+                pair_decisions = ()
+                decision = pair_hold
+            else:
+                decision = _resolve_pair_hypothesis(
                     resolver=resolver,
                     event=event,
                     observation=observation,
@@ -898,14 +949,8 @@ def replay_binary_merge_events(
                     evidence=evidence,
                     frame_shape=frame_shape,
                 )
-                for pair in observation.pair_hypotheses
-            )
+                pair_decisions = (decision,)
             pair_decisions_by_frame[observation.frame_index] = pair_decisions
-            decision = (
-                pair_decisions[0]
-                if len(pair_decisions) == 1
-                else _pair_ambiguity_hold(event.event_id, pair_decisions)
-            )
             decisions.append((observation.frame_index, decision))
             if decision.status is BinaryTransferStatus.RESOLVED:
                 break
@@ -931,6 +976,62 @@ def replay_binary_merge_events(
             )
         )
     return tuple(sorted(replays, key=lambda replay: (replay.premerge_frame, replay.event_id)))
+
+
+def _select_pair_hypothesis(
+    event_id: int,
+    observation: BinarySplitObservation,
+) -> tuple[CandidatePairHypothesis | None, BinaryTransferDecision | None]:
+    if len(observation.pair_hypotheses) != 1:
+        return None, _pair_ambiguity_hold(
+            event_id,
+            pair_count=len(observation.pair_competitors),
+            normalized_margin=0.0,
+            required_margin=observation.pair_uncertainty,
+        )
+
+    selected = observation.pair_hypotheses[0]
+    selected_ids = _pair_candidate_ids(selected)
+    selected_cost = _pair_normalized_cost(selected)
+    runner_up_cost = min(
+        (
+            _pair_normalized_cost(pair)
+            for pair in observation.pair_competitors
+            if _pair_candidate_ids(pair) != selected_ids
+        ),
+        default=None,
+    )
+    if runner_up_cost is None:
+        return selected, None
+
+    normalized_margin = max(0.0, runner_up_cost - selected_cost) / max(
+        1.0,
+        abs(selected_cost),
+        abs(runner_up_cost),
+    )
+    required_margin = max(0.0, observation.pair_uncertainty)
+    if normalized_margin <= required_margin:
+        return None, _pair_ambiguity_hold(
+            event_id,
+            pair_count=len(observation.pair_competitors),
+            normalized_margin=normalized_margin,
+            required_margin=required_margin,
+            selected_cost=selected_cost,
+            runner_up_cost=runner_up_cost,
+        )
+    return selected, None
+
+
+def _pair_normalized_cost(pair: CandidatePairHypothesis) -> float:
+    return (
+        pair.target_residual
+        + pair.background_residual
+        + pair.parent_residual
+    ) / 3.0
+
+
+def _pair_candidate_ids(pair: CandidatePairHypothesis) -> tuple[str, str]:
+    return tuple(cluster.candidate.candidate_id for cluster in pair.clusters)
 
 
 def _resolve_pair_hypothesis(
@@ -969,7 +1070,12 @@ def _resolve_pair_hypothesis(
 
 def _pair_ambiguity_hold(
     event_id: int,
-    pair_decisions: Sequence[BinaryTransferDecision],
+    *,
+    pair_count: int,
+    normalized_margin: float,
+    required_margin: float,
+    selected_cost: float | None = None,
+    runner_up_cost: float | None = None,
 ) -> BinaryTransferDecision:
     return BinaryTransferDecision(
         event_id=event_id,
@@ -977,9 +1083,14 @@ def _pair_ambiguity_hold(
         target_candidate_id=None,
         background_candidate_id=None,
         selected_hypothesis=None,
-        normalized_margin=0.0,
+        normalized_margin=normalized_margin,
         reason="pair_ambiguous",
-        debug={"pair_count": len(pair_decisions)},
+        debug={
+            "pair_count": pair_count,
+            "pair_cost": selected_cost,
+            "runner_up_pair_cost": runner_up_cost,
+            "required_pair_margin": required_margin,
+        },
     )
 
 
@@ -1522,6 +1633,9 @@ def _decision_diagnostic(
         "status": decision.status.value,
         "reason": decision.reason,
         "normalized_margin": decision.normalized_margin,
+        "pair_cost": decision.debug.get("pair_cost"),
+        "runner_up_pair_cost": decision.debug.get("runner_up_pair_cost"),
+        "required_pair_margin": decision.debug.get("required_pair_margin"),
         "h1": _hypothesis_diagnostic(decision.debug.get("h1")),
         "h2": _hypothesis_diagnostic(decision.debug.get("h2")),
     }

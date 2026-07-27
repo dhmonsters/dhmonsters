@@ -515,6 +515,56 @@ def test_replay_resolves_later_unique_pair_under_the_same_event_id(tmp_path: Pat
     assert not replay.hold
 
 
+def _single_retained_pair_rows(background_x: float) -> list[dict[str, object]]:
+    rows = make_trace_rows_for_separate_overlap_merged_split()
+    for row in rows:
+        if row["type"] == "CANDIDATES" and row["frame_index"] == 4:
+            row["payload"]["candidates"].append(
+                _candidate(
+                    "background_alternative",
+                    4,
+                    (background_x, 0.50),
+                    half_ratio=0.02,
+                )
+            )
+    return rows
+
+
+def test_replay_holds_when_unique_retained_pair_margin_does_not_clear_uncertainty(
+    tmp_path: Path,
+) -> None:
+    # RED at d1372b1: the retained pair skipped pair margin and resolved immediately.
+    rows = _single_retained_pair_rows(0.575)
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    extraction = extract_binary_merge_events(rows)
+    (replay,) = replay_binary_merge_events(trace_path)
+
+    assert len(extraction.events[0].split_observations[0].pair_hypotheses) == 1
+    assert replay.hold
+    assert replay.decision_reason == "pair_ambiguous"
+    decision = replay.diagnostics["decisions"][0]
+    assert 0.0 < decision["normalized_margin"] <= 0.25
+    assert decision["pair_cost"] < decision["runner_up_pair_cost"]
+    assert decision["required_pair_margin"] == pytest.approx(0.25)
+
+
+def test_replay_resolves_when_unique_retained_pair_margin_clears_uncertainty(
+    tmp_path: Path,
+) -> None:
+    rows = _single_retained_pair_rows(0.52)
+    trace_path = tmp_path / "trace.jsonl"
+    _write_jsonl(trace_path, rows)
+
+    extraction = extract_binary_merge_events(rows)
+    (replay,) = replay_binary_merge_events(trace_path)
+
+    assert len(extraction.events[0].split_observations[0].pair_hypotheses) == 1
+    assert not replay.hold
+    assert replay.decision_reason == "binary_judges_agree"
+
+
 def test_replay_holds_judge_disagreement_for_a_unique_pair(tmp_path: Path) -> None:
     # RED at ed04a19: BinarySplitObservation did not retain pair_hypotheses.
     rows = make_trace_rows_for_separate_overlap_merged_split()
