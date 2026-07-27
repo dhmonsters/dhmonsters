@@ -124,6 +124,36 @@ def _rows_for_frame(
     ]
 
 
+def _white_anchor_row(
+    frame_index: int,
+    point_ratio: tuple[float, float],
+) -> dict[str, object]:
+    height, width = FRAME_SHAPE
+    return {
+        "type": "TEMPORAL_SELECTOR",
+        "frame_index": frame_index,
+        "payload": {
+            "debug": {
+                "kinematic_wide_beam_debug": {
+                    "reason": "white_anchor",
+                    "point": [point_ratio[0] * width, point_ratio[1] * height],
+                }
+            }
+        },
+    }
+
+
+def _board_distractors(frame_index: int) -> list[dict[str, object]]:
+    return [
+        _candidate(
+            f"board_distractor_{frame_index}_{index}",
+            frame_index,
+            (0.05 + 0.06 * (index % 14), 0.10 if index < 14 else 0.90),
+        )
+        for index in range(28)
+    ]
+
+
 def _preparation_rows(
     frame_indices: tuple[int, ...] = (0, 1, 2),
     *,
@@ -290,6 +320,90 @@ def test_binary_event_untrusted_premerge_is_diagnostic_not_event() -> None:
 
     assert not extraction.events
     assert any(row.reason == "premerge_identity_untrusted" for row in extraction.diagnostics)
+
+
+def test_visible_white_contact_with_board_distractors_is_not_event_or_diagnostic() -> None:
+    rows: list[dict[str, object]] = []
+    rows += _rows_for_frame(
+        0,
+        [
+            _candidate("visible_target_0", 0, (0.42, 0.50)),
+            _candidate("visible_background_0", 0, (0.58, 0.50)),
+            *_board_distractors(0),
+        ],
+        (0.42, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(0, (0.42, 0.50)))
+    for frame_index in (1, 2):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"visible_target_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"visible_background_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+                *_board_distractors(frame_index),
+            ],
+            (0.455, 0.50),
+            identity_state="UNKNOWN",
+        )
+        rows.append(_white_anchor_row(frame_index, (0.455, 0.50)))
+
+    extraction = extract_binary_merge_events(rows)
+
+    assert not extraction.events
+    assert not extraction.diagnostics
+
+
+def test_identity_risk_after_visible_contact_uses_last_visible_contact_snapshot() -> None:
+    rows: list[dict[str, object]] = []
+    rows += _rows_for_frame(
+        0,
+        [
+            _candidate("visible_target_0", 0, (0.42, 0.50)),
+            _candidate("visible_background_0", 0, (0.58, 0.50)),
+        ],
+        (0.42, 0.50),
+        identity_state="UNKNOWN",
+    )
+    rows.append(_white_anchor_row(0, (0.42, 0.50)))
+    for frame_index in (1, 2):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"visible_target_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"visible_background_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+            identity_state="UNKNOWN",
+        )
+        rows.append(_white_anchor_row(frame_index, (0.455, 0.50)))
+    for frame_index in (3, 4):
+        rows += _rows_for_frame(
+            frame_index,
+            [
+                _candidate(f"risk_target_{frame_index}", frame_index, (0.455, 0.50), half_ratio=0.06),
+                _candidate(f"risk_background_{frame_index}", frame_index, (0.545, 0.50), half_ratio=0.06),
+            ],
+            (0.455, 0.50),
+            identity_state="IDENTITY_HOLD",
+        )
+    rows += _rows_for_frame(
+        5,
+        [
+            _candidate("risk_target_child", 5, (0.42, 0.50)),
+            _candidate("risk_background_child", 5, (0.58, 0.50)),
+        ],
+        (0.42, 0.50),
+        identity_state="IDENTITY_HOLD",
+    )
+
+    extraction = extract_binary_merge_events(rows)
+
+    assert len(extraction.events) == 1
+    assert not extraction.diagnostics
+    assert extraction.events[0].premerge.frame_index == 2
+    assert extraction.events[0].premerge.target_candidate_id == "visible_target_2"
+    assert extraction.events[0].premerge.background_candidate_id == "visible_background_2"
 
 
 def test_binary_event_ambiguous_first_split_keeps_same_event_for_later_pair() -> None:

@@ -158,6 +158,7 @@ def extract_binary_merge_events(
     suppressed_event_id: int | None = None
     pending_premerge: _FrameRuntime | None = None
     prior: _FrameRuntime | None = None
+    last_visible_contact: _FrameRuntime | None = None
     trusted_separate_frames: list[_FrameRuntime] = []
     stable_area = 0.0
 
@@ -181,6 +182,24 @@ def extract_binary_merge_events(
             else None
         )
         collision_candidate = _nearest_other_candidate(target_candidate, frame.candidates)
+        visible_contact = _identity_observable(frame) and _candidates_are_in_contact(
+            target_candidate,
+            collision_candidate,
+        )
+        if _identity_observable(frame):
+            if visible_contact:
+                last_visible_contact = frame
+            else:
+                last_visible_contact = None
+                if target_candidate is not None:
+                    stable_area = _bbox_area(target_candidate.bbox)
+                if _premerge_identity_is_trusted(frame):
+                    trusted_separate_frames.append(frame)
+            if open_event is None:
+                detector.complete_split_recovery()
+                pending_premerge = None
+            prior = frame
+            continue
         event_candidates = tuple(frame.candidates)
         if target_candidate is not None:
             event_candidates = (
@@ -206,7 +225,7 @@ def extract_binary_merge_events(
         in_merge = state_event.state in (MergeState.PARTIAL_OVERLAP, MergeState.MERGED)
 
         if detector.pending_merge_state is not None and pending_premerge is None:
-            pending_premerge = prior
+            pending_premerge = last_visible_contact or prior
 
         if open_event is not None and event_id != open_event.event_id:
             _finalize_open_event(open_event, events, diagnostics, frame.frame_index)
@@ -215,7 +234,7 @@ def extract_binary_merge_events(
                 return result()
 
         if open_event is None and in_merge and suppressed_event_id != event_id:
-            premerge = pending_premerge or prior
+            premerge = pending_premerge or last_visible_contact or prior
             pending_premerge = None
             if premerge is None or not _premerge_identity_is_trusted(premerge):
                 diagnostics.append(
@@ -229,7 +248,10 @@ def extract_binary_merge_events(
                 if result_limit_reached():
                     return result()
             else:
-                snapshot = _build_premerge_snapshot(premerge, trusted_separate_frames)
+                snapshot_frames = tuple(trusted_separate_frames)
+                if not any(row.frame_index == premerge.frame_index for row in snapshot_frames):
+                    snapshot_frames += (premerge,)
+                snapshot = _build_premerge_snapshot(premerge, snapshot_frames)
                 if snapshot is None:
                     diagnostics.append(
                         BinaryEventExtractionDiagnostic(
@@ -286,6 +308,7 @@ def extract_binary_merge_events(
             suppressed_event_id = None
         if not in_merge and detector.pending_merge_state is None:
             pending_premerge = None
+            last_visible_contact = None
         if (
             target_candidate is not None
             and previous_detector_state in (MergeState.SEPARATE, MergeState.REACQUIRED)
@@ -552,6 +575,10 @@ def _premerge_identity_is_trusted(frame: _FrameRuntime) -> bool:
         return True
     if frame.identity_state == "IDENTITY_HOLD":
         return False
+    return _identity_observable(frame)
+
+
+def _identity_observable(frame: _FrameRuntime) -> bool:
     if frame.white_anchor_point is None or frame.target_point is None:
         return False
     anchor_candidate = _selected_candidate(frame.candidates, frame.white_anchor_point)
@@ -561,6 +588,24 @@ def _premerge_identity_is_trusted(frame: _FrameRuntime) -> bool:
         and selected_candidate is not None
         and anchor_candidate.candidate_id == selected_candidate.candidate_id
     )
+
+
+def _candidates_are_in_contact(
+    target: Candidate | None,
+    background: Candidate | None,
+) -> bool:
+    if target is None or background is None:
+        return False
+    target_area = _bbox_area(target.bbox)
+    if target_area <= 0.0:
+        return False
+    overlap = (
+        max(target.bbox[0], background.bbox[0]),
+        max(target.bbox[1], background.bbox[1]),
+        min(target.bbox[2], background.bbox[2]),
+        min(target.bbox[3], background.bbox[3]),
+    )
+    return _bbox_area(overlap) / target_area >= 0.15
 
 
 def _merge_parent_bbox(candidates: Sequence[Candidate], target: Candidate | None) -> tuple[float, float, float, float] | None:
