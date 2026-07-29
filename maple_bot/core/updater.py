@@ -5,6 +5,7 @@ import sys
 import subprocess
 import tempfile
 import re
+import json
 from typing import Callable
 
 # GitHub Raw URL ??version.json ?꾩튂
@@ -24,8 +25,8 @@ def _read_local_version() -> str:
             # ?뚯뒪 ?ㅽ뻾: core/updater.py 湲곗??쇰줈 ???④퀎 ??(?꾨줈?앺듃 猷⑦듃)
             base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         path = os.path.join(base, _LOCAL_VERSION_FILE)
-        with open(path, encoding="utf-8") as f:
-            return f.read().strip()
+        with open(path, encoding="utf-8-sig") as f:
+            return f.read().strip().lstrip("\ufeff")
     except Exception:
         return "0.0.0"
 
@@ -68,9 +69,9 @@ def check_for_update() -> dict | None:
     try:
         resp = requests.get(_VERSION_URL, timeout=5)
         resp.raise_for_status()
-        data = resp.json()
-    except Exception:
-        return None
+        data = json.loads(resp.content.decode("utf-8-sig"))
+    except Exception as exc:
+        raise RuntimeError(f"업데이트 정보를 확인하지 못했습니다: {exc}") from exc
 
     latest = data.get("version", "0.0.0")
     if _parse_version(latest) > _parse_version(current):

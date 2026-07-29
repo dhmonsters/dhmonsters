@@ -18,6 +18,31 @@ def _get_config_path() -> str:
 
 CONFIG_PATH = _get_config_path()
 
+REQUIRED_HUNT_GROUND_PRESETS = {
+    "초급 수련장": {
+        "name": "초급 수련장",
+        "mapping_completed": True,
+    },
+    "빨코2": {
+        "name": "빨코2",
+        "mapping_completed": True,
+        "note": "빨코2 v5/new 전용 하드코딩 사냥터. 전용 동작값으로 실행합니다.",
+    },
+    "빨코3": {
+        "name": "빨코3",
+        "mapping_completed": True,
+        "note": "텔레포트 전용 하드코딩 사냥터. 좌표 블록 없이 전용 루틴으로 실행합니다.",
+    },
+}
+
+HUNT_GROUND_ALIASES = {
+    "鍮⑥퐫2": "빨코2",
+    "rednose2": "빨코2",
+    "rednose2v5": "빨코2",
+    "鍮⑥퐫3": "빨코3",
+    "rednose3": "빨코3",
+}
+
 
 def get_user_templates_dir() -> str:
     """사용자가 생성하는 템플릿 파일 저장 디렉토리.
@@ -338,7 +363,7 @@ def _load_json_safe(path: str) -> dict:
 
 
 def _ensure_required_presets(data: dict) -> bool:
-    """기존 사용자 설정에 배포 필수 사냥터 프리셋을 보강한다."""
+    """배포 필수 사냥터 프리셋만 유지하고 깨진 이름을 정상 이름으로 보정한다."""
     bundled = _load_json_safe(_get_bundled_config_path())
     bundled_presets = ((bundled.get("hunt_grounds") or {}).get("presets") or {})
     if not isinstance(bundled_presets, dict):
@@ -352,24 +377,39 @@ def _ensure_required_presets(data: dict) -> bool:
         hunt_grounds["presets"] = presets
         changed = True
 
+    for bad_name, good_name in HUNT_GROUND_ALIASES.items():
+        if bad_name in presets:
+            if good_name not in presets:
+                presets[good_name] = presets[bad_name]
+            presets.pop(bad_name, None)
+            changed = True
+
+    allowed_names = set(REQUIRED_HUNT_GROUND_PRESETS)
+    for name in list(presets.keys()):
+        if name not in allowed_names:
+            presets.pop(name, None)
+            changed = True
+
     if "rednose2_v5" in bundled and "rednose2_v5" not in data:
         data["rednose2_v5"] = copy.deepcopy(bundled["rednose2_v5"])
         changed = True
 
-    if "빨코2" not in presets:
-        presets["빨코2"] = {
-            "name": "빨코2",
-            "mapping_completed": True,
-            "note": "빨코2 v5/new 전용 하드코딩 사냥터. 전용 동작값으로 실행합니다.",
-        }
-        changed = True
+    for name, preset in REQUIRED_HUNT_GROUND_PRESETS.items():
+        if name not in presets:
+            presets[name] = copy.deepcopy(preset)
+            changed = True
+        elif isinstance(presets[name], dict):
+            for key, value in preset.items():
+                if presets[name].get(key) != value:
+                    presets[name][key] = copy.deepcopy(value)
+                    changed = True
 
-    if "빨코3" not in presets:
-        presets["빨코3"] = {
-            "name": "빨코3",
-            "mapping_completed": True,
-            "note": "텔레포트 전용 하드코딩 사냥터. 좌표 블록 없이 전용 루틴으로 실행합니다.",
-        }
+    active = str(hunt_grounds.get("active") or "").strip()
+    normalized_active = HUNT_GROUND_ALIASES.get(active, active)
+    if normalized_active not in allowed_names:
+        normalized_active = "빨코2"
+    if hunt_grounds.get("active") != normalized_active:
+        hunt_grounds["active"] = normalized_active
         changed = True
 
     attack = data.setdefault("attack", {})
@@ -414,8 +454,19 @@ class ConfigManager:
         self._data = copy.deepcopy(DEFAULT_CONFIG)
         changed = False
         if os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-                saved = json.load(f)
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
+                    saved = json.load(f)
+            except Exception:
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                broken_path = f"{CONFIG_PATH}.broken_{timestamp}"
+                try:
+                    import shutil
+                    shutil.copy2(CONFIG_PATH, broken_path)
+                except Exception:
+                    pass
+                saved = {}
+                changed = True
             world = saved.get("world_map", {})
             calibration_data = world.get("calibration")
             if calibration_data and not world.get("migration_completed"):

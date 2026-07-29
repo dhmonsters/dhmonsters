@@ -1,8 +1,8 @@
-﻿; Claude Inno Setup installer script
+; Claude Inno Setup installer script
 ; Build with ISCC.exe installer.iss
 
 #define AppName    "Claude"
-#define AppVersion "2.2.12"
+#define AppVersion "2.2.13"
 #define AppExe     "Claude.exe"
 #define AppPublisher "Claude"
 #define SourceDir  "dist\Claude_" + AppVersion

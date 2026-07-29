@@ -1,1 +1,1 @@
-﻿{"version":"2.2.12","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.12/Claude_v2.2.12_Setup.exe","notes":"캐릭터 색검출 보정 슬라이더를 추가하고, H/S/V 및 점 크기 필터를 사냥터 설정에 저장해 미검출 상황에서 직접 조절할 수 있게 했습니다. 연속기 표시 글자 깨짐과 설치 안내 글자 깨짐 보정도 포함했습니다."}
+{"version":"2.2.13","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.2.13/Claude_v2.2.13_Setup.exe","notes":"캐릭터 색검출 조절 UI의 한글 깨짐을 수정하고, 업데이트 확인이 본체 실행을 막지 않도록 실행 흐름을 안정화했습니다."}

@@ -294,8 +294,8 @@ class TabHunt(QWidget):
         """연속기 키 목록을 '키(홀드ms±varMs) → ...' 형식으로 표시."""
         parts = []
         for k, (b, v) in zip(self._combo_keys, self._combo_holds):
-            parts.append(f"{k}({int(b*1000)}±{int(v*1000)}ms)")
-        return " → ".join(parts)
+            parts.append(f"{k}({int(b*1000)}+/-{int(v*1000)}ms)")
+        return " -> ".join(parts)
 
     # ── 키 반복 조작 ──────────────────────────────────────────────────
     def _key_add_step(self) -> None:

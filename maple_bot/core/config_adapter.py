@@ -1,6 +1,8 @@
 ﻿# config_adapter ??config.json ?뺤뀛?덈━瑜?RuntimeConfig濡?留ㅽ븨 (湲곗〈 ?ㅼ젙 ???좉퇋 ?고????ㅻ━)
 from __future__ import annotations
 
+from dataclasses import fields
+
 try:
     from core.runtime import RuntimeConfig
 except ModuleNotFoundError:
@@ -129,18 +131,20 @@ def _legacy_absolute_region_to_window_ratio(region_cfg, window_title: str) -> di
 
 def _potion_rule(cfg: dict) -> PotionRule:
     """recovery.hp_potion/mp_potion ?뺤뀛?덈━ ??PotionRule. threshold %?믩퉬??"""
-    return PotionRule(
-        enabled=bool(cfg.get("enabled", False)),
-        key=cfg.get("key", ""),
-        secondary_key=cfg.get("secondary_key", ""),
-        threshold=float(cfg.get("threshold", 70)) / 100.0,
-        cooldown=(
+    kwargs = {
+        "enabled": bool(cfg.get("enabled", False)),
+        "key": cfg.get("key", ""),
+        "secondary_key": cfg.get("secondary_key", ""),
+        "threshold": float(cfg.get("threshold", 70)) / 100.0,
+        "cooldown": (
             1.0 if float(cfg.get("cooldown_sec", 1.0)) == 3.0
             else float(cfg.get("cooldown_sec", 1.0))
         ),
-        verify_delay=float(cfg.get("verify_delay_sec", 0.2)),
-        min_recovery=float(cfg.get("min_recovery_percent", 1.0)) / 100.0,
-    )
+        "verify_delay": float(cfg.get("verify_delay_sec", 0.2)),
+        "min_recovery": float(cfg.get("min_recovery_percent", 1.0)) / 100.0,
+    }
+    allowed = {field.name for field in fields(PotionRule)}
+    return PotionRule(**{key: value for key, value in kwargs.items() if key in allowed})
 
 
 def _attack_sequences(attack: dict) -> list[AttackSequence]:

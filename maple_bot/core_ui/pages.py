@@ -366,6 +366,40 @@ def _make_current_position_checker(config) -> QWidget:
     return row
 
 
+
+
+def _make_character_color_controls(config) -> QWidget:
+    """미니맵 캐릭터 노란점의 HSV와 점 크기 필터를 조절하는 영역."""
+    box = QWidget()
+    v = QVBoxLayout(box)
+    v.setContentsMargins(0, SPACING["xs"], 0, SPACING["xs"])
+    v.setSpacing(SPACING["xxs"])
+
+    title = QLabel("캐릭터 색검출 조절")
+    title.setObjectName("subtle")
+    desc = QLabel(
+        "노란점이 안 잡히면 밝기 최소값을 낮추고, "
+        "배경 노란색을 잡으면 밝기/채도 최소값을 올려주세요. "
+        "점 크기 범위는 작은 노란 캐릭터 마크만 남기기 위한 필터입니다."
+    )
+    desc.setObjectName("subtle")
+    desc.setWordWrap(True)
+    v.addWidget(title)
+    v.addWidget(desc)
+
+    controls = [
+        SliderField("색상 시작 H", config, ("minimap", "hsv_h_low"), lo=0, hi=179, default=20, is_int=True, label_w=120),
+        SliderField("색상 끝 H", config, ("minimap", "hsv_h_high"), lo=0, hi=179, default=40, is_int=True, label_w=120),
+        SliderField("채도 최소 S", config, ("minimap", "hsv_s_low"), lo=0, hi=255, default=100, is_int=True, label_w=120),
+        SliderField("밝기 최소 V", config, ("minimap", "hsv_v_low"), lo=0, hi=255, default=200, is_int=True, label_w=120),
+        SliderField("점 크기 최소", config, ("minimap", "char_area_min"), lo=1, hi=80, default=3, is_int=True, label_w=120),
+        SliderField("점 크기 최대", config, ("minimap", "char_area_max"), lo=10, hi=500, default=100, is_int=True, label_w=120),
+    ]
+    for field in controls:
+        v.addWidget(field.row)
+    return box
+
+
 def build_pages(config) -> list[QWidget]:
     """6 카테고리 페이지 리스트. shell의 stack에 순서대로 들어감."""
     c = config
@@ -386,6 +420,7 @@ def build_pages(config) -> list[QWidget]:
     # 사냥 영역 옆에 색 허용오차 슬라이더(정수)
     tol_slider = SliderField("색 허용오차", c, ("minimap", "tolerance"),
                              lo=0, hi=255, default=30, is_int=True, label_w=74)
+    char_controls = _make_character_color_controls(c)
     ha_status = StatusField("사냥 영역",
                             lambda: int(c.get("attack", "hunt_area", "w", default=0)) > 0,
                             [hunt_area_picker], extra=tol_slider.row)
@@ -408,7 +443,7 @@ def build_pages(config) -> list[QWidget]:
     pages.append(_page("연결·인식", "게임연결·미니맵·사냥영역·닉네임·몬스터감지", [
         ComboField("사냥 모드", c, ("hunt_mode",), ["key", "image"],
                    labels={"key": "키 입력", "image": "이미지 인식"}),
-        mm_status, ha_status, mon_status, name_status,
+        mm_status, char_controls, ha_status, mon_status, name_status,
     ]))
 
     # 2. 동선·이동 — 좌표 동선은 블록 빌더로 (이동/공격/사다리 순차)
