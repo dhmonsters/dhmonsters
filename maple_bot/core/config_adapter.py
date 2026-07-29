@@ -155,19 +155,41 @@ def _attack_sequences(attack: dict) -> list[AttackSequence]:
     ]
 
 
+def _minimap_region_profile(mm: dict) -> dict:
+    """현재 UI에 저장된 미니맵 영역을 게임창 기준 상대좌표로 전달한다."""
+    region = {
+        "base_region": [
+            int(mm.get("region_x", 38)),
+            int(mm.get("region_y", 129)),
+            int(mm.get("width", 172)),
+            int(mm.get("height", 103)),
+        ],
+    }
+    ratio_keys = ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio")
+    if all(mm.get(key) is not None for key in ratio_keys):
+        region.update({
+            "x_ratio": float(mm.get("region_x_ratio")),
+            "y_ratio": float(mm.get("region_y_ratio")),
+            "w_ratio": float(mm.get("width_ratio")),
+            "h_ratio": float(mm.get("height_ratio")),
+        })
+    else:
+        region.update({
+            "left": int(mm.get("region_x", 38)),
+            "top": int(mm.get("region_y", 129)),
+            "width": int(mm.get("width", 172)),
+            "height": int(mm.get("height", 103)),
+        })
+    return region
+
+
 def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     """Build RedNose2 v5 runtime profile from one fixed source."""
     mm = d.get("minimap", {}) or {}
     forced = {
         "enabled": True,
         "use_fixed_minimap_region": True,
-        "fixed_minimap_region": {
-            "x_ratio": 38 / 1366,
-            "y_ratio": 129 / 768,
-            "w_ratio": 172 / 1366,
-            "h_ratio": 103 / 768,
-            "base_region": [38, 129, 172, 103],
-        },
+        "fixed_minimap_region": _minimap_region_profile(mm),
         "attack_key": "end",
         "teleport_key": "x",
         "attack_hold_sec": 0.9,
@@ -236,13 +258,7 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
     forced = {
         "enabled": True,
         "use_fixed_minimap_region": True,
-        "fixed_minimap_region": {
-            "x_ratio": 38 / 1366,
-            "y_ratio": 129 / 768,
-            "w_ratio": 172 / 1366,
-            "h_ratio": 103 / 768,
-            "base_region": [38, 129, 172, 103],
-        },
+        "fixed_minimap_region": _minimap_region_profile(mm),
         "attack_key": "end",
         "teleport_key": "x",
         "jump_key": str(mm.get("jump_key", "alt") or "alt"),

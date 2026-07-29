@@ -91,7 +91,7 @@
     "sequences": [
       {
         "enabled": true,
-        "name": "?곗냽湲?1",
+        "name": "연속기1",
         "keys": [
           "end",
           "x"
@@ -105,7 +105,7 @@
       }
     ],
     "monster_template": "",
-    "monster_folder": "templates\\hunt_monsters\\鍮⑥퐫2",
+    "monster_folder": "templates\\hunt_monsters\\초급_수련장",
     "jump_before_attack": false,
     "riding_on_rope": false,
     "range_px": 350,
@@ -130,9 +130,9 @@
     "density_max_dwell_sec": 8.0,
     "hunt_area": {
       "x": 0,
-      "y": 251,
-      "w": 1278,
-      "h": 396
+      "y": 379,
+      "w": 1922,
+      "h": 570
     },
     "image_trigger": {
       "enabled": false,
@@ -176,18 +176,25 @@
   },
   "hunt_mode": "key",
   "hunt_grounds": {
-    "active": "鍮⑥퐫2",
+    "active": "초급 수련장",
     "presets": {
-      "鍮⑥퐫2": {
+      "초급 수련장": {
         "minimap": {
-          "region_x": 38,
-          "region_y": 129,
-          "width": 172,
-          "height": 103,
+          "region_x": 16,
+          "region_y": 177,
+          "width": 274,
+          "height": 109,
           "char_r": 225,
           "char_g": 225,
           "char_b": 0,
           "tolerance": 30,
+          "char_h_tol": 10,
+          "char_s_min": 100,
+          "char_v_min": 200,
+          "char_area_min": 3,
+          "char_area_max": 100,
+          "attack_key": "ctrl",
+          "monster_template": "",
           "jump_key": "alt",
           "hotkey_region": "f11",
           "hotkey_zone": "f12",
@@ -196,9 +203,135 @@
           "width_ratio": 0.12708333333333333,
           "height_ratio": 0.14271555996035679
         },
+        "attack": {
+          "key": "end",
+          "sequences": [
+            {
+              "enabled": true,
+              "name": "연속기1",
+              "keys": [
+                "end",
+                "x"
+              ],
+              "key_hold_sec": [
+                1.5,
+                0.1
+              ],
+              "key_interval_sec": 0.6,
+              "repeat_interval_sec": 1.0
+            }
+          ],
+          "monster_template": "",
+          "monster_folder": "templates\\hunt_monsters\\초급_수련장",
+          "jump_before_attack": false,
+          "riding_on_rope": false,
+          "range_px": 350,
+          "camera_w_ratio": 0.5,
+          "char_y_ratio": 0.6,
+          "char_offset_x": 0,
+          "char_offset_y": 0,
+          "floor_profiles": [],
+          "box_h": 250,
+          "monster_range_h": 450,
+          "monster_range_px": 650,
+          "monster_range_y_offset": -180,
+          "local_window_size": 80,
+          "deadzone_ratio": 0.0,
+          "name_tag_threshold": 0.7,
+          "name_tag_y_offset": 138,
+          "hits_to_kill": 1,
+          "skill_cast_sec": 0.6,
+          "delay_sec": 1.0,
+          "density_stay": 3,
+          "density_leave": 1,
+          "density_max_dwell_sec": 8.0,
+          "hunt_area": {
+            "x": 0,
+            "y": 251,
+            "w": 1278,
+            "h": 396
+          },
+          "image_trigger": {
+            "enabled": false,
+            "template_path": "",
+            "threshold": 0.8,
+            "check_interval_sec": 0.1,
+            "cooldown_sec": 2.0,
+            "action": {
+              "key": "space",
+              "hold_sec": 0.1,
+              "repeat": 1,
+              "repeat_interval_sec": 0.0,
+              "wait_after_sec": 0.0
+            }
+          },
+          "normal_buffs": [
+            {
+              "enabled": true,
+              "key": "f",
+              "interval_sec": 70
+            },
+            {
+              "enabled": true,
+              "key": "s",
+              "interval_sec": 400
+            },
+            {
+              "enabled": true,
+              "key": "d",
+              "interval_sec": 200
+            }
+          ],
+          "toggle_buffs": [],
+          "name_template": "templates/name_tag.png",
+          "atk_x_min": -285,
+          "atk_x_max": 299,
+          "atk_y_min": -330,
+          "atk_y_max": 14,
+          "monster_accuracy": 0.22,
+          "jump_while_move": false
+        },
+        "hunt_mode": "key",
+        "world_map": {
+          "enabled": false,
+          "image_path": "C:\\Users\\PC\\Desktop\\02_work\\05_AI\\maple_bot\\maps\\minimap_world_map.png",
+          "image_width": 156,
+          "image_height": 99,
+          "calibration": {
+            "scale": 1.0,
+            "offset": [
+              0.0,
+              0.0
+            ]
+          },
+          "tracking_policy": "continue_estimated",
+          "migration_completed": true,
+          "legacy_backup_path": "config.pre_world_map_20260722_143955.json"
+        },
+        "navigation": {
+          "nodes": [],
+          "edges": [],
+          "routes": []
+        },
+        "map_exit": {
+          "enabled": true,
+          "action": "both",
+          "name_region": {
+            "x_ratio": 0.049479166666666664,
+            "y_ratio": 0.2983151635282458,
+            "w_ratio": 0.071875,
+            "h_ratio": 0.027750247770069375
+          },
+          "threshold": 0.75,
+          "grace_count": 1,
+          "region_x": 67,
+          "region_y": 90,
+          "width": 153,
+          "height": 21
+        },
         "zones": [
           {
-            "name": "1痢?",
+            "name": "1층",
             "left_x": 48,
             "right_x": 150,
             "y_min": 75,
@@ -215,7 +348,7 @@
             "rope_x_ratio": -1.0
           },
           {
-            "name": "2痢?",
+            "name": "2층",
             "left_x": 57,
             "right_x": 133,
             "y_min": 61,
@@ -224,7 +357,7 @@
             "random_margin_min": 0,
             "random_margin_max": 0,
             "sweeps": 11.0,
-            "key_pattern": "留롮씠?뚮━湲??⑦꽩",
+            "key_pattern": "많이때리기 패턴",
             "left_x_ratio": 0.3313953488372093,
             "right_x_ratio": 0.7732558139534884,
             "y_min_ratio": 0.5922330097087378,
@@ -232,7 +365,89 @@
             "rope_x_ratio": -1.0
           }
         ],
-        "ropes": []
+        "floor_hunt": {
+          "enabled": true,
+          "route_mode": true,
+          "route": [
+            {
+              "type": "move",
+              "target_x": 0,
+              "move_type": "walk",
+              "direction": "right",
+              "pos_x": 19,
+              "pos_y": 72,
+              "start_x": 40,
+              "end_x": 125,
+              "mode": "count"
+            },
+            {
+              "type": "ladder",
+              "ladder_x": 60,
+              "y_top": 46,
+              "y_bot": 66,
+              "exit_side": "left"
+            },
+            {
+              "type": "move",
+              "target_x": 0,
+              "move_type": "walk",
+              "direction": "right",
+              "pos_x": 123,
+              "pos_y": 44,
+              "start_x": 60,
+              "end_x": 90
+            }
+          ],
+          "route_steps": [
+            {
+              "id": "move_1",
+              "name": "",
+              "parameters": {
+                "start_x": 50,
+                "end_x": 220,
+                "move_type": "walk",
+                "mode": "infinite",
+                "sweeps": 1,
+                "pos_x": 50,
+                "pos_y": 85
+              },
+              "completion": {
+                "type": "repeat_count",
+                "target_x": null,
+                "pass_direction": "either",
+                "tolerance": 1,
+                "y_min": null,
+                "y_max": null,
+                "confirmations": 1,
+                "repeat_count": 1
+              },
+              "failure": {
+                "action": "retry",
+                "max_retries": 0,
+                "recovery_step_id": null,
+                "timeout_sec": 15.0
+              },
+              "input_policy": {
+                "allow_attack": true,
+                "allow_pickup": true,
+                "allow_potion": true,
+                "allow_buff": true
+              },
+              "next_step_id": null,
+              "step_type": "move",
+              "start_x": 50,
+              "end_x": 220,
+              "move_type": "walk",
+              "mode": "infinite",
+              "sweeps": 1,
+              "pos_x": 50,
+              "pos_y": 85,
+              "type": "move"
+            }
+          ]
+        },
+        "mapping_completed": true,
+        "name": "초급 수련장"
       },
       "빨코2": {
         "name": "빨코2",
@@ -247,14 +462,19 @@
     }
   },
   "minimap": {
-    "region_x": 38,
-    "region_y": 129,
-    "width": 172,
-    "height": 103,
+    "region_x": 16,
+    "region_y": 177,
+    "width": 274,
+    "height": 109,
     "char_r": 225,
     "char_g": 225,
     "char_b": 0,
     "tolerance": 30,
+    "char_h_tol": 10,
+    "char_s_min": 100,
+    "char_v_min": 200,
+    "char_area_min": 3,
+    "char_area_max": 100,
     "attack_key": "ctrl",
     "monster_template": "",
     "jump_key": "alt",
@@ -263,11 +483,12 @@
     "region_x_ratio": 0.025520833333333333,
     "region_y_ratio": 0.1377601585728444,
     "width_ratio": 0.12708333333333333,
-    "height_ratio": 0.14271555996035679
+    "height_ratio": 0.14271555996035679,
+    "hsv_v_low": 195
   },
   "zones": [
     {
-      "name": "1痢?",
+      "name": "1층",
       "left_x": 48,
       "right_x": 150,
       "y_min": 75,
@@ -284,7 +505,7 @@
       "rope_x_ratio": -1.0
     },
     {
-      "name": "2痢?",
+      "name": "2층",
       "left_x": 57,
       "right_x": 133,
       "y_min": 61,
@@ -293,7 +514,7 @@
       "random_margin_min": 0,
       "random_margin_max": 0,
       "sweeps": 11.0,
-      "key_pattern": "留롮씠?뚮━湲??⑦꽩",
+      "key_pattern": "많이때리기 패턴",
       "left_x_ratio": 0.3313953488372093,
       "right_x_ratio": 0.7732558139534884,
       "y_min_ratio": 0.5922330097087378,
@@ -306,7 +527,7 @@
   },
   "key_patterns": {
     "active": {
-      "name": "湲곕낯 ?⑦꽩",
+      "name": "기본 패턴",
       "loop": true,
       "between_min": 0.05,
       "between_max": 0.2,
@@ -338,8 +559,8 @@
       ]
     },
     "presets": {
-      "湲곕낯 ?⑦꽩": {
-        "name": "湲곕낯 ?⑦꽩",
+      "기본 패턴": {
+        "name": "기본 패턴",
         "loop": true,
         "between_min": 0.05,
         "between_max": 0.2,
@@ -370,8 +591,8 @@
           }
         ]
       },
-      "?쒖옄由ш났寃?": {
-        "name": "?쒖옄由ш났寃?",
+      "제자리공격": {
+        "name": "제자리공격",
         "loop": true,
         "between_min": 1.5,
         "between_max": 2.0,
@@ -390,8 +611,8 @@
           }
         ]
       },
-      "留롮씠?뚮━湲??⑦꽩": {
-        "name": "留롮씠?뚮━湲??⑦꽩",
+      "많이때리기 패턴": {
+        "name": "많이때리기 패턴",
         "loop": true,
         "between_min": 0.05,
         "between_max": 0.2,
@@ -422,8 +643,8 @@
           }
         ]
       },
-      "留ㅼ쭅?대줈": {
-        "name": "留ㅼ쭅?대줈",
+      "매직클로": {
+        "name": "매직클로",
         "loop": true,
         "between_min": 1.5,
         "between_max": 1.8,
@@ -467,12 +688,14 @@
       "enabled": true,
       "threshold": 30,
       "key": "pgup",
+      "secondary_key": "",
       "cooldown_sec": 1.0
     },
     "mp_potion": {
       "enabled": true,
       "threshold": 50,
       "key": "pgdn",
+      "secondary_key": "",
       "cooldown_sec": 3.0
     },
     "potion_count": {
@@ -518,7 +741,7 @@
     "height": 21
   },
   "anti_mob": {
-    "enabled": false,
+    "enabled": true,
     "type": "click",
     "detect_region": null,
     "target_x": 100,
@@ -637,7 +860,7 @@
         1831,
         842
       ],
-      "junk_sell_enabled": true,
+      "junk_sell_enabled": false,
       "auto_sell_enabled": false,
       "auto_sell_interval_min": 50,
       "sell_on_start": false,
@@ -728,6 +951,53 @@
         "pos_y": 44,
         "start_x": 60,
         "end_x": 90
+      }
+    ],
+    "route_steps": [
+      {
+        "id": "move_1",
+        "name": "",
+        "parameters": {
+          "start_x": 50,
+          "end_x": 220,
+          "move_type": "walk",
+          "mode": "infinite",
+          "sweeps": 1,
+          "pos_x": 50,
+          "pos_y": 85
+        },
+        "completion": {
+          "type": "repeat_count",
+          "target_x": null,
+          "pass_direction": "either",
+          "tolerance": 1,
+          "y_min": null,
+          "y_max": null,
+          "confirmations": 1,
+          "repeat_count": 1
+        },
+        "failure": {
+          "action": "retry",
+          "max_retries": 0,
+          "recovery_step_id": null,
+          "timeout_sec": 15.0
+        },
+        "input_policy": {
+          "allow_attack": true,
+          "allow_pickup": true,
+          "allow_potion": true,
+          "allow_buff": true
+        },
+        "next_step_id": null,
+        "step_type": "move",
+        "start_x": 50,
+        "end_x": 220,
+        "move_type": "walk",
+        "mode": "infinite",
+        "sweeps": 1,
+        "pos_x": 50,
+        "pos_y": 85,
+        "type": "move"
       }
     ]
   },
