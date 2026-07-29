@@ -66,3 +66,10 @@ det(박스탐색)는 기존 파이프라인이 담당, 여기선 **rec-only**(�
 3. 로그 자동스크롤 — `core_ui/shell.py` 로그뷰 `verticalScrollBar().rangeChanged`→맨아래.
 
 전체 324 passed.
+
+## 2026-07-29 실행 경로 정리
+- 공식 진입점은 run_integrated.py 하나로 고정한다.
+- main.py는 구형 ui.main_window를 열지 않고 run_integrated.py로 위임한다.
+- core_ui가 최신 UI이며 ui/main_window.py와 ui/tab_*.py는 구형 UI로 취급한다.
+- 배포 시 core_ui만 교체하지 말고 core 의존 파일까지 같은 시점으로 포함한다.
+

@@ -1,1 +1,1 @@
-﻿{"version":"2.3.1","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.1/Claude_v2.3.1_Setup.exe","notes":"물약 2차 키 설정이 포함된 기존 설정을 읽을 때 실행이 중단되던 문제를 수정하고, 배포용 실행 파일의 물약 처리 로직을 최신 버전으로 맞췄습니다."}
+﻿{"version":"2.3.2","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.2/Claude_v2.3.2_Setup.exe","notes":"캐릭터 색검출 조절 UI의 한글 깨짐을 수정하고, 업데이트 확인이 본체 실행을 막지 않도록 실행 흐름을 안정화했습니다."}

@@ -1,4 +1,4 @@
-# 자동 업데이트 알림과 다운로드 진행을 보여주는 대화상자.
+﻿# 자동 업데이트 알림과 다운로드 진행 상태를 보여주는 대화상자.
 from __future__ import annotations
 
 import threading
@@ -24,7 +24,7 @@ class _DownloadSignals(QObject):
 
 
 class UpdateDialog(QDialog):
-    """새 버전 알림, 다운로드, 설치 실행을 처리하는 업데이트 창."""
+    """새 버전 알림, 다운로드, 설치 실행을 처리한다."""
 
     def __init__(self, update_info: dict, parent=None):
         super().__init__(parent)
@@ -59,7 +59,7 @@ class UpdateDialog(QDialog):
             lay.addWidget(note_box)
 
         self._status_lbl = QLabel(
-            "업데이트를 설치하면 설정과 라이선스는 그대로 유지됩니다."
+            "업데이트를 설치해도 기존 설정과 라이선스는 그대로 유지됩니다."
         )
         self._status_lbl.setWordWrap(True)
         lay.addWidget(self._status_lbl)
