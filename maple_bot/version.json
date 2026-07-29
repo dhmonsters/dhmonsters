@@ -1,1 +1,1 @@
-﻿{"version":"2.3.2","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.2/Claude_v2.3.2_Setup.exe","notes":"캐릭터 색검출 조절 UI의 한글 깨짐을 수정하고, 업데이트 확인이 본체 실행을 막지 않도록 실행 흐름을 안정화했습니다."}
+{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.3/Claude_v2.3.3_Setup.exe","version":"2.3.3","notes":"빨코2/빨코3 전용 미니맵 영역을 현재 게임창 크기 기준 상대좌표로 적용해, 창 크기 변경 후 좌표 판정이 어긋나는 문제를 수정했습니다."}
