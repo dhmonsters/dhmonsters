@@ -1,1 +1,1 @@
-{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.4/Claude_v2.3.4_Setup.exe","version":"2.3.4","notes":"EXE \uc2e4\ud589 \uc624\ub958\ub97c \uc218\uc815\ud558\uace0 run_integrated \uae30\uc900 \ucd5c\uc2e0 \uc18c\uc2a4\ub85c \uc7ac\ubc30\ud3ec\ud588\uc2b5\ub2c8\ub2e4."}
+{"version":"2.3.5","download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.5/Claude_v2.3.5_Setup.exe","notes":"빨코2 이동 진입 로그와 정지 원인 로그를 추가해 2층에서 판단만 하고 입력이 이어지지 않는 문제를 추적할 수 있게 했습니다."}
