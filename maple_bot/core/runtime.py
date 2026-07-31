@@ -176,6 +176,7 @@ class BotRuntime:
         self._anti_mob_moving = False
         self._anti_mob_failed = False
         self._anti_mob_last = -1e9
+        self._anti_mob_last_diag = -1e9
         self._sidecar = sidecar_channel or InMemoryChannel()
         # HP/MP 鍮꾩쑉???쎌뼱 (hp, mp) 諛섑솚?섎뒗 肄쒕갚(run_integrated媛 Detector濡?二쇱엯).
         # ?듯빀 ?ы똿 ???ъ뀡 諛곗꽑??鍮좎졇 ?덉뿀??????由щ뜑 + check_potions濡?蹂듦뎄.
@@ -433,7 +434,7 @@ class BotRuntime:
                 self.block_runner,
                 is_active=self._route_can_run,
                 profile=config.rednose3,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif is_rednose2_route:
@@ -442,7 +443,7 @@ class BotRuntime:
                 get_blocks=lambda: self._cfg.route,
                 is_active=self._route_can_run,
                 profile=config.rednose2_v5,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif config.route_mode and config.route_steps:
@@ -453,11 +454,11 @@ class BotRuntime:
                 position_store=self.route_position_store,
                 input_owner=self.route_input_owner,
                 block_runner=self.block_runner,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
             )
         elif config.route_mode and config.route:
             self.floor_hunt_runner = LegacyRouteGuard(
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
             )
 
         # 嫄고깘 怨꾩링 (寃⑸━) ???먯껜 ncnn ?붿쭊 (secure_loader/?쒕쾭 ?섏〈 ?놁쓬)
@@ -878,7 +879,7 @@ class BotRuntime:
                 self.block_runner,
                 is_active=self._route_can_run,
                 profile=config.rednose3,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif is_rednose2_route:
@@ -887,7 +888,7 @@ class BotRuntime:
                 get_blocks=lambda: self._cfg.route,
                 is_active=self._route_can_run,
                 profile=config.rednose2_v5,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif config.route_mode and config.route_steps:
@@ -898,11 +899,11 @@ class BotRuntime:
                 position_store=self.route_position_store,
                 input_owner=self.route_input_owner,
                 block_runner=self.block_runner,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
             )
         elif config.route_mode and config.route:
             self.floor_hunt_runner = LegacyRouteGuard(
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
             )
 
     def _check_anti_mob_profile(self) -> None:
@@ -914,6 +915,12 @@ class BotRuntime:
         from pathlib import Path
 
         profile = getattr(self._cfg, "anti_mob_profile", {}) or {}
+        def diag(message: str, interval_sec: float = 2.0) -> None:
+            now_diag = time.monotonic()
+            if now_diag - self._anti_mob_last_diag >= interval_sec:
+                self._anti_mob_last_diag = now_diag
+                self.log(message, "안티밴")
+
         if (
             not profile.get("enabled")
             or profile.get("profile") != "beginner_training"
@@ -936,12 +943,18 @@ class BotRuntime:
         paths2 = fixed_templates("image2")
         paths3 = fixed_templates("image3")
         if not paths1 or not paths2 or not paths3:
+            diag(
+                f"방지몹 감시 대기: 템플릿 부족 "
+                f"(image1={len(paths1)}, image2={len(paths2)}, image3={len(paths3)})"
+            )
             return
         region = self._resolve_region(self._cfg.hunt_area_region)
         if not region:
+            diag("방지몹 감시 대기: 사냥영역이 설정되지 않았습니다.")
             return
         scene = self._capture(region)
         if scene is None:
+            diag("방지몹 감시 대기: 사냥영역 캡처 실패")
             return
 
         def best_match(paths):
@@ -960,9 +973,14 @@ class BotRuntime:
                         best = (float(score), path, (int(loc[0]), int(loc[1])), (tw, th))
             return best
 
-        threshold = 1.0
+        threshold = float(profile.get("threshold", 1.0))
         first = best_match(paths1)
         if first[0] < threshold:
+            name = os.path.basename(str(first[1])) if first[1] else "없음"
+            diag(
+                f"방지몹 감시중: image1 score={first[0]:.3f}, "
+                f"threshold={threshold:.3f}, template={name}"
+            )
             return
 
         self._anti_mob_busy = True
@@ -1084,7 +1102,7 @@ class BotRuntime:
                 spec,
             )
         except Exception as exc:
-            self.log(f"?대?吏 ?몃━嫄??ㅻ쪟: {exc}", "媛먯?")
+            self.log(f"이미지 트리거 오류: {exc}", "감지")
             return None
 
     # ?? ??????????????????????????????????????????????????????????????
@@ -1147,8 +1165,8 @@ class BotRuntime:
                 if not moved:
                     self.humanizer.release_dir()
                     self.log(
-                        "???대룞 ?ㅽ뙣: 諛⑺뼢?ㅻ? ?댁젣?섍퀬 ?ㅼ쓬 ?깆뿉 媛숈? ?대룞 釉붾줉???ъ떆?묓빀?덈떎.",
-                        "?대룞",
+                        "이동 실패: 방향키를 해제하고 다음 틱에 같은 이동 블록을 다시 시도합니다.",
+                        "이동",
                     )
             # ?숈꽑 醫뚰몴媛 ?놁쓣 ?뚮쭔 湲곗〈 ?쒖같 寃쎄퀎瑜?蹂댁“ ?ъ슜?쒕떎.
             elif self.patrol is not None:
