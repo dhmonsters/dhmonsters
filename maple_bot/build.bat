@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo  Claude v2.3.3 Build (PyArmor + PyInstaller)
+echo  Claude v2.3.6 Build (PyArmor + PyInstaller)
 echo ========================================
 
 set PYTHON=C:\Users\PC\AppData\Local\Programs\Python\Python314\python.exe
@@ -12,7 +12,7 @@ if errorlevel 1 "%PYTHON%" -m pip install pyarmor
 "%PYTHON%" -m pip show pyinstaller >nul 2>&1
 if errorlevel 1 "%PYTHON%" -m pip install pyinstaller
 
-if exist dist\Claude_2.3.3 rmdir /s /q dist\Claude_2.3.3
+if exist dist\Claude_2.3.6 rmdir /s /q dist\Claude_2.3.6
 if exist build rmdir /s /q build
 if exist .obf_build rmdir /s /q .obf_build
 
@@ -42,25 +42,26 @@ if errorlevel 1 (echo PyInstaller failed & pause & exit /b 1)
 echo.
 echo [3/3] Copying files...
 if not exist dist mkdir dist
-xcopy /E /I /Y .obf_build\dist\Claude dist\Claude_2.3.3
-xcopy /E /I /Y .obf_build\core dist\Claude_2.3.3\core
-xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.3.3\core_ui
-xcopy /E /I /Y .obf_build\ui dist\Claude_2.3.3\ui
-if exist dist\Claude_2.3.3\_internal xcopy /E /I /Y .obf_build\core dist\Claude_2.3.3\_internal\core
-if exist dist\Claude_2.3.3\_internal xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.3.3\_internal\core_ui
-if exist dist\Claude_2.3.3\_internal xcopy /E /I /Y .obf_build\ui dist\Claude_2.3.3\_internal\ui
-copy /Y config.json dist\Claude_2.3.3\config.json
-copy /Y version.txt dist\Claude_2.3.3\version.txt
-if exist templates xcopy /E /I /Y templates dist\Claude_2.3.3\templates
-if exist monsters xcopy /E /I /Y monsters dist\Claude_2.3.3\monsters
-if exist models xcopy /E /I /Y models dist\Claude_2.3.3\models
-if exist "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" copy /Y "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" "dist\Claude_2.3.3\interception.dll"
+xcopy /E /I /Y .obf_build\dist\Claude dist\Claude_2.3.6
+xcopy /E /I /Y .obf_build\core dist\Claude_2.3.6\core
+xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.3.6\core_ui
+xcopy /E /I /Y .obf_build\ui dist\Claude_2.3.6\ui
+if exist dist\Claude_2.3.6\_internal xcopy /E /I /Y .obf_build\core dist\Claude_2.3.6\_internal\core
+if exist dist\Claude_2.3.6\_internal xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.3.6\_internal\core_ui
+if exist dist\Claude_2.3.6\_internal xcopy /E /I /Y .obf_build\ui dist\Claude_2.3.6\_internal\ui
+copy /Y config.json dist\Claude_2.3.6\config.json
+copy /Y version.txt dist\Claude_2.3.6\version.txt
+if exist templates xcopy /E /I /Y templates dist\Claude_2.3.6\templates
+if exist monsters xcopy /E /I /Y monsters dist\Claude_2.3.6\monsters
+if exist models xcopy /E /I /Y models dist\Claude_2.3.6\models
+if exist "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" copy /Y "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" "dist\Claude_2.3.6\interception.dll"
 
 echo.
 echo ========================================
-echo  Done! dist\Claude_2.3.3\Claude.exe
+echo  Done! dist\Claude_2.3.6\Claude.exe
 echo ========================================
 pause
+
 
 
 

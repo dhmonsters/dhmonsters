@@ -879,7 +879,7 @@ class BotRuntime:
                 self.block_runner,
                 is_active=self._route_can_run,
                 profile=config.rednose3,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif is_rednose2_route:
@@ -888,7 +888,7 @@ class BotRuntime:
                 get_blocks=lambda: self._cfg.route,
                 is_active=self._route_can_run,
                 profile=config.rednose2_v5,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif config.route_mode and config.route_steps:
@@ -899,11 +899,11 @@ class BotRuntime:
                 position_store=self.route_position_store,
                 input_owner=self.route_input_owner,
                 block_runner=self.block_runner,
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
             )
         elif config.route_mode and config.route:
             self.floor_hunt_runner = LegacyRouteGuard(
-                log_fn=lambda m: self.log(m, "?대룞"),
+                log_fn=lambda m: self.log(m, "이동"),
             )
 
     def _check_anti_mob_profile(self) -> None:
@@ -1102,7 +1102,7 @@ class BotRuntime:
                 spec,
             )
         except Exception as exc:
-                self.log(f"이미지 트리거 오류: {exc}", "감지")
+            self.log(f"이미지 트리거 오류: {exc}", "감지")
             return None
 
     # ?? ??????????????????????????????????????????????????????????????

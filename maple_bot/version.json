@@ -1,1 +1,1 @@
-﻿{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.3/Claude_v2.3.3_Setup.exe","version":"2.3.3","notes":"빨코2/빨코3 전용 미니맵 영역을 현재 게임창 크기 기준 상대좌표로 적용해, 창 크기 변경 후 좌표 판정이 어긋나는 문제를 수정했습니다."}
+﻿{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.3.6/Claude_v2.3.6_Setup.exe","version":"2.3.6","notes":"빨코2 전용 이동 러너 오류 로그를 추가하고, 설정 새로고침 후 이동 로그 카테고리가 깨져 핵심 이동 로그가 보이지 않던 문제를 수정했습니다."}

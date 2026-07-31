@@ -51,17 +51,24 @@ class RedNose2RouteRunner:
     def stop(self) -> None:
         self._stop.set()
         self._br.release_inputs()
+        self._log("[rednose2v5] runner stop requested")
 
     def is_running(self) -> bool:
         return bool(self._thread and self._thread.is_alive())
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            if not self._is_active():
+            try:
+                if not self._is_active():
+                    self._br.release_inputs()
+                    self._sleep(0.03)
+                    continue
+                self.run_once()
+            except Exception as exc:
                 self._br.release_inputs()
-                self._sleep(0.03)
-                continue
-            self.run_once()
+                self._log(f"[rednose2v5] runner error: {type(exc).__name__}: {exc}")
+                logger.exception("rednose2 runner error")
+                self._sleep(0.2)
 
     def reset(self) -> None:
         self._index = 0
@@ -448,6 +455,18 @@ class RedNose2RouteRunner:
         started = time.monotonic()
         previous_owns_movement = self.owns_movement
         self.owns_movement = True
+        first_pos = self._current_pos()
+        if first_pos is None:
+            self._log(
+                f"[rednose2v5] move enter target={target_x:.0f}, "
+                f"attack={attack}, pos=None, active={is_active()}"
+            )
+        else:
+            self._log(
+                f"[rednose2v5] move enter target={target_x:.0f}, "
+                f"attack={attack}, pos=x{int(first_pos[0])}/y{int(first_pos[1])}, "
+                f"active={is_active()}"
+            )
         try:
             while is_active():
                 pos = self._current_pos()
@@ -458,7 +477,10 @@ class RedNose2RouteRunner:
                     h.release_dir()
                     self._release_attack_key()
                     label = f" during {guard_label}" if guard_label else ""
-                    self._log(f"[rednose2v5] floor changed{label}; recover required")
+                    self._log(
+                        f"[rednose2v5] floor changed{label}; recover required "
+                        f"(pos=x{int(pos[0])}/y{int(pos[1])}, floor={self._floor_name_v5(None)})"
+                    )
                     return False
                 x = float(pos[0])
                 dist = target_x - x
@@ -470,6 +492,10 @@ class RedNose2RouteRunner:
                 )
                 if side_reached or abs(dist) <= tolerance or (allow_crossed_arrival and crossed):
                     h.release_dir()
+                    self._log(
+                        f"[rednose2v5] move reached target={target_x:.0f}, "
+                        f"x={int(x)}, dist={dist:.1f}, side={arrival_side}, crossed={crossed}"
+                    )
                     return True
 
                 direction = "right" if dist > 0 else "left"
@@ -516,6 +542,11 @@ class RedNose2RouteRunner:
                     return False
                 self._sleep(0.03)
             h.release_dir()
+            self._release_attack_key()
+            self._log(
+                f"[rednose2v5] move aborted inactive target={target_x:.0f}, "
+                f"active={is_active()}, stop={self._stop.is_set()}"
+            )
             return False
         finally:
             self.owns_movement = previous_owns_movement
@@ -707,6 +738,12 @@ class RedNose2RouteRunner:
         self._log(
             f"[rednose2v5] floor2 timed hunt target X={target:.0f}, "
             f"collection in {max(0.0, self._next_collection_at - time.monotonic()):.1f}s"
+        )
+        pos = self._current_pos()
+        pos_text = "None" if pos is None else f"x{int(pos[0])}/y{int(pos[1])}"
+        self._log(
+            f"[rednose2v5] floor2 move request pos={pos_text}, "
+            f"rangeY={self._floor2_y_range()}, active={self._active()}"
         )
         if self._move_to_target_v5(
             target,
