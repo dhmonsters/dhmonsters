@@ -144,7 +144,15 @@ class BlockRunner:
         if position is None or seen_at is None:
             return None, None
         age = max(0.0, time.monotonic() - seen_at)
+        max_age = max(0.0, self._ladder_profile.position_max_age_sec + stale_grace_sec)
+        if age > max_age:
+            return None, age
         return position, age
+
+    def _get_pos(self):
+        """좌표 샘플이 있으면 허용 시간 안의 최신 위치만 반환한다."""
+        position, _age = self._fresh_position()
+        return position
 
     def refresh_position(self):
         """CharScanner가 저장한 최신 좌표를 추가 캡처 없이 반환한다."""

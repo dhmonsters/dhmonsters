@@ -147,7 +147,7 @@ class RuntimeConfig:
     char_s_min: int = 100
     char_v_min: int = 200
     char_area_min: float = 3.0
-    char_area_max: float = 100.0
+    char_area_max: float = 160.0
     # 紐ъ뒪??媛먯?(image 紐⑤뱶, B 硫붿빱?덉쬁: ?됰꽕??諛뺤뒪 ??紐ъ뒪??
     hunt_mode: str = "key"
     name_template: str = ""        # ?됰꽕???쒗뵆由?寃쎈줈

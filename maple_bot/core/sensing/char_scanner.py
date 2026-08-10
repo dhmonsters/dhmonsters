@@ -59,7 +59,10 @@ def find_char_in_hsv(
         moments = cv2.moments(contour)
         if moments["m00"] == 0:
             return None
-        return int(moments["m10"] / moments["m00"]), int(moments["m01"] / moments["m00"])
+        return (
+            int(moments["m10"] / moments["m00"] + 0.5),
+            int(moments["m01"] / moments["m00"] + 0.5),
+        )
 
     candidates = []
     for contour, area, circularity in valid_contours:
