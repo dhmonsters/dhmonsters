@@ -894,7 +894,7 @@ class RedNose2RouteRunner:
 
         if not self._active():
             return False
-        target = self._floor2_right_safe_x() if self._main_move_index % 2 == 0 else self._floor2_left_x()
+        target = self._floor2_right_x() if self._main_move_index % 2 == 0 else self._floor2_left_x()
         arrival_side = "right" if self._main_move_index % 2 == 0 else "left"
         self._log(
             f"[rednose2v5] floor2 timed hunt target X={target:.0f}, "
