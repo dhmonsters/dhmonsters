@@ -27,6 +27,31 @@ def test_detects_title_emits_lie_event():
     assert ev is not None and ev.type == "lie"
 
 
+def test_scan_records_capture_match_and_total_timing(monkeypatch):
+    title = _textured(1)
+    scene = _scene_with(title)
+    traces = []
+    debug_logs = []
+    monkeypatch.setattr(
+        "core.sensing.lie_scanner.trace_event",
+        lambda category, event, **data: traces.append((category, event, data)),
+    )
+    scanner = LieScanner(
+        screen_capture=lambda r=None: scene,
+        title_template=title,
+        threshold=0.9,
+        debug_log_fn=debug_logs.append,
+    )
+
+    scanner.scan_once()
+
+    _, _, timing = traces[-1]
+    assert timing["capture_ms"] >= 0
+    assert timing["match_ms"] >= 0
+    assert timing["total_ms"] >= timing["match_ms"]
+    assert "total=" in debug_logs[-1]
+
+
 def test_no_title_no_event():
     title = _textured(1)
     scene = _scene_with(None)   # 타이틀 없음

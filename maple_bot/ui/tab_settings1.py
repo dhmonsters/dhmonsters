@@ -187,7 +187,48 @@ class TabSettings1(QWidget):
         self.chk_transparent_enabled.toggled.connect(self._save_transparent_shape)
         layout.addWidget(self.chk_transparent_enabled)
 
+        # Planet Solver 버튼 행
+        from PyQt6.QtWidgets import QHBoxLayout, QPushButton
+        row = QHBoxLayout()
+        btn_open = QPushButton("🪐 Planet Solver 열기")
+        btn_open.setToolTip("로컬 M1+M2 모델로 투명도형 자동 추적 창을 엽니다 (서버 인증 없음)")
+        btn_open.clicked.connect(self._open_planet_solver)
+        row.addWidget(btn_open)
+        btn_orig = QPushButton("원본 exe 실행")
+        btn_orig.setToolTip("Planet_solver_v1.0.5.exe 를 직접 실행합니다 (서버 인증 필요)")
+        btn_orig.clicked.connect(self._open_planet_solver_exe)
+        row.addWidget(btn_orig)
+        row.addStretch()
+        layout.addLayout(row)
+
         return group
+
+    def _open_planet_solver(self):
+        """로컬 ncnn M1+M2 모델을 사용하는 자체 Planet Solver 창을 연다.
+
+        서버 인증 없이 즉시 창이 열리며, 창 내 ▶ 시작 버튼으로 추적을 시작한다.
+        """
+        from ui.planet_solver_window import PlanetSolverWindow
+        if not hasattr(self, "_planet_win") or self._planet_win is None:
+            self._planet_win = PlanetSolverWindow(config=self.config)
+        self._planet_win.show()
+        self._planet_win.raise_()
+        self._planet_win.activateWindow()
+
+    def _open_planet_solver_exe(self):
+        """Planet_solver_v1.0.5.exe 를 직접 실행한다 (서버 인증 포함, 원본 동작 확인용)."""
+        import os, subprocess
+        _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        exe = os.path.join(_here, "_planet_solver_extract", "Planet_solver_v1.0.5.exe")
+        if not os.path.exists(exe):
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "파일 없음", f"찾을 수 없습니다:\n{exe}")
+            return
+        try:
+            subprocess.Popen([exe], cwd=os.path.dirname(exe))
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "실행 오류", str(e))
 
     def _save_transparent_shape(self):
         self.config.set("settings1", "transparent_shape", "enabled",

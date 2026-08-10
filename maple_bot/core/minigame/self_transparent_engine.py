@@ -13,7 +13,7 @@ class SelfTransparentEngine(MinigameSolver):
 
     handles: "planet", "transparent" (플래닛맵 투명도형 찾기)
     solve(): board_capture_fn 으로 게임판을 캡처 → 모델로 도형 중심 추적 →
-             move_cursor_fn(cx, cy) 로 커서 이동(주입식, Humanizer/입력 경유).
+             move_cursor_fn(cx, cy) 로 커서 이동(주입식 입력 경유).
              도형이 사라질 때까지(=풀이 완료) 추적 반복.
     """
     HANDLES = ("planet", "transparent")

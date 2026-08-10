@@ -1,1 +1,1 @@
-# 인간화 입력 계층 — 모든 행동의 단일 통제점 (Humanizer + InputBackend)
+# 입력 시간 보정 도우미와 이전 Humanizer 호환 코드를 보관한다.

@@ -105,10 +105,14 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     inventory_key         = (cfg.get("inventory_key") or "i").strip() or "i"
 
     inventory_tpl       = "templates/junk/inventory.png"
+    cash_tab_tpl        = "templates/junk/cash_tab.png"
     cash_tab_active_tpl = "templates/junk/cash_tab_active.png"
+    shop_item_tpl       = "templates/junk/shop_item.png"
     shop_open_tpl       = "templates/junk/shop_open.png"
     has_inv_tpl         = os.path.exists(inventory_tpl)
+    has_cash_tab_tpl    = os.path.exists(cash_tab_tpl)
     has_active_tpl      = os.path.exists(cash_tab_active_tpl)
+    has_shop_item_tpl   = os.path.exists(shop_item_tpl)
     has_shop_open_tpl   = os.path.exists(shop_open_tpl)
 
     # ── 전체 화면 캡처 헬퍼 ──────────────────────────────────────────
@@ -124,8 +128,16 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
 
     # ── 게임 창 포커스 ────────────────────────────────────────────────
     status_cb("게임 창 포커스...")
-    input_ctrl.focus_game_window()
-    time.sleep(0.3)   # AttachThreadInput 처리 후 OS 포커스 전환 대기
+    if hasattr(input_ctrl, "focus_game_window"):
+        input_ctrl.focus_game_window()
+    else:
+        try:
+            from core.input_controller import InputController
+            title = config.get("settings2", "game_window_title", default="MapleStory Worlds")
+            InputController(title).focus_game_window()
+        except Exception:
+            pass
+    time.sleep(0.15)   # AttachThreadInput 처리 후 OS 포커스 전환 대기
     if stopped():
         return False
 
@@ -142,7 +154,7 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     if inv_pos is None:
         status_cb(f"인벤토리 미감지 → [{inventory_key}] 키로 열기...")
         input_ctrl.press_key(inventory_key)
-        time.sleep(random.uniform(0.5, 0.7))   # 인벤토리 열리는 애니메이션 대기
+        time.sleep(random.uniform(0.35, 0.45))   # 인벤토리 열리는 애니메이션 대기
         if stopped():
             return False
 
@@ -159,13 +171,29 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     inv_abs = _abs(inv_pos, mon_all)
     status_cb(f"인벤토리 감지: {inv_abs}")
 
-    # ── 3단계: 캐시탭 위치 = 인벤토리 감지 위치 + 저장된 오프셋 ─────
-    if not cash_tab_offset:
-        status_cb("⚠ 캐시탭 오프셋 미설정 — 설정2 탭에서 '캐시탭 위치' 지정 후 재시도하세요.")
+    # ── 3단계: 캐시탭 이미지를 찾아 더블클릭 ───────────────────────
+    scene, mon_all = _capture()
+    cash_tab_pos = None
+    cash_tab_source = None
+
+    if has_cash_tab_tpl:
+        cash_tab_score = screen.find_template_score(scene, cash_tab_tpl)
+        status_cb(f"캐시탭 이미지 매칭 점수: {cash_tab_score:.2f}")
+        cash_tab_pos = screen.find_template(scene, cash_tab_tpl, threshold=0.60)
+        cash_tab_source = "cash_tab.png"
+
+    if cash_tab_pos is None and has_active_tpl:
+        active_score = screen.find_template_score(scene, cash_tab_active_tpl)
+        status_cb(f"캐시탭 활성 이미지 매칭 점수: {active_score:.2f}")
+        cash_tab_pos = screen.find_template(scene, cash_tab_active_tpl, threshold=0.60)
+        cash_tab_source = "cash_tab_active.png"
+
+    if cash_tab_pos is None:
+        status_cb("⚠ 캐시탭 이미지를 찾지 못했습니다. cash_tab.png 또는 cash_tab_active.png를 다시 캡처하세요.")
         return False
 
-    cash_tab_actual = (inv_abs[0] + cash_tab_offset[0], inv_abs[1] + cash_tab_offset[1])
-    status_cb(f"캐시탭 위치: 인벤토리{inv_abs} + 오프셋{cash_tab_offset} = {cash_tab_actual}")
+    cash_tab_actual = _abs(cash_tab_pos, mon_all)
+    status_cb(f"캐시탭 이미지 감지({cash_tab_source}) → 더블클릭 좌표 사용: {cash_tab_actual}")
 
     # ── 4~5단계: 캐시탭 더블클릭 → 색상 변화로 활성화 확인 (최대 3회) ─
     MAX_CASH_RETRY = 3
@@ -178,7 +206,7 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
         before = snap()
         status_cb(f"캐시탭 더블클릭 (시도 {attempt + 1}/{MAX_CASH_RETRY}): {cash_tab_actual}")
         input_ctrl.double_click(*cash_tab_actual)
-        time.sleep(0.2)
+        time.sleep(0.08)
 
         after = snap()
         diff = _color_diff(before, after)
@@ -190,28 +218,29 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
             break
         if attempt < MAX_CASH_RETRY - 1:
             status_cb("캐시탭 색상 미변화 → 재시도 중...")
-            time.sleep(0.15)
+            time.sleep(0.06)
         else:
             status_cb("⚠ 캐시탭 활성화 최종 미확인 — 계속 진행")
 
     if stopped():
         return False
 
-    # ── 6단계: 첫번째 슬롯 위치 = 기준 위치 + 저장된 오프셋 ──────────
-    if not first_slot_offset:
-        status_cb("⚠ 첫번째 슬롯 오프셋 미설정 — 설정2 탭에서 지정하세요.")
+    # ── 6단계: 상점 진입 아이콘 이미지를 찾아 더블클릭 ───────────────
+    if not has_shop_item_tpl:
+        status_cb("⚠ 상점 아이템 템플릿이 없습니다. templates/junk/shop_item.png를 추가하세요.")
         return False
 
-    if active_abs:
-        # 활성 캐시탭 감지 위치 기준
-        first_slot_actual = (active_abs[0] + first_slot_offset[0], active_abs[1] + first_slot_offset[1])
-        status_cb(f"첫번째 슬롯: 활성캐시탭{active_abs} + 오프셋{first_slot_offset} = {first_slot_actual}")
-    else:
-        # fallback: 캐시탭 클릭 위치 기준
-        first_slot_actual = (cash_tab_actual[0] + first_slot_offset[0], cash_tab_actual[1] + first_slot_offset[1])
-        status_cb(f"첫번째 슬롯: 캐시탭{cash_tab_actual} + 오프셋{first_slot_offset} = {first_slot_actual}")
+    scene, mon_all = _capture()
+    shop_item_score = screen.find_template_score(scene, shop_item_tpl)
+    status_cb(f"상점 아이템 매칭 점수: {shop_item_score:.2f}")
+    shop_item_pos = screen.find_template(scene, shop_item_tpl, threshold=0.60)
+    if shop_item_pos is None:
+        status_cb("⚠ 상점 아이템 이미지를 찾지 못했습니다. 좌표 폴백 없이 자동판매를 중단합니다.")
+        return False
 
-    # ── 7단계: 첫번째 슬롯 더블클릭 → 상점 열림 확인 (최대 2회 재시도) ─
+    first_slot_actual = _abs(shop_item_pos, mon_all)
+    status_cb(f"상점 아이템 템플릿 감지 → 더블클릭 좌표 사용: {first_slot_actual}")
+
     MAX_SLOT_RETRY = 2
     shop_confirmed = False
 
@@ -220,24 +249,24 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
             return False
         status_cb(f"첫번째 슬롯 더블클릭 (시도 {attempt + 1}/{MAX_SLOT_RETRY}): {first_slot_actual}")
         input_ctrl.double_click(*first_slot_actual)
-        time.sleep(random.uniform(0.6, 0.8))
+        time.sleep(random.uniform(0.25, 0.35))
 
         if not has_shop_open_tpl:
             shop_confirmed = True
             break
 
-        deadline = time.time() + 2.0
+        deadline = time.time() + 1.0
         first_check = True
         while time.time() < deadline and not stopped():
             chk_scene, _ = _capture()
             if first_check:
                 shop_score = screen.find_template_score(chk_scene, shop_open_tpl)
-                status_cb(f"상점 열림 매칭 점수: {shop_score:.2f}")
+                status_cb(f"상점 열림 매칭 점수: {shop_score:.2f} / 기준 0.55")
                 first_check = False
-            if screen.find_template(chk_scene, shop_open_tpl, threshold=0.70):
+            if screen.find_template(chk_scene, shop_open_tpl, threshold=0.55):
                 shop_confirmed = True
                 break
-            time.sleep(0.1)
+            time.sleep(0.05)
 
         if shop_confirmed:
             status_cb("상점 열림 확인 ✔")
@@ -261,6 +290,24 @@ def _exit_shop(input_ctrl, shop_exit_btn, status_cb) -> None:
         input_ctrl.press_key("esc")
         time.sleep(0.3)
         input_ctrl.press_key("esc")
+
+
+class JunkSeller:
+    """잡템 판매 함수를 런타임에서 안전하게 호출하기 위한 얇은 실행 래퍼."""
+
+    def __init__(self, config, screen, input_ctrl):
+        self.config = config
+        self.screen = screen
+        self.input_ctrl = input_ctrl
+
+    def sell(self, status_cb, stop_event=None) -> None:
+        sell_junk(
+            self.config,
+            self.screen,
+            self.input_ctrl,
+            status_cb,
+            stop_event=stop_event,
+        )
 
 
 def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
@@ -292,6 +339,9 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
         "cash_tab.png", "cash_tab_active.png", "inventory.png", "shop_open.png",
         "equip_sell_btn.png", "equip_sell_confirm.png",
         "etc_tab_active.png", "scroll_bottom.png",
+        "shop_item.png", "shop_exit.png", "item_1.png",
+        "step1.png", "step1_check.png", "step2.png", "step3.png", "step4.png",
+        "step5.png", "step6.png", "ok.png", "sell.png", "shop.png", "end.png",
     }
     item_templates = sorted(
         f for f in glob.glob("templates/junk/*.png")
@@ -331,14 +381,14 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
             abs_y = mon["top"]  + eq_pos[1]
             status_cb(f"장비 일괄 판매 버튼 감지 → 더블클릭: ({abs_x}, {abs_y})")
             input_ctrl.double_click(abs_x, abs_y)
-            time.sleep(0.3)
+            time.sleep(0.15)
             if stopped():
                 return
 
             # 확인창 감지 → 더블클릭, 미감지 시 Enter
             confirmed = False
             if has_equip_conf_tpl:
-                deadline = time.time() + 2.5
+                deadline = time.time() + 1.2
                 first_check = True
                 while time.time() < deadline and not stopped():
                     chk, chk_mon = _capture()
@@ -354,11 +404,11 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
                         input_ctrl.double_click(cx, cy)
                         confirmed = True
                         break
-                    time.sleep(0.15)
+                    time.sleep(0.05)
             if not confirmed:
                 status_cb("확인창 미감지 → Enter 키")
                 input_ctrl.press_key("enter")
-            time.sleep(0.2)
+            time.sleep(0.1)
         else:
             status_cb("⚠ 장비 일괄 판매 버튼 미감지 — 건너뜀")
         if stopped():
@@ -378,7 +428,7 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
 
         etc_snap = _tab_color_changed(*etc_tab)
         before_etc = etc_snap()
-        time.sleep(0.2)
+        time.sleep(0.08)
         after_etc = etc_snap()
         diff_etc = _color_diff(before_etc, after_etc)
         status_cb(f"기타탭 색상 변화량: {diff_etc:.1f}")
@@ -414,13 +464,13 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
                     abs_x = shop_area["left"] + pos[0]
                     abs_y = shop_area["top"]  + pos[1]
                     input_ctrl.double_click(abs_x, abs_y)
-                    time.sleep(random.uniform(0.3, 0.5))
+                    time.sleep(random.uniform(0.12, 0.18))
                     input_ctrl.press_key("enter")
-                    time.sleep(random.uniform(0.3, 0.5))
+                    time.sleep(random.uniform(0.10, 0.15))
                     sold_this  += 1
                     total_sold += 1
                     status_cb(f"잡템 판매 → {total_sold}개 판매됨")
-                    time.sleep(random.uniform(0.2, 0.3))
+                    time.sleep(random.uniform(0.08, 0.12))
 
         if stopped():
             break
@@ -435,7 +485,7 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
         # ③ 스크롤 다운
         if scroll_pos:
             input_ctrl.scroll(*scroll_pos, clicks=-3)
-            time.sleep(0.15)
+            time.sleep(0.08)
         else:
             # 스크롤 위치 미설정 — 폴백 종료
             no_match_streak += 1
@@ -463,12 +513,12 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
                             abs_x = shop_area["left"] + pos[0]
                             abs_y = shop_area["top"]  + pos[1]
                             input_ctrl.double_click(abs_x, abs_y)
-                            time.sleep(random.uniform(0.3, 0.5))
+                            time.sleep(random.uniform(0.12, 0.18))
                             input_ctrl.press_key("enter")
-                            time.sleep(random.uniform(0.3, 0.5))
+                            time.sleep(random.uniform(0.10, 0.15))
                             total_sold += 1
                             status_cb(f"잡템 판매 → {total_sold}개 판매됨")
-                            time.sleep(random.uniform(0.2, 0.3))
+                            time.sleep(random.uniform(0.08, 0.12))
                 status_cb("스크롤 최하단 도달 — 판매 종료")
                 break
         else:

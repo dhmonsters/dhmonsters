@@ -72,5 +72,76 @@ def test_real_config_json_loads():
     with open(path, encoding="utf-8") as f:
         d = json.load(f)
     rc = to_runtime_config(d)
-    assert "left" in rc.minimap_region
+    absolute_keys = {"left", "top", "width", "height"}
+    relative_keys = {"base_region", "x_ratio", "y_ratio", "w_ratio", "h_ratio"}
+    assert absolute_keys <= rc.minimap_region.keys() or relative_keys <= rc.minimap_region.keys()
     assert rc.attack_key  # 비어있지 않음
+
+
+def test_maps_enabled_world_map_and_image_trigger():
+    from core.config_adapter import to_runtime_config
+
+    data = {
+        "world_map": {
+            "enabled": True,
+            "image_path": "maps/test.png",
+            "image_width": 1000,
+            "image_height": 500,
+            "calibration": {"scale": 2.0, "offset": [10.0, 20.0]},
+            "tracking_policy": "continue_estimated",
+        },
+        "navigation": {"nodes": [], "edges": [], "routes": []},
+        "attack": {
+            "hunt_area": {"x": 3, "y": 286, "w": 300, "h": 200},
+            "image_trigger": {
+                "enabled": True,
+                "template_path": "templates/target.png",
+                "threshold": 0.85,
+                "check_interval_sec": 0.2,
+                "cooldown_sec": 3.0,
+                "action": {
+                    "key": "space",
+                    "hold_sec": 0.1,
+                    "repeat": 1,
+                    "repeat_interval_sec": 0.0,
+                    "wait_after_sec": 0.0,
+                },
+            },
+        },
+    }
+
+    runtime = to_runtime_config(data)
+
+    assert runtime.world_map.enabled is True
+    assert runtime.world_map.calibration.scale == 2.0
+    assert runtime.hunt_area_region == {"left": 3, "top": 286, "width": 300, "height": 200}
+    assert runtime.image_trigger_spec.template_path == "templates/target.png"
+    assert runtime.image_trigger_spec.action.key == "space"
+
+
+def test_maps_attack_sequences_secondary_potions_and_legacy_coordinate_mode():
+    data = {
+        "hunt_mode": "coordinate",
+        "attack": {
+            "key": "ctrl",
+            "sequences": [{
+                "enabled": True,
+                "name": "연속기 1",
+                "keys": ["ctrl", "a"],
+                "key_interval_sec": 0.15,
+                "repeat_interval_sec": 5.0,
+            }],
+        },
+        "recovery": {
+            "hp_potion": {"enabled": True, "key": "9", "secondary_key": "8"},
+            "mp_potion": {"enabled": True, "key": "0", "secondary_key": "7"},
+        },
+    }
+
+    runtime = to_runtime_config(data)
+
+    assert runtime.hunt_mode == "key"
+    assert runtime.attack_sequences[0].keys == ("ctrl", "a")
+    assert runtime.attack_sequences[0].repeat_interval_sec == 5.0
+    assert runtime.hp_rule.secondary_key == "8"
+    assert runtime.mp_rule.secondary_key == "7"

@@ -8,6 +8,7 @@ import time
 from typing import Callable
 
 
+
 class FloorHuntRunner:
     """route(Block 리스트)를 반복 실행. is_active()가 True일 때만 돈다.
 

@@ -6,9 +6,12 @@ from core.navigation.floor_hunt_runner import FloorHuntRunner
 class FakeBR:
     def __init__(self):
         self.routes = []
+        self.released = 0
     def run_route(self, blocks, max_steps=200):
         self.routes.append(list(blocks))
         return True
+    def release_inputs(self):
+        self.released += 1
 
 
 def test_run_once_executes_when_active():

@@ -1,51 +1,44 @@
-# CharlieExchange — 찰리중사 이빨 교환 자동화 (구매 제외, 교환 시퀀스만). C 명세 이식
-# 1루틴 = 이빨 200개 소비. 반복 = 보유 // 200. 모든 입력 Humanizer 경유(타이밍 사람화)
+# 찰리중사 이빨 교환 입력을 입력 백엔드로 직접 전송합니다.
 from __future__ import annotations
 
-from core.humanize.intent import Intent
+import time
+
+from core.humanize.timing import plus_minus_5
 
 _TOOTH_PER_ROUTINE = 200
-_DOWN_REPEAT = 15   # 대화 옵션까지 아래키 15회 (C 명세)
+_DOWN_REPEAT = 15
 
 
 class CharlieExchange:
-    """찰리중사와 이빨 교환. 경매장 구매는 포함하지 않는다(사용자 지정).
-
-    1루틴 시퀀스 (C UI 명세):
-      NPC키 → NPC키 → 아래키 15회 → NPC키 → 왼쪽키 1회 → NPC키 → NPC키
-    키 간격(NPC 0.5s, 방향 0.1s)은 Humanizer 가 사람같이 변형한다.
-    """
-
-    def __init__(self, humanizer, npc_key: str = "u"):
-        self._h = humanizer
+    def __init__(self, input_backend, npc_key: str = "u", sleep_fn=None):
+        self._input = input_backend
         self._npc = npc_key
+        self._sleep = sleep_fn or time.sleep
 
     @staticmethod
     def repeat_count(tooth_amount: int) -> int:
-        """보유 이빨로 가능한 교환 루틴 횟수."""
         return tooth_amount // _TOOTH_PER_ROUTINE
 
     def run(self, tooth_amount: int) -> int:
-        """보유량만큼 교환 반복. 실행한 루틴 수 반환."""
-        n = self.repeat_count(tooth_amount)
-        for _ in range(n):
+        count = self.repeat_count(tooth_amount)
+        for _ in range(count):
             self.run_one_routine()
-        return n
+        return count
 
     def run_one_routine(self) -> None:
-        """교환 1회 시퀀스."""
-        self._npc_talk()                      # NPC 대화 시작
-        self._npc_talk()                      # 다음 대화
-        for _ in range(_DOWN_REPEAT):         # 교환 메뉴까지 아래로
-            self._dir("down")
-        self._npc_talk()                      # 선택
-        self._dir("left")                     # 수량/확인 이동
-        self._npc_talk()                      # 확인
-        self._npc_talk()                      # 완료
+        self._npc_talk()
+        self._npc_talk()
+        for _ in range(_DOWN_REPEAT):
+            self._direction("down")
+        self._npc_talk()
+        self._direction("left")
+        self._npc_talk()
+        self._npc_talk()
 
-    # ── 내부 (모든 입력 Humanizer 경유) ──────────────────────────────
     def _npc_talk(self) -> None:
-        self._h.perform(Intent(action="key", key=self._npc, base_hold_sec=0.05, base_delay=0.5))
+        self._sleep(plus_minus_5(0.5))
+        self._input.press(self._npc, plus_minus_5(0.05))
 
-    def _dir(self, key: str) -> None:
-        self._h.perform(Intent(action="key", key=key, base_hold_sec=0.05, base_delay=0.1))
+    def _direction(self, key: str) -> None:
+        self._sleep(plus_minus_5(0.1))
+        self._input.press(key, plus_minus_5(0.05))

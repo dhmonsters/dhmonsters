@@ -50,9 +50,12 @@ class GaugePreview(QWidget):
         return pct, bar
 
     def _refresh(self) -> None:
+        if self.window().isActiveWindow():
+            return
         try:
-            hp = max(0, min(100, int(round(self._d.hp_ratio() * 100))))
-            mp = max(0, min(100, int(round(self._d.mp_ratio() * 100))))
+            hp_ratio, mp_ratio = self._d.hp_mp_ratios()
+            hp = max(0, min(100, int(round(hp_ratio * 100))))
+            mp = max(0, min(100, int(round(mp_ratio * 100))))
         except Exception:
             return
         self.hp_pct.setText(f"{hp}%"); self.hp_bar.setValue(hp)

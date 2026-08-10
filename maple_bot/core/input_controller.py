@@ -121,7 +121,7 @@ class InputController:
         self._window_title = window_title
 
     # ── 창 포커스 ─────────────────────────────────────────────────────
-    def focus_game_window(self) -> None:
+    def focus_game_window(self) -> bool:
         """게임 창을 전면으로 가져온다.
 
         Windows 포그라운드 잠금 우회: AttachThreadInput 기법으로
@@ -134,7 +134,7 @@ class InputController:
             import win32process
             hwnd = win32gui.FindWindow(None, self._window_title)
             if not hwnd:
-                return
+                return False
             # 최소화된 경우 복원
             if win32gui.IsIconic(hwnd):
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -160,8 +160,9 @@ class InputController:
                     except Exception:
                         pass
             time.sleep(0.15)
+            return True
         except Exception:
-            pass
+            return False
 
     # ── 키보드 ───────────────────────────────────────────────────────
     def press_key(self, key: str, hold_sec: float = 0.05) -> None:
@@ -208,6 +209,11 @@ class InputController:
 
     def double_click(self, x: int, y: int) -> None:
         """(x, y) 화면 절대 좌표를 더블클릭한다."""
+        if _ic.is_active():
+            _ic.click(x, y)
+            time.sleep(0.08)
+            _ic.click(x, y)
+            return
         _move_mouse(x, y)
         time.sleep(0.03)
         _click_mouse(True)
@@ -224,7 +230,10 @@ class InputController:
         clicks > 0 : 위로 (스크롤 업), clicks < 0 : 아래로 (스크롤 다운).
         Windows WHEEL_DELTA = 120 단위.
         """
-        _move_mouse(x, y)
+        if _ic.is_active():
+            _ic.move_to(x, y)
+        else:
+            _move_mouse(x, y)
         time.sleep(0.03)
         delta = int(clicks * 120)
         # mouseData에 부호 있는 값을 c_ulong으로 전달 (음수는 wrap-around)

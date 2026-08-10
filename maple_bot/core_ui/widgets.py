@@ -51,8 +51,7 @@ class SliderField:
         else:
             self._val.setText(f"{v}%")
             self._cfg.set(*self._keys, round(v / 100.0, 2))
-        if not self.widget.isSliderDown():
-            self._cfg.save()
+        self._cfg.save()
 
 
 class StatusField:
@@ -101,6 +100,7 @@ class _Field:
         self._cfg = config
         self._keys = keys
         self.row = QWidget()
+        self.row._field = self
         h = QHBoxLayout(self.row)
         h.setContentsMargins(0, SPACING["xxs"], 0, SPACING["xxs"])
         h.setSpacing(SPACING["sm"])
