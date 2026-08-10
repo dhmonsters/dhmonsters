@@ -45,9 +45,12 @@ class MapNavigator:
         self._attack_key: str = "ctrl"
         self._monster_template: str = ""
         self._jump_before_attack: bool = False
+        self._jump_while_move: bool = False   # 순찰 걷기 동안 점프키 홀드(바니합)
 
         # 현재 꾹 누르고 있는 방향키
         self._held_direction: str | None = None
+        self._jump_held: bool = False         # 이동 점프키 홀드 중 여부
+        self._jump_suppress_until: float = 0.0  # 이 시각까지 이동 점프 재홀드 금지(포션·방향전환)
 
         # 밧줄 스테이트 머신
         self._state: str = _PATROL
@@ -108,15 +111,51 @@ class MapNavigator:
         self._hold_direction(direction)
 
     def set_attack(self, key: str, monster_template: str = "",
-                   jump_before_attack: bool = False) -> None:
+                   jump_before_attack: bool = False,
+                   jump_while_move: bool = False) -> None:
         self._attack_key = key
         self._monster_template = monster_template
         self._jump_before_attack = jump_before_attack
+        self._jump_while_move = jump_while_move
 
     # ── 방향키 꾹 누르기 관리 ─────────────────────────────────────────
+    def _jump_key(self) -> str:
+        return (self._minimap.config.jump_key or "alt") if self._minimap.config else "alt"
+
+    def _release_jump(self) -> None:
+        """이동 점프키가 눌려 있으면 뗀다(멱등)."""
+        if self._jump_held:
+            self._jump_held = False
+            self._input.key_up(self._jump_key())
+
+    def suppress_jump_briefly(self, sec: float = 0.4) -> None:
+        """포션·줍기 등 단발 키 입력 동안 이동 점프를 잠시 멈춘다.
+        점프키를 떼고 sec초간 재홀드를 막아, 공중 상태로 그 입력이 씹히는 것을 방지.
+        포션 스레드 등 외부 스레드에서 호출 — 타임스탬프만 쓰므로 스레드 안전."""
+        self._jump_suppress_until = time.time() + max(0.05, sec)
+        self._release_jump()
+
+    def _sync_jump_hold(self) -> None:
+        """이동 점프키 홀드 동기화 — 순찰 걷기 중에만 누르고, 그 외 상태에선 뗀다.
+        밧줄 접근/등반 중 점프가 눌려 있으면 잡기·등반이 깨지므로 _PATROL로 한정.
+        억제 윈도우(포션·방향전환) 동안에도 누르지 않는다."""
+        want = (self._jump_while_move and self._held_direction is not None
+                and self._state == _PATROL
+                and time.time() >= self._jump_suppress_until)
+        if want and not self._jump_held:
+            self._input.key_down(self._jump_key())
+            self._jump_held = True
+        elif not want and self._jump_held:
+            self._release_jump()
+
     def _hold_direction(self, direction: str) -> None:
         if self._held_direction == direction:
+            self._sync_jump_hold()   # 상태 전환(순찰↔접근)·억제 해제 시 점프 홀드 갱신
             return
+        # 방향 전환 — 점프를 먼저 떼고 잠깐 억제(공중에서 방향키가 씹히지 않게).
+        # 그 틱엔 재홀드하지 않고, 다음 같은-방향 호출에서 _sync_jump_hold가 다시 누른다.
+        self._release_jump()
+        self._jump_suppress_until = time.time() + 0.15
         if self._held_direction:
             old = self._held_direction
             self._held_direction = None   # keepalive가 old 방향 재전송하지 못하도록 먼저 해제
@@ -126,6 +165,7 @@ class MapNavigator:
         self._input.key_down(direction)
 
     def release_direction(self) -> None:
+        self._release_jump()
         if self._held_direction:
             old = self._held_direction
             self._held_direction = None   # keepalive 재전송 차단 후 키업
@@ -135,6 +175,8 @@ class MapNavigator:
         """현재 방향키 key_down 재전송 — 스킬 사이 이동 유지용."""
         if self._held_direction:
             self._input.key_down(self._held_direction)
+            if self._jump_held:
+                self._input.key_down(self._jump_key())
 
     # ── 메인 스텝 ─────────────────────────────────────────────────────
     def run_one_step(self) -> None:

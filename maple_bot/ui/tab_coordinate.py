@@ -431,11 +431,17 @@ class TabCoordinate(QWidget):
             setattr(self, f"slider_{attr}", slider)
             setattr(self, f"spin_{attr}", spin)
 
-        _add_slider("H 색상 범위", "char_h_tol", 2, 30, 10)
+        _add_slider("H 색상 범위", "char_h_tol", 0, 30, 10)
         _add_slider("S 채도 최소", "char_s_min", 40, 255, 100)
         _add_slider("V 밝기 최소", "char_v_min", 80, 255, 200)
         _add_slider("점 크기 최소", "char_area_min", 1, 80, 3)
         _add_slider("점 크기 최대", "char_area_max", 10, 250, 100)
+        for w in [
+            self.spin_cr, self.spin_cg, self.spin_cb, self.spin_tol,
+            self.spin_char_h_tol, self.spin_char_s_min, self.spin_char_v_min,
+            self.spin_char_area_min, self.spin_char_area_max,
+        ]:
+            w.valueChanged.connect(self._on_character_filter_changed)
         layout.addWidget(detect_group)
 
         # ?꾩튂 ?뺤씤
@@ -965,6 +971,16 @@ class TabCoordinate(QWidget):
                 "height_ratio":   ph / ch,
             })
         self.config.set("minimap", mm)
+
+        active = self.config.get("hunt_grounds", "active") or ""
+        presets = dict(self.config.get("hunt_grounds", "presets") or {})
+        if active and active in presets and isinstance(presets.get(active), dict):
+            preset = dict(presets[active])
+            preset["minimap"] = dict(mm)
+            presets[active] = preset
+            self.config.set("hunt_grounds", "presets", presets)
+
+        self.config.save()
         _copy_text_to_clipboard(
             "minimap={"
             f"'region_x': {rx}, 'region_y': {ry}, "
@@ -981,7 +997,7 @@ class TabCoordinate(QWidget):
         )
 
         mode = " [비율 저장]" if cw > 0 else ""
-        self.lbl_mm_hk.setText(f"({rx},{ry}) {pw}횞{ph}{mode}")
+        self.lbl_mm_hk.setText(f"저장됨 ({rx},{ry}) {pw}x{ph}{mode}")
 
     def _apply_mm_hotkey(self, key: str) -> None:
         if not self._hk:
@@ -1041,12 +1057,48 @@ class TabCoordinate(QWidget):
         self.lbl_pos.setText(f"색상 적용: R{r} G{g} B{b}")
 
     # ?? 罹먮┃???꾩튂 ???????????????????????????????????????????????????
-    def _fetch_pos(self) -> None:
+    def _on_character_filter_changed(self, _value: int = 0) -> None:
+        """캐릭터 색검출 보정값을 즉시 저장하고 미리보기 감지에 반영한다."""
+        self._save_minimap_detection_settings()
         self._sync_minimap_config()
-        pos = None
+        self._update_character_preview_label()
+
+    def _save_minimap_detection_settings(self) -> None:
+        mm = self.config.get("minimap") or {}
+        mm.update({
+            "char_r": self.spin_cr.value(),
+            "char_g": self.spin_cg.value(),
+            "char_b": self.spin_cb.value(),
+            "tolerance": self.spin_tol.value(),
+            "char_h_tol": self.spin_char_h_tol.value(),
+            "char_s_min": self.spin_char_s_min.value(),
+            "char_v_min": self.spin_char_v_min.value(),
+            "char_area_min": self.spin_char_area_min.value(),
+            "char_area_max": self.spin_char_area_max.value(),
+        })
+        self.config.set("minimap", mm)
+
+        active = self.config.get("hunt_grounds", "active") or ""
+        presets = self.config.get("hunt_grounds", "presets") or {}
+        if active and active in presets and isinstance(presets.get(active), dict):
+            preset_mm = presets[active].setdefault("minimap", {})
+            preset_mm.update(mm)
+            self.config.set("hunt_grounds", "presets", presets)
+        self.config.save()
+
+    def _detect_current_character_pos(self) -> tuple[int, int] | None:
+        self._sync_minimap_config()
         try:
-            from core.sensing.char_scanner import find_char_in_hsv, hsv_range_from_rgb
+            from core.sensing.char_scanner import (
+                _load_marker_templates,
+                find_char_by_template,
+                find_char_in_hsv,
+                hsv_range_from_rgb,
+            )
             frame = self._minimap_reader.capture_minimap()
+            template_pos = find_char_by_template(frame, _load_marker_templates())
+            if template_pos is not None:
+                return template_pos
             area_min = min(self.spin_char_area_min.value(), self.spin_char_area_max.value())
             area_max = max(self.spin_char_area_min.value(), self.spin_char_area_max.value())
             lo, hi = hsv_range_from_rgb(
@@ -1057,14 +1109,28 @@ class TabCoordinate(QWidget):
                 s_min=self.spin_char_s_min.value(),
                 v_min=self.spin_char_v_min.value(),
             )
-            pos = find_char_in_hsv(frame, lo, hi, area_min, area_max, previous_position=self._last_pos)
+            return find_char_in_hsv(frame, lo, hi, area_min, area_max, previous_position=self._last_pos)
         except Exception:
-            pos = self._minimap_reader.get_character_pos()
+            return self._minimap_reader.get_character_pos()
+
+    def _update_character_preview_label(self) -> None:
+        pos = self._detect_current_character_pos()
         if pos:
             self._last_pos = pos
             x, y = int(pos[0]), int(pos[1])
-            mm_w = max(1, int(self.spin_rw.value()))
-            mm_h = max(1, int(self.spin_rh.value()))
+            frame = self._minimap_reader.capture_minimap()
+            mm_h, mm_w = frame.shape[:2]
+            self.lbl_pos.setText(f"미리보기 감지: X={x}  Y={y} / 상대 X={x / mm_w:.4f}, Y={y / mm_h:.4f}")
+        else:
+            self.lbl_pos.setText("미리보기 감지 실패 - H/S/V/점 크기 값을 조절해 주세요")
+
+    def _fetch_pos(self) -> None:
+        pos = self._detect_current_character_pos()
+        if pos:
+            self._last_pos = pos
+            x, y = int(pos[0]), int(pos[1])
+            frame = self._minimap_reader.capture_minimap()
+            mm_h, mm_w = frame.shape[:2]
             rx = x / mm_w
             ry = y / mm_h
             text = f"현재 위치: X={x}  Y={y} / 상대 X={rx:.4f}, Y={ry:.4f}"
@@ -1082,7 +1148,24 @@ class TabCoordinate(QWidget):
     def _sync_minimap_config(self) -> None:
         from core.config_manager import resolve_minimap_coords
         stored_mm = self.config.get("minimap") or {}
-        region_x, region_y, width, height = resolve_minimap_coords(self.config, stored_mm)
+        live_mm = dict(stored_mm)
+        live_mm.update({
+            "region_x": self.spin_rx.value(),
+            "region_y": self.spin_ry.value(),
+            "width": self.spin_rw.value(),
+            "height": self.spin_rh.value(),
+            "char_r": self.spin_cr.value(),
+            "char_g": self.spin_cg.value(),
+            "char_b": self.spin_cb.value(),
+            "tolerance": self.spin_tol.value(),
+            "char_h_tol": self.spin_char_h_tol.value(),
+            "char_s_min": self.spin_char_s_min.value(),
+            "char_v_min": self.spin_char_v_min.value(),
+            "char_area_min": self.spin_char_area_min.value(),
+            "char_area_max": self.spin_char_area_max.value(),
+        })
+        region_x, region_y, width, height = resolve_minimap_coords(self.config, live_mm)
+        self._minimap_reader.set_dynamic_source(self.config, live_mm)
         self._minimap_reader.set_config(MinimapConfig(
             region_x=region_x, region_y=region_y,
             width=width, height=height,
@@ -1170,8 +1253,7 @@ class TabCoordinate(QWidget):
     # ?? 諛㏃쨪 踰꾪듉 ?????????????????????????????????????????????????????
     def _set_rope_from_pos(self) -> None:
         # 踰꾪듉 ?대┃ ???ㅼ떆媛?罹먮┃???꾩튂瑜??쎌뼱 諛㏃쨪 X濡??ㅼ젙
-        self._sync_minimap_config()
-        pos = self._minimap_reader.get_character_pos()
+        pos = self._detect_current_character_pos()
         if pos:
             self._last_pos = pos
             self._pending_rope_x = pos[0]

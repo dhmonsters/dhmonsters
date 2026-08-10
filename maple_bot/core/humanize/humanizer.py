@@ -1,179 +1,221 @@
-# Humanizer — 모든 행동의 단일 통제점. Intent를 사람같은 타이밍으로 변형해 백엔드로 송출
+# 모든 입력 시간에 ±5% 랜덤을 한 번만 적용하고 서로 다른 키의 동시 입력을 허용하는 입력 관리자
 from __future__ import annotations
 
 import random
-import threading
 import time
 from typing import Callable
 
-from core.humanize.intent import Intent, RiskProfile
-
-
-# risk_profile 별 변형 파라미터.
-#   hold_jitter: base_hold_sec 에 곱할 (min, max) 배수 — 사람은 누르는 시간이 매번 다름
-#   reaction:    감지→행동 사이 반응 지연 (min, max) 초 — 사람 반응속도(150~400ms 근처)
-#   sloppy:      의도적 불완전성 확률 (미세 과/부족) — 완벽하면 봇
-_PROFILE = {
-    RiskProfile.CAREFUL: {"hold_jitter": (0.75, 1.6), "reaction": (0.22, 0.45), "sloppy": 0.06},
-    RiskProfile.NORMAL:  {"hold_jitter": (0.8, 1.4),  "reaction": (0.14, 0.30), "sloppy": 0.03},
-    RiskProfile.FAST:    {"hold_jitter": (0.85, 1.2), "reaction": (0.05, 0.13), "sloppy": 0.01},
-}
-
-# hold_sec 안전 범위 — 지터가 폭주하지 않도록 클램프
-# 버프는 캔슬방지로 길게(≈0.8s) 눌러야 하므로 상한을 1.2까지 허용(공격 탭은 base가 작아 영향 없음)
-_HOLD_MIN = 0.03
-_HOLD_MAX = 1.2
+from core.humanize.intent import Intent
+from core.humanize.timing import down_5
 
 
 class Humanizer:
-    """Intent → 사람같은 변형 → InputBackend.
-
-    모든 모듈은 Intent 만 만들고, '언제·어떻게'는 여기서만 결정한다.
-    고정 상수 타이밍을 직접 입력하지 않는다(헌법).
-    """
-
     def __init__(self, backend, sleep_fn: Callable[[float], None] | None = None,
                  rng: random.Random | None = None):
         self._backend = backend
         self._sleep = sleep_fn or time.sleep
         self._rng = rng or random.Random()
-        self._held: str | None = None   # 현재 누른 채 유지 중인 이동키(left/right)
-        self._held_keys: set[str] = set()   # 좌우 외 유지키(사다리 ↑/↓ 등)
-        # 이동(루트 스레드)과 공격(메인 루프)이 같은 Humanizer를 동시 사용 → 키 상태 보호
-        self._lock = threading.RLock()
+        self._held: str | None = None
+        self._held_keys: set[str] = set()
+        self._press_counts: dict[str, int] = {}
 
-    # ── 이동키 유지/해제 (C _walk_to_x 방식) ──────────────────────────
-    # 좌우 이동키는 '한 번 누르고 계속 유지'한다. 매 틱 톡톡 누르지 않는다.
-    # 떼는 경우는 둘뿐 — 방향이 바뀔 때(hold_dir로 자동), 제자리 공격 등(release_dir).
-    def hold_dir(self, key: str,
-                 risk_profile: RiskProfile = RiskProfile.NORMAL) -> None:
-        """좌우 이동키를 누른 채 유지. 같은 방향이면 그대로(no-op),
-        다른 방향이면 기존 키를 떼고 새 키를 누른다(방향 전환)."""
-        with self._lock:
-            if self._held == key:
-                return                      # 이미 같은 방향 유지 중 → 계속 누름 유지
-            p = _PROFILE[risk_profile]
-            if self._held is not None:
-                self._backend.key_up(self._held)   # 방향 전환: 기존 키 떼기
-                self._sleep(self._uniform(*p["reaction"]))  # 전환 사이 사람같은 미세 지연
+    def humanize(self, value: float) -> float:
+        """입력된 수치에 ±5%를 한 번 적용해 소수점 넷째 자리로 반환한다."""
+        return down_5(value, self._rng)
+
+    def sleep_humanized(self, value: float) -> float:
+        applied = self.humanize(value)
+        self._sleep(applied)
+        return applied
+
+    def _press_key(self, key: str) -> bool:
+        """키별 참조 수를 올리고 첫 입력일 때만 실제 key_down을 보낸다."""
+        count = self._press_counts.get(key, 0)
+        if count == 0:
             self._backend.key_down(key)
-            self._held = key
+        self._press_counts[key] = count + 1
+        return count == 0
+
+    def _release_key(self, key: str) -> bool:
+        """마지막 사용자가 키를 놓을 때만 실제 key_up을 보낸다."""
+        count = self._press_counts.get(key, 0)
+        if count <= 0:
+            return False
+        if count == 1:
+            self._backend.key_up(key)
+            self._press_counts.pop(key, None)
+            return True
+        self._press_counts[key] = count - 1
+        return False
+
+    def _force_press_key(self, key: str) -> int:
+        """사다리 중요 입력은 남아 있는 참조를 정리하고 실제 key_down을 다시 보낸다."""
+        previous_count = self._press_counts.pop(key, 0)
+        self._held_keys.discard(key)
+        if previous_count > 0:
+            self._backend.key_up(key)
+        self._backend.key_down(key)
+        self._press_counts[key] = 1
+        return previous_count
+
+    def hold_dir(self, key: str) -> None:
+        """같은 방향은 유지하고 방향 전환은 대기 없이 즉시 실행한다."""
+        if self._held == key:
+            return
+        previous = self._held
+        self._held = key
+        if previous is not None:
+            self._release_key(previous)
+        self._press_key(key)
+
+    def force_dir(self, key: str) -> dict[str, float | int | str]:
+        """사다리 점프 직전 반대 방향을 실제 해제하고 목표 방향을 강제 재전송한다."""
+        opposite = "left" if key == "right" else "right"
+        started_at = time.monotonic()
+        opposite_refs = self._press_counts.pop(opposite, 0)
+        self._backend.key_up(opposite)
+        opposite_up_at = time.monotonic()
+
+        target_refs = self._press_counts.get(key, 0)
+        self._backend.key_down(key)
+        target_down_at = time.monotonic()
+
+        self._press_counts[key] = 1
+        self._held = key
+        return {
+            "direction": key,
+            "opposite": opposite,
+            "opposite_refs": opposite_refs,
+            "target_refs": target_refs,
+            "opposite_up_sec": opposite_up_at - started_at,
+            "target_down_sec": target_down_at - opposite_up_at,
+            "total_sec": target_down_at - started_at,
+        }
 
     def refresh_dir(self) -> None:
-        """유지 중인 이동키를 같은 키로 재전송(키가 풀린 이벤트 뒤 재유지용). 없으면 no-op."""
-        with self._lock:
-            if self._held is not None:
-                self._backend.key_down(self._held)
+        if self._held is not None:
+            self._backend.key_down(self._held)
 
     def release_dir(self) -> None:
-        """유지 중인 이동키를 뗀다(제자리 공격/정지/안전 진입 시)."""
-        with self._lock:
-            if self._held is not None:
-                self._backend.key_up(self._held)
-                self._held = None
+        if self._held is not None:
+            key = self._held
+            self._held = None
+            self._release_key(key)
 
     def held_dir(self) -> str | None:
-        """현재 유지 중인 이동키(없으면 None)."""
-        with self._lock:
-            return self._held
+        return self._held
 
     def hold(self, key: str) -> None:
-        """좌우 외 임의 키를 누른 채 유지(사다리 ↑/↓ 등)."""
-        with self._lock:
-            if key not in self._held_keys:
-                self._backend.key_down(key)
-                self._held_keys.add(key)
+        if key not in self._held_keys:
+            self._held_keys.add(key)
+            self._press_key(key)
 
     def release(self, key: str) -> None:
-        """hold로 누른 키를 뗀다(멱등)."""
-        with self._lock:
-            if key in self._held_keys:
-                self._backend.key_up(key)
-                self._held_keys.discard(key)
+        if key in self._held_keys:
+            self._held_keys.discard(key)
+            self._release_key(key)
+
+    def force_release_key(self, key: str) -> None:
+        """특정 키가 입력 상태로 남지 않도록 카운트를 정리하고 key_up을 보낸다."""
+        if not key:
+            return
+        self._press_counts.pop(key, None)
+        self._held_keys.discard(key)
+        if self._held == key:
+            self._held = None
+        self._backend.key_up(key)
 
     def release_all(self) -> None:
-        """유지 중인 모든 키(좌우+↑/↓)를 뗀다(정지/안전 진입 시)."""
-        with self._lock:
-            self.release_dir()
-            for k in list(self._held_keys):
-                self.release(k)
+        for key in list(self._press_counts):
+            self._backend.key_up(key)
+        self._press_counts.clear()
+        self._held = None
+        self._held_keys.clear()
 
-    # ── 고정 타이밍 랜덤화 (헌법: 어떤 고정 수치도 매번 미세하게 다르게) ──
-    def jitter_sec(self, base: float, spread: float | None = None) -> float:
-        """고정 시간값을 크기에 맞춰 랜덤화(음수 방지).
+    def perform(self, intent: Intent, trace_fn=None) -> float:
+        """서로 다른 키를 막지 않고 즉시 입력한 뒤 적용된 유지시간 후 해제한다."""
+        if intent.action in {"hold", "move_dir"}:
+            self._backend.key_down(intent.key)
+            return 0.0
 
-        - base ≥ 0.1 (0.5초 매달림 등): ±0.05 범위, 소수점 둘째 자리.
-        - base < 0.1 (폴링 0.05 등 둘째 단위 수치): ±0.005 범위, 소수점 넷째 자리.
-        spread를 명시하면 그 값을 쓰고 둘째 자리로 반올림한다.
-        """
-        if spread is None:
-            if base >= 0.1:
-                spread, ndigits = 0.05, 2
-            else:
-                spread, ndigits = 0.005, 4   # 작은 값은 넷째 자리에서 미세 랜덤
-        else:
-            ndigits = 2
-        return round(max(0.0, base + self._rng.uniform(-spread, spread)), ndigits)
+        hold = self.humanize(intent.base_hold_sec)
+        if trace_fn:
+            trace_fn(
+                f"점프 요청, 유지시간 설정={intent.base_hold_sec:.4f}, 적용={hold:.4f}초"
+            )
+            trace_fn("동시 입력 허용, 입력 대기=0.0000초")
+        self._press_key(intent.key)
+        if trace_fn:
+            trace_fn(f"{intent.key} key_down 전달")
+        try:
+            self._sleep(hold)
+        finally:
+            self._release_key(intent.key)
+            if trace_fn:
+                trace_fn(f"{intent.key} key_up 전달, 실제 유지={hold:.4f}초")
+        return hold
 
-    def sleep_jittered(self, base: float, spread: float | None = None) -> None:
-        """jitter_sec 만큼 대기."""
-        self._sleep(self.jitter_sec(base, spread))
+    def perform_ladder_jump(
+        self,
+        jump_key: str,
+        jump_hold_sec: float,
+        up_delay_sec: float,
+        trace_fn=None,
+    ) -> dict[str, float]:
+        """사다리 점프와 Up을 실행하되 대기 중 전역 입력 잠금을 보유하지 않는다."""
+        jump_hold = self.humanize(jump_hold_sec)
+        if trace_fn:
+            trace_fn(
+                f"점프 요청, 유지시간 설정={jump_hold_sec:.4f}, "
+                f"적용={jump_hold:.4f}초"
+            )
+            trace_fn("사다리 점프 우선 입력 시작")
 
-    def random_side(self) -> str:
-        """좌/우 무작위 선택 (밧줄 잡기 방향 랜덤화 등)."""
-        return self._rng.choice(["left", "right"])
+        send_started_at = time.monotonic()
+        previous_count = self._force_press_key(jump_key)
+        jump_down_at = time.monotonic()
+        if trace_fn:
+            trace_fn(
+                f"{jump_key} key_down 실제 전송, 이전 참조={previous_count}, "
+                f"입력 호출={jump_down_at - send_started_at:.4f}초"
+            )
 
-    # ── 공개 API ──────────────────────────────────────────────────────
-    def rand_in(self, lo: float, hi: float, ndigits: int = 4) -> float:
-        """[lo, hi] 균일 랜덤을 소수점 ndigits자리로(왕복 끝점 랜덤마진 등). lo>hi면 lo 반환."""
-        if hi <= lo:
-            return round(float(lo), ndigits)
-        return round(self._rng.uniform(lo, hi), ndigits)
+        self._sleep(jump_hold)
+        jump_release_started_at = time.monotonic()
+        jump_released = self._release_key(jump_key)
+        jump_up_at = time.monotonic()
+        if trace_fn:
+            trace_fn(
+                f"{jump_key} key_up 실제 전송={jump_released}, "
+                f"실제 유지={jump_up_at - jump_down_at:.4f}초, "
+                f"입력 호출={jump_up_at - jump_release_started_at:.4f}초"
+            )
 
-    def jitter_pct(self, base: float, pct: float = 0.05, ndigits: int = 4) -> float:
-        """고정값을 base±pct 비율로 랜덤화(소수점 ndigits자리). 양방향용."""
-        return round(base * self._rng.uniform(1 - pct, 1 + pct), ndigits)
+        direction_release_started_at = time.monotonic()
+        self.release_dir()
+        direction_up_at = time.monotonic()
+        if trace_fn:
+            trace_fn(
+                "점프키 해제 후 좌우 방향키 해제, "
+                f"입력 호출={direction_up_at - direction_release_started_at:.4f}초"
+            )
 
-    def jitter_down(self, base: float, pct: float = 0.05, ndigits: int = 4) -> float:
-        """고정값을 [base*(1-pct), base]로만 랜덤화(소수점 ndigits자리) — base를 절대 넘지 않음.
-        (버프/펫: 설정 간격·홀드를 초과하지 않게. 예 200초면 190~200초만)"""
-        return round(base * self._rng.uniform(1 - pct, 1.0), ndigits)
+        up_deadline = jump_down_at + max(0.0, up_delay_sec)
+        remaining = up_deadline - time.monotonic()
+        if remaining > 0.0:
+            self._sleep(remaining)
 
-    def perform(self, intent: Intent) -> None:
-        """의도를 변형해 실제 입력으로 송출."""
-        p = _PROFILE[intent.risk_profile]
+        up_requested_at = time.monotonic()
+        self.hold("up")
+        up_down_at = time.monotonic()
+        if trace_fn:
+            trace_fn("사다리 점프 우선 입력 종료")
 
-        # 행동 전 반응 지연 (base_delay + 프로파일 반응시간)
-        delay = intent.base_delay + self._uniform(*p["reaction"])
-        if delay > 0:
-            self._sleep(delay)
-
-        with self._lock:
-            if intent.action == "hold":
-                self._backend.key_down(intent.key)
-                return
-            if intent.action == "move_dir":
-                self._backend.key_down(intent.key)
-                return
-            # action == "key": 홀드 시간을 지터해 누름
-            hold = self._jitter_hold(intent.base_hold_sec, p, intent.hold_jitter_pct)
-            self._backend.press(intent.key, hold)
-
-    def reaction_delay(self, profile: RiskProfile) -> float:
-        """프로파일별 반응 지연 1회 샘플 (테스트/외부 사용)."""
-        lo, hi = _PROFILE[profile]["reaction"]
-        return self._uniform(lo, hi)
-
-    # ── 내부 ──────────────────────────────────────────────────────────
-    def _jitter_hold(self, base: float, p: dict, pct: float = 0.0) -> float:
-        if pct > 0:
-            # 정밀 모드: [base*(1-pct), base]로만 — base(설정 홀드시간) 초과 안 함(버프/펫/공격).
-            # 호출자가 의도한 값이라 상한 클램프 없음(다중 타격 홀드는 1.2s를 넘을 수 있음).
-            return max(_HOLD_MIN, round(base * self._uniform(1 - pct, 1.0), 4))
-        val = base * self._uniform(*p["hold_jitter"])
-        if self._rng.random() < p["sloppy"]:   # 의도적 불완전성: 가끔 미세하게 더/덜
-            val *= self._uniform(0.7, 1.3)
-        return max(_HOLD_MIN, min(_HOLD_MAX, val))
-
-    def _uniform(self, lo: float, hi: float) -> float:
-        return self._rng.uniform(lo, hi)
+        return {
+            "jump_down_at": jump_down_at,
+            "jump_up_at": jump_up_at,
+            "direction_up_at": direction_up_at,
+            "up_requested_at": up_requested_at,
+            "up_down_at": up_down_at,
+            "jump_hold_sec": jump_hold,
+        }

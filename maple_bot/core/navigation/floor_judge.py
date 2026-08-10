@@ -22,6 +22,9 @@ class FloorJudge:
 
     def floor_at(self, y: int) -> Floor | None:
         """현재 Y가 속한 층. 층 사이(밧줄 중간)면 None."""
+        # 층이 하나만 설정된 맵은 다층 판정이 필요 없으므로 해당 층을 사용한다.
+        if len(self._floors) == 1:
+            return self._floors[0]
         for f in self._floors:
             if f.y_min <= y <= f.y_max:
                 return f

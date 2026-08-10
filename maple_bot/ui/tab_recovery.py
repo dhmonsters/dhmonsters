@@ -243,19 +243,30 @@ class TabRecovery(QWidget):
         from core.config_manager import get_game_window_rect
 
         def _on_selected(x: int, y: int, w: int, h: int) -> None:
-            ox, oy, cw, ch = get_game_window_rect(self.config)
+            # 창 찾기 — relative/absolute 모드 무관하게 항상 시도
+            try:
+                import win32gui as _wg
+                _title = self.config.get("settings2", "game_window_title") or "MapleStory"
+                _hwnd  = _wg.FindWindow(None, _title)
+                gox, goy = (_wg.ClientToScreen(_hwnd, (0, 0)) if _hwnd else (0, 0))
+                from core.config_manager import get_game_window_rect as _gwr
+                _, _, _cw, _ch = _gwr(self.config)
+                if _cw <= 0 and _hwnd:
+                    # relative 모드 아니어도 실제 창 크기 직접 조회
+                    import win32gui as _wg2
+                    _l, _t, _r, _b = _wg2.GetClientRect(_hwnd)
+                    _cw, _ch = _r - _l, _b - _t
+            except Exception:
+                gox, goy, _cw, _ch = 0, 0, 0, 0
 
-            if cw > 0 and ch > 0:
-                # relative 모드 — 논리 좌표 기준 비율로 저장
-                x_ratio = (x - ox) / cw
-                y_ratio = (y - oy) / ch
-                w_ratio = w / cw
-                coord = {"x_ratio": x_ratio, "y_ratio": y_ratio, "width_ratio": w_ratio}
-                rx, ry, rw = int(x - ox), int(y - oy), w
-            else:
-                # absolute 모드 — 논리 절대 좌표로 저장
-                coord = {"x": x, "y": y, "width": w}
-                rx, ry, rw = x, y, w
+            rx, ry, rw = int(x - gox), int(y - goy), w
+            coord = {"x": rx, "y": ry, "width": w}
+
+            # 창 크기를 알면 비율도 함께 저장 → 창 크기 변경(창↔전체화면) 자동 대응
+            if _cw > 0 and _ch > 0:
+                coord["x_ratio"]     = rx / _cw
+                coord["y_ratio"]     = ry / _ch
+                coord["width_ratio"] = w  / _cw
 
             if bar_type == "hp":
                 self.spin_hp_x.setValue(rx)
@@ -270,7 +281,7 @@ class TabRecovery(QWidget):
 
             self.config.save()
             label = "HP" if bar_type == "hp" else "MP"
-            mode  = "비율 저장" if cw > 0 else "픽셀 저장"
+            mode  = "비율+픽셀 저장" if _cw > 0 else "픽셀 저장"
             self.lbl_ratio.setText(f"{label} 바 좌표 {mode} ✓")
             self._refresh_bar_status()
 

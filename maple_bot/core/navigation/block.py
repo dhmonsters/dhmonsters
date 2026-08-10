@@ -48,6 +48,17 @@ class Block:
     pos_x: int = -1              # 캔버스 앵커 X (미니맵 픽셀). -1=미배치(캔버스에 안 그림)
     pos_y: int = -1              # 캔버스 앵커 Y (미니맵 픽셀). -1=미배치
 
+    target_x_ratio: float | None = None
+    start_x_ratio: float | None = None
+    end_x_ratio: float | None = None
+    pos_x_ratio: float | None = None
+    pos_y_ratio: float | None = None
+    ladder_x_ratio: float | None = None
+    y_top_ratio: float | None = None
+    y_bot_ratio: float | None = None
+    rand_margin_ratio: float | None = None
+    jump_offset_ratio: float | None = None
+
     def __post_init__(self) -> None:
         if self.type not in _VALID_TYPES:
             raise ValueError(f"알 수 없는 Block.type: {self.type!r} (허용: {sorted(_VALID_TYPES)})")

@@ -88,7 +88,13 @@ def monster_boxes_in_box(scene: np.ndarray, templates: dict[str, np.ndarray],
         if th > roi.shape[0] or tw > roi.shape[1]:
             continue
         res = cv2.matchTemplate(roi, tpl, cv2.TM_CCOEFF_NORMED)
-        ys, xs = np.where(res >= threshold)
+        local_max = cv2.dilate(res, np.ones((3, 3), dtype=np.uint8))
+        ys, xs = np.where((res >= threshold) & (res >= local_max))
+        if len(xs) > 200:
+            scores = res[ys, xs]
+            keep = np.argpartition(scores, -200)[-200:]
+            keep = keep[np.argsort(scores[keep])[::-1]]
+            ys, xs = ys[keep], xs[keep]
         for ry, rx in zip(ys, xs):
             ox, oy = x1 + int(rx), y1 + int(ry)   # 원본좌표
             # 근접 중복 제거 (이미 가까운 박스 있으면 skip)
@@ -96,4 +102,6 @@ def monster_boxes_in_box(scene: np.ndarray, templates: dict[str, np.ndarray],
                    for fx, fy, _, _ in found):
                 continue
             found.append((ox, oy, tw, th))
+            if len(found) >= 100:
+                return found
     return found

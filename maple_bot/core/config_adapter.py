@@ -155,19 +155,95 @@ def _attack_sequences(attack: dict) -> list[AttackSequence]:
     ]
 
 
+def _minimap_region_profile(mm: dict) -> dict:
+    """현재 UI에 저장된 미니맵 영역을 게임창 기준 상대좌표로 전달한다."""
+    region = {
+        "base_region": [
+            int(mm.get("region_x", 38)),
+            int(mm.get("region_y", 129)),
+            int(mm.get("width", 172)),
+            int(mm.get("height", 103)),
+        ],
+    }
+    ratio_keys = ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio")
+    if all(mm.get(key) is not None for key in ratio_keys):
+        region.update({
+            "x_ratio": float(mm.get("region_x_ratio")),
+            "y_ratio": float(mm.get("region_y_ratio")),
+            "w_ratio": float(mm.get("width_ratio")),
+            "h_ratio": float(mm.get("height_ratio")),
+        })
+    else:
+        region.update({
+            "left": int(mm.get("region_x", 38)),
+            "top": int(mm.get("region_y", 129)),
+            "width": int(mm.get("width", 172)),
+            "height": int(mm.get("height", 103)),
+        })
+    return region
+
+
+def _with_minimap_ratios(profile: dict, x_keys: tuple[str, ...], y_keys: tuple[str, ...]) -> dict:
+    """고정 좌표를 기준 미니맵 내부 비율로 함께 저장한다."""
+    base_w = max(1.0, float(profile.get("base_minimap_width", 172)))
+    base_h = max(1.0, float(profile.get("base_minimap_height", 103)))
+    for key in x_keys:
+        if key in profile and f"{key}_ratio" not in profile:
+            profile[f"{key}_ratio"] = float(profile[key]) / base_w
+    for key in y_keys:
+        if key in profile and f"{key}_ratio" not in profile:
+            profile[f"{key}_ratio"] = float(profile[key]) / base_h
+    return profile
+
+
+def _platforms_with_minimap_ratios(profile: dict) -> dict:
+    """빨코3 발판 범위를 기준 미니맵 내부 비율로 함께 저장한다."""
+    base_w = max(1.0, float(profile.get("base_minimap_width", 172)))
+    base_h = max(1.0, float(profile.get("base_minimap_height", 103)))
+    for data in (profile.get("platforms") or {}).values():
+        if not isinstance(data, dict):
+            continue
+        for key in ("x", "x_min", "x_max"):
+            if key in data and f"{key}_ratio" not in data:
+                data[f"{key}_ratio"] = float(data[key]) / base_w
+        for key in ("y", "y_min", "y_max"):
+            if key in data and f"{key}_ratio" not in data:
+                data[f"{key}_ratio"] = float(data[key]) / base_h
+    return profile
+
+
+def _route_blocks_with_minimap_ratios(blocks: list, mm: dict) -> list:
+    """레거시 동선 픽셀 좌표를 저장 당시 미니맵 내부 비율로 한 번만 변환한다."""
+    base_w = max(1.0, float(mm.get("width", 172)))
+    base_h = max(1.0, float(mm.get("height", 103)))
+    converted = []
+    for source in blocks:
+        if not isinstance(source, dict):
+            continue
+        block = dict(source)
+        for key in (
+            "target_x", "start_x", "end_x", "pos_x", "ladder_x",
+            "rand_margin", "jump_offset",
+        ):
+            ratio_key = f"{key}_ratio"
+            if block.get(ratio_key) is None and block.get(key) is not None:
+                block[ratio_key] = float(block[key]) / base_w
+        for key in ("pos_y", "y_top", "y_bot"):
+            ratio_key = f"{key}_ratio"
+            value = block.get(key)
+            if block.get(ratio_key) is None and value is not None and float(value) >= 0:
+                block[ratio_key] = float(value) / base_h
+        converted.append(block)
+    return converted
+
+
 def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     """Build RedNose2 v5 runtime profile from one fixed source."""
     mm = d.get("minimap", {}) or {}
     forced = {
         "enabled": True,
         "use_fixed_minimap_region": True,
-        "fixed_minimap_region": {
-            "x_ratio": 38 / 1366,
-            "y_ratio": 129 / 768,
-            "w_ratio": 172 / 1366,
-            "h_ratio": 103 / 768,
-            "base_region": [38, 129, 172, 103],
-        },
+        "fixed_minimap_region": _minimap_region_profile(mm),
         "attack_key": "end",
         "teleport_key": "x",
         "attack_hold_sec": 0.9,
@@ -197,8 +273,8 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
         "stair7_x_min": 38,
         "stair7_x_max": 44,
         "stair7_y": 67,
-        "stair7_return_y_min": 61,
-        "stair7_return_y_max": 63,
+        "stair7_return_y_min": 66,
+        "stair7_return_y_max": 68,
         "stair7_right_bias_x": 45,
         "stair7_right_bias_correct_sec": 0.0,
         "stair7_right_teleport_hold_sec": 0.1,
@@ -227,7 +303,28 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     }
     forced["minimap_width"] = int(mm.get("width", forced["base_minimap_width"]))
     forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
-    return forced
+    return _with_minimap_ratios(
+        forced,
+        x_keys=(
+            "floor2_left_x", "floor2_right_x", "floor2_right_safe_x",
+            "auto_sell_entry_x_min", "auto_sell_entry_x_max", "auto_sell_entry_x",
+            "stair7_x", "stair7_x_min", "stair7_x_max", "stair7_right_bias_x",
+            "platform24_approach_x", "platform24_x",
+            "platform1415_16_approach_x", "platform1415_x_min", "platform1415_x_max",
+            "platform27_approach_x", "platform27_bypass_approach_x",
+            "platform27_bypass_x_min", "platform27_bypass_x_max",
+        ),
+        y_keys=(
+            "floor2_y_min", "floor2_y_max",
+            "floor1_y_min", "floor1_y_max",
+            "floor3_y_min", "floor3_y_max",
+            "stair7_y", "stair7_return_y_min", "stair7_return_y_max",
+            "platform24_y",
+            "platform1415_y_min", "platform1415_y_max",
+            "platform16_y_min", "platform16_y_max",
+            "platform27_y_min", "platform27_y_max",
+        ),
+    )
 
 
 def _rednose3_profile(d: dict, attack: dict) -> dict:
@@ -236,13 +333,7 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
     forced = {
         "enabled": True,
         "use_fixed_minimap_region": True,
-        "fixed_minimap_region": {
-            "x_ratio": 38 / 1366,
-            "y_ratio": 129 / 768,
-            "w_ratio": 172 / 1366,
-            "h_ratio": 103 / 768,
-            "base_region": [38, 129, 172, 103],
-        },
+        "fixed_minimap_region": _minimap_region_profile(mm),
         "attack_key": "end",
         "teleport_key": "x",
         "jump_key": str(mm.get("jump_key", "alt") or "alt"),
@@ -273,10 +364,15 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
             "5": {"x_min": 30, "x_max": 34, "y_min": 40, "y_max": 42},
             "6": {"x_min": 30, "x_max": 34, "y_min": 45, "y_max": 47},
         },
-        "base_minimap_width": int(mm.get("width", 172)),
-        "base_minimap_height": int(mm.get("height", 103)),
+        "base_minimap_width": 172,
+        "base_minimap_height": 103,
     }
-    return forced
+    forced["minimap_width"] = int(mm.get("width", forced["base_minimap_width"]))
+    forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
+    forced["fall_y_threshold_ratio"] = (
+        float(forced["fall_y_threshold"]) / float(forced["base_minimap_height"])
+    )
+    return _platforms_with_minimap_ratios(forced)
 
 
 def _hunt_ground_matches(active: str, canonical: str) -> bool:
@@ -322,6 +418,19 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         "width": int(mm.get("width", 200)),
         "height": int(mm.get("height", 120)),
     }
+    if all(mm.get(key) is not None for key in ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio")):
+        minimap_region.update({
+            "x_ratio": float(mm.get("region_x_ratio")),
+            "y_ratio": float(mm.get("region_y_ratio")),
+            "w_ratio": float(mm.get("width_ratio")),
+            "h_ratio": float(mm.get("height_ratio")),
+            "base_region": [
+                int(mm.get("region_x", 0)),
+                int(mm.get("region_y", 0)),
+                int(mm.get("width", 200)),
+                int(mm.get("height", 120)),
+            ],
+        })
     raw_char_rgb = (
         (int(mm["char_r"]), int(mm["char_g"]), int(mm["char_b"]))
         if all(k in mm for k in ("char_r", "char_g", "char_b"))
@@ -463,13 +572,16 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         game_window_title=game_window_title,
         coord_anchor=d.get("coord_anchor"),
         char_rgb=char_rgb,
+        char_h_low=(int(mm["hsv_h_low"]) if mm.get("hsv_h_low") is not None else None),
+        char_h_high=(int(mm["hsv_h_high"]) if mm.get("hsv_h_high") is not None else None),
         char_h_tol=int(mm.get("char_h_tol", 10)),
         char_s_min=int(mm.get("char_s_min", 100)),
         char_v_min=int(mm.get("char_v_min", 200)),
         char_area_min=float(mm.get("char_area_min", 3)),
         char_area_max=float(mm.get("char_area_max", 100)),
         floors=_floors(zones),
-        route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
+        route=[Block.from_dict(b) for b in _route_blocks_with_minimap_ratios(
+                   d.get("floor_hunt", {}).get("route") or [], mm)
                if isinstance(b, dict) and "type" in b],
         route_steps=[RouteStep.from_dict(s) for s in
                      (d.get("floor_hunt", {}).get("route_steps") or [])

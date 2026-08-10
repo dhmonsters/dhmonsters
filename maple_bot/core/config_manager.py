@@ -534,11 +534,12 @@ def resolve_minimap_coords(config: "ConfigManager", mm: dict) -> tuple[int, int,
     """
     ox, oy, cw, ch = get_game_window_rect(config)
 
-    if cw > 0 and ch > 0 and mm.get("region_x_ratio") is not None:
-        region_x = ox + int(mm["region_x_ratio"] * cw)
-        region_y = oy + int(mm["region_y_ratio"] * ch)
-        width    = max(1, int(mm.get("width_ratio",  0.1)  * cw))
-        height   = max(1, int(mm.get("height_ratio", 0.07) * ch))
+    ratio_keys = ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio")
+    if cw > 0 and ch > 0 and all(mm.get(key) is not None for key in ratio_keys):
+        region_x = ox + int(round(float(mm["region_x_ratio"]) * cw))
+        region_y = oy + int(round(float(mm["region_y_ratio"]) * ch))
+        width = max(1, int(round(float(mm["width_ratio"]) * cw)))
+        height = max(1, int(round(float(mm["height_ratio"]) * ch)))
     else:
         region_x = ox + int(mm.get("region_x", 0))
         region_y = oy + int(mm.get("region_y", 0))
@@ -586,13 +587,18 @@ def resolve_region_coords(config: "ConfigManager", region_cfg) -> tuple[int, int
 def _query_window_origin(window_title: str) -> tuple[int, int, int, int]:
     """win32로 게임창 클라이언트 (ox, oy, cw, ch). 못 찾거나 win32 미가용이면 (0,0,0,0)."""
     try:
-        import win32gui
-        hwnd = win32gui.FindWindow(None, window_title or "MapleStory")
+        from core.puzzle.game_window import (
+            find_game_hwnd,
+            find_window_hwnd_by_title,
+            get_game_client_rect_screen,
+        )
+        hwnd = None
+        if window_title:
+            hwnd = find_window_hwnd_by_title(window_title)
+        if hwnd is None:
+            hwnd = find_game_hwnd()
         if hwnd:
-            ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
-            left, top, right, bottom = win32gui.GetClientRect(hwnd)
-            if right - left > 0 and bottom - top > 0:
-                return (ox, oy, right - left, bottom - top)
+            return get_game_client_rect_screen(hwnd)
     except Exception:
         pass
     return (0, 0, 0, 0)
@@ -670,15 +676,16 @@ def get_game_window_rect(config: "ConfigManager") -> tuple[int, int, int, int]:
         return (0, 0, 0, 0)
     title = config.get("settings2", "game_window_title") or "MapleStory"
     try:
-        import win32gui
-        hwnd = win32gui.FindWindow(None, title)
+        from core.puzzle.game_window import (
+            find_game_hwnd,
+            find_window_hwnd_by_title,
+            get_game_client_rect_screen,
+        )
+        hwnd = find_window_hwnd_by_title(title) if title else None
+        if hwnd is None:
+            hwnd = find_game_hwnd()
         if hwnd:
-            ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
-            left, top, right, bottom = win32gui.GetClientRect(hwnd)
-            cw = right - left
-            ch = bottom - top
-            if cw > 0 and ch > 0:
-                return (ox, oy, cw, ch)
+            return get_game_client_rect_screen(hwnd)
     except Exception:
         pass
     return (0, 0, 0, 0)

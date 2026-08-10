@@ -1,7 +1,8 @@
 # CharScanner의 HSV 위치 감지(순수 함수)를 합성 이미지로 검증 (C vision.py 방식)
 import numpy as np
 import pytest
-from core.sensing.char_scanner import find_char_in_hsv
+from core.sensing.char_scanner import CharScanner, find_char_in_hsv
+from core.sensing.coordinate_history import CoordinateHistory
 
 
 def _img_with_yellow_block(w=200, h=120, cx=50, cy=40, size=10):
@@ -43,3 +44,17 @@ def test_area_filter_rejects_too_big():
     img = _img_with_yellow_block(size=60)
     pos = find_char_in_hsv(img, HSV_LO, HSV_HI, min_area=10, max_area=100)
     assert pos is None
+
+
+def test_char_scanner_uses_30ms_interval():
+    assert CharScanner.interval == 0.03
+
+
+def test_coordinate_history_keeps_latest_ten_samples():
+    history = CoordinateHistory(maxlen=10)
+    for index in range(12):
+        history.append((index, 40), observed_at=float(index), scan_duration_sec=0.01)
+    samples = history.snapshot()
+    assert len(samples) == 10
+    assert samples[0].position == (2, 40)
+    assert history.latest().position == (11, 40)

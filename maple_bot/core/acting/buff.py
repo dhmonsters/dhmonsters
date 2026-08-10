@@ -1,56 +1,42 @@
-# BuffManager — 주기 버프 자동 사용(일반/토글). 모션캔슬 대기 포함. Humanizer 경유
+# 주기 버프 입력을 입력 백엔드로 직접 전송합니다.
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.humanize.intent import Intent
+from core.humanize.timing import down_5, plus_minus_5
 
 
 @dataclass
 class Buff:
-    """버프 1개 설정."""
     key: str = ""
-    interval: float = 60.0     # 재사용 주기(초)
-    hold_sec: float = 0.8      # A: 버프는 길게 눌러 캔슬 방지
+    interval: float = 60.0
+    hold_sec: float = 0.8
 
 
 class BuffManager:
-    """주기마다 버프 키를 사용한다.
-
-    A 방식: hold 0.8s로 길게 + 다음 버프와의 모션 캔슬 방지.
-    각 버프는 interval 에 ±지터(Humanizer 위임)로 비주기성 확보.
-    """
-
-    def __init__(self, humanizer, buffs: list[Buff], log_fn=None, gap: float = 1.2,
+    def __init__(self, input_backend, buffs: list[Buff], log_fn=None, gap: float = 2.5,
                  jitter: float = 0.05):
-        self._h = humanizer
+        self._input = input_backend
         self._buffs = buffs
-        self._last: dict[int, float] = {}   # buff index → 마지막 사용 시각
-        self._iv: dict[int, float] = {}     # buff index → 이번 주기(±5% 랜덤 적용)
-        self._log = log_fn or (lambda msg: None)   # 버프 사용 로그
-        self._gap = gap          # 연속 버프 사이 최소 간격(초) — 동시발동 시 스킬딜레이로 씹힘 방지
-        self._jit = jitter       # 간격·홀드 ±비율 랜덤(소수점4자리)
+        self._last: dict[int, float] = {}
+        self._iv: dict[int, float] = {}
+        self._log = log_fn or (lambda msg: None)
+        self._gap = gap
+        self._jit = jitter
         self._next_allowed = -1e9
 
-    def _jp(self, base: float) -> float:
-        f = getattr(self._h, "jitter_down", None)
-        return f(base, self._jit) if f else base
-
     def tick(self, now: float) -> None:
-        """주기 경과한 버프를 한 틱에 하나씩, gap 간격으로 사용(동시 발동 안 함).
-        간격·홀드는 ±5%(소수점4자리) 랜덤으로 비주기화."""
         if now < self._next_allowed:
-            return                          # 직전 버프 후 gap 동안 대기
-        for i, b in enumerate(self._buffs):
-            if not b.key:
-                continue   # 키 미설정 = 비활성
-            last = self._last.get(i, -1e9)
-            iv = self._iv.get(i, b.interval)   # 이번 주기(±5% 적용된 값)
-            if now - last >= iv:
-                self._h.perform(Intent(action="key", key=b.key, base_hold_sec=b.hold_sec,
-                                       hold_jitter_pct=self._jit))   # 홀드 ±5%
-                self._last[i] = now
-                self._iv[i] = self._jp(b.interval)        # 다음 주기 ±5%
-                self._next_allowed = now + self._jp(self._gap)
-                self._log(f"버프 [{b.key}]")
-                return                      # 한 틱에 한 버프만 → 나머지는 다음 틱(gap 후)
+            return
+        for index, buff in enumerate(self._buffs):
+            if not buff.key:
+                continue
+            last = self._last.get(index, -1e9)
+            interval = self._iv.get(index, buff.interval)
+            if now - last >= interval:
+                self._input.press(buff.key, plus_minus_5(buff.hold_sec))
+                self._last[index] = now
+                self._iv[index] = down_5(buff.interval)
+                self._next_allowed = now + plus_minus_5(self._gap)
+                self._log(f"버프 [{buff.key}]")
+                return
