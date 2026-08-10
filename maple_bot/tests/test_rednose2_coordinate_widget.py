@@ -45,6 +45,18 @@ def test_loads_saved_values_and_defaults_for_missing_values(app):
     assert widget.inputs["platform24_x"].value() == REDNOSE2_X_DEFAULTS["platform24_x"]
 
 
+def test_loads_defaults_for_bool_and_out_of_range_saved_values(app):
+    widget = Rednose2CoordinateWidget(FakeConfig({
+        "floor2_left_x": True,
+        "floor2_right_x": False,
+        "stair7_x": -1,
+        "platform24_x": 172,
+    }))
+
+    for key in ("floor2_left_x", "floor2_right_x", "stair7_x", "platform24_x"):
+        assert widget.inputs[key].value() == REDNOSE2_X_DEFAULTS[key]
+
+
 def test_restore_defaults_changes_fields_without_saving(app):
     config = FakeConfig({"stair7_x": 42})
     widget = Rednose2CoordinateWidget(config)

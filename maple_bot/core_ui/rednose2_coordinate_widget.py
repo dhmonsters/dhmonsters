@@ -81,7 +81,8 @@ class Rednose2CoordinateWidget(QFrame):
         saved = self._config.get("rednose2_v5", default={}) or {}
         for key, default in REDNOSE2_X_DEFAULTS.items():
             value = saved.get(key, default) if isinstance(saved, dict) else default
-            self.inputs[key].setValue(value if isinstance(value, int) else default)
+            valid = isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 171
+            self.inputs[key].setValue(value if valid else default)
 
     def restore_defaults(self) -> None:
         for key, value in REDNOSE2_X_DEFAULTS.items():
