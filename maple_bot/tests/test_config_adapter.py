@@ -145,3 +145,63 @@ def test_maps_attack_sequences_secondary_potions_and_legacy_coordinate_mode():
     assert runtime.attack_sequences[0].repeat_interval_sec == 5.0
     assert runtime.hp_rule.secondary_key == "8"
     assert runtime.mp_rule.secondary_key == "7"
+
+
+def test_rednose2_user_x_settings_override_defaults_and_rebuild_ratios():
+    data = _sample_config()
+    data["hunt_grounds"] = {"active": "빨코2"}
+    data["rednose2_v5"] = {
+        "floor2_left_x": 58,
+        "floor2_right_x": 121,
+        "floor2_right_safe_x": 120,
+        "stair7_x": 42,
+        "stair7_x_min": 39,
+        "stair7_x_max": 45,
+        "platform24_approach_x": 44,
+        "platform24_x": 31,
+        "platform1415_16_approach_x": 97,
+        "platform1415_x_min": 96,
+        "platform1415_x_max": 98,
+        "platform27_approach_x": 92,
+        "platform27_bypass_approach_x": 81,
+        "platform27_bypass_x_min": 73,
+        "platform27_bypass_x_max": 90,
+    }
+
+    profile = to_runtime_config(data).rednose2_v5
+
+    assert profile["floor2_left_x"] == 58
+    assert profile["stair7_x"] == 42
+    assert profile["platform1415_16_approach_x"] == 97
+    assert profile["platform27_bypass_x_max"] == 90
+    assert profile["floor2_left_x_ratio"] == pytest.approx(58 / 172)
+    assert profile["platform27_bypass_x_max_ratio"] == pytest.approx(90 / 172)
+
+
+def test_rednose2_invalid_external_ranges_fall_back_by_group():
+    data = _sample_config()
+    data["rednose2_v5"] = {
+        "floor2_left_x": 130,
+        "floor2_right_x": 120,
+        "platform24_approach_x": 46,
+        "stair7_x_min": 44,
+        "stair7_x": 40,
+        "stair7_x_max": 42,
+    }
+
+    profile = to_runtime_config(data).rednose2_v5
+
+    assert profile["floor2_left_x"] == 55
+    assert profile["floor2_right_x"] == 124
+    assert profile["stair7_x_min"] == 38
+    assert profile["stair7_x"] == 41
+    assert profile["stair7_x_max"] == 44
+    assert profile["platform24_approach_x"] == 46
+
+
+def test_rednose2_x_overrides_do_not_change_rednose3_profile():
+    baseline = to_runtime_config(_sample_config()).rednose3
+    data = _sample_config()
+    data["rednose2_v5"] = {"floor2_left_x": 58, "floor2_right_x": 121}
+
+    assert to_runtime_config(data).rednose3 == baseline

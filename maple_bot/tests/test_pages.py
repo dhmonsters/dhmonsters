@@ -54,6 +54,14 @@ def test_movement_page_has_hunt_ground_preset_card(app):
     )
 
 
+def test_movement_page_has_rednose2_coordinate_card(app):
+    from PyQt6.QtWidgets import QWidget
+
+    pages = build_pages(FakeConfig())
+
+    assert pages[1].findChild(QWidget, "rednose2CoordinateCard") is not None
+
+
 def test_combat_page_has_attack_sequence_editor(app):
     from PyQt6.QtWidgets import QWidget
 

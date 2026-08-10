@@ -618,7 +618,9 @@ def build_pages(config) -> list[QWidget]:
     current_position_checker = _make_current_position_checker(c)
     nav_extras = []
     from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
+    from core_ui.rednose2_coordinate_widget import Rednose2CoordinateWidget
     nav_extras.append(HuntGroundPresetWidget(c, name_field=hunt_name_field))
+    nav_extras.append(Rednose2CoordinateWidget(c))
     try:
         import mss as _mss
         from PyQt6.QtWidgets import QWidget as _QWidget, QHBoxLayout as _QHBox, \
