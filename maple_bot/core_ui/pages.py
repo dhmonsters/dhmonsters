@@ -449,7 +449,7 @@ def _make_character_color_controls(config) -> QWidget:
         "s_low": SliderField("채도 최소 S", config, ("minimap", "hsv_s_low"), lo=0, hi=255, default=100, is_int=True, label_w=120),
         "v_low": SliderField("밝기 최소 V", config, ("minimap", "hsv_v_low"), lo=0, hi=255, default=200, is_int=True, label_w=120),
         "area_min": SliderField("점 크기 최소", config, ("minimap", "char_area_min"), lo=1, hi=80, default=3, is_int=True, label_w=120),
-        "area_max": SliderField("점 크기 최대", config, ("minimap", "char_area_max"), lo=10, hi=500, default=100, is_int=True, label_w=120),
+        "area_max": SliderField("점 크기 최대", config, ("minimap", "char_area_max"), lo=10, hi=500, default=160, is_int=True, label_w=120),
     }
     for field in fields.values():
         v.addWidget(field.row)

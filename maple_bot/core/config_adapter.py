@@ -578,7 +578,7 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         char_s_min=int(mm.get("char_s_min", 100)),
         char_v_min=int(mm.get("char_v_min", 200)),
         char_area_min=float(mm.get("char_area_min", 3)),
-        char_area_max=float(mm.get("char_area_max", 100)),
+        char_area_max=float(mm.get("char_area_max", 160)),
         floors=_floors(zones),
         route=[Block.from_dict(b) for b in _route_blocks_with_minimap_ratios(
                    d.get("floor_hunt", {}).get("route") or [], mm)

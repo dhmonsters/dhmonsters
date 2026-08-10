@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 from core.sensing.char_scanner import CharScanner, find_char_in_hsv
 from core.sensing.coordinate_history import CoordinateHistory
+from core.runtime import RuntimeConfig
 
 
 def _img_with_yellow_block(w=200, h=120, cx=50, cy=40, size=10):
@@ -24,6 +25,56 @@ def test_finds_yellow_block_center():
     assert pos is not None
     x, y = pos
     assert abs(x - 50) <= 2 and abs(y - 40) <= 2  # 무게중심 ≈ 블록 중심
+
+
+def test_default_filter_accepts_deployed_round_marker_size():
+    """배포 화면의 반지름 7 노란 마커를 기본 점 크기 범위가 탈락시키지 않는다."""
+    import cv2
+
+    image = np.zeros((39, 43, 3), dtype=np.uint8)
+    cv2.circle(image, (29, 12), 7, (0, 225, 225), -1)
+    config = RuntimeConfig(minimap_region={"left": 0, "top": 0, "width": 172, "height": 103})
+
+    position = find_char_in_hsv(
+        image,
+        HSV_LO,
+        HSV_HI,
+        min_area=config.char_area_min,
+        max_area=config.char_area_max,
+    )
+
+    assert position == (29, 12)
+
+
+def test_even_width_marker_centroid_rounds_to_nearest_pixel():
+    """X 중심이 28.5인 마커를 항상 왼쪽 28로 버리지 않는다."""
+    yy, xx = np.ogrid[:39, :43]
+    marker = (((xx - 28.5) / 6.5) ** 2 + ((yy - 12.0) / 6.0) ** 2) <= 1.0
+    image = np.zeros((39, 43, 3), dtype=np.uint8)
+    image[marker] = (0, 225, 225)
+
+    position = find_char_in_hsv(image, HSV_LO, HSV_HI, min_area=3, max_area=160)
+
+    assert position == (29, 12)
+
+
+def test_default_filter_still_rejects_larger_round_background_object():
+    """캐릭터보다 큰 원형 배경 물체는 기본 최대 면적에서 제외한다."""
+    import cv2
+
+    image = np.zeros((39, 43, 3), dtype=np.uint8)
+    cv2.circle(image, (29, 18), 10, (0, 225, 225), -1)
+    config = RuntimeConfig(minimap_region={"left": 0, "top": 0, "width": 172, "height": 103})
+
+    position = find_char_in_hsv(
+        image,
+        HSV_LO,
+        HSV_HI,
+        min_area=config.char_area_min,
+        max_area=config.char_area_max,
+    )
+
+    assert position is None
 
 
 def test_returns_none_when_no_yellow():
