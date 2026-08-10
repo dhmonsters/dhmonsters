@@ -8,9 +8,24 @@ from pathlib import Path
 from types import ModuleType
 
 
-DEFAULT_VENDOR_ROOT = Path(
+DEVELOPMENT_VENDOR_ROOT = Path(
     r"C:\Users\PC\Downloads\Telegram Desktop\1테스트\V6497_LIVE_ONE_SHOT_1280_SELF_CLEAN"
 )
+
+
+def resolve_vendor_root(
+    *,
+    frozen: bool | None = None,
+    executable: str | Path | None = None,
+) -> Path:
+    packaged = bool(getattr(sys, "frozen", False)) if frozen is None else bool(frozen)
+    if not packaged:
+        return DEVELOPMENT_VENDOR_ROOT
+    executable_path = Path(executable or sys.executable).resolve()
+    return executable_path.parent / "vendor"
+
+
+DEFAULT_VENDOR_ROOT = resolve_vendor_root()
 
 
 @dataclass(frozen=True)

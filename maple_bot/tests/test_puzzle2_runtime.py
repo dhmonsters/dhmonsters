@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from core.puzzle2.runtime import MouseGate, SotLiveRuntime
-from core.puzzle2.vendor import VendorLayout
+from core.puzzle2.runtime import MouseGate, SotLiveRuntime, resolve_session_root
+from core.puzzle2.vendor import VendorLayout, resolve_vendor_root
 
 
 def test_mouse_gate_defaults_off_and_swallows_move() -> None:
@@ -35,6 +35,22 @@ def test_vendor_layout_requires_only_tracking_files(tmp_path: Path) -> None:
 
     assert layout.validate() == []
     assert "START_HERE.cmd" not in layout.required_paths
+
+
+def test_packaged_vendor_root_is_next_to_executable(tmp_path: Path) -> None:
+    executable = tmp_path / "portable" / "puzzle2.exe"
+
+    assert resolve_vendor_root(frozen=True, executable=executable) == (
+        executable.parent / "vendor"
+    )
+
+
+def test_packaged_session_root_is_next_to_executable(tmp_path: Path) -> None:
+    executable = tmp_path / "portable" / "puzzle2.exe"
+
+    assert resolve_session_root(frozen=True, executable=executable) == (
+        executable.parent / "sessions"
+    )
 
 
 def test_runtime_intercepts_rows_and_respects_mouse_toggle() -> None:

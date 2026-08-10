@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -14,6 +15,22 @@ from .vendor import load_default_backend
 
 MoveFunction = Callable[[float, float], bool]
 BackendLoader = Callable[[], ModuleType]
+
+
+def resolve_session_root(
+    *,
+    frozen: bool | None = None,
+    executable: str | Path | None = None,
+) -> Path:
+    packaged = bool(getattr(sys, "frozen", False)) if frozen is None else bool(frozen)
+    if packaged:
+        executable_path = Path(executable or sys.executable).resolve()
+        return executable_path.parent / "sessions"
+    return (
+        Path(__file__).resolve().parents[2]
+        / "03_output"
+        / "2026-08-10_puzzle2_live_sessions"
+    )
 
 
 class MouseGate:
@@ -55,11 +72,7 @@ class SotLiveRuntime:
         self._thread: threading.Thread | None = None
         self._preview_capture: Any = None
         self._preview_hwnd: int | None = None
-        self.output_root = Path(output_root) if output_root else (
-            Path(__file__).resolve().parents[2]
-            / "03_output"
-            / "2026-08-10_puzzle2_live_sessions"
-        )
+        self.output_root = Path(output_root) if output_root else resolve_session_root()
         self.session_dir: Path | None = None
         self.latest_row: dict[str, Any] | None = None
         self.status: dict[str, str] = {
