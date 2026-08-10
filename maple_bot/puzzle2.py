@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Puzzle2 V6497 SOT 라이브 검증")
     parser.add_argument("--vendor-root", default=str(DEFAULT_VENDOR_ROOT))
     parser.add_argument("--output-root", default="")
+    parser.add_argument("--runtime-self-check", default="", metavar="REPORT_PATH")
+    parser.add_argument("--required-arch", default="sm_61")
     return parser
 
 
@@ -25,6 +28,18 @@ def main(argv: list[str] | None = None) -> int:
         for path in missing:
             print(path, file=sys.stderr)
         return 2
+
+    if args.runtime_self_check:
+        from core.puzzle2.runtime_check import run_runtime_check, save_runtime_report
+
+        report = run_runtime_check(
+            vendor_root=layout.root,
+            required_arch=args.required_arch,
+        )
+        report_path = save_runtime_report(report, args.runtime_self_check)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        print(f"REPORT={report_path}")
+        return 0 if report["status"] == "PASS" else 3
 
     from PyQt6.QtWidgets import QApplication
 
