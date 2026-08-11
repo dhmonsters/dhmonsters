@@ -106,7 +106,7 @@ class Puzzle2Window(QMainWindow):
         title = QLabel("제어")
         title.setObjectName("sectionTitle")
         self.solver_start_button = _button("솔버 시작", "primary")
-        self.solver_stop_button = _button("솔버 종료", "warning")
+        self.solver_stop_button = _button("솔버 종료 F12", "warning")
         self.mouse_on_button = _button("마우스 ON", "danger")
         self.mouse_off_button = _button("마우스 OFF", "safe")
         self.solver_start_button.clicked.connect(self._start_solver)
@@ -133,6 +133,9 @@ class Puzzle2Window(QMainWindow):
             ("후보", "hypotheses"),
             ("겹침", "overlap"),
             ("신분 잠금", "lock"),
+            ("완료", "completed"),
+            ("입력", "input_backend"),
+            ("커서 보정", "cursor_offset"),
             ("판단", "reason"),
         )
         for row_index, (name, key) in enumerate(labels):
@@ -199,6 +202,9 @@ class Puzzle2Window(QMainWindow):
         self.state_values["hypotheses"].setText(str(row.get("hypothesis_count", "-")))
         self.state_values["overlap"].setText(str(row.get("overlap_hold", "-")))
         self.state_values["lock"].setText("ON" if row.get("identity_lock_active") else "OFF")
+        self.state_values["completed"].setText(str(snapshot.get("completed_puzzles", 0)))
+        self.state_values["input_backend"].setText(str(status.get("input_backend", "대기")))
+        self.state_values["cursor_offset"].setText(str(status.get("cursor_offset", "0.0,0.0")))
         reason = row.get("owner_guard_reason") or row.get("owner_guard_action") or "-"
         self.state_values["reason"].setText(str(reason))
         if row:

@@ -117,3 +117,35 @@ def save_runtime_report(report: dict[str, Any], output_path: str | Path) -> Path
         encoding="utf-8",
     )
     return path
+
+
+def build_input_module_report(interception_module: Any) -> dict[str, Any]:
+    required = ("auto_capture_devices", "move_to", "click")
+    missing = [
+        name
+        for name in required
+        if not callable(getattr(interception_module, name, None))
+    ]
+    return {
+        "status": "PASS" if not missing else "FAIL",
+        "reasons": ["interception_api_missing"] if missing else [],
+        "metrics": {
+            "module": str(getattr(interception_module, "__file__", "bundled")),
+            "required_api": list(required),
+            "missing_api": missing,
+        },
+    }
+
+
+def run_input_module_check() -> dict[str, Any]:
+    try:
+        import interception
+
+        return build_input_module_report(interception)
+    except Exception as exc:
+        return {
+            "status": "FAIL",
+            "reasons": ["interception_import_failed"],
+            "error": f"{type(exc).__name__}: {exc}",
+            "metrics": {},
+        }

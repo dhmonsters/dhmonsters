@@ -4,8 +4,26 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core.puzzle2.runtime import MouseGate, SotLiveRuntime, resolve_session_root
 from core.puzzle2.vendor import VendorLayout, resolve_vendor_root
+
+
+class FakeMouseController:
+    def __init__(self) -> None:
+        self.moves: list[tuple[float, float, bool]] = []
+        self.offset = (0.0, 0.0)
+
+    def begin_puzzle(self) -> None:
+        pass
+
+    def move(self, x: float, y: float, *, learn_offset: bool) -> bool:
+        self.moves.append((x, y, learn_offset))
+        return True
+
+    def close(self) -> None:
+        pass
 
 
 def test_mouse_gate_defaults_off_and_swallows_move() -> None:
@@ -55,6 +73,7 @@ def test_packaged_session_root_is_next_to_executable(tmp_path: Path) -> None:
 
 def test_runtime_intercepts_rows_and_respects_mouse_toggle() -> None:
     vendor_moves: list[tuple[float, float]] = []
+    kernel_mouse = FakeMouseController()
     backend = SimpleNamespace()
     backend.move_toward_screen = lambda x, y: vendor_moves.append((x, y)) or True
     backend.f12_pressed = lambda: False
@@ -79,23 +98,28 @@ def test_runtime_intercepts_rows_and_respects_mouse_toggle() -> None:
         return True, True, {"result": "SUCCESS"}
 
     backend.run_one_shot = run_one_shot
-    runtime = SotLiveRuntime(backend_loader=lambda: backend)
+    runtime = SotLiveRuntime(
+        backend_loader=lambda: backend,
+        mouse_controller_factory=lambda _backend: kernel_mouse,
+    )
 
     runtime.run_session_sync()
 
     assert vendor_moves == []
     assert runtime.latest_row is not None
     assert runtime.latest_row["center_x"] == 420.0
-    assert runtime.status["tracking"] == "TRACKING"
+    assert runtime.status["tracking"] == "WAIT_REARM"
     assert runtime.result["result"] == "SUCCESS"
 
     runtime.set_mouse_enabled(True)
     runtime.run_session_sync()
 
-    assert vendor_moves == [(100.0, 200.0)]
+    assert vendor_moves == []
+    assert kernel_mouse.moves == [(100.0, 200.0, False)]
 
 
-def test_runtime_stop_is_seen_as_vendor_f12() -> None:
+def test_runtime_stop_prevents_another_vendor_cycle() -> None:
+    calls = 0
     backend = SimpleNamespace(
         move_toward_screen=lambda x, y: True,
         f12_pressed=lambda: False,
@@ -103,6 +127,8 @@ def test_runtime_stop_is_seen_as_vendor_f12() -> None:
     )
 
     def run_one_shot(status_cb=None, consumed_cb=None):
+        nonlocal calls
+        calls += 1
         return False, False, {"stopped": backend.f12_pressed()}
 
     backend.run_one_shot = run_one_shot
@@ -111,7 +137,8 @@ def test_runtime_stop_is_seen_as_vendor_f12() -> None:
 
     runtime.run_session_sync()
 
-    assert runtime.result["stopped"] is True
+    assert calls == 0
+    assert runtime.status["tracking"] == "STOPPED"
 
 
 def test_runtime_replaces_vendor_exact_torch_version_gate(monkeypatch) -> None:
@@ -136,3 +163,137 @@ def test_runtime_replaces_vendor_exact_torch_version_gate(monkeypatch) -> None:
 
     assert runtime.result["torch"] == "2.11.0+cu128"
     assert runtime.result["cuda"] is True
+
+
+def test_start_session_removes_previous_session_contents(tmp_path: Path) -> None:
+    output_root = tmp_path / "puzzle2_sessions"
+    old_session = output_root / "old-session"
+    old_session.mkdir(parents=True)
+    (old_session / "large.trace").write_bytes(b"old")
+    (output_root / "loose.log").write_text("old", encoding="utf-8")
+    runtime = SotLiveRuntime(output_root=output_root)
+
+    runtime._start_session(clear_existing=True)
+
+    assert not old_session.exists()
+    assert not (output_root / "loose.log").exists()
+    assert runtime.session_dir is not None
+    assert runtime.session_dir.parent == output_root
+    assert runtime.session_dir.is_dir()
+
+
+def test_continuous_runtime_retries_wait_timeout_until_stop() -> None:
+    calls = 0
+    backend = SimpleNamespace(
+        move_toward_screen=lambda x, y: True,
+        f12_pressed=lambda: False,
+        run=lambda *args, **kwargs: (Path("result"), {}),
+        find_game_window=lambda: SimpleNamespace(hwnd=10),
+        foreground_is=lambda hwnd: True,
+        activate=lambda hwnd: True,
+    )
+    runtime = SotLiveRuntime(backend_loader=lambda: backend)
+
+    def run_one_shot(status_cb=None, consumed_cb=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False, False, {"error": "QUEST_WAIT_TIMEOUT", "aborted": False}
+        runtime.request_stop()
+        return False, False, {"error": "F12_ABORT", "aborted": True}
+
+    backend.run_one_shot = run_one_shot
+
+    runtime.run_session_sync(max_cycles=None, retry_delay=0.0, rearm_delay=0.0)
+
+    assert calls == 2
+    assert runtime.status["tracking"] == "STOPPED"
+
+
+def test_continuous_runtime_returns_to_watch_after_success() -> None:
+    calls = 0
+    backend = SimpleNamespace(
+        move_toward_screen=lambda x, y: True,
+        f12_pressed=lambda: False,
+        run=lambda *args, **kwargs: (Path("result"), {}),
+        find_game_window=lambda: SimpleNamespace(hwnd=10),
+        foreground_is=lambda hwnd: True,
+        activate=lambda hwnd: True,
+    )
+    runtime = SotLiveRuntime(backend_loader=lambda: backend)
+
+    def run_one_shot(status_cb=None, consumed_cb=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            status_cb(tracking="FINISHED", result="SUCCESS / square")
+            return True, True, {"result": "SUCCESS"}
+        runtime.request_stop()
+        return False, False, {"error": "F12_ABORT", "aborted": True}
+
+    backend.run_one_shot = run_one_shot
+
+    runtime.run_session_sync(max_cycles=None, retry_delay=0.0, rearm_delay=0.0)
+
+    assert calls == 2
+    assert runtime.completed_puzzles == 1
+    assert runtime.status["tracking"] == "STOPPED"
+
+
+def test_runtime_does_not_activate_background_game_window() -> None:
+    activation_calls: list[int] = []
+    backend = SimpleNamespace(
+        move_toward_screen=lambda x, y: True,
+        f12_pressed=lambda: False,
+        run=lambda *args, **kwargs: (Path("result"), {}),
+        find_game_window=lambda: SimpleNamespace(hwnd=10),
+        foreground_is=lambda hwnd: True,
+        activate=lambda hwnd: activation_calls.append(hwnd) or True,
+    )
+    backend.run_one_shot = lambda status_cb=None, consumed_cb=None: (
+        False,
+        False,
+        {"error": "QUEST_WAIT_TIMEOUT", "aborted": False},
+    )
+    runtime = SotLiveRuntime(backend_loader=lambda: backend)
+
+    runtime.run_session_sync(max_cycles=1, retry_delay=0.0, rearm_delay=0.0)
+
+    assert activation_calls == []
+
+
+def test_f12_stops_during_success_rearm_wait() -> None:
+    f12_checks = iter((False, True))
+    backend = SimpleNamespace(
+        move_toward_screen=lambda x, y: True,
+        f12_pressed=lambda: next(f12_checks, True),
+        run=lambda *args, **kwargs: (Path("result"), {}),
+        find_game_window=lambda: SimpleNamespace(hwnd=10),
+        foreground_is=lambda hwnd: True,
+        activate=lambda hwnd: True,
+        run_one_shot=lambda status_cb=None, consumed_cb=None: (
+            True,
+            True,
+            {"result": "SUCCESS"},
+        ),
+    )
+    runtime = SotLiveRuntime(backend_loader=lambda: backend)
+
+    runtime.run_session_sync(max_cycles=None, retry_delay=0.0, rearm_delay=5.0)
+
+    assert runtime.completed_puzzles == 1
+    assert runtime.status["tracking"] == "STOPPED"
+
+
+def test_session_cleanup_refuses_drive_root() -> None:
+    runtime = SotLiveRuntime(output_root=Path(Path.cwd().anchor))
+
+    with pytest.raises(ValueError, match="unsafe session root"):
+        runtime._start_session(clear_existing=True)
+
+
+def test_session_cleanup_refuses_unrelated_directory(tmp_path: Path) -> None:
+    runtime = SotLiveRuntime(output_root=tmp_path / "unrelated")
+
+    with pytest.raises(ValueError, match="unsafe session root"):
+        runtime._start_session(clear_existing=True)

@@ -1,18 +1,18 @@
-# sm_61 지원 Puzzle2 GT1030 배포본을 빌드하고 자체 검사 후 ZIP으로 압축한다.
+# sm_61 이상을 지원하는 Puzzle2 GPU 공용 배포본을 빌드하고 검사한다.
 param(
-    [string]$Python = "C:\Users\PC\Desktop\02_work\05_AI\maple_bot\03_output\2026-08-10_gt1030_torch_env_v1\Scripts\python.exe"
+    [string]$Python = "C:\Users\PC\AppData\Local\Programs\Python\Python312\python.exe"
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $OutputRoot = Join-Path $ProjectRoot "03_output"
-$BuildRoot = Join-Path $OutputRoot "2026-08-10_puzzle2_gt1030_portable_build_v1"
+$BuildRoot = Join-Path $OutputRoot "2026-08-10_puzzle2_gpu_portable_build_v2"
 $DistRoot = Join-Path $BuildRoot "dist"
 $WorkRoot = Join-Path $BuildRoot "work"
-$PortableRoot = Join-Path $DistRoot "Puzzle2_GT1030"
-$ZipPath = Join-Path $OutputRoot "2026-08-10_puzzle2_gt1030_portable_v1.zip"
+$PortableRoot = Join-Path $DistRoot "Puzzle2_GPU"
+$ZipPath = Join-Path $OutputRoot "2026-08-10_puzzle2_gpu_portable_v2.zip"
 $SelfCheckPath = Join-Path $PortableRoot "gt1030_runtime_check.json"
-$ExpectedTempEnv = Join-Path $OutputRoot "2026-08-10_gt1030_torch_env_v1"
+$InputCheckPath = Join-Path $PortableRoot "interception_module_check.json"
 
 if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
     throw "GT1030 build Python is missing: $Python"
@@ -42,18 +42,22 @@ if (-not (Test-Path -LiteralPath $InternalVendor -PathType Container)) {
 Move-Item -LiteralPath $InternalVendor -Destination $PortableVendor
 
 $Readme = @"
-Puzzle2 GT1030 Portable Validation Tool
+Puzzle2 GPU Continuous Monitor
 
 1. Extract the ZIP completely.
-2. Run GT1030_SELF_CHECK.cmd first.
-3. PASS means sm_61 CUDA and the V6497 model inference both worked.
-4. Run puzzle2_gt1030.exe.
-5. Mouse output always starts OFF.
+2. Install the Interception driver and reboot Windows.
+3. Run GPU_SELF_CHECK.cmd first.
+4. PASS means sm_61 CUDA and the V6497 model inference both worked.
+5. Run puzzle2_gpu.exe as administrator.
+6. Mouse output always starts OFF.
+7. Solver Start watches continuously. F12 or Solver Stop ends it.
+8. Old session logs are removed when Solver Start begins a new run.
 
 Requirements
 - Windows 10/11 64-bit
-- NVIDIA GeForce GT 1030 4GB or newer
+- NVIDIA GeForce GT 1030 4GB or RTX 4060
 - A current NVIDIA driver
+- Interception kernel driver
 - 1280x720 game client
 
 Logs
@@ -78,11 +82,11 @@ type gt1030_runtime_check.json
 pause
 "@
 Set-Content `
-    -LiteralPath (Join-Path $PortableRoot "GT1030_SELF_CHECK.cmd") `
+    -LiteralPath (Join-Path $PortableRoot "GPU_SELF_CHECK.cmd") `
     -Value $SelfCheckCommand `
     -Encoding ASCII
 
-$PortableExe = Join-Path $PortableRoot "puzzle2_gt1030.exe"
+$PortableExe = Join-Path $PortableRoot "puzzle2_gpu.exe"
 $SelfCheckProcess = Start-Process `
     -FilePath $PortableExe `
     -ArgumentList @(
@@ -109,15 +113,24 @@ if (-not $SelfCheck.metrics.model_inference_ok) {
     throw "Packaged V6497 model inference did not run."
 }
 
+$InputCheckProcess = Start-Process `
+    -FilePath $PortableExe `
+    -ArgumentList @("--input-module-check", $InputCheckPath) `
+    -WorkingDirectory $PortableRoot `
+    -WindowStyle Hidden `
+    -Wait `
+    -PassThru
+if ($InputCheckProcess.ExitCode -ne 0) {
+    throw "Packaged Interception module check failed with exit code $($InputCheckProcess.ExitCode)"
+}
+$InputCheck = Get-Content -LiteralPath $InputCheckPath -Raw | ConvertFrom-Json
+if ($InputCheck.status -ne "PASS") {
+    throw "Packaged Interception module report did not pass."
+}
+
 if (Test-Path -LiteralPath $WorkRoot) {
     Remove-Item -LiteralPath $WorkRoot -Recurse -Force
 }
-$ResolvedPython = (Resolve-Path -LiteralPath $Python).Path
-$ResolvedExpectedPython = Join-Path $ExpectedTempEnv "Scripts\python.exe"
-if ($ResolvedPython -eq $ResolvedExpectedPython -and (Test-Path -LiteralPath $ExpectedTempEnv)) {
-    Remove-Item -LiteralPath $ExpectedTempEnv -Recurse -Force
-}
-
 Compress-Archive `
     -LiteralPath $PortableRoot `
     -DestinationPath $ZipPath `
@@ -128,11 +141,12 @@ $Archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
 try {
     $EntryNames = @($Archive.Entries | ForEach-Object { $_.FullName.Replace("\", "/") })
     $RequiredEntries = @(
-        "Puzzle2_GT1030/puzzle2_gt1030.exe",
-        "Puzzle2_GT1030/GT1030_SELF_CHECK.cmd",
-        "Puzzle2_GT1030/gt1030_runtime_check.json",
-        "Puzzle2_GT1030/vendor/live_core.py",
-        "Puzzle2_GT1030/vendor/triangle_models/triangle_guard_v6496.pt"
+        "Puzzle2_GPU/puzzle2_gpu.exe",
+        "Puzzle2_GPU/GPU_SELF_CHECK.cmd",
+        "Puzzle2_GPU/gt1030_runtime_check.json",
+        "Puzzle2_GPU/interception_module_check.json",
+        "Puzzle2_GPU/vendor/live_core.py",
+        "Puzzle2_GPU/vendor/triangle_models/triangle_guard_v6496.pt"
     )
     foreach ($Required in $RequiredEntries) {
         if ($Required -notin $EntryNames) {
@@ -145,6 +159,6 @@ finally {
 }
 
 $Hash = Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256
-Write-Host "GT1030_PORTABLE_EXE=$PortableExe"
-Write-Host "GT1030_PORTABLE_ZIP=$ZipPath"
-Write-Host "GT1030_PORTABLE_SHA256=$($Hash.Hash)"
+Remove-Item -LiteralPath $BuildRoot -Recurse -Force
+Write-Host "GPU_PORTABLE_ZIP=$ZipPath"
+Write-Host "GPU_PORTABLE_SHA256=$($Hash.Hash)"

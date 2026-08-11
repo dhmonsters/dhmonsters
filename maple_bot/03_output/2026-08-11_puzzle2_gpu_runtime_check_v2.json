@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "reasons": [],
+  "metrics": {
+    "torch_version": "2.6.0+cu124",
+    "cuda_version": "12.4",
+    "cuda_available": true,
+    "gpu_name": "NVIDIA GeForce RTX 4060",
+    "arch_list": [
+      "sm_50",
+      "sm_60",
+      "sm_61",
+      "sm_70",
+      "sm_75",
+      "sm_80",
+      "sm_86",
+      "sm_90"
+    ],
+    "required_arch": "sm_61",
+    "model_loaded": true,
+    "model_device": "cuda",
+    "model_inference_ok": true,
+    "model_score": 0.7490234375
+  }
+}

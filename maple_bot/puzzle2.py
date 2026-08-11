@@ -15,6 +15,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vendor-root", default=str(DEFAULT_VENDOR_ROOT))
     parser.add_argument("--output-root", default="")
     parser.add_argument("--runtime-self-check", default="", metavar="REPORT_PATH")
+    parser.add_argument("--input-module-check", default="", metavar="REPORT_PATH")
     parser.add_argument("--required-arch", default="sm_61")
     return parser
 
@@ -40,6 +41,15 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         print(f"REPORT={report_path}")
         return 0 if report["status"] == "PASS" else 3
+
+    if args.input_module_check:
+        from core.puzzle2.runtime_check import run_input_module_check, save_runtime_report
+
+        report = run_input_module_check()
+        report_path = save_runtime_report(report, args.input_module_check)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        print(f"REPORT={report_path}")
+        return 0 if report["status"] == "PASS" else 4
 
     from PyQt6.QtWidgets import QApplication
 

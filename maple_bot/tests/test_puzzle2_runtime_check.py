@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.puzzle2.runtime_check import build_runtime_report
+from core.puzzle2.runtime_check import build_input_module_report, build_runtime_report
 
 
 class FakeCuda:
@@ -63,6 +63,21 @@ def test_runtime_report_fails_when_required_arch_is_missing() -> None:
 
     assert report["status"] == "FAIL"
     assert "required_arch_missing" in report["reasons"]
+
+
+def test_input_module_report_requires_kernel_mouse_api() -> None:
+    complete = SimpleNamespace(
+        __file__="interception/__init__.py",
+        auto_capture_devices=lambda **kwargs: None,
+        move_to=lambda x, y: None,
+        click=lambda **kwargs: None,
+    )
+    incomplete = SimpleNamespace(auto_capture_devices=lambda **kwargs: None)
+
+    assert build_input_module_report(complete)["status"] == "PASS"
+    failed = build_input_module_report(incomplete)
+    assert failed["status"] == "FAIL"
+    assert failed["metrics"]["missing_api"] == ["move_to", "click"]
 
 
 def test_runtime_report_fails_when_model_did_not_run_on_cuda() -> None:

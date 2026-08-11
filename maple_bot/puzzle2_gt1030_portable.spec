@@ -1,5 +1,6 @@
 # Puzzle2와 sm_61 지원 CUDA 11.8 런타임을 GT1030 전용 폴더형 EXE로 묶는다.
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 project_root = Path(SPECPATH).resolve()
 vendor_root = Path(
@@ -30,11 +31,14 @@ a = Analysis(
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
-    hiddenimports=[
+    hiddenimports=collect_submodules("interception") + [
         "torch",
         "cv2",
         "mss",
         "numpy",
+        "core.interception_backend",
+        "core.humanize.backend",
+        "core.puzzle2.mouse",
         "core.puzzle2.runtime_check",
     ],
     hookspath=[],
@@ -51,7 +55,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="puzzle2_gt1030",
+    name="puzzle2_gpu",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -71,5 +75,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="Puzzle2_GT1030",
+    name="Puzzle2_GPU",
 )
