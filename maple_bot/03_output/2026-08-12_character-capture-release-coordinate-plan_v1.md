@@ -27,7 +27,7 @@
 - Consumes: `QMouseEvent.position()`과 `_Canvas._clamp(QPoint)`.
 - Produces: 기존 `_on_release(QRect)` 콜백에 실제 시작점과 해제점으로 만든 정규화 사각형을 전달한다.
 
-- [ ] **Step 1: 실패하는 실제 위젯 테스트 작성**
+- [x] **Step 1: 실패하는 실제 위젯 테스트 작성**
 
 ```python
 def test_region_selector_uses_release_position_without_move_event(app):
@@ -42,13 +42,13 @@ def test_region_selector_uses_release_position_without_move_event(app):
     assert selector.result() == QDialog.DialogCode.Accepted
 ```
 
-- [ ] **Step 2: 테스트가 원인 때문에 실패하는지 확인**
+- [x] **Step 2: 테스트가 원인 때문에 실패하는지 확인**
 
 Run: `python -m pytest tests/test_shot_selector.py::test_region_selector_uses_release_position_without_move_event -q`
 
 Expected: `selected`가 빈 목록이어서 실패한다.
 
-- [ ] **Step 3: 최소 구현 적용**
+- [x] **Step 3: 최소 구현 적용**
 
 ```python
 def mouseReleaseEvent(self, e):
@@ -58,13 +58,13 @@ def mouseReleaseEvent(self, e):
         self._on_release(QRect(self.start, self.cur).normalized())
 ```
 
-- [ ] **Step 4: 관련 테스트 확인**
+- [x] **Step 4: 관련 테스트 확인**
 
 Run: `python -m pytest tests/test_shot_selector.py tests/test_pages.py -q`
 
 Expected: 전체 통과.
 
-- [ ] **Step 5: 문법과 변경 범위 확인**
+- [x] **Step 5: 문법과 변경 범위 확인**
 
 Run: `python -m compileall -q core_ui/shot_selector.py tests/test_shot_selector.py`
 
@@ -72,9 +72,8 @@ Run: `git diff --check`
 
 Expected: 모두 종료 코드 0.
 
-- [ ] **Step 6: 의미 단위 커밋**
+- [x] **Step 6: 의미 단위 커밋**
 
 ```text
 fix: 캡처 선택기의 마우스 해제 좌표 반영
 ```
-
