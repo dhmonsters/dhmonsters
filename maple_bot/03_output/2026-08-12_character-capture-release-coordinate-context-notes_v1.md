@@ -13,3 +13,6 @@
 - 경고 8개는 기존 `core_ui/pages.py`의 `mss.mss` 폐기 예정 경고이며 새 경고는 없다.
 - `compileall`, `git diff --check`, 수정 파일 strict UTF-8 검사가 통과했다.
 - 코드와 테스트 커밋은 `bf71c81`이다.
+- 프로젝트 전체 테스트는 `tests/test_humanizer.py`, `tests/test_intent.py`가 제거된 `RiskProfile`을 가져오면서 수집 단계에서 중단됐다.
+- 위 두 파일을 제외한 실행 결과는 `279 passed, 85 failed, 11 warnings`이다. 실패는 이전 Humanizer 계약, 이전 `BlockRunner` 생성자, 이전 테마 기대값 등 이번 변경과 무관한 레거시 테스트에 분포한다.
+- 이번 브랜치는 Humanizer와 런타임 파일을 변경하지 않았으며 전체 테스트가 녹색이 될 때까지 병합, 푸시, 빌드, 배포를 진행하지 않는다.
