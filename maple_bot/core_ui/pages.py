@@ -432,8 +432,16 @@ def _make_current_position_checker(config) -> QWidget:
 
 
 
+def _mean_rgb_from_bgr(crop) -> tuple[int, int, int]:
+    """선택한 BGR/BGRA 영역 전체 픽셀의 평균을 RGB 한 값으로 반환한다."""
+    import numpy as np
+
+    b, g, r = np.rint(crop[:, :, :3].reshape(-1, 3).mean(axis=0)).astype(int)
+    return int(r), int(g), int(b)
+
+
 def _make_character_color_controls(config) -> QWidget:
-    """미니맵 캐릭터 노란점의 HSV와 점 크기 필터를 조절하는 영역."""
+    """미니맵 캐릭터 대표 색상 한 값과 점 크기 필터를 조절하는 영역."""
     box = QWidget()
     v = QVBoxLayout(box)
     v.setContentsMargins(0, SPACING["xs"], 0, SPACING["xs"])
@@ -442,8 +450,8 @@ def _make_character_color_controls(config) -> QWidget:
     title = QLabel("캐릭터 색검출 조절")
     title.setObjectName("subtle")
     desc = QLabel(
-        "노란점이 안 잡히면 밝기 최소값을 낮추고, "
-        "배경 노란색을 잡으면 밝기/채도 최소값을 올려주세요. "
+        "캐릭터 마커를 드래그하면 선택 영역의 평균 색상 한 개를 저장하고 "
+        "검출 허용 범위는 자동으로 계산합니다. "
         "점 크기 범위는 작은 노란 캐릭터 마크만 남기기 위한 필터입니다."
     )
     desc.setObjectName("subtle")
@@ -451,11 +459,39 @@ def _make_character_color_controls(config) -> QWidget:
     v.addWidget(title)
     v.addWidget(desc)
 
+    raw_reference = config.get("minimap", "reference_color_rgb", default=None)
+    if not isinstance(raw_reference, (list, tuple)) or len(raw_reference) != 3:
+        raw_reference = [
+            config.get("minimap", "char_r", default=225),
+            config.get("minimap", "char_g", default=225),
+            config.get("minimap", "char_b", default=0),
+        ]
+    reference_rgb = tuple(max(0, min(255, int(value))) for value in raw_reference)
+
+    reference_row = QHBoxLayout()
+    reference_title = QLabel("저장된 기준색")
+    reference_title.setObjectName("subtle")
+    reference_title.setFixedWidth(120)
+    reference_swatch = QLabel()
+    reference_swatch.setFixedSize(28, 20)
+    reference_value = QLabel()
+    reference_value.setObjectName("subtle")
+
+    def update_reference_preview(rgb) -> None:
+        r, g, b = (int(value) for value in rgb)
+        reference_swatch.setStyleSheet(
+            f"background-color: rgb({r}, {g}, {b}); border: 1px solid #80848e; border-radius: 4px;"
+        )
+        reference_value.setText(f"#{r:02X}{g:02X}{b:02X} · RGB({r}, {g}, {b})")
+
+    update_reference_preview(reference_rgb)
+    reference_row.addWidget(reference_title)
+    reference_row.addWidget(reference_swatch)
+    reference_row.addWidget(reference_value)
+    reference_row.addStretch()
+    v.addLayout(reference_row)
+
     fields = {
-        "h_low": SliderField("색상 시작 H", config, ("minimap", "hsv_h_low"), lo=0, hi=179, default=20, is_int=True, label_w=120),
-        "h_high": SliderField("색상 끝 H", config, ("minimap", "hsv_h_high"), lo=0, hi=179, default=40, is_int=True, label_w=120),
-        "s_low": SliderField("채도 최소 S", config, ("minimap", "hsv_s_low"), lo=0, hi=255, default=100, is_int=True, label_w=120),
-        "v_low": SliderField("밝기 최소 V", config, ("minimap", "hsv_v_low"), lo=0, hi=255, default=200, is_int=True, label_w=120),
         "area_min": SliderField("점 크기 최소", config, ("minimap", "char_area_min"), lo=1, hi=80, default=3, is_int=True, label_w=120),
         "area_max": SliderField("점 크기 최대", config, ("minimap", "char_area_max"), lo=10, hi=500, default=160, is_int=True, label_w=120),
     }
@@ -486,17 +522,6 @@ def _make_character_color_controls(config) -> QWidget:
     capture_row.addWidget(capture_status, 1)
     v.addLayout(capture_row)
 
-    def _set_slider(field, value: int) -> bool:
-        for name in ("slider", "control", "widget", "input"):
-            control = getattr(field, name, None)
-            if control is not None and hasattr(control, "setValue"):
-                control.setValue(int(value))
-                return True
-        for control in field.row.findChildren(QSlider):
-            control.setValue(int(value))
-            return True
-        return False
-
     def _capture_selection():
         from core_ui.shot_selector import ScreenshotRegionSelector
 
@@ -526,30 +551,22 @@ def _make_character_color_controls(config) -> QWidget:
         return image[y:y + height, x:x + width].copy()
 
     def capture_reference_color():
-        import cv2
-        import numpy as np
-
         crop = _capture_selection()
         if crop is None or not crop.size:
             capture_status.setText("기준색 선택을 취소했습니다.")
             return
-        bgr = cv2.cvtColor(crop, cv2.COLOR_BGRA2BGR) if crop.shape[2] == 4 else crop[:, :, :3]
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        h, s, value = (int(round(v)) for v in np.median(hsv.reshape(-1, 3), axis=0))
-        h_low, h_high = max(0, h - 10), min(179, h + 10)
-        s_low, v_low = max(0, s - 40), max(0, value - 40)
-        _set_slider(fields["h_low"], h_low)
-        _set_slider(fields["h_high"], h_high)
-        _set_slider(fields["s_low"], s_low)
-        _set_slider(fields["v_low"], v_low)
-        config.set("minimap", "hsv_h_low", h_low)
-        config.set("minimap", "hsv_h_high", h_high)
-        config.set("minimap", "hsv_s_low", s_low)
-        config.set("minimap", "hsv_v_low", v_low)
-        config.save()
+        rgb = _mean_rgb_from_bgr(crop)
+        previous = config.get("minimap", "reference_color_rgb", default=None)
+        config.set("minimap", "reference_color_rgb", list(rgb))
+        try:
+            config.save()
+        except Exception as exc:
+            config.set("minimap", "reference_color_rgb", previous)
+            capture_status.setText(f"기준색 저장에 실패했습니다. {exc}")
+            return
+        update_reference_preview(rgb)
         capture_status.setText(
-            f"기준색 HSV({h}, {s}, {value})를 적용했습니다. "
-            f"범위 H {h_low}~{h_high}, S {s_low} 이상, V {v_low} 이상."
+            f"기준색을 저장했습니다. #{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
         )
 
     def capture_character_template():

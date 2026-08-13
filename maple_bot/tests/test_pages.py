@@ -269,35 +269,73 @@ def test_reference_color_button_applies_selected_game_region(app, monkeypatch):
 
     buttons["기준색 캡처"].click()
 
-    assert cfg.get("minimap", "hsv_h_low") == 0
-    assert cfg.get("minimap", "hsv_h_high") == 10
-    assert cfg.get("minimap", "hsv_s_low") == 215
-    assert cfg.get("minimap", "hsv_v_low") == 215
+    assert cfg.get("minimap", "reference_color_rgb") == [255, 0, 0]
+    assert cfg.saved == 1
 
 
-def test_reference_color_button_saves_even_when_values_do_not_change(app, monkeypatch):
-    """캡처값이 기존값과 같아 슬라이더 신호가 없어도 설정 파일을 저장한다."""
-    import cv2
+def test_mean_rgb_from_bgr_uses_all_selected_pixels():
+    crop = np.array([[[10, 20, 30], [30, 40, 50]]], dtype=np.uint8)
+
+    assert pages_module._mean_rgb_from_bgr(crop) == (40, 30, 20)
+
+
+def test_character_color_controls_show_one_reference_color_without_hsv_sliders(app):
+    cfg = FakeConfig()
+    cfg.set("minimap", "reference_color_rgb", [225, 220, 10])
+    controls = pages_module._make_character_color_controls(cfg)
+    text = " ".join(label.text() for label in controls.findChildren(pages_module.QLabel))
+
+    assert "#E1DC0A" in text
+    assert "RGB(225, 220, 10)" in text
+    assert "색상 시작 H" not in text
+    assert "색상 끝 H" not in text
+    assert "채도 최소 S" not in text
+    assert "밝기 최소 V" not in text
+    assert "점 크기 최소" in text
+    assert "점 크기 최대" in text
+
+
+def test_reference_color_button_saves_average_rgb_once(app, monkeypatch):
     import core_ui.shot_selector as shot_selector
 
-    hsv = np.full((5, 5, 3), (30, 140, 240), dtype=np.uint8)
-    image = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    image = np.zeros((5, 5, 3), dtype=np.uint8)
+    image[1:3, 1:3] = np.array([
+        [[10, 20, 30], [30, 40, 50]],
+        [[50, 60, 70], [70, 80, 90]],
+    ], dtype=np.uint8)
     monkeypatch.setattr(pages_module, "_capture_game_client", lambda _config, _owner: (image, (100, 200)))
     monkeypatch.setattr(shot_selector, "ScreenshotRegionSelector", FakeRegionSelector)
     cfg = FakeConfig()
-    for key, value in {
-        "hsv_h_low": 20,
-        "hsv_h_high": 40,
-        "hsv_s_low": 100,
-        "hsv_v_low": 200,
-    }.items():
-        cfg.set("minimap", key, value)
     controls = pages_module._make_character_color_controls(cfg)
     buttons = {button.text(): button for button in controls.findChildren(pages_module.QPushButton)}
 
     buttons["기준색 캡처"].click()
 
+    assert cfg.get("minimap", "reference_color_rgb") == [60, 50, 40]
     assert cfg.saved == 1
+
+
+def test_reference_color_save_failure_restores_previous_value(app, monkeypatch):
+    import core_ui.shot_selector as shot_selector
+
+    class FailingSaveConfig(FakeConfig):
+        def save(self):
+            raise OSError("disk full")
+
+    image = np.zeros((5, 5, 3), dtype=np.uint8)
+    image[1:3, 1:3] = (0, 0, 255)
+    monkeypatch.setattr(pages_module, "_capture_game_client", lambda _config, _owner: (image, (100, 200)))
+    monkeypatch.setattr(shot_selector, "ScreenshotRegionSelector", FakeRegionSelector)
+    cfg = FailingSaveConfig()
+    cfg.set("minimap", "reference_color_rgb", [225, 225, 0])
+    controls = pages_module._make_character_color_controls(cfg)
+    buttons = {button.text(): button for button in controls.findChildren(pages_module.QPushButton)}
+
+    buttons["기준색 캡처"].click()
+
+    text = " ".join(label.text() for label in controls.findChildren(pages_module.QLabel))
+    assert cfg.get("minimap", "reference_color_rgb") == [225, 225, 0]
+    assert "기준색 저장에 실패했습니다" in text
 
 
 def test_character_template_path_uses_user_directory_in_frozen_app(tmp_path, monkeypatch):
