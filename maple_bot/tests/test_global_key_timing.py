@@ -12,6 +12,10 @@ from core.navigation.rednose3_runner import RedNose3RouteRunner
 from core.navigation.world_runner import ActionExecutor
 from core.potion_manager import PotionManager
 from core.map_navigator import MapNavigator
+from core.key_hunter import KeyHunter
+from core.navigation.route_state import RouteStepType
+from core.navigation.route_state_runner import RouteStateRunner
+from core.pattern import ACTION_HOLD
 
 
 class RecordingBackend:
@@ -160,3 +164,40 @@ def test_map_navigator_passes_fixed_nominal_attack_holds():
     navigator._do_attack()
 
     assert backend.presses == [("space", 0.0533), ("end", 0.0533)]
+
+
+def test_key_hunter_manual_hold_applies_down_five_once(monkeypatch):
+    events = []
+    hunter = KeyHunter.__new__(KeyHunter)
+    hunter._input = SimpleNamespace(
+        key_down=lambda key: events.append(("down", key)),
+        key_up=lambda key: events.append(("up", key)),
+    )
+    hunter._sleep_with_move = lambda duration: events.append(("sleep", duration))
+    hunter._status = lambda message: None
+    step = SimpleNamespace(action=ACTION_HOLD, key="ctrl", min_sec=1.0, max_sec=1.0)
+    monkeypatch.setattr("core.key_hunter.random.uniform", lambda low, high: 1.0)
+    monkeypatch.setattr("core.key_hunter.down_5", lambda value: 0.95, raising=False)
+
+    hunter._execute(step)
+
+    assert events == [("down", "ctrl"), ("sleep", 0.95), ("up", "ctrl")]
+
+
+def test_route_state_manual_action_applies_down_five_once(monkeypatch):
+    events = []
+    input_owner = SimpleNamespace(
+        hold_action=lambda key: events.append(("down", key)),
+        release_action=lambda key: events.append(("up", key)),
+    )
+    runner = RouteStateRunner.__new__(RouteStateRunner)
+    runner._input = input_owner
+    step = SimpleNamespace(
+        type=RouteStepType.ACTION,
+        parameters={"skill_key": "home", "hold_sec": 0.1},
+    )
+    monkeypatch.setattr("core.navigation.route_state_runner.down_5", lambda value: 0.095, raising=False)
+    monkeypatch.setattr("core.navigation.route_state_runner.time.sleep", lambda value: events.append(("sleep", value)))
+
+    assert runner._execute(step, [step])
+    assert events == [("down", "home"), ("sleep", 0.095), ("up", "home")]

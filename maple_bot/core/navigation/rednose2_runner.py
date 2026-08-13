@@ -1390,7 +1390,7 @@ class RedNose2RouteRunner:
         self._teleport_once("left")
         if attack_key:
             h.hold_action(attack_key)
-            self._sleep(float(self._profile.get("platform27_attack_sec", 2.0)))
+            self._sleep(down_5(float(self._profile.get("platform27_attack_sec", 2.0))))
             h.release_action(attack_key)
         for attempt in range(1, down_attempts + 1):
             self._teleport_once("down")

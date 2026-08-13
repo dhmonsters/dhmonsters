@@ -118,3 +118,16 @@ def test_next_teleport_interval_starts_after_action_completion(monkeypatch):
     assert len(action_windows) >= 2
     for previous, following in zip(action_windows, action_windows[1:]):
         assert following[0] - previous[1] >= 0.72
+
+
+def test_platform27_manual_attack_hold_applies_down_five_once(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs, {"platform27_attack_sec": 2.0})
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr(runner, "_teleport_once", lambda direction: None)
+    monkeypatch.setattr(runner, "_wait_floor", lambda predicate, timeout: True)
+
+    assert runner._finish_platform27_and_return_floor2()
+
+    assert route_inputs.action_events == [("down", "end", 0.0), ("up", "end", 1.9)]

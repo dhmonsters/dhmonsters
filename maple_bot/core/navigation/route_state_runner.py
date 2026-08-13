@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
+from core.humanize.timing import down_5
 from core.navigation.block import Block
 from core.navigation.route_recovery import RouteRecoveryResolver
 from core.navigation.route_state import RouteStep, RouteStepType
@@ -111,7 +112,7 @@ class RouteStateRunner:
             if not key:
                 return True
             self._input.hold_action(key)
-            time.sleep(max(0.0, float(step.parameters.get("hold_sec", 0.1))))
+            time.sleep(down_5(max(0.0, float(step.parameters.get("hold_sec", 0.1)))))
             self._input.release_action(key)
             return True
         return self._execute_complex(step)
