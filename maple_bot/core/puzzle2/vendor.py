@@ -9,7 +9,7 @@ from types import ModuleType
 
 
 DEVELOPMENT_VENDOR_ROOT = Path(
-    r"C:\Users\PC\Downloads\Telegram Desktop\1테스트\V6497_LIVE_ONE_SHOT_1280_SELF_CLEAN"
+    r"C:\Users\PC\Downloads\Telegram Desktop\a\V6497_LIVE_ONE_SHOT_v4_PASSWORD"
 )
 
 

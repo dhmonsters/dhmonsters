@@ -18,6 +18,7 @@ def test_gpu_spec_uses_shared_distribution_name_and_interception() -> None:
     assert 'collect_submodules("interception")' in text
     assert '"core.interception_backend"' in text
     assert 'excludes=["tkinter", "pytest"]' in text
+    assert "V6497_LIVE_ONE_SHOT_v4_PASSWORD" in text
 
 
 def test_gt1030_build_runs_packaged_sm61_model_check() -> None:
@@ -29,5 +30,8 @@ def test_gt1030_build_runs_packaged_sm61_model_check() -> None:
     assert "--input-module-check" in text
     assert "--required-arch" in text
     assert "sm_61" in text
-    assert "2026-08-10_puzzle2_gpu_portable_v2.zip" in text
+    assert "2026-08-13_puzzle2_gpu_portable_v3.zip" in text
     assert "2026-08-10_puzzle2_portable_v1.zip" not in text
+    assert "puzzle2_gpu.exe --runtime-self-check" in text
+    assert "puzzle2_gt1030.exe --runtime-self-check" not in text
+    assert "owner_connection" in text

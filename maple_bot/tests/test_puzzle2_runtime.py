@@ -55,6 +55,14 @@ def test_vendor_layout_requires_only_tracking_files(tmp_path: Path) -> None:
     assert "START_HERE.cmd" not in layout.required_paths
 
 
+def test_development_vendor_root_uses_v4_password_source() -> None:
+    expected = Path(
+        r"C:\Users\PC\Downloads\Telegram Desktop\a\V6497_LIVE_ONE_SHOT_v4_PASSWORD"
+    )
+
+    assert resolve_vendor_root(frozen=False) == expected
+
+
 def test_packaged_vendor_root_is_next_to_executable(tmp_path: Path) -> None:
     executable = tmp_path / "portable" / "puzzle2.exe"
 

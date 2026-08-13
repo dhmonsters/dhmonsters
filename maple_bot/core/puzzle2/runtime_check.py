@@ -4,11 +4,70 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 from core.puzzle2.vendor import VendorLayout
+
+
+def build_owner_connection_report(vendor_root: str | Path) -> dict[str, Any]:
+    root = Path(vendor_root)
+    live_core_path = root / "live_core.py"
+    tracker_path = root / "motion_tracker_v645.py"
+    guard_path = root / "v6494_owner_guard.py"
+    missing = [
+        str(path)
+        for path in (live_core_path, tracker_path, guard_path)
+        if not path.is_file()
+    ]
+    if missing:
+        return {
+            "status": "FAIL",
+            "reasons": ["owner_source_missing"],
+            "metrics": {"missing": missing},
+        }
+
+    live_core = live_core_path.read_text(encoding="utf-8")
+    tracker = tracker_path.read_text(encoding="utf-8")
+    guard = guard_path.read_text(encoding="utf-8")
+
+    owner_enabled = bool(re.search(r"owner_guard_enabled\s*=\s*True", live_core))
+    deep_model_empty = bool(re.search(r"deep_model\s*=\s*(['\"])\1", live_core))
+    global_recovery_enabled = not bool(
+        re.search(r"global_recovery_enabled\s*=\s*False", live_core)
+    )
+    guard_imported = "V6494OwnerGuard" in tracker
+    guard_constructed = bool(re.search(r"V6494OwnerGuard\s*\(", tracker))
+    apply_connected = bool(re.search(r"owner_guard\.apply\s*\(", tracker))
+    guard_defined = "class V6494OwnerGuard" in guard
+
+    reasons: list[str] = []
+    if not owner_enabled:
+        reasons.append("owner_guard_disabled")
+    if not guard_imported or not guard_constructed or not guard_defined:
+        reasons.append("owner_guard_not_constructed")
+    if not apply_connected:
+        reasons.append("owner_apply_path_missing")
+
+    return {
+        "status": "PASS" if not reasons else "FAIL",
+        "reasons": reasons,
+        "metrics": {
+            "mode": (
+                "CLASSICAL_TEMPORAL_OWNER_GUARD"
+                if deep_model_empty
+                else "DEEP_ASSISTED_TEMPORAL_OWNER_GUARD"
+            ),
+            "owner_guard_enabled": owner_enabled,
+            "owner_guard_class": "V6494OwnerGuard",
+            "owner_guard_constructed": guard_imported and guard_constructed and guard_defined,
+            "owner_apply_connected": apply_connected,
+            "deep_checkpoint_required": not deep_model_empty,
+            "global_recovery_enabled": global_recovery_enabled,
+        },
+    }
 
 
 def build_runtime_report(
@@ -86,6 +145,10 @@ def run_runtime_check(
         if missing:
             raise FileNotFoundError("V6497 필수 파일 누락: " + ", ".join(missing))
 
+        owner_report = build_owner_connection_report(layout.root)
+        if owner_report["status"] != "PASS":
+            return owner_report
+
         guard_type = _load_triangle_guard(layout)
         model_path = layout.root / "triangle_models" / "triangle_guard_v6496.pt"
         guard = guard_type(model_path)
@@ -94,12 +157,14 @@ def run_runtime_check(
         scores = guard.score(frame, candidates)
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        return build_runtime_report(
+        report = build_runtime_report(
             torch_module=torch,
             guard=guard,
             scores=scores,
             required_arch=required_arch,
         )
+        report["metrics"]["owner_connection"] = owner_report["metrics"]
+        return report
     except Exception as exc:
         return {
             "status": "FAIL",

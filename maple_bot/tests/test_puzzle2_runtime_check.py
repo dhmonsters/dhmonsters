@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.puzzle2.runtime_check import build_input_module_report, build_runtime_report
+from core.puzzle2.runtime_check import (
+    build_input_module_report,
+    build_owner_connection_report,
+    build_runtime_report,
+)
 
 
 class FakeCuda:
@@ -97,3 +101,50 @@ def test_runtime_report_fails_when_model_did_not_run_on_cuda() -> None:
 
     assert report["status"] == "FAIL"
     assert "model_not_on_cuda" in report["reasons"]
+
+
+def test_owner_connection_report_accepts_original_model_free_mode(tmp_path) -> None:
+    (tmp_path / "live_core.py").write_text(
+        "cfg = Config(owner_guard_enabled=True, deep_model='', "
+        "global_recovery_enabled=False)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "motion_tracker_v645.py").write_text(
+        "from v6494_owner_guard import V6494OwnerGuard\n"
+        "owner_guard = V6494OwnerGuard(model_path=cfg.deep_model)\n"
+        "hypotheses = owner_guard.apply(pool=pool)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "v6494_owner_guard.py").write_text(
+        "class V6494OwnerGuard: pass\n",
+        encoding="utf-8",
+    )
+
+    report = build_owner_connection_report(tmp_path)
+
+    assert report["status"] == "PASS"
+    assert report["metrics"]["mode"] == "CLASSICAL_TEMPORAL_OWNER_GUARD"
+    assert report["metrics"]["deep_checkpoint_required"] is False
+    assert report["metrics"]["global_recovery_enabled"] is False
+
+
+def test_owner_connection_report_fails_when_apply_path_is_missing(tmp_path) -> None:
+    (tmp_path / "live_core.py").write_text(
+        "cfg = Config(owner_guard_enabled=True, deep_model='', "
+        "global_recovery_enabled=False)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "motion_tracker_v645.py").write_text(
+        "from v6494_owner_guard import V6494OwnerGuard\n"
+        "owner_guard = V6494OwnerGuard(model_path='')\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "v6494_owner_guard.py").write_text(
+        "class V6494OwnerGuard: pass\n",
+        encoding="utf-8",
+    )
+
+    report = build_owner_connection_report(tmp_path)
+
+    assert report["status"] == "FAIL"
+    assert "owner_apply_path_missing" in report["reasons"]
