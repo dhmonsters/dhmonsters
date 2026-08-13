@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import time
 
-from core.humanize.timing import plus_minus_5
-
 _TOOTH_PER_ROUTINE = 200
 _DOWN_REPEAT = 15
 
@@ -36,9 +34,9 @@ class CharlieExchange:
         self._npc_talk()
 
     def _npc_talk(self) -> None:
-        self._sleep(plus_minus_5(0.5))
-        self._input.press(self._npc, plus_minus_5(0.05))
+        self._sleep(0.5)
+        self._input.press(self._npc, 0.05)
 
     def _direction(self, key: str) -> None:
-        self._sleep(plus_minus_5(0.1))
-        self._input.press(key, plus_minus_5(0.05))
+        self._sleep(0.1)
+        self._input.press(key, 0.05)

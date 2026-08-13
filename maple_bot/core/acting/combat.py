@@ -3,9 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.humanize.timing import down_5, plus_minus_5
-
-
 @dataclass
 class PotionRule:
     enabled: bool = False
@@ -51,10 +48,10 @@ class Combat:
             if now - self._atk_last < current_interval:
                 return
             self._atk_last = now
-            self._cur_interval = down_5(interval)
+            self._cur_interval = interval
         count = int(value) if mode == "count" else 1
         for _ in range(max(0, count)):
-            self._input.press(skill_key, down_5(hold))
+            self._input.press(skill_key, hold)
         timestamp = self._clock()
         if timestamp - self._atk_log_last >= 1.0:
             self._atk_log_last = timestamp
@@ -62,7 +59,7 @@ class Combat:
 
     def _press_potion(self, key: str, hold_sec: float = 0.05) -> None:
         if key:
-            self._input.press(key, plus_minus_5(hold_sec))
+            self._input.press(key, hold_sec)
 
     def _maybe_potion(self, rule: PotionRule, ratio: float, now: float, last: float,
                       label: str = "") -> float:
@@ -87,8 +84,8 @@ class Combat:
             if rule.secondary_key:
                 self._potion_pending[label] = {
                     "baseline": ratio,
-                    "check_at": now + down_5(rule.verify_delay),
+                    "check_at": now + rule.verify_delay,
                 }
-            self._potion_next_allowed[label] = now + plus_minus_5(rule.cooldown)
+            self._potion_next_allowed[label] = now + rule.cooldown
             return now
         return last

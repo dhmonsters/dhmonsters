@@ -1,6 +1,5 @@
 # HP/MP 비율 감지 후 포션 키를 자동으로 입력하는 포션 관리자
 import time
-import random
 import logging
 from typing import Callable
 
@@ -60,6 +59,7 @@ class PotionManager:
         threshold = cfg.get("threshold", 70) / 100.0
         cooldown  = cfg.get("cooldown_sec", 3.0)
         key       = cfg.get("key", "9" if bar_type == "hp" else "0")
+        hold_sec  = max(0.0, float(cfg.get("hold_sec", 0.05)))
         label     = "HP" if bar_type == "hp" else "MP"
 
         # 실측 비율을 먼저 읽어 진단 로그를 throttle 출력(쿨다운과 무관하게 항상 가시화).
@@ -74,9 +74,8 @@ class PotionManager:
             return  # 쿨다운 중
 
         if ratio < threshold:
-            hold = random.uniform(0.03, 0.20)
             self._on_before_use()   # 이동 점프 잠깐 해제 → 포션이 공중에서 씹히지 않게
-            self._input.press_key(key, hold_sec=hold)
+            self._input.press_key(key, hold_sec=hold_sec)
             self._on_status(f"{label} 포션 사용 [{key}] ({ratio * 100:.0f}%)")
             logger.info("%s 포션: ratio=%.2f key=%s", label, ratio, key)
 

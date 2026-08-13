@@ -757,12 +757,12 @@ class BotRuntime:
                 self.input_backend.key_down(key)
                 self._pickup_held_key = key
                 self._pickup_always_last = now
-                self._pickup_always_interval = down_5(2.0)
+                self._pickup_always_interval = 2.0
             elif now - self._pickup_always_last >= self._pickup_always_interval:
                 self.input_backend.key_up(key)
                 self.input_backend.key_down(key)
                 self._pickup_always_last = now
-                self._pickup_always_interval = down_5(2.0)
+                self._pickup_always_interval = 2.0
         else:
             self.release_pickup_key()
             self._pickup_always_last = -1e9
@@ -1565,6 +1565,6 @@ class BotRuntime:
         msg = msgs[self._reply_idx % len(msgs)]
         self._reply_idx += 1
         # 梨꾪똿: enter ??硫붿떆吏 ?낅젰 ??enter (?ㅺ린 ?낅젰? 諛깆뿏???듯빐)
-        self.input_backend.press("enter", down_5(0.05))
+        self.input_backend.press("enter", 0.05)
 
 
