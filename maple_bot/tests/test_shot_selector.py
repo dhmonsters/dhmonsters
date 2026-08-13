@@ -99,3 +99,30 @@ def test_region_selector_keeps_last_drag_point_when_release_returns_to_start(app
 
     assert selected == [(10, 10, 21, 16)]
     assert selector.result() == QDialog.DialogCode.Accepted
+
+
+def test_region_selector_keeps_last_drag_point_when_release_returns_near_start(app):
+    """해제 좌표가 시작점 근처로 어긋나도 보이던 드래그 영역을 확정한다."""
+    selector = ScreenshotRegionSelector(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        max_display=100,
+    )
+    selected = []
+    selector.region_selected.connect(lambda *rect: selected.append(rect))
+
+    QTest.mousePress(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(10, 10),
+    )
+    QTest.mouseMove(selector._canvas, QPoint(30, 25))
+    QTest.mouseRelease(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(11, 11),
+    )
+
+    assert selected == [(10, 10, 21, 16)]
+    assert selector.result() == QDialog.DialogCode.Accepted
