@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 import threading
 
+from core.humanize.timing import down_5
 from core.internal_trace import trace_event
 
 _call_lock = threading.RLock()
@@ -248,7 +249,8 @@ def press(key: str, hold_sec: float = 0.05) -> None:
     key = str(key).strip().lower()
     key_down(key)
     down_event = get_last_timing()
-    time.sleep(max(0.02, hold_sec))
+    applied_hold = down_5(hold_sec)
+    time.sleep(applied_hold)
     key_up(key)
     up_event = get_last_timing()
     if key in _TIMING_KEYS and down_event is not None and up_event is not None:
@@ -266,6 +268,7 @@ def press(key: str, hold_sec: float = 0.05) -> None:
         message = (
             "[input-timing] "
             f"press key={key} requested_hold={hold_sec:.4f}s "
+            f"applied_hold={applied_hold:.4f}s "
             f"actual_hold={actual_hold:.4f}s{gap_text}"
         )
         _emit_timing_log(message)
