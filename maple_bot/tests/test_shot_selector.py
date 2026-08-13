@@ -72,3 +72,30 @@ def test_region_selector_uses_release_position_without_move_event(app):
 
     assert selected == [(10, 10, 21, 16)]
     assert selector.result() == QDialog.DialogCode.Accepted
+
+
+def test_region_selector_keeps_last_drag_point_when_release_returns_to_start(app):
+    """DPI 환경에서 해제 좌표가 시작점으로 돌아와도 보이던 드래그 영역을 확정한다."""
+    selector = ScreenshotRegionSelector(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        max_display=100,
+    )
+    selected = []
+    selector.region_selected.connect(lambda *rect: selected.append(rect))
+
+    QTest.mousePress(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(10, 10),
+    )
+    QTest.mouseMove(selector._canvas, QPoint(30, 25))
+    QTest.mouseRelease(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(10, 10),
+    )
+
+    assert selected == [(10, 10, 21, 16)]
+    assert selector.result() == QDialog.DialogCode.Accepted
