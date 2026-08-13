@@ -166,11 +166,11 @@ class RedNose2RouteRunner:
         )))
 
     def _teleport_interval(self) -> float:
-        return max(0.05, float(self._profile.get("teleport_interval_sec", 0.4)))
+        return max(0.0, float(self._profile.get("teleport_interval_sec", 0.4)))
 
     def _segment_interval(self, key: str, fallback: float | None = None) -> float:
         base = self._teleport_interval() if fallback is None else fallback
-        return max(0.05, float(self._profile.get(key, base)))
+        return max(0.0, float(self._profile.get(key, base)))
 
     def _teleport_step_px(self) -> float:
         return max(
@@ -453,16 +453,16 @@ class RedNose2RouteRunner:
             if lead_sec is None:
                 lead_sec = float(self._profile.get("teleport_lead_sec", 0.07))
             if lead_sec > 0:
-                self._sleep(down_5(lead_sec))
-            h.press_action(teleport_key, down_5(hold_sec))
+                self._sleep(lead_sec)
+            h.press_action(teleport_key, hold_sec)
             h.release_direction()
             return
 
         h.release_direction()
         h.hold_action(direction)
-        self._sleep(down_5(float(self._profile.get("vertical_teleport_lead_sec", 0.15))))
+        self._sleep(float(self._profile.get("vertical_teleport_lead_sec", 0.15)))
         try:
-            h.press_action(teleport_key, down_5(hold_sec))
+            h.press_action(teleport_key, hold_sec)
         finally:
             h.release_action(direction)
 
@@ -472,13 +472,19 @@ class RedNose2RouteRunner:
         if not attack_key or not teleport_key:
             return
         h = self._route_inputs()
+        attack_hold = down_5(float(self._profile.get("attack_hold_sec", 0.08)))
+        started_at = time.monotonic()
         h.hold_direction(direction)
         h.hold_action(attack_key)
-        self._sleep(down_5(float(self._profile.get("attack_to_teleport_sec", 0.05))))
-        h.press_action(teleport_key, down_5(float(self._profile.get("teleport_hold_sec", 0.05))))
-        h.release_direction()
-        self._sleep(max(0.0, float(self._profile.get("attack_hold_sec", 0.08)) - 0.05))
-        h.release_action(attack_key)
+        try:
+            self._sleep(float(self._profile.get("attack_to_teleport_sec", 0.05)))
+            h.press_action(teleport_key, float(self._profile.get("teleport_hold_sec", 0.05)))
+            remaining = attack_hold - (time.monotonic() - started_at)
+            if remaining > 0.0:
+                self._sleep(remaining)
+        finally:
+            h.release_direction()
+            h.release_action(attack_key)
 
     def _tap_attack(self, count: int = 1) -> None:
         attack_key = self._attack_key()
@@ -488,9 +494,9 @@ class RedNose2RouteRunner:
         hold_sec = float(self._profile.get("attack_hold_sec", 0.08))
         interval_sec = float(self._profile.get("retry_attack_interval_sec", 0.12))
         for index in range(max(1, int(count))):
-            h.press_action(attack_key, down_5(hold_sec))
+            h.press_action(attack_key, hold_sec)
             if index < count - 1:
-                self._sleep(down_5(interval_sec))
+                self._sleep(interval_sec)
 
     def _retry_attack_once(self) -> None:
         attack_key = self._attack_key()
@@ -498,7 +504,7 @@ class RedNose2RouteRunner:
             return
         h = self._route_inputs()
         hold_sec = float(self._profile.get("retry_attack_hold_sec", 1.5))
-        h.press_action(attack_key, down_5(hold_sec))
+        h.press_action(attack_key, hold_sec)
 
     def _stair7_up_right_teleport_once(self) -> None:
         self._teleport_once("up")
@@ -507,7 +513,7 @@ class RedNose2RouteRunner:
         if bias_correct_sec > 0.0 and pos is not None and float(pos[0]) >= self._stair7_right_bias_x():
             h = self._route_inputs()
             h.hold_direction("left")
-            self._sleep(down_5(bias_correct_sec))
+            self._sleep(bias_correct_sec)
             h.release_direction()
         self._teleport_once_with_hold(
             "right",
@@ -664,9 +670,8 @@ class RedNose2RouteRunner:
                         self._teleport_once(direction)
                         log_label = "teleport-move"
                     last_teleport_position = current_position
-                    next_teleport_at = now + down_5(
-                        self._teleport_interval() if interval_sec is None else interval_sec
-                    )
+                    interval = self._teleport_interval() if interval_sec is None else interval_sec
+                    next_teleport_at = time.monotonic() + max(0.0, float(interval))
                     if now - self._last_teleport_log_at >= 0.5:
                         self._last_teleport_log_at = now
                         self._log(
@@ -1385,7 +1390,7 @@ class RedNose2RouteRunner:
         self._teleport_once("left")
         if attack_key:
             h.hold_action(attack_key)
-            self._sleep(down_5(float(self._profile.get("platform27_attack_sec", 2.0))))
+            self._sleep(float(self._profile.get("platform27_attack_sec", 2.0)))
             h.release_action(attack_key)
         for attempt in range(1, down_attempts + 1):
             self._teleport_once("down")
