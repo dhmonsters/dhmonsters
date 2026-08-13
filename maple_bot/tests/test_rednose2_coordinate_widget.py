@@ -11,8 +11,11 @@ from core_ui.rednose2_coordinate_widget import Rednose2CoordinateWidget
 
 
 class FakeConfig:
-    def __init__(self, profile=None):
-        self._data = {"rednose2_v5": dict(profile or {})}
+    def __init__(self, profile=None, active="빨코2"):
+        self._data = {
+            "rednose2_v5": dict(profile or {}),
+            "hunt_grounds": {"active": active},
+        }
         self.saved = 0
 
     def get(self, *keys, default=None):
@@ -90,3 +93,54 @@ def test_invalid_range_does_not_mutate_or_save(app):
     assert config.get("rednose2_v5") == before
     assert config.saved == 0
     assert "7번 계단" in widget.status.text()
+
+
+def test_sections_start_collapsed_and_toggle_independently(app):
+    widget = Rednose2CoordinateWidget(FakeConfig())
+
+    assert widget.coordinate_content.isHidden()
+    assert widget.timing_content.isHidden()
+
+    widget.coordinate_toggle.click()
+    assert not widget.coordinate_content.isHidden()
+    assert widget.timing_content.isHidden()
+
+    widget.timing_toggle.click()
+    assert not widget.coordinate_content.isHidden()
+    assert not widget.timing_content.isHidden()
+
+
+def test_card_only_shows_for_rednose2_names(app):
+    widget = Rednose2CoordinateWidget(FakeConfig(active="빨코3"))
+    assert widget.isHidden()
+
+    widget.set_hunt_ground("rednose2v5")
+    assert not widget.isHidden()
+
+    widget.set_hunt_ground("일반 사냥터")
+    assert widget.isHidden()
+
+
+def test_timing_save_preserves_coordinates_and_writes_version(app):
+    config = FakeConfig({"stair7_x": 42, "timing_version": 2, "attack_hold_sec": 0.9})
+    widget = Rednose2CoordinateWidget(config)
+    widget.timing_inputs["attack_hold_sec"].setValue(0.77)
+    widget.timing_inputs["floor2_hunt_teleport_interval_sec"].setValue(0.66)
+
+    widget.save_timing_values()
+
+    saved = config.get("rednose2_v5")
+    assert saved["stair7_x"] == 42
+    assert saved["timing_version"] == 2
+    assert saved["attack_hold_sec"] == 0.77
+    assert saved["floor2_hunt_teleport_interval_sec"] == 0.66
+
+
+def test_coordinate_save_preserves_timing_values(app):
+    config = FakeConfig({"timing_version": 2, "attack_hold_sec": 0.77, "stair7_x": 41})
+    widget = Rednose2CoordinateWidget(config)
+    widget.inputs["stair7_x"].setValue(42)
+
+    widget.save_values()
+
+    assert config.get("rednose2_v5", "attack_hold_sec") == 0.77
