@@ -1,8 +1,8 @@
 # 스크린샷 기반 영역 선택기 — 게임창을 캡처해 정지 이미지 위에서 드래그(움직이는 게임보다 정확)
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QDialog, QWidget, QVBoxLayout, QScrollArea
-from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QDialog, QWidget, QVBoxLayout, QScrollArea
+from PyQt6.QtCore import Qt, QRect, QPoint, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QPen, QFont
 
 
@@ -196,6 +196,9 @@ class _Canvas(QWidget):
         self.start: QPoint | None = None
         self.cur: QPoint | None = None
         self._dragging = False
+        self._release_timer = QTimer(self)
+        self._release_timer.setInterval(16)
+        self._release_timer.timeout.connect(self._check_button_release)
         self.set_eff(eff)
 
     def set_eff(self, eff: float) -> None:
@@ -223,6 +226,7 @@ class _Canvas(QWidget):
         self.cur = self.start
         self._dragging = True
         self.grabMouse()
+        self._release_timer.start()
         self.update()
 
     def mouseMoveEvent(self, e):
@@ -230,18 +234,27 @@ class _Canvas(QWidget):
             self.cur = self._clamp(e.position().toPoint())
             self.update()
 
+    def _finish_drag(self, release_point: QPoint | None = None) -> None:
+        if not self._dragging or self.start is None or self.cur is None:
+            return
+        if release_point is not None and self.cur == self.start:
+            self.cur = self._clamp(release_point)
+        rect = QRect(self.start, self.cur).normalized()
+        self._dragging = False
+        self._release_timer.stop()
+        self.releaseMouse()
+        self.start = None
+        self.cur = None
+        self.update()
+        self._on_release(rect)
+
+    def _check_button_release(self) -> None:
+        if self._dragging and not (QApplication.mouseButtons() & Qt.MouseButton.LeftButton):
+            self._finish_drag()
+
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and self._dragging and self.start is not None:
-            release_point = self._clamp(e.position().toPoint())
-            if self.cur == self.start:
-                self.cur = release_point
-            rect = QRect(self.start, self.cur).normalized()
-            self._dragging = False
-            self.releaseMouse()
-            self.start = None
-            self.cur = None
-            self.update()
-            self._on_release(rect)
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._finish_drag(e.position().toPoint())
 
     def paintEvent(self, e):
         qp = QPainter(self)
@@ -349,9 +362,11 @@ class ScreenshotRegionSelector(QDialog):
             rect.x(), rect.y(), rect.width(), rect.height(),
             self._canvas.eff, self._origin,
         )
-        if rw > 2 and rh > 2:
+        if rw >= 2 and rh >= 2:
             self.region_selected.emit(rx, ry, rw, rh)
             self.accept()
+            return
+        self.setWindowTitle("영역이 너무 작습니다 — 다시 드래그하세요 (ESC 취소)")
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key.Key_Escape:

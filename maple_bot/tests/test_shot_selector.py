@@ -185,3 +185,60 @@ def test_region_selector_resets_state_after_invalid_click(app, monkeypatch):
     assert selector._canvas.start is None
     assert selector._canvas.cur is None
     assert selector._canvas._dragging is False
+
+
+def test_region_selector_finishes_when_button_poll_detects_release(app, monkeypatch):
+    """해제 이벤트가 누락돼도 버튼 상태 감시가 마지막 드래그 영역을 확정한다."""
+    selector = ScreenshotRegionSelector(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        max_display=100,
+    )
+    selected = []
+    selector.region_selected.connect(lambda *rect: selected.append(rect))
+    monkeypatch.setattr(selector._canvas, "releaseMouse", lambda: None)
+    monkeypatch.setattr(QApplication, "mouseButtons", lambda: Qt.MouseButton.NoButton)
+    selector._canvas.start = QPoint(10, 10)
+    selector._canvas.cur = QPoint(30, 25)
+    selector._canvas._dragging = True
+
+    selector._canvas._check_button_release()
+
+    assert selected == [(10, 10, 21, 16)]
+    assert selector.result() == QDialog.DialogCode.Accepted
+    assert selector._canvas._dragging is False
+
+
+def test_region_selector_emits_once_when_release_poll_runs_after_normal_release(app, monkeypatch):
+    """정상 해제 뒤 감시가 실행돼도 선택 신호를 중복 발행하지 않는다."""
+    selector = ScreenshotRegionSelector(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        max_display=100,
+    )
+    selected = []
+    selector.region_selected.connect(lambda *rect: selected.append(rect))
+    monkeypatch.setattr(_Canvas, "grabMouse", lambda self: None)
+    monkeypatch.setattr(_Canvas, "releaseMouse", lambda self: None)
+    monkeypatch.setattr(QApplication, "mouseButtons", lambda: Qt.MouseButton.NoButton)
+
+    QTest.mousePress(selector._canvas, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    QTest.mouseMove(selector._canvas, QPoint(30, 25))
+    QTest.mouseRelease(selector._canvas, Qt.MouseButton.LeftButton, pos=QPoint(30, 25))
+    selector._canvas._check_button_release()
+
+    assert selected == [(10, 10, 21, 16)]
+
+
+def test_region_selector_keeps_dialog_open_for_too_small_region(app, monkeypatch):
+    """원본 기준 2×2 미만 선택은 저장하지 않고 같은 창에서 재시도한다."""
+    selector = ScreenshotRegionSelector(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        max_display=100,
+    )
+    monkeypatch.setattr(_Canvas, "grabMouse", lambda self: None)
+    monkeypatch.setattr(_Canvas, "releaseMouse", lambda self: None)
+
+    QTest.mousePress(selector._canvas, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    QTest.mouseRelease(selector._canvas, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+
+    assert selector.result() == QDialog.DialogCode.Rejected
+    assert "영역이 너무 작습니다" in selector.windowTitle()
