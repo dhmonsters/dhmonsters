@@ -2,6 +2,7 @@
 import json
 import os
 import pytest
+from core.config_manager import DEFAULT_CONFIG
 from core.config_adapter import to_runtime_config
 from core.navigation.block import Block
 from core.acting.combat import PotionRule
@@ -41,6 +42,35 @@ def test_potion_rules_mapped():
 def test_attack_key_mapped():
     rc = to_runtime_config(_sample_config())
     assert rc.attack_key == "ctrl"
+
+
+def test_default_reference_color_is_deployed_yellow_rgb():
+    assert DEFAULT_CONFIG["minimap"]["reference_color_rgb"] == [225, 225, 0]
+
+
+def test_reference_color_rgb_overrides_legacy_hsv_fields():
+    data = _sample_config()
+    data["minimap"].update({
+        "reference_color_rgb": [220, 210, 20],
+        "hsv_h_low": 1,
+        "hsv_h_high": 2,
+        "hsv_s_low": 3,
+        "hsv_v_low": 4,
+    })
+
+    result = to_runtime_config(data)
+
+    assert result.char_rgb == (220, 210, 20)
+    assert result.char_h_low is None
+    assert result.char_h_high is None
+
+
+def test_legacy_char_rgb_is_used_when_reference_color_is_absent():
+    result = to_runtime_config(_sample_config())
+
+    assert result.char_rgb == (225, 225, 0)
+    assert result.char_h_low is None
+    assert result.char_h_high is None
 
 
 def test_buffs_mapped():

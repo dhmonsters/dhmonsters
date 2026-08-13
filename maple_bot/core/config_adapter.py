@@ -533,19 +533,26 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
                 int(mm.get("height", 120)),
             ],
         })
+    raw_reference_rgb = mm.get("reference_color_rgb")
+    reference_rgb = None
+    if isinstance(raw_reference_rgb, (list, tuple)) and len(raw_reference_rgb) == 3:
+        try:
+            reference_rgb = tuple(max(0, min(255, int(value))) for value in raw_reference_rgb)
+        except (TypeError, ValueError):
+            reference_rgb = None
     raw_char_rgb = (
         (int(mm["char_r"]), int(mm["char_g"]), int(mm["char_b"]))
         if all(k in mm for k in ("char_r", "char_g", "char_b"))
         else None
     )
     # ?몃? 罹먮┃????湲곗?: 鍮④컯/?곗깋 ???섎せ ??λ맂 ?됱긽? ?몃??됱쑝濡?蹂댁젙?쒕떎.
-    char_rgb = (
+    char_rgb = reference_rgb or (
         raw_char_rgb
         if raw_char_rgb is not None
         and raw_char_rgb[0] >= 180
         and raw_char_rgb[1] >= 180
         and raw_char_rgb[2] <= 100
-        else (255, 255, 0)
+        else (225, 225, 0)
     )
 
     recovery = d.get("recovery", {})
@@ -674,8 +681,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         game_window_title=game_window_title,
         coord_anchor=d.get("coord_anchor"),
         char_rgb=char_rgb,
-        char_h_low=(int(mm["hsv_h_low"]) if mm.get("hsv_h_low") is not None else None),
-        char_h_high=(int(mm["hsv_h_high"]) if mm.get("hsv_h_high") is not None else None),
+        char_h_low=None,
+        char_h_high=None,
         char_h_tol=int(mm.get("char_h_tol", 10)),
         char_s_min=int(mm.get("char_s_min", 100)),
         char_v_min=int(mm.get("char_v_min", 200)),

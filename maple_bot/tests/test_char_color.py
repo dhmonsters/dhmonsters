@@ -1,5 +1,8 @@
 # 설정 캐릭터색(RGB)→HSV 범위 변환 검증(밝고 진한 점만 골라내는 빡빡한 하한)
-from core.sensing.char_scanner import hsv_range_from_rgb
+import cv2
+import numpy as np
+
+from core.sensing.char_scanner import auto_hsv_range_from_rgb, hsv_range_from_rgb
 
 
 def test_yellow_rgb_to_hsv_matches_proven_range():
@@ -20,3 +23,15 @@ def test_hue_centers_on_color():
     lo, hi = hsv_range_from_rgb(255, 0, 0)   # 빨강 H≈0 → 하한 0 클램프
     assert lo[0] == 0
     assert hi[0] == 10
+
+
+def test_auto_hsv_range_uses_reference_s_and_v_minus_forty():
+    lo, hi = auto_hsv_range_from_rgb(220, 210, 20)
+    hsv = cv2.cvtColor(np.uint8([[[20, 210, 220]]]), cv2.COLOR_BGR2HSV)[0, 0]
+
+    assert lo == (
+        max(0, int(hsv[0]) - 10),
+        max(0, int(hsv[1]) - 40),
+        max(0, int(hsv[2]) - 40),
+    )
+    assert hi == (min(179, int(hsv[0]) + 10), 255, 255)

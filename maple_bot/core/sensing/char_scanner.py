@@ -23,6 +23,21 @@ def hsv_range_from_rgb(r: int, g: int, b: int,
     return ((max(0, h - h_tol), s_min, v_min), (min(179, h + h_tol), 255, 255))
 
 
+def auto_hsv_range_from_rgb(r: int, g: int, b: int,
+                            h_tol: int = 10, sv_margin: int = 40):
+    """대표 RGB 한 값에서 색상·채도·밝기 허용 범위를 자동 계산한다."""
+    h, s, v = (
+        int(value)
+        for value in cv2.cvtColor(
+            np.uint8([[[b, g, r]]]), cv2.COLOR_BGR2HSV
+        )[0, 0]
+    )
+    return (
+        (max(0, h - h_tol), max(0, s - sv_margin), max(0, v - sv_margin)),
+        (min(179, h + h_tol), 255, 255),
+    )
+
+
 def find_char_in_hsv(
     bgr_img: np.ndarray,
     hsv_lower: tuple[int, int, int],

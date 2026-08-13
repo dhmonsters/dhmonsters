@@ -536,12 +536,10 @@ class BotRuntime:
             return
 
         if getattr(config, "char_rgb", None):
-            from core.sensing.char_scanner import hsv_range_from_rgb
-            lo, hi = hsv_range_from_rgb(
+            from core.sensing.char_scanner import auto_hsv_range_from_rgb
+            lo, hi = auto_hsv_range_from_rgb(
                 *config.char_rgb,
                 h_tol=int(getattr(config, "char_h_tol", 10)),
-                s_min=s_min,
-                v_min=v_min,
             )
             self.char_scanner.set_filters(lo, hi, min_area=min_area, max_area=max_area)
 

@@ -51,6 +51,40 @@ def test_runtime_character_filter_reload_refreshes_marker_templates():
     assert calls[1] == ((20, 100, 200), (40, 255, 255), 3.0, 100.0)
 
 
+def test_runtime_character_filter_builds_automatic_range_from_reference_rgb():
+    calls = []
+
+    class FakeScanner:
+        def reload_marker_templates(self):
+            calls.append("templates")
+
+        def set_filters(self, lower, upper, min_area=None, max_area=None):
+            calls.append((lower, upper, min_area, max_area))
+
+    runtime = SimpleNamespace(_cfg=SimpleNamespace(), char_scanner=FakeScanner())
+    config = SimpleNamespace(
+        char_rgb=(220, 210, 20),
+        char_h_low=None,
+        char_h_high=None,
+        char_h_tol=10,
+        char_s_min=100,
+        char_v_min=200,
+        char_area_min=3.0,
+        char_area_max=160.0,
+    )
+
+    BotRuntime.reload_character_filter(runtime, config)
+
+    hsv = cv2.cvtColor(np.uint8([[[20, 210, 220]]]), cv2.COLOR_BGR2HSV)[0, 0]
+    assert calls[0] == "templates"
+    assert calls[1] == (
+        (max(0, int(hsv[0]) - 10), max(0, int(hsv[1]) - 40), max(0, int(hsv[2]) - 40)),
+        (min(179, int(hsv[0]) + 10), 255, 255),
+        3.0,
+        160.0,
+    )
+
+
 def test_marker_template_loader_prefers_user_y_p_over_bundled(tmp_path, monkeypatch):
     user_templates = tmp_path / "user_templates"
     bundled_templates = tmp_path / "bundled" / "templates"
