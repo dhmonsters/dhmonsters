@@ -231,6 +231,50 @@ def test_capture_game_client_reports_grab_error_and_restores_owner(app, monkeypa
     assert warnings == [("게임창 캡처 실패", "게임창 화면을 캡처하지 못했습니다.\ncapture failed")]
 
 
+def test_template_capture_uses_game_client_image_and_screen_origin(app, monkeypatch, tmp_path):
+    import cv2
+    import core_ui.shot_selector as shot_selector
+
+    game_image = np.arange(5 * 5 * 3, dtype=np.uint8).reshape(5, 5, 3)
+    selected = {}
+    saved = {}
+
+    class RecordingSelector:
+        def __init__(self, image, src_origin, parent=None):
+            selected.update(image=image, origin=src_origin, parent=parent)
+            self.region_selected = FakeRegionSignal()
+
+        def exec(self):
+            self.region_selected.emit(101, 201, 2, 2)
+
+    capture_calls = []
+    monkeypatch.setattr(
+        pages_module,
+        "_capture_game_client",
+        lambda config, owner: capture_calls.append((config, owner)) or (game_image, (100, 200)),
+    )
+    monkeypatch.setattr(shot_selector, "ScreenshotRegionSelector", RecordingSelector)
+    monkeypatch.setattr(
+        cv2,
+        "imwrite",
+        lambda path, crop: saved.update(path=Path(path), crop=crop.copy()) or True,
+    )
+    cfg = FakeConfig()
+    button = pages_module._make_template_capture(
+        cfg,
+        str(tmp_path / "monster.png"),
+        ("attack", "monster_template"),
+        "몬스터",
+    )
+
+    button.click()
+
+    assert len(capture_calls) == 1
+    assert selected["image"] is game_image
+    assert selected["origin"] == (100, 200)
+    assert np.array_equal(saved["crop"], game_image[1:3, 1:3])
+
+
 def test_character_template_path_always_targets_loaded_yellow_marker(tmp_path):
     assert pages_module._character_template_path(Path(tmp_path)) == Path(tmp_path) / "templates" / "player" / "y_p.png"
 

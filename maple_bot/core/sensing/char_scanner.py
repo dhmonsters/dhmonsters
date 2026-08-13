@@ -45,8 +45,11 @@ def find_char_in_hsv(
     min_area: float,
     max_area: float,
     previous_position: tuple[int, int] | None = None,
+    diagnostic_out: dict[str, object] | None = None,
 ) -> tuple[int, int] | None:
     """BGR 이미지에서 헌터 방식으로 캐릭터 노란점을 찾아 미니맵 좌표를 반환한다."""
+    if diagnostic_out is not None:
+        diagnostic_out.clear()
     img_hsv = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(img_hsv, np.array(hsv_lower), np.array(hsv_upper))
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -94,6 +97,10 @@ def find_char_in_hsv(
     if not candidates:
         return None
 
+    def _record_candidate(contour) -> None:
+        if diagnostic_out is not None:
+            diagnostic_out["candidate_bbox"] = tuple(int(value) for value in cv2.boundingRect(contour))
+
     if previous_position is not None:
         near_candidates = [item for item in candidates if item[4] <= 80.0]
         if near_candidates:
@@ -101,6 +108,7 @@ def find_char_in_hsv(
                 near_candidates,
                 key=lambda item: (item[4], -item[2], -item[3]),
             )
+            _record_candidate(best_contour)
             return cx, cy
 
     best_contour, (cx, cy), _area, _circularity, _distance = max(
@@ -111,6 +119,7 @@ def find_char_in_hsv(
     if moments["m00"] == 0:
         return None
 
+    _record_candidate(best_contour)
     return cx, cy
 
 
@@ -144,7 +153,7 @@ def find_char_by_template(
     templates: list[tuple[str, np.ndarray]],
     threshold: float = 0.72,
     excluded_regions: tuple[tuple[int, int, int, int], ...] = (),
-    timing_out: dict[str, float] | None = None,
+    timing_out: dict[str, object] | None = None,
 ) -> tuple[int, int] | None:
     """미니맵 안에서 고정 캐릭터 마커 템플릿을 찾아 중심 좌표를 반환한다."""
     if timing_out is not None:
@@ -152,7 +161,7 @@ def find_char_by_template(
         timing_out.update(template_match_sec=0.0, candidate_filter_sec=0.0)
     if bgr_img is None or not templates:
         return None
-    best: tuple[float, int, int] | None = None
+    best: tuple[float, int, int, tuple[int, int, int, int]] | None = None
     template_match_sec = 0.0
     candidate_filter_sec = 0.0
     img_h, img_w = bgr_img.shape[:2]
@@ -181,7 +190,7 @@ def find_char_by_template(
                     result[max_loc[1], max_loc[0]] = -1.0
                     continue
                 if best is None or max_val > best[0]:
-                    best = (float(max_val), cx, cy)
+                    best = (float(max_val), cx, cy, (max_loc[0], max_loc[1], sw, sh))
                 break
             candidate_filter_sec += time.perf_counter() - candidate_started
     if timing_out is not None:
@@ -189,6 +198,8 @@ def find_char_by_template(
             template_match_sec=template_match_sec,
             candidate_filter_sec=candidate_filter_sec,
         )
+        if best is not None:
+            timing_out["candidate_bbox"] = best[3]
     if best is None or best[0] < threshold:
         return None
     return best[1], best[2]
@@ -334,24 +345,39 @@ class CharScanner(Scanner):
             self._diag("⚠ 미니맵 캡처 결과 None")
             return None
         capture_sec = time.perf_counter() - capture_started
-        template_timing: dict[str, float] = {}
+        template_timing: dict[str, object] = {}
         pos = find_char_by_template(
             img,
             self._marker_templates,
             excluded_regions=self._marker_exclusions,
             timing_out=template_timing,
         )
+        detection_source = "template" if pos is not None else None
         hsv_candidate_sec = 0.0
+        hsv_diagnostics: dict[str, object] = {}
         if pos is None and not self._marker_templates:
             hsv_started = time.perf_counter()
             pos = find_char_in_hsv(
                 img, self._lo, self._hi, self._min_area, self._max_area,
                 previous_position=self.position(),
+                diagnostic_out=hsv_diagnostics,
             )
             hsv_candidate_sec = time.perf_counter() - hsv_started
+            if pos is not None:
+                detection_source = "color"
         if pos is None:
             self._diag(f"⚠ 노란점 미검출 (캡처 {tuple(img.shape)}, HSV {tuple(self._lo)}~{tuple(self._hi)})")
             return None
+        candidate_bbox = (
+            template_timing.get("candidate_bbox")
+            if detection_source == "template"
+            else hsv_diagnostics.get("candidate_bbox")
+        )
+        candidate_text = (
+            "none"
+            if candidate_bbox is None
+            else f"({','.join(str(int(value)) for value in candidate_bbox)})"
+        )
         observed_at = time.monotonic()
         scan_duration = observed_at - scan_started
         image_height, image_width = img.shape[:2]
@@ -406,9 +432,9 @@ class CharScanner(Scanner):
             minimap_height=image_height,
             scan_duration_sec=scan_duration,
             capture_sec=capture_sec,
-            template_match_sec=template_timing.get("template_match_sec", 0.0),
+            template_match_sec=float(template_timing.get("template_match_sec", 0.0)),
             candidate_filter_sec=(
-                template_timing.get("candidate_filter_sec", 0.0) + hsv_candidate_sec
+                float(template_timing.get("candidate_filter_sec", 0.0)) + hsv_candidate_sec
             ),
             total_scan_sec=scan_duration,
         )
@@ -422,7 +448,9 @@ class CharScanner(Scanner):
         if now - self._last_position_log_ts >= 1.0:
             self._last_position_log_ts = now
             self._diag(
-                f"✓ 캐릭터 감지 x={pos[0]} y={pos[1]} "
+                f"✓ 캐릭터 감지 source={detection_source} raw=({pos[0]},{pos[1]}) "
+                f"candidate={candidate_text} "
+                f"x={pos[0]} y={pos[1]} "
                 f"ratio=({x_ratio:.4f},{y_ratio:.4f}) minimap={image_width}x{image_height}"
             )
         return Event(type="char_pos", data={

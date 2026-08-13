@@ -282,15 +282,13 @@ def _make_template_capture(config, save_path, config_key, label: str,
 
     def on_click():
         import os
-        import mss as _mss
-        import numpy as np
         import cv2
         from core_ui.shot_selector import ScreenshotRegionSelector
-        with _mss.mss() as sct:
-            mon = sct.monitors[1]
-            shot = np.array(sct.grab(mon))[:, :, :3]   # BGR
-            origin = (mon["left"], mon["top"])
-        dlg = ScreenshotRegionSelector(shot, src_origin=origin)
+        captured = _capture_game_client(config, btn.window())
+        if captured is None:
+            return
+        shot, origin = captured
+        dlg = ScreenshotRegionSelector(shot, src_origin=origin, parent=btn.window())
 
         def crop_save(x, y, w, h):
             # ?먮낯 ?덈?醫뚰몴 ??shot ?대? ?곷?醫뚰몴
