@@ -48,7 +48,7 @@ from core.navigation.route_state import RouteStep
 from core.navigation.route_position import LatestPositionStore
 from core.navigation.route_input_owner import RouteInputOwner
 from core.navigation.route_state_runner import RouteStateRunner
-from core.navigation.legacy_route_guard import LegacyRouteGuard
+from core.navigation.floor_hunt_runner import FloorHuntRunner
 from core.navigation.rednose2_runner import RedNose2RouteRunner
 from core.navigation.rednose3_runner import RedNose3RouteRunner
 from core.auto_seller import AutoSeller
@@ -469,8 +469,10 @@ class BotRuntime:
                 log_fn=lambda m: self.log(m, "이동"),
             )
         elif config.route_mode and config.route:
-            self.floor_hunt_runner = LegacyRouteGuard(
-                log_fn=lambda m: self.log(m, "이동"),
+            self.floor_hunt_runner = FloorHuntRunner(
+                self.block_runner,
+                get_blocks=lambda: self._cfg.route,
+                is_active=self._route_can_run,
             )
 
         # 嫄고깘 怨꾩링 (寃⑸━) ???먯껜 ncnn ?붿쭊 (secure_loader/?쒕쾭 ?섏〈 ?놁쓬)
@@ -996,8 +998,10 @@ class BotRuntime:
                 log_fn=lambda m: self.log(m, "이동"),
             )
         elif config.route_mode and config.route:
-            self.floor_hunt_runner = LegacyRouteGuard(
-                log_fn=lambda m: self.log(m, "이동"),
+            self.floor_hunt_runner = FloorHuntRunner(
+                self.block_runner,
+                get_blocks=lambda: self._cfg.route,
+                is_active=self._route_can_run,
             )
 
     def _check_anti_mob_profile(self) -> None:

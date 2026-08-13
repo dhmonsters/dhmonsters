@@ -384,12 +384,6 @@ def _ensure_required_presets(data: dict) -> bool:
             presets.pop(bad_name, None)
             changed = True
 
-    allowed_names = set(REQUIRED_HUNT_GROUND_PRESETS)
-    for name in list(presets.keys()):
-        if name not in allowed_names:
-            presets.pop(name, None)
-            changed = True
-
     if "rednose2_v5" in bundled and "rednose2_v5" not in data:
         data["rednose2_v5"] = copy.deepcopy(bundled["rednose2_v5"])
         changed = True
@@ -406,7 +400,7 @@ def _ensure_required_presets(data: dict) -> bool:
 
     active = str(hunt_grounds.get("active") or "").strip()
     normalized_active = HUNT_GROUND_ALIASES.get(active, active)
-    if normalized_active not in allowed_names:
+    if normalized_active not in presets:
         normalized_active = "빨코2"
     if hunt_grounds.get("active") != normalized_active:
         hunt_grounds["active"] = normalized_active

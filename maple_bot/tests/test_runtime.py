@@ -4,6 +4,9 @@ import pytest
 from core.runtime import BotRuntime, RuntimeConfig
 from core.navigation.block import Block
 from core.navigation.floor_judge import Floor
+from core.navigation.floor_hunt_runner import FloorHuntRunner
+from core.navigation.rednose2_runner import RedNose2RouteRunner
+from core.navigation.rednose3_runner import RedNose3RouteRunner
 from core.minigame.sidecar import InMemoryChannel
 
 
@@ -180,7 +183,7 @@ def test_route_mode_builds_floor_hunt_runner_and_gates():
     rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
                     input_backend=backend, config=cfg,
                     sidecar_channel=InMemoryChannel())
-    assert rt.floor_hunt_runner is not None
+    assert isinstance(rt.floor_hunt_runner, FloorHuntRunner)
     assert rt._route_can_run() is False          # 아직 정지 상태
     assert rt.floor_hunt_runner.run_once() is False
     rt.set_running(True)
@@ -188,6 +191,53 @@ def test_route_mode_builds_floor_hunt_runner_and_gates():
     assert rt.floor_hunt_runner.run_once() is True
     rt.orchestrator.mode = "safety"
     assert rt._route_can_run() is False           # 안전모드 → 루트 멈춤
+
+
+@pytest.mark.parametrize(
+    ("hunt_ground", "expected_runner"),
+    [
+        ("빨코2", RedNose2RouteRunner),
+        ("빨코3", RedNose3RouteRunner),
+    ],
+)
+def test_rednose_dedicated_runner_wins_over_generic_legacy_route(
+    hunt_ground, expected_runner
+):
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        floors=[Floor("1층", 70, 80)],
+        route=[Block(type="move", target_x=120, move_type="walk")],
+        route_mode=True,
+        hunt_ground_active=hunt_ground,
+        rednose2_v5={"enabled": True},
+        rednose3={"enabled": True},
+        attack_key="a",
+    )
+
+    rt = BotRuntime(
+        screen_capture=lambda r=None: _yellow_at(50, 75),
+        input_backend=backend,
+        config=cfg,
+        sidecar_channel=InMemoryChannel(),
+    )
+
+    assert isinstance(rt.floor_hunt_runner, expected_runner)
+
+
+def test_reload_generic_legacy_route_builds_floor_hunt_runner():
+    rt, _ = _make_runtime(lambda r=None: _yellow_at(50, 75))
+    fresh = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        floors=[Floor("1층", 70, 80)],
+        route=[Block(type="move", target_x=120, move_type="walk")],
+        route_mode=True,
+        hunt_ground_active="사용자맵",
+    )
+
+    rt.reload_floor_hunt_runner(fresh)
+
+    assert isinstance(rt.floor_hunt_runner, FloorHuntRunner)
 
 
 def test_no_route_mode_keeps_tick_path():
