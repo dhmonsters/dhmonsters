@@ -1065,12 +1065,15 @@ class RedNose2RouteRunner:
         pos = self._current_pos()
         if pos is None or pos[1] is None:
             return "unknown"
+        x = float(pos[0])
         y = int(pos[1])
         floor3_min, floor3_max = self._floor3_y_range()
         floor2_min, floor2_max = self._floor2_y_range()
         floor1_min, floor1_max = self._floor1_y_range()
         if floor3_min <= y <= floor3_max:
-            return "shop-entry"
+            entry_min = self._profile_x("auto_sell_entry_x_min", 123)
+            entry_max = self._profile_x("auto_sell_entry_x_max", 136)
+            return "shop-entry" if entry_min <= x <= entry_max else "upper-platform"
         if floor2_min <= y <= floor2_max:
             return "floor2"
         if floor1_min <= y <= floor1_max:
