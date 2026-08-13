@@ -16,3 +16,11 @@
 - 관련 통합 테스트는 `72 passed, 9 warnings`이며 경고는 기존 `mss.mss` deprecation 경고다.
 - 전체 테스트 수집은 기존 `RiskProfile`을 가져오는 구형 테스트 2개 때문에 중단된다. 이번 변경과 무관한 기존 정합성 문제다.
 - `compileall`은 `core`, `core_ui`, `run_integrated.py`, `main.py`에서 통과했다.
+- 버전 필수 파일 `version.txt`, `version.json`, `installer.iss`, `build.bat`을 모두 `2.3.11`로 맞췄다.
+- PR #7을 원격 `main`에 병합해 자동 업데이트가 읽는 `main/maple_bot/version.json`을 먼저 갱신했다.
+- PyArmor와 PyInstaller 빌드가 성공했고 배포 설정은 Python JSON 파싱, UTF-8 한글, 민감정보 제거 검증을 통과했다.
+- `dist/Claude_2.3.11`에는 core 166개, core_ui 18개, ui 20개, templates 55개, monsters 113개, models 13개, maps 1개와 Interception DLL이 포함됐다.
+- 설치본은 `03_output/Claude_v2.3.11_Setup.exe`이며 크기는 `413,504,160`바이트다.
+- 설치본 SHA-256은 `912988092A263037B1AF423CA39806BD48A31D4A02019FEDDCEB696F1A0DE69C`다.
+- GitHub Release `v2.3.11`을 정식 공개했고 자산 크기와 GitHub 제공 SHA-256이 로컬 파일과 일치한다.
+- 공개 다운로드 URL은 HTTP `200`과 Content-Length `413,504,160`을 반환한다.
