@@ -195,6 +195,7 @@ class _Canvas(QWidget):
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.start: QPoint | None = None
         self.cur: QPoint | None = None
+        self._dragging = False
         self.set_eff(eff)
 
     def set_eff(self, eff: float) -> None:
@@ -216,22 +217,31 @@ class _Canvas(QWidget):
                      int(w * self.eff), int(h * self.eff))
 
     def mousePressEvent(self, e):
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
         self.start = self._clamp(e.position().toPoint())
         self.cur = self.start
+        self._dragging = True
+        self.grabMouse()
         self.update()
 
     def mouseMoveEvent(self, e):
-        if self.start is not None:
+        if self._dragging and self.start is not None:
             self.cur = self._clamp(e.position().toPoint())
             self.update()
 
     def mouseReleaseEvent(self, e):
-        if self.start is not None:
+        if e.button() == Qt.MouseButton.LeftButton and self._dragging and self.start is not None:
             release_point = self._clamp(e.position().toPoint())
             if self.cur == self.start:
                 self.cur = release_point
+            rect = QRect(self.start, self.cur).normalized()
+            self._dragging = False
+            self.releaseMouse()
+            self.start = None
+            self.cur = None
             self.update()
-            self._on_release(QRect(self.start, self.cur).normalized())
+            self._on_release(rect)
 
     def paintEvent(self, e):
         qp = QPainter(self)

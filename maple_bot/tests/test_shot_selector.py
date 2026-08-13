@@ -9,7 +9,7 @@ from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QDialog
 
-from core_ui.shot_selector import ScreenshotRegionSelector, display_to_source_rect
+from core_ui.shot_selector import ScreenshotRegionSelector, _Canvas, display_to_source_rect
 
 
 @pytest.fixture(scope="module")
@@ -126,3 +126,62 @@ def test_region_selector_keeps_last_drag_point_when_release_returns_near_start(a
 
     assert selected == [(10, 10, 21, 16)]
     assert selector.result() == QDialog.DialogCode.Accepted
+
+
+def test_region_selector_grabs_mouse_until_left_button_release(app, monkeypatch):
+    """캔버스 밖에서 놓아도 해제 이벤트를 받도록 드래그 동안 마우스를 고정한다."""
+    selector = ScreenshotRegionSelector(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        max_display=100,
+    )
+    calls = []
+    monkeypatch.setattr(_Canvas, "grabMouse", lambda self: calls.append("grab"))
+    monkeypatch.setattr(_Canvas, "releaseMouse", lambda self: calls.append("release"))
+
+    QTest.mousePress(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(10, 10),
+    )
+
+    assert calls == ["grab"]
+    assert selector._canvas._dragging is True
+
+    QTest.mouseRelease(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(30, 25),
+    )
+
+    assert calls == ["grab", "release"]
+    assert selector._canvas._dragging is False
+
+
+def test_region_selector_resets_state_after_invalid_click(app, monkeypatch):
+    """1×1 무효 선택은 다음 드래그를 방해하지 않도록 상태를 완전히 지운다."""
+    selector = ScreenshotRegionSelector(
+        np.zeros((100, 100, 3), dtype=np.uint8),
+        max_display=100,
+    )
+    monkeypatch.setattr(_Canvas, "grabMouse", lambda self: None)
+    monkeypatch.setattr(_Canvas, "releaseMouse", lambda self: None)
+
+    QTest.mousePress(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(10, 10),
+    )
+    QTest.mouseRelease(
+        selector._canvas,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(10, 10),
+    )
+
+    assert selector.result() == QDialog.DialogCode.Rejected
+    assert selector._canvas.start is None
+    assert selector._canvas.cur is None
+    assert selector._canvas._dragging is False
