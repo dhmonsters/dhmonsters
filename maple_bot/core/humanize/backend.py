@@ -1,11 +1,13 @@
-# 입력 백엔드 — Interception(스텔스) 우선, SendInput 폴백. 공통 인터페이스 뒤로 격리
+﻿# ?낅젰 諛깆뿏????Interception(?ㅽ뀛?? ?곗꽑, SendInput ?대갚. 怨듯넻 ?명꽣?섏씠???ㅻ줈 寃⑸━
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from core.humanize.timing import down_5
+
 
 class InputBackend(ABC):
-    """입력 송출 백엔드 계약. 구현체는 교체 가능(콘센트)."""
+    """?낅젰 ?≪텧 諛깆뿏??怨꾩빟. 援ы쁽泥대뒗 援먯껜 媛??肄섏꽱??."""
     name: str = "abstract"
 
     @abstractmethod
@@ -22,18 +24,18 @@ class InputBackend(ABC):
 
     @abstractmethod
     def is_available(self) -> bool:
-        """이 백엔드가 현재 환경에서 사용 가능한가."""
+        """??諛깆뿏?쒓? ?꾩옱 ?섍꼍?먯꽌 ?ъ슜 媛?ν븳媛."""
         ...
 
     def begin_priority(self) -> None:
-        """중요 입력 구간 시작. 지원하지 않는 백엔드는 그대로 실행한다."""
+        """以묒슂 ?낅젰 援ш컙 ?쒖옉. 吏?먰븯吏 ?딅뒗 諛깆뿏?쒕뒗 洹몃?濡??ㅽ뻾?쒕떎."""
 
     def end_priority(self) -> None:
-        """중요 입력 구간 종료. 지원하지 않는 백엔드는 그대로 실행한다."""
+        """以묒슂 ?낅젰 援ш컙 醫낅즺. 吏?먰븯吏 ?딅뒗 諛깆뿏?쒕뒗 洹몃?濡??ㅽ뻾?쒕떎."""
 
 
 class InterceptionBackend(InputBackend):
-    """커널 드라이버 기반 스텔스 입력 (core/interception_backend.py 래핑)."""
+    """而ㅻ꼸 ?쒕씪?대쾭 湲곕컲 ?ㅽ뀛???낅젰 (core/interception_backend.py ?섑븨)."""
     name = "interception"
 
     def __init__(self):
@@ -43,7 +45,7 @@ class InterceptionBackend(InputBackend):
 
     def is_available(self) -> bool:
         if not self._enabled:
-            # enable()은 드라이버 캡처를 1회 시도하고 성공 여부를 반환
+            # enable()? ?쒕씪?대쾭 罹≪쿂瑜?1???쒕룄?섍퀬 ?깃났 ?щ?瑜?諛섑솚
             self._enabled = self._ic.enable()
         return self._ic.is_active()
 
@@ -67,7 +69,7 @@ class InterceptionBackend(InputBackend):
 
 
 class SendInputBackend(InputBackend):
-    """Win32 SendInput 폴백 (core/input_controller.py 프리미티브 재사용)."""
+    """Win32 SendInput ?대갚 (core/input_controller.py ?꾨━誘명떚釉??ъ궗??."""
     name = "sendinput"
 
     def __init__(self):
@@ -75,8 +77,7 @@ class SendInputBackend(InputBackend):
         self._src = _src
 
     def is_available(self) -> bool:
-        return True  # Win32는 항상 가용
-
+        return True  # Win32????긽 媛??
     def key_down(self, key: str) -> None:
         vk = self._src._vk(key)
         if vk:
@@ -90,7 +91,7 @@ class SendInputBackend(InputBackend):
     def press(self, key: str, hold_sec: float = 0.05) -> None:
         import time
         self.key_down(key)
-        time.sleep(max(0.0, hold_sec))
+        time.sleep(down_5(hold_sec))
         self.key_up(key)
 
     def click(self, x: int, y: int) -> None:
@@ -103,16 +104,15 @@ class SendInputBackend(InputBackend):
 
 
 def select_backend(candidates: list[InputBackend] | None = None) -> InputBackend:
-    """후보 중 첫 번째로 가용한 백엔드를 선택. 없으면 RuntimeError.
-
-    기본 우선순위: Interception → SendInput.
-    """
+    """Interception 입력 백엔드만 선택합니다. 실패 시 fallback 없이 중단합니다."""
     if candidates is None:
-        candidates = [InterceptionBackend(), SendInputBackend()]
+        candidates = [InterceptionBackend()]
+    last_error: Exception | None = None
     for b in candidates:
         try:
             if b.is_available():
                 return b
-        except Exception:
-            continue
-    raise RuntimeError("사용 가능한 입력 백엔드가 없습니다.")
+        except Exception as exc:
+            last_error = exc
+    detail = f" ({last_error})" if last_error else ""
+    raise RuntimeError("Interception 입력 백엔드 활성화에 실패했습니다. 드라이버 설치와 관리자 권한 실행을 확인해 주세요." + detail)

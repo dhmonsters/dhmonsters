@@ -1,6 +1,7 @@
 ﻿# config_adapter ??config.json ?뺤뀛?덈━瑜?RuntimeConfig濡?留ㅽ븨 (湲곗〈 ?ㅼ젙 ???좉퇋 ?고????ㅻ━)
 from __future__ import annotations
 
+import math
 from dataclasses import fields
 
 try:
@@ -183,6 +184,173 @@ def _minimap_region_profile(mm: dict) -> dict:
     return region
 
 
+def _with_minimap_ratios(profile: dict, x_keys: tuple[str, ...], y_keys: tuple[str, ...]) -> dict:
+    """고정 좌표를 기준 미니맵 내부 비율로 함께 저장한다."""
+    base_w = max(1.0, float(profile.get("base_minimap_width", 172)))
+    base_h = max(1.0, float(profile.get("base_minimap_height", 103)))
+    for key in x_keys:
+        if key in profile and f"{key}_ratio" not in profile:
+            profile[f"{key}_ratio"] = float(profile[key]) / base_w
+    for key in y_keys:
+        if key in profile and f"{key}_ratio" not in profile:
+            profile[f"{key}_ratio"] = float(profile[key]) / base_h
+    return profile
+
+
+def _platforms_with_minimap_ratios(profile: dict) -> dict:
+    """빨코3 발판 범위를 기준 미니맵 내부 비율로 함께 저장한다."""
+    base_w = max(1.0, float(profile.get("base_minimap_width", 172)))
+    base_h = max(1.0, float(profile.get("base_minimap_height", 103)))
+    for data in (profile.get("platforms") or {}).values():
+        if not isinstance(data, dict):
+            continue
+        for key in ("x", "x_min", "x_max"):
+            if key in data and f"{key}_ratio" not in data:
+                data[f"{key}_ratio"] = float(data[key]) / base_w
+        for key in ("y", "y_min", "y_max"):
+            if key in data and f"{key}_ratio" not in data:
+                data[f"{key}_ratio"] = float(data[key]) / base_h
+    return profile
+
+
+def _route_blocks_with_minimap_ratios(blocks: list, mm: dict) -> list:
+    """레거시 동선 픽셀 좌표를 저장 당시 미니맵 내부 비율로 한 번만 변환한다."""
+    base_w = max(1.0, float(mm.get("width", 172)))
+    base_h = max(1.0, float(mm.get("height", 103)))
+    converted = []
+    for source in blocks:
+        if not isinstance(source, dict):
+            continue
+        block = dict(source)
+        for key in (
+            "target_x", "start_x", "end_x", "pos_x", "ladder_x",
+            "rand_margin", "jump_offset",
+        ):
+            ratio_key = f"{key}_ratio"
+            if block.get(ratio_key) is None and block.get(key) is not None:
+                block[ratio_key] = float(block[key]) / base_w
+        for key in ("pos_y", "y_top", "y_bot"):
+            ratio_key = f"{key}_ratio"
+            value = block.get(key)
+            if block.get(ratio_key) is None and value is not None and float(value) >= 0:
+                block[ratio_key] = float(value) / base_h
+        converted.append(block)
+    return converted
+
+
+REDNOSE2_X_DEFAULTS = {
+    "floor2_left_x": 55,
+    "floor2_right_x": 124,
+    "floor2_right_safe_x": 124,
+    "stair7_x": 41,
+    "stair7_x_min": 38,
+    "stair7_x_max": 44,
+    "platform24_approach_x": 43,
+    "platform24_x": 30,
+    "platform1415_16_approach_x": 95,
+    "platform1415_x_min": 94,
+    "platform1415_x_max": 96,
+    "platform27_approach_x": 91,
+    "platform27_bypass_approach_x": 80,
+    "platform27_bypass_x_min": 72,
+    "platform27_bypass_x_max": 89,
+}
+
+REDNOSE2_TIMING_VERSION = 2
+REDNOSE2_TIMING_DEFAULTS = {
+    "teleport_hold_sec": 0.30,
+    "attack_hold_sec": 0.90,
+    "floor2_hunt_teleport_interval_sec": 0.72,
+    "stair7_right_teleport_hold_sec": 0.10,
+    "floor2_right_edge_teleport_interval_sec": 0.90,
+}
+
+
+def rednose2_x_validation_error(values: dict) -> str | None:
+    for key in REDNOSE2_X_DEFAULTS:
+        value = values.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 171:
+            return "모든 X 좌표는 0~171 사이의 정수여야 합니다."
+    if values["floor2_left_x"] > values["floor2_right_x"]:
+        return "2층 사냥 범위의 왼쪽 X는 오른쪽 X보다 클 수 없습니다."
+    if not values["stair7_x_min"] <= values["stair7_x"] <= values["stair7_x_max"]:
+        return "7번 계단 목표 X는 허용 범위 안에 있어야 합니다."
+    if not values["platform1415_x_min"] <= values["platform1415_16_approach_x"] <= values["platform1415_x_max"]:
+        return "14/15번과 16번 공통 접근 X는 14/15 허용 범위 안에 있어야 합니다."
+    if not values["platform27_bypass_x_min"] <= values["platform27_bypass_approach_x"] <= values["platform27_bypass_x_max"]:
+        return "27번 우회 접근 X는 우회 허용 범위 안에 있어야 합니다."
+    return None
+
+
+def _valid_rednose2_x(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 171
+
+
+def _rednose2_group_is_valid(keys: tuple[str, ...], values: dict) -> bool:
+    if not all(_valid_rednose2_x(values[key]) for key in keys):
+        return False
+    if keys == ("floor2_left_x", "floor2_right_x"):
+        return values["floor2_left_x"] <= values["floor2_right_x"]
+    if keys == ("stair7_x_min", "stair7_x", "stair7_x_max"):
+        return values["stair7_x_min"] <= values["stair7_x"] <= values["stair7_x_max"]
+    if keys == ("platform1415_x_min", "platform1415_16_approach_x", "platform1415_x_max"):
+        return values["platform1415_x_min"] <= values["platform1415_16_approach_x"] <= values["platform1415_x_max"]
+    if keys == ("platform27_bypass_x_min", "platform27_bypass_approach_x", "platform27_bypass_x_max"):
+        return values["platform27_bypass_x_min"] <= values["platform27_bypass_approach_x"] <= values["platform27_bypass_x_max"]
+    return False
+
+
+def _merge_rednose2_x_settings(raw: dict | None) -> dict[str, int]:
+    raw = raw if isinstance(raw, dict) else {}
+    merged = dict(REDNOSE2_X_DEFAULTS)
+    simple_keys = (
+        "floor2_right_safe_x",
+        "platform24_approach_x",
+        "platform24_x",
+        "platform27_approach_x",
+    )
+    for key in simple_keys:
+        if _valid_rednose2_x(raw.get(key)):
+            merged[key] = int(raw[key])
+
+    groups = (
+        ("floor2_left_x", "floor2_right_x"),
+        ("stair7_x_min", "stair7_x", "stair7_x_max"),
+        ("platform1415_x_min", "platform1415_16_approach_x", "platform1415_x_max"),
+        ("platform27_bypass_x_min", "platform27_bypass_approach_x", "platform27_bypass_x_max"),
+    )
+    for keys in groups:
+        candidate = dict(merged)
+        for key in keys:
+            if key in raw:
+                candidate[key] = raw[key]
+        if _rednose2_group_is_valid(keys, candidate):
+            merged.update({key: int(candidate[key]) for key in keys})
+    return merged
+
+
+def _valid_rednose2_timing(value) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and 0.0 <= float(value) <= 10.0
+    )
+
+
+def _merge_rednose2_timing_settings(raw: dict | None) -> dict[str, float | int]:
+    merged: dict[str, float | int] = {
+        "timing_version": REDNOSE2_TIMING_VERSION,
+        **REDNOSE2_TIMING_DEFAULTS,
+    }
+    if not isinstance(raw, dict) or raw.get("timing_version") != REDNOSE2_TIMING_VERSION:
+        return merged
+    for key in REDNOSE2_TIMING_DEFAULTS:
+        if _valid_rednose2_timing(raw.get(key)):
+            merged[key] = float(raw[key])
+    return merged
+
+
 def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     """Build RedNose2 v5 runtime profile from one fixed source."""
     mm = d.get("minimap", {}) or {}
@@ -203,9 +371,7 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
         "close_walk_px": 8,
         "arrival_tolerance": 3,
         "max_step_sec": 18.0,
-        "floor2_left_x": 55,
-        "floor2_right_x": 124,
-        "floor2_right_safe_x": 124,
+        **REDNOSE2_X_DEFAULTS,
         "auto_sell_entry_x_min": 123,
         "auto_sell_entry_x_max": 136,
         "auto_sell_entry_x": 129.5,
@@ -215,30 +381,18 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
         "floor1_y_max": 77,
         "floor3_y_min": 47,
         "floor3_y_max": 51,
-        "stair7_x": 41,
-        "stair7_x_min": 38,
-        "stair7_x_max": 44,
         "stair7_y": 67,
-        "stair7_return_y_min": 61,
-        "stair7_return_y_max": 63,
+        "stair7_return_y_min": 66,
+        "stair7_return_y_max": 68,
         "stair7_right_bias_x": 45,
         "stair7_right_bias_correct_sec": 0.0,
         "stair7_right_teleport_hold_sec": 0.1,
         "stair7_right_teleport_lead_sec": 0.02,
-        "platform24_approach_x": 43,
-        "platform24_x": 30,
         "platform24_y": 61,
-        "platform1415_16_approach_x": 95,
-        "platform1415_x_min": 94,
-        "platform1415_x_max": 96,
         "platform1415_y_min": 54,
         "platform1415_y_max": 55,
         "platform16_y_min": 47,
         "platform16_y_max": 48,
-        "platform27_approach_x": 91,
-        "platform27_bypass_approach_x": 80,
-        "platform27_bypass_x_min": 72,
-        "platform27_bypass_x_max": 89,
         "platform27_y_min": 50,
         "platform27_y_max": 50,
         "pickup_route_enabled": True,
@@ -249,7 +403,30 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     }
     forced["minimap_width"] = int(mm.get("width", forced["base_minimap_width"]))
     forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
-    return forced
+    forced.update(_merge_rednose2_x_settings(d.get("rednose2_v5")))
+    forced.update(_merge_rednose2_timing_settings(d.get("rednose2_v5")))
+    return _with_minimap_ratios(
+        forced,
+        x_keys=(
+            "floor2_left_x", "floor2_right_x", "floor2_right_safe_x",
+            "auto_sell_entry_x_min", "auto_sell_entry_x_max", "auto_sell_entry_x",
+            "stair7_x", "stair7_x_min", "stair7_x_max", "stair7_right_bias_x",
+            "platform24_approach_x", "platform24_x",
+            "platform1415_16_approach_x", "platform1415_x_min", "platform1415_x_max",
+            "platform27_approach_x", "platform27_bypass_approach_x",
+            "platform27_bypass_x_min", "platform27_bypass_x_max",
+        ),
+        y_keys=(
+            "floor2_y_min", "floor2_y_max",
+            "floor1_y_min", "floor1_y_max",
+            "floor3_y_min", "floor3_y_max",
+            "stair7_y", "stair7_return_y_min", "stair7_return_y_max",
+            "platform24_y",
+            "platform1415_y_min", "platform1415_y_max",
+            "platform16_y_min", "platform16_y_max",
+            "platform27_y_min", "platform27_y_max",
+        ),
+    )
 
 
 def _rednose3_profile(d: dict, attack: dict) -> dict:
@@ -289,10 +466,15 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
             "5": {"x_min": 30, "x_max": 34, "y_min": 40, "y_max": 42},
             "6": {"x_min": 30, "x_max": 34, "y_min": 45, "y_max": 47},
         },
-        "base_minimap_width": int(mm.get("width", 172)),
-        "base_minimap_height": int(mm.get("height", 103)),
+        "base_minimap_width": 172,
+        "base_minimap_height": 103,
     }
-    return forced
+    forced["minimap_width"] = int(mm.get("width", forced["base_minimap_width"]))
+    forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
+    forced["fall_y_threshold_ratio"] = (
+        float(forced["fall_y_threshold"]) / float(forced["base_minimap_height"])
+    )
+    return _platforms_with_minimap_ratios(forced)
 
 
 def _hunt_ground_matches(active: str, canonical: str) -> bool:
@@ -338,6 +520,19 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         "width": int(mm.get("width", 200)),
         "height": int(mm.get("height", 120)),
     }
+    if all(mm.get(key) is not None for key in ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio")):
+        minimap_region.update({
+            "x_ratio": float(mm.get("region_x_ratio")),
+            "y_ratio": float(mm.get("region_y_ratio")),
+            "w_ratio": float(mm.get("width_ratio")),
+            "h_ratio": float(mm.get("height_ratio")),
+            "base_region": [
+                int(mm.get("region_x", 0)),
+                int(mm.get("region_y", 0)),
+                int(mm.get("width", 200)),
+                int(mm.get("height", 120)),
+            ],
+        })
     raw_char_rgb = (
         (int(mm["char_r"]), int(mm["char_g"]), int(mm["char_b"]))
         if all(k in mm for k in ("char_r", "char_g", "char_b"))
@@ -479,13 +674,16 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         game_window_title=game_window_title,
         coord_anchor=d.get("coord_anchor"),
         char_rgb=char_rgb,
+        char_h_low=(int(mm["hsv_h_low"]) if mm.get("hsv_h_low") is not None else None),
+        char_h_high=(int(mm["hsv_h_high"]) if mm.get("hsv_h_high") is not None else None),
         char_h_tol=int(mm.get("char_h_tol", 10)),
         char_s_min=int(mm.get("char_s_min", 100)),
         char_v_min=int(mm.get("char_v_min", 200)),
         char_area_min=float(mm.get("char_area_min", 3)),
-        char_area_max=float(mm.get("char_area_max", 100)),
+        char_area_max=float(mm.get("char_area_max", 160)),
         floors=_floors(zones),
-        route=[Block.from_dict(b) for b in (d.get("floor_hunt", {}).get("route") or [])
+        route=[Block.from_dict(b) for b in _route_blocks_with_minimap_ratios(
+                   d.get("floor_hunt", {}).get("route") or [], mm)
                if isinstance(b, dict) and "type" in b],
         route_steps=[RouteStep.from_dict(s) for s in
                      (d.get("floor_hunt", {}).get("route_steps") or [])

@@ -6,9 +6,6 @@ import threading
 import time
 from typing import Callable
 
-from core.humanize.intent import Intent
-
-
 class RedNose3RouteRunner:
     """Runs RedNose3 by switching platforms with teleport-only inputs."""
 
@@ -65,8 +62,8 @@ class RedNose3RouteRunner:
             return False
         return (not self._stop.is_set()) and self._is_active()
 
-    def _humanizer(self):
-        return getattr(self._br, "_h")
+    def _route_inputs(self):
+        return getattr(self._br, "_route_inputs")
 
     def _current_pos(self):
         getter = getattr(self._br, "_get_pos", None)
@@ -91,7 +88,7 @@ class RedNose3RouteRunner:
         return str(self._profile.get("jump_key") or "alt").strip()
 
     def _humanized(self, key: str, fallback: float) -> float:
-        return self._humanizer().humanize(float(self._profile.get(key, fallback)))
+        return float(self._profile.get(key, fallback))
 
     def _random_hunt_cycle_sec(self) -> float:
         min_sec = float(self._profile.get("hunt_cycle_min_sec", 92.83))
@@ -100,15 +97,46 @@ class RedNose3RouteRunner:
             min_sec, max_sec = max_sec, min_sec
         return round(random.uniform(max(10.0, min_sec), max(10.0, max_sec)), 4)
 
+    def _minimap_size(self) -> tuple[int, int]:
+        if self._minimap_region_fn is not None:
+            try:
+                region = self._minimap_region_fn()
+                width = int(region.get("width", 0))
+                height = int(region.get("height", 0))
+                if width > 0 and height > 0:
+                    return width, height
+            except Exception:
+                pass
+        return (
+            max(1, int(self._profile.get("minimap_width", self._profile.get("base_minimap_width", 172)))),
+            max(1, int(self._profile.get("minimap_height", self._profile.get("base_minimap_height", 103)))),
+        )
+
+    def _platform_x(self, data: dict, key: str, fallback: float) -> float:
+        width, _height = self._minimap_size()
+        ratio = data.get(f"{key}_ratio")
+        if ratio is not None:
+            return float(ratio) * width
+        return float(data.get(key, fallback))
+
+    def _platform_y(self, data: dict, key: str, fallback: float) -> int:
+        _width, height = self._minimap_size()
+        ratio = data.get(f"{key}_ratio")
+        if ratio is not None:
+            return int(round(float(ratio) * height))
+        return int(data.get(key, fallback))
+
     def _platform(self, number: int) -> dict:
         return dict((self._profile.get("platforms") or {}).get(str(number), {}))
 
     def _platform_range(self, number: int) -> tuple[float, float, int, int]:
         data = self._platform(number)
-        x_min = float(data.get("x_min", data.get("x", 0)))
-        x_max = float(data.get("x_max", data.get("x", x_min)))
-        y_min = int(data.get("y_min", data.get("y", 0)))
-        y_max = int(data.get("y_max", data.get("y", y_min)))
+        x_fallback = float(data.get("x", 0))
+        y_fallback = int(data.get("y", 0))
+        x_min = self._platform_x(data, "x_min", x_fallback)
+        x_max = self._platform_x(data, "x_max", x_min)
+        y_min = self._platform_y(data, "y_min", y_fallback)
+        y_max = self._platform_y(data, "y_max", y_min)
         return min(x_min, x_max), max(x_min, x_max), min(y_min, y_max), max(y_min, y_max)
 
     def _is_on_platform(self, number: int, pos=None) -> bool:
@@ -131,27 +159,34 @@ class RedNose3RouteRunner:
         pos = self._current_pos()
         if pos is None or pos[1] is None:
             return False
-        return int(pos[1]) > int(self._profile.get("fall_y_threshold", 70))
+        _width, height = self._minimap_size()
+        ratio = self._profile.get("fall_y_threshold_ratio")
+        threshold = (
+            int(round(float(ratio) * height))
+            if ratio is not None
+            else int(round(float(self._profile.get("fall_y_threshold", 70))))
+        )
+        return int(pos[1]) > threshold
 
     def _tap_attack(self, count: int) -> None:
         key = self._attack_key()
         if not key:
             return
-        h = self._humanizer()
+        h = self._route_inputs()
         hold_sec = float(self._profile.get("attack_hold_sec", 0.9))
         gap_sec = float(self._profile.get("attack_gap_sec", 0.05))
         for index in range(max(1, int(count))):
             if not self._active():
                 return
-            h.perform(Intent(action="key", key=key, base_hold_sec=hold_sec))
+            h.press_action(key, hold_sec)
             if index < count - 1:
-                self._sleep(h.humanize(gap_sec))
+                self._sleep(gap_sec)
 
     def _teleport(self, direction: str) -> None:
         key = self._teleport_key()
         if not key:
             return
-        h = self._humanizer()
+        h = self._route_inputs()
         if direction in ("left", "right"):
             direction_hold_key = f"{direction}_direction_hold_sec"
             direction_hold_sec = self._humanized(
@@ -160,39 +195,39 @@ class RedNose3RouteRunner:
             )
             lead_sec = self._humanized("teleport_lead_sec", 0.09)
             started_at = time.monotonic()
-            h.hold_dir(direction)
+            h.hold_direction(direction)
             try:
                 self._sleep(lead_sec)
-                h.perform(Intent(action="key", key=key, base_hold_sec=float(self._profile.get("teleport_hold_sec", 0.07))))
+                h.press_action(key, float(self._profile.get("teleport_hold_sec", 0.07)))
                 remaining = direction_hold_sec - (time.monotonic() - started_at)
                 if remaining > 0:
                     self._sleep(remaining)
             finally:
-                h.release_dir()
+                h.release_direction()
             self._sleep(self._humanized("after_teleport_wait_sec", 0.12))
             return
 
-        h.release_dir()
-        h.hold(direction)
+        h.release_direction()
+        h.hold_action(direction)
         self._sleep(self._humanized("vertical_teleport_lead_sec", 0.02))
         try:
-            h.perform(Intent(action="key", key=key, base_hold_sec=float(self._profile.get("teleport_hold_sec", 0.3))))
+            h.press_action(key, float(self._profile.get("teleport_hold_sec", 0.3)))
         finally:
-            h.release(direction)
+            h.release_action(direction)
         self._sleep(self._humanized("after_teleport_wait_sec", 0.12))
 
     def _down_jump(self) -> None:
         jump_key = self._jump_key()
         if not jump_key:
             return
-        h = self._humanizer()
-        h.release_dir()
-        h.hold("down")
+        h = self._route_inputs()
+        h.release_direction()
+        h.hold_action("down")
         self._sleep(self._humanized("down_jump_lead_sec", 0.03))
         try:
-            h.perform(Intent(action="key", key=jump_key, base_hold_sec=float(self._profile.get("down_jump_hold_sec", 0.12))))
+            h.press_action(jump_key, float(self._profile.get("down_jump_hold_sec", 0.12)))
         finally:
-            h.release("down")
+            h.release_action("down")
         self._sleep(self._humanized("after_down_jump_wait_sec", 0.25))
 
     def _step_to_platform(self, target: int, action: str, attempts: int | None = None) -> bool:
@@ -214,7 +249,13 @@ class RedNose3RouteRunner:
         self._log("[rednose3] fell below platform1; recover to platform1")
         x_min, x_max, y_min, y_max = self._platform_range(1)
         target_x = (x_min + x_max) / 2.0
-        fall_y = int(self._profile.get("fall_y_threshold", 70))
+        _width, height = self._minimap_size()
+        fall_ratio = self._profile.get("fall_y_threshold_ratio")
+        fall_y = (
+            int(round(float(fall_ratio) * height))
+            if fall_ratio is not None
+            else int(self._profile.get("fall_y_threshold", 70))
+        )
         for attempt in range(1, int(self._profile.get("recover_attempts", 10)) + 1):
             if not self._active():
                 return False
@@ -231,7 +272,7 @@ class RedNose3RouteRunner:
             y = int(pos[1])
             if y >= fall_y:
                 if x_min <= x <= x_max:
-                    self._humanizer().release_dir()
+                    self._route_inputs().release_direction()
                     self._log(
                         f"[rednose3] recover up-teleport: x={x:.0f}, y={y}, "
                         f"target X={target_x:.1f}, range {x_min:.0f}-{x_max:.0f}"
@@ -246,11 +287,11 @@ class RedNose3RouteRunner:
                     f"[rednose3] recover walk-align before up: direction={direction}, "
                     f"x={x:.0f}, y={y}, target X={target_x:.1f}, range {x_min:.0f}-{x_max:.0f}"
                 )
-                self._humanizer().hold_dir(direction)
+                self._route_inputs().hold_direction(direction)
                 self._sleep(0.08)
                 continue
 
-            self._humanizer().release_dir()
+            self._route_inputs().release_direction()
             direction = "right" if x < target_x else "left"
             self._log(
                 f"[rednose3] recover upper align: direction={direction}, "
@@ -316,5 +357,5 @@ class RedNose3RouteRunner:
                 self._sleep(0.05)
             return True
         finally:
-            self._humanizer().release_dir()
+            self._route_inputs().release_direction()
             self.owns_movement = previous_owns_movement

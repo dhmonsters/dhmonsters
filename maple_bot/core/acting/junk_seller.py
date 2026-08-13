@@ -58,13 +58,13 @@ class JunkSeller:
         """아이템명이 보호목록에 (부분)매칭되면 판매 제외."""
         return any(p and p in item_name for p in self._protect)
 
-    def sell(self, status_cb=None, stop_event=None) -> None:
+    def sell(self, status_cb=None, stop_event=None) -> bool:
         """잡템 판매 실행 — A sell_junk 위임 (보호목록은 향후 슬롯별 판매에 적용).
 
         주의: A sell_junk 는 '기타탭 일괄판매'라 아이템명 단위 필터가 없다.
         보호목록은 슬롯 단위 판매로 확장될 때 is_protected 로 거른다(실기 확장 지점).
         """
-        sell_junk(
+        return sell_junk(
             self._config,
             self._screen,
             self._input,

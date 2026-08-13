@@ -79,6 +79,36 @@ def _resolve_coords(config, cfg: dict):
     return pt, region
 
 
+def _capture_scene(config, screen):
+    """가능하면 전체 모니터 대신 현재 게임창만 캡처하고 절대 원점을 함께 반환한다."""
+    from core.config_manager import get_game_window_rect
+
+    left, top, width, height = get_game_window_rect(config)
+    if width > 0 and height > 0:
+        region = {"left": left, "top": top, "width": width, "height": height}
+        return screen.capture(region), region
+
+    import mss as _mss
+    import cv2 as _cv2
+    import numpy as _np
+
+    with _mss.mss() as sct:
+        monitor = sct.monitors[0]
+        raw = sct.grab(monitor)
+        image = _cv2.cvtColor(_np.array(raw), _cv2.COLOR_BGRA2BGR)
+    return image, monitor
+
+
+def _match_template(screen, scene, template_path: str, threshold: float):
+    """점수와 위치를 지원하는 화면 판독기에서는 템플릿을 한 번만 탐색한다."""
+    combined = getattr(screen, "find_template_match", None)
+    if callable(combined):
+        return combined(scene, template_path, threshold=threshold)
+    score = screen.find_template_score(scene, template_path)
+    position = screen.find_template(scene, template_path, threshold=threshold)
+    return score, position
+
+
 def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     """인벤토리 감지 → 캐시탭 더블클릭 → 활성화 확인 → 첫번째 슬롯 더블클릭 → 상점 열림 확인.
 
@@ -90,10 +120,6 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
         True  — 성공 (상점 열림 확인 또는 첫슬롯 클릭 완료)
         False — 중단 또는 필수 설정 누락
     """
-    import mss as _mss
-    import cv2 as _cv2
-    import numpy as _np
-
     def stopped() -> bool:
         return stop_event is not None and stop_event.is_set()
 
@@ -117,11 +143,7 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
 
     # ── 전체 화면 캡처 헬퍼 ──────────────────────────────────────────
     def _capture():
-        with _mss.mss() as sct:
-            mon = sct.monitors[0]
-            raw = sct.grab(mon)
-            img = _cv2.cvtColor(_np.array(raw), _cv2.COLOR_BGRA2BGR)
-        return img, mon
+        return _capture_scene(config, screen)
 
     def _abs(pos, mon):
         return (mon["left"] + pos[0], mon["top"] + pos[1])
@@ -146,9 +168,22 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
 
     inv_pos = None
     if has_inv_tpl:
-        score = screen.find_template_score(scene, inventory_tpl)
+        score, inv_pos = _match_template(screen, scene, inventory_tpl, 0.70)
         status_cb(f"인벤토리 매칭 점수: {score:.2f}")
-        inv_pos = screen.find_template(scene, inventory_tpl, threshold=0.70)
+
+    if inv_pos is None:
+        visible_hint = None
+        for template_path, threshold in (
+            (cash_tab_tpl, 0.60),
+            (cash_tab_active_tpl, 0.60),
+            (shop_item_tpl, 0.60),
+        ):
+            if os.path.exists(template_path):
+                _score, visible_hint = _match_template(screen, scene, template_path, threshold)
+                if visible_hint is not None:
+                    status_cb("인벤토리 내부 요소 감지 → 이미 열린 상태로 처리")
+                    inv_pos = visible_hint
+                    break
 
     # ── 2단계: 미감지 → 인벤토리 키로 열기 후 재탐색 ───────────────
     if inv_pos is None:
@@ -160,9 +195,8 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
 
         scene, mon_all = _capture()
         if has_inv_tpl:
-            score2 = screen.find_template_score(scene, inventory_tpl)
+            score2, inv_pos = _match_template(screen, scene, inventory_tpl, 0.70)
             status_cb(f"인벤토리 재탐색 점수: {score2:.2f}")
-            inv_pos = screen.find_template(scene, inventory_tpl, threshold=0.70)
 
     if inv_pos is None:
         status_cb("⚠ 인벤토리를 찾지 못했습니다. 인벤토리 바 이미지를 다시 캡처하세요.")
@@ -177,15 +211,13 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     cash_tab_source = None
 
     if has_cash_tab_tpl:
-        cash_tab_score = screen.find_template_score(scene, cash_tab_tpl)
+        cash_tab_score, cash_tab_pos = _match_template(screen, scene, cash_tab_tpl, 0.60)
         status_cb(f"캐시탭 이미지 매칭 점수: {cash_tab_score:.2f}")
-        cash_tab_pos = screen.find_template(scene, cash_tab_tpl, threshold=0.60)
         cash_tab_source = "cash_tab.png"
 
     if cash_tab_pos is None and has_active_tpl:
-        active_score = screen.find_template_score(scene, cash_tab_active_tpl)
+        active_score, cash_tab_pos = _match_template(screen, scene, cash_tab_active_tpl, 0.60)
         status_cb(f"캐시탭 활성 이미지 매칭 점수: {active_score:.2f}")
-        cash_tab_pos = screen.find_template(scene, cash_tab_active_tpl, threshold=0.60)
         cash_tab_source = "cash_tab_active.png"
 
     if cash_tab_pos is None:
@@ -195,45 +227,24 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     cash_tab_actual = _abs(cash_tab_pos, mon_all)
     status_cb(f"캐시탭 이미지 감지({cash_tab_source}) → 더블클릭 좌표 사용: {cash_tab_actual}")
 
-    # ── 4~5단계: 캐시탭 더블클릭 → 색상 변화로 활성화 확인 (최대 3회) ─
-    MAX_CASH_RETRY = 3
-    active_abs = None
-    snap = _tab_color_changed(*cash_tab_actual)
-
-    for attempt in range(MAX_CASH_RETRY):
-        if stopped():
-            return False
-        before = snap()
-        status_cb(f"캐시탭 더블클릭 (시도 {attempt + 1}/{MAX_CASH_RETRY}): {cash_tab_actual}")
-        input_ctrl.double_click(*cash_tab_actual)
-        time.sleep(0.08)
-
-        after = snap()
-        diff = _color_diff(before, after)
-        status_cb(f"캐시탭 색상 변화량: {diff:.1f}")
-
-        if diff >= 6.0:
-            active_abs = cash_tab_actual
-            status_cb(f"캐시탭 활성화 확인 ✔ (색상 변화 감지)")
-            break
-        if attempt < MAX_CASH_RETRY - 1:
-            status_cb("캐시탭 색상 미변화 → 재시도 중...")
-            time.sleep(0.06)
-        else:
-            status_cb("⚠ 캐시탭 활성화 최종 미확인 — 계속 진행")
-
-    if stopped():
-        return False
-
-    # ── 6단계: 상점 진입 아이콘 이미지를 찾아 더블클릭 ───────────────
+    # ── 4~6단계: 캐시탭 활성화와 상점 진입 아이콘 확인 ───────────────
     if not has_shop_item_tpl:
         status_cb("⚠ 상점 아이템 템플릿이 없습니다. templates/junk/shop_item.png를 추가하세요.")
         return False
 
-    scene, mon_all = _capture()
-    shop_item_score = screen.find_template_score(scene, shop_item_tpl)
-    status_cb(f"상점 아이템 매칭 점수: {shop_item_score:.2f}")
-    shop_item_pos = screen.find_template(scene, shop_item_tpl, threshold=0.60)
+    shop_item_pos = None
+    for attempt in range(2):
+        if stopped():
+            return False
+        if cash_tab_source != "cash_tab_active.png" or attempt > 0:
+            status_cb(f"캐시탭 더블클릭 (시도 {attempt + 1}/2): {cash_tab_actual}")
+            input_ctrl.double_click(*cash_tab_actual)
+            time.sleep(0.08)
+        scene, mon_all = _capture()
+        shop_item_score, shop_item_pos = _match_template(screen, scene, shop_item_tpl, 0.60)
+        status_cb(f"상점 아이템 매칭 점수: {shop_item_score:.2f}")
+        if shop_item_pos is not None:
+            break
     if shop_item_pos is None:
         status_cb("⚠ 상점 아이템 이미지를 찾지 못했습니다. 좌표 폴백 없이 자동판매를 중단합니다.")
         return False
@@ -249,21 +260,23 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
             return False
         status_cb(f"첫번째 슬롯 더블클릭 (시도 {attempt + 1}/{MAX_SLOT_RETRY}): {first_slot_actual}")
         input_ctrl.double_click(*first_slot_actual)
-        time.sleep(random.uniform(0.25, 0.35))
+        time.sleep(0.20)
 
         if not has_shop_open_tpl:
             shop_confirmed = True
             break
 
-        deadline = time.time() + 1.0
+        deadline = time.time() + 0.70
         first_check = True
         while time.time() < deadline and not stopped():
             chk_scene, _ = _capture()
             if first_check:
-                shop_score = screen.find_template_score(chk_scene, shop_open_tpl)
+                shop_score, shop_position = _match_template(screen, chk_scene, shop_open_tpl, 0.55)
                 status_cb(f"상점 열림 매칭 점수: {shop_score:.2f} / 기준 0.55")
                 first_check = False
-            if screen.find_template(chk_scene, shop_open_tpl, threshold=0.55):
+            else:
+                _shop_score, shop_position = _match_template(screen, chk_scene, shop_open_tpl, 0.55)
+            if shop_position is not None:
                 shop_confirmed = True
                 break
             time.sleep(0.05)
@@ -284,7 +297,7 @@ def _exit_shop(input_ctrl, shop_exit_btn, status_cb) -> None:
     if shop_exit_btn:
         status_cb(f"상점 나가기 클릭: {shop_exit_btn}")
         input_ctrl.click(*shop_exit_btn)
-        time.sleep(0.5)
+        time.sleep(0.12)
     else:
         time.sleep(0.3)
         input_ctrl.press_key("esc")
@@ -300,8 +313,8 @@ class JunkSeller:
         self.screen = screen
         self.input_ctrl = input_ctrl
 
-    def sell(self, status_cb, stop_event=None) -> None:
-        sell_junk(
+    def sell(self, status_cb, stop_event=None) -> bool:
+        return sell_junk(
             self.config,
             self.screen,
             self.input_ctrl,
@@ -310,12 +323,8 @@ class JunkSeller:
         )
 
 
-def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
+def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     """잡템 자동 판매. stop_event가 set 되면 즉시 중단."""
-    import mss as _mss
-    import cv2 as _cv2
-    import numpy as _np
-
     def stopped() -> bool:
         return stop_event is not None and stop_event.is_set()
 
@@ -353,29 +362,24 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
 
     if not has_templates and not has_equip_sell:
         status_cb("잡템 판매 — 판매 템플릿도 장비 일괄 판매 템플릿도 미설정입니다.")
-        return
+        return False
 
     status_cb("잡템 판매 시작...")
 
     def _capture():
-        with _mss.mss() as sct:
-            mon = sct.monitors[0]
-            raw = sct.grab(mon)
-            img = _cv2.cvtColor(_np.array(raw), _cv2.COLOR_BGRA2BGR)
-        return img, mon
+        return _capture_scene(config, screen)
 
     # ── 1. 상점 열기 ─────────────────────────────────────────────────
     if not open_shop(config, screen, input_ctrl, status_cb, stop_event):
-        return
+        return False
     if stopped():
-        return
+        return False
 
     # ── 2. 장비 일괄 판매 (템플릿 인식 → 더블클릭) ───────────────────
     if has_equip_sell_tpl:
         scene, mon = _capture()
-        eq_score = screen.find_template_score(scene, equip_sell_tpl)
+        eq_score, eq_pos = _match_template(screen, scene, equip_sell_tpl, 0.70)
         status_cb(f"장비 일괄 판매 버튼 매칭 점수: {eq_score:.2f}")
-        eq_pos = screen.find_template(scene, equip_sell_tpl, threshold=0.70)
         if eq_pos:
             abs_x = mon["left"] + eq_pos[0]
             abs_y = mon["top"]  + eq_pos[1]
@@ -383,20 +387,21 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
             input_ctrl.double_click(abs_x, abs_y)
             time.sleep(0.15)
             if stopped():
-                return
+                return False
 
             # 확인창 감지 → 더블클릭, 미감지 시 Enter
             confirmed = False
             if has_equip_conf_tpl:
-                deadline = time.time() + 1.2
+                deadline = time.time() + 0.70
                 first_check = True
                 while time.time() < deadline and not stopped():
                     chk, chk_mon = _capture()
                     if first_check:
-                        sc = screen.find_template_score(chk, equip_confirm_tpl)
+                        sc, conf_pos = _match_template(screen, chk, equip_confirm_tpl, 0.70)
                         status_cb(f"확인창 매칭 점수: {sc:.2f}")
                         first_check = False
-                    conf_pos = screen.find_template(chk, equip_confirm_tpl, threshold=0.70)
+                    else:
+                        _score, conf_pos = _match_template(screen, chk, equip_confirm_tpl, 0.70)
                     if conf_pos:
                         cx = chk_mon["left"] + conf_pos[0]
                         cy = chk_mon["top"]  + conf_pos[1]
@@ -410,16 +415,18 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
                 input_ctrl.press_key("enter")
             time.sleep(0.1)
         else:
-            status_cb("⚠ 장비 일괄 판매 버튼 미감지 — 건너뜀")
+            status_cb("⚠ 장비 일괄 판매 버튼 미감지 — 판매 실패로 처리")
+            _exit_shop(input_ctrl, shop_exit_btn, status_cb)
+            return False
         if stopped():
-            return
+            return False
 
     # ── 3. 기타템 판매 여부 ──────────────────────────────────────────
     if not junk_sell_enabled or not has_templates:
         reason = "기타템 판매 미활성" if not junk_sell_enabled else "아이템 템플릿 없음"
         status_cb(f"판매 완료 ({reason})")
         _exit_shop(input_ctrl, shop_exit_btn, status_cb)
-        return
+        return True
 
     # ── 4. 기타탭 더블클릭 → 활성화 확인 ────────────────────────────
     if etc_tab:
@@ -535,3 +542,4 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> None:
 
     # ── 7. 상점 나가기 ───────────────────────────────────────────────
     _exit_shop(input_ctrl, shop_exit_btn, status_cb)
+    return not stopped()

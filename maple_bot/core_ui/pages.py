@@ -1,4 +1,4 @@
-# 6 카테고리 설정 페이지 — config 키를 폼 필드로 바인딩. shell이 카테고리별로 호출
+# 6 移댄뀒怨좊━ ?ㅼ젙 ?섏씠吏 ??config ?ㅻ? ???꾨뱶濡?諛붿씤?? shell??移댄뀒怨좊━蹂꾨줈 ?몄텧
 from __future__ import annotations
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton
@@ -7,6 +7,62 @@ from core_ui.theme import SPACING
 from core_ui.widgets import (
     CheckField, TextField, IntField, ComboField, FloatField, StatusField, SliderField,
 )
+
+
+def _capture_game_client(config, owner):
+    """설정된 게임창의 클라이언트 영역을 캡처해 BGR 이미지와 화면 원점을 반환한다."""
+    import time
+
+    import mss
+    import numpy as np
+    import win32gui
+    from PyQt6.QtWidgets import QApplication, QMessageBox
+
+    owner_hidden = False
+    try:
+        title = config.get("settings2", "game_window_title") or "MapleStory Worlds"
+        hwnd = win32gui.FindWindow(None, title)
+        if not hwnd:
+            QMessageBox.warning(owner, "게임창을 찾을 수 없음", f"게임창 제목이 '{title}'인지 확인해 주세요.")
+            return None
+
+        ox, oy = win32gui.ClientToScreen(hwnd, (0, 0))
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        width, height = int(right - left), int(bottom - top)
+        if width <= 0 or height <= 0:
+            QMessageBox.warning(owner, "게임창 영역 오류", "게임창 클라이언트 영역을 확인할 수 없습니다.")
+            return None
+
+        owner.hide()
+        owner_hidden = True
+        QApplication.processEvents()
+        win32gui.ShowWindow(hwnd, 9)
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        time.sleep(0.25)
+        region = {
+            "left": int(ox),
+            "top": int(oy),
+            "width": width,
+            "height": height,
+        }
+        with mss.mss() as sct:
+            image = np.asarray(sct.grab(region))[:, :, :3].copy()
+        return image, (int(ox), int(oy))
+    except Exception as exc:
+        QMessageBox.warning(owner, "게임창 캡처 실패", f"게임창 화면을 캡처하지 못했습니다.\n{exc}")
+        return None
+    finally:
+        if owner_hidden:
+            owner.show()
+            QApplication.processEvents()
+
+
+def _character_template_path(project_root):
+    """CharScanner가 실제로 로드하는 노란 캐릭터 마커 템플릿 경로를 반환한다."""
+    return project_root / "templates" / "player" / "y_p.png"
 
 
 def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
@@ -18,21 +74,21 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
     """
     btn = QPushButton("영역 지정"); btn.setMinimumWidth(78)
     btn.setObjectName("primary")
-    btn.setToolTip(f"{label} 영역을 스크린샷에서 드래그")
+    btn.setToolTip(f"{label} 영역을 스크린샷에서 드래그해 지정합니다.")
 
     def on_click():
         import mss as _mss
         import numpy as np
         from core_ui.shot_selector import ScreenshotRegionSelector
-        # 전체 주모니터 캡처
+        # ?꾩껜 二쇰え?덊꽣 罹≪쿂
         with _mss.mss() as sct:
             mon = sct.monitors[1]
-            raw = np.array(sct.grab(mon))[:, :, :3]   # BGRA→BGR
+            raw = np.array(sct.grab(mon))[:, :, :3]   # BGRA?묪GR
             origin = (mon["left"], mon["top"])
         dlg = ScreenshotRegionSelector(raw, src_origin=origin)
 
         def apply(x, y, w, h):
-            # 절대좌표로 저장 + 지정 시점 창 원점을 앵커로 기록(이후 창 이동량만 보정 → 안 밀림)
+            # ?덈?醫뚰몴濡????+ 吏???쒖젏 李??먯젏???듭빱濡?湲곕줉(?댄썑 李??대룞?됰쭔 蹂댁젙 ????諛由?
             if (config.get("coord_mode") or "relative") == "relative":
                 from core.config_manager import cached_window_origin
                 title = config.get("settings2", "game_window_title") or ""
@@ -57,7 +113,7 @@ def _make_bar_picker(config, bar_type: str, label: str) -> QPushButton:
     """게임창에서 HP/MP 바를 드래그해 게임창 기준 상대좌표로 저장한다."""
     btn = QPushButton(f"{label} 바 화면 캡처")
     btn.setObjectName("primary")
-    btn.setToolTip(f"게임 화면에서 {label} 게이지 영역을 드래그해 저장")
+    btn.setToolTip(f"게임 화면에서 {label} 게이지 영역을 드래그해 저장합니다.")
 
     def on_click():
         from PyQt6.QtWidgets import QMessageBox
@@ -122,11 +178,11 @@ def _make_bar_picker(config, bar_type: str, label: str) -> QPushButton:
             config.save()
             QMessageBox.information(
                 btn, f"{label} 바 저장",
-                f"{label} 바 영역을 게임창 기준 상대좌표로 저장했습니다.",
+                f"{label} 바 영역을 게임창 기준 상대 좌표로 저장했습니다.",
             )
 
         selector.region_selected.connect(apply)
-        selector.exec()
+        _run_character_capture_selector(selector)
 
     btn.clicked.connect(on_click)
     return btn
@@ -149,14 +205,14 @@ def _make_attack_box_picker(config, fields4, on_done=None) -> QPushButton:
             mon = sct.monitors[1]
             raw = np.array(sct.grab(mon))[:, :, :3]
             origin = (mon["left"], mon["top"])
-            anchor = (mon["width"] // 2, mon["height"] // 2)   # 화면 중앙=캐릭 기준
+            anchor = (mon["width"] // 2, mon["height"] // 2)   # ?붾㈃ 以묒븰=罹먮┃ 湲곗?
         xmn = int(config.get("attack", "atk_x_min", default=-35))
         xmx = int(config.get("attack", "atk_x_max", default=35))
         ymn = int(config.get("attack", "atk_y_min", default=-70))
         ymx = int(config.get("attack", "atk_y_max", default=70))
         init_rect = offsets_to_rect(xmn, xmx, ymn, ymx, anchor)
 
-        # 닉네임/몬스터 감지 → 오버레이 박스 (실제 뭐가 잡히는지 보면서 조정)
+        # ?됰꽕??紐ъ뒪??媛먯? ???ㅻ쾭?덉씠 諛뺤뒪 (?ㅼ젣 萸먭? ?≫엳?붿? 蹂대㈃??議곗젙)
         from core.sensing import monster_vision as _mv
         overlays = []
         name_path = config.get("attack", "name_template", default="")
@@ -169,9 +225,9 @@ def _make_attack_box_picker(config, fields4, on_done=None) -> QPushButton:
                     nh, nw = nt.shape[:2]
                     overlays.append((npos[0]-nw//2, npos[1]-nh//2, nw, nh,
                                      "#cba258", "닉네임"))
-                    name_anchor = npos   # 닉네임 위치를 실제 앵커로
+                    name_anchor = npos   # ?됰꽕???꾩튂瑜??ㅼ젣 ?듭빱濡?
                     init_rect = offsets_to_rect(xmn, xmx, ymn, ymx, name_anchor)
-        # 몬스터 (현재 공격박스 안)
+        # 紐ъ뒪??(?꾩옱 怨듦꺽諛뺤뒪 ??
         mon_tpls = {}
         mt = config.get("attack", "monster_template", default="")
         if mt:
@@ -190,7 +246,7 @@ def _make_attack_box_picker(config, fields4, on_done=None) -> QPushButton:
                                        overlays=overlays)
 
         def apply(x, y, w, h):
-            # 닉네임 감지됐으면 그 위치 기준, 아니면 화면중앙 기준 오프셋
+            # ?됰꽕??媛먯??먯쑝硫?洹??꾩튂 湲곗?, ?꾨땲硫??붾㈃以묒븰 湲곗? ?ㅽ봽??
             o = rect_to_offsets(x - origin[0], y - origin[1], w, h, name_anchor)
             for i, (key, val) in enumerate(zip(
                     ["atk_x_min", "atk_x_max", "atk_y_min", "atk_y_max"], o)):
@@ -214,7 +270,7 @@ def _make_template_capture(config, save_path, config_key, label: str,
     save_path: 저장할 png 경로(templates/...). config_key: 경로 저장할 config 키. on_done: 완료 콜백.
     """
     btn = QPushButton("캡처"); btn.setMinimumWidth(64)
-    btn.setToolTip(f"{label} 이미지를 스크린샷에서 드래그로 캡처")
+    btn.setToolTip(f"{label} 이미지를 스크린샷에서 드래그해 캡처합니다.")
 
     def on_click():
         import os
@@ -229,7 +285,7 @@ def _make_template_capture(config, save_path, config_key, label: str,
         dlg = ScreenshotRegionSelector(shot, src_origin=origin)
 
         def crop_save(x, y, w, h):
-            # 원본 절대좌표 → shot 내부 상대좌표
+            # ?먮낯 ?덈?醫뚰몴 ??shot ?대? ?곷?醫뚰몴
             rx, ry = x - origin[0], y - origin[1]
             crop = shot[ry:ry + h, rx:rx + w]
             if crop.size == 0:
@@ -268,7 +324,7 @@ def _page(title: str, desc: str, fields: list, buttons: list | None = None,
         v.addWidget(getattr(f, "row", f))
     ex = extras or []
     for i, w in enumerate(ex):
-        # fill_last면 마지막 extra에 stretch=1 부여(빈공간 채움), 나머지/일반 페이지는 0
+        # fill_last硫?留덉?留?extra??stretch=1 遺??鍮덇났媛?梨꾩?), ?섎㉧吏/?쇰컲 ?섏씠吏??0
         v.addWidget(w, 1 if (fill_last and i == len(ex) - 1) else 0)
     if not fill_last:
         v.addStretch(1)
@@ -280,7 +336,7 @@ def _page(title: str, desc: str, fields: list, buttons: list | None = None,
     return scroll
 
 
-# ── 6 카테고리 빌더 (config 실제 키 매핑) ────────────────────────────
+# ?? 6 移댄뀒怨좊━ 鍮뚮뜑 (config ?ㅼ젣 ??留ㅽ븨) ????????????????????????????
 def _make_current_position_checker(config) -> QWidget:
     """현재 미니맵에서 감지한 캐릭터 좌표를 픽셀/상대좌표로 보여주는 행."""
     row = QWidget()
@@ -387,16 +443,121 @@ def _make_character_color_controls(config) -> QWidget:
     v.addWidget(title)
     v.addWidget(desc)
 
-    controls = [
-        SliderField("색상 시작 H", config, ("minimap", "hsv_h_low"), lo=0, hi=179, default=20, is_int=True, label_w=120),
-        SliderField("색상 끝 H", config, ("minimap", "hsv_h_high"), lo=0, hi=179, default=40, is_int=True, label_w=120),
-        SliderField("채도 최소 S", config, ("minimap", "hsv_s_low"), lo=0, hi=255, default=100, is_int=True, label_w=120),
-        SliderField("밝기 최소 V", config, ("minimap", "hsv_v_low"), lo=0, hi=255, default=200, is_int=True, label_w=120),
-        SliderField("점 크기 최소", config, ("minimap", "char_area_min"), lo=1, hi=80, default=3, is_int=True, label_w=120),
-        SliderField("점 크기 최대", config, ("minimap", "char_area_max"), lo=10, hi=500, default=100, is_int=True, label_w=120),
-    ]
-    for field in controls:
+    fields = {
+        "h_low": SliderField("색상 시작 H", config, ("minimap", "hsv_h_low"), lo=0, hi=179, default=20, is_int=True, label_w=120),
+        "h_high": SliderField("색상 끝 H", config, ("minimap", "hsv_h_high"), lo=0, hi=179, default=40, is_int=True, label_w=120),
+        "s_low": SliderField("채도 최소 S", config, ("minimap", "hsv_s_low"), lo=0, hi=255, default=100, is_int=True, label_w=120),
+        "v_low": SliderField("밝기 최소 V", config, ("minimap", "hsv_v_low"), lo=0, hi=255, default=200, is_int=True, label_w=120),
+        "area_min": SliderField("점 크기 최소", config, ("minimap", "char_area_min"), lo=1, hi=80, default=3, is_int=True, label_w=120),
+        "area_max": SliderField("점 크기 최대", config, ("minimap", "char_area_max"), lo=10, hi=500, default=160, is_int=True, label_w=120),
+    }
+    for field in fields.values():
         v.addWidget(field.row)
+
+    capture_row = QHBoxLayout()
+    def _run_character_capture_selector(selector):
+        """영역 선택 신호를 기존 동기식 캡처 처리와 연결한다."""
+        from PyQt6.QtCore import QEventLoop
+
+        loop = QEventLoop()
+
+        def apply_selection(x, y, width, height):
+            selector.selected_rect = (x, y, width, height)
+            loop.quit()
+
+        selector.region_selected.connect(apply_selection)
+        selector.show()
+        loop.exec()
+    color_button = QPushButton("기준색 캡처")
+    template_button = QPushButton("캐릭터 템플릿 캡처")
+    capture_status = QLabel("게임 화면에서 캐릭터 마커를 작게 드래그해 선택하세요.")
+    capture_status.setObjectName("subtle")
+    capture_status.setWordWrap(True)
+    capture_row.addWidget(color_button)
+    capture_row.addWidget(template_button)
+    capture_row.addWidget(capture_status, 1)
+    v.addLayout(capture_row)
+
+    def _set_slider(field, value: int) -> bool:
+        for name in ("slider", "control", "widget", "input"):
+            control = getattr(field, name, None)
+            if control is not None and hasattr(control, "setValue"):
+                control.setValue(int(value))
+                return True
+        for control in field.row.findChildren(QSlider):
+            control.setValue(int(value))
+            return True
+        return False
+
+    def _capture_selection():
+        from core_ui.shot_selector import ScreenshotRegionSelector
+
+        captured = _capture_game_client(config, box.window())
+        if captured is None:
+            return None
+        image, origin = captured
+        selector = ScreenshotRegionSelector(image, src_origin=origin, parent=box.window())
+        selected = {}
+
+        def remember_selection(x, y, width, height):
+            selected["value"] = (x, y, width, height)
+
+        selector.region_selected.connect(remember_selection)
+        selector.exec()
+        if "value" not in selected:
+            return None
+
+        x, y, width, height = selected["value"]
+        x, y, width, height = map(int, (x, y, width, height))
+        x -= origin[0]
+        y -= origin[1]
+        x = max(0, min(x, image.shape[1] - 1))
+        y = max(0, min(y, image.shape[0] - 1))
+        width = max(1, min(width, image.shape[1] - x))
+        height = max(1, min(height, image.shape[0] - y))
+        return image[y:y + height, x:x + width].copy()
+
+    def capture_reference_color():
+        import cv2
+        import numpy as np
+
+        crop = _capture_selection()
+        if crop is None or not crop.size:
+            capture_status.setText("기준색 선택을 취소했습니다.")
+            return
+        bgr = cv2.cvtColor(crop, cv2.COLOR_BGRA2BGR) if crop.shape[2] == 4 else crop[:, :, :3]
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        h, s, value = (int(round(v)) for v in np.median(hsv.reshape(-1, 3), axis=0))
+        h_low, h_high = max(0, h - 10), min(179, h + 10)
+        s_low, v_low = max(0, s - 40), max(0, value - 40)
+        _set_slider(fields["h_low"], h_low)
+        _set_slider(fields["h_high"], h_high)
+        _set_slider(fields["s_low"], s_low)
+        _set_slider(fields["v_low"], v_low)
+        capture_status.setText(
+            f"기준색 HSV({h}, {s}, {value})를 적용했습니다. "
+            f"범위 H {h_low}~{h_high}, S {s_low} 이상, V {v_low} 이상."
+        )
+
+    def capture_character_template():
+        import cv2
+        from pathlib import Path
+
+        crop = _capture_selection()
+        if crop is None or not crop.size:
+            capture_status.setText("캐릭터 템플릿 선택을 취소했습니다.")
+            return
+        project_root = Path(__file__).resolve().parents[1]
+        template_path = _character_template_path(project_root)
+        template_dir = template_path.parent
+        template_dir.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(template_path), crop):
+            capture_status.setText("캐릭터 템플릿 저장에 실패했습니다.")
+            return
+        capture_status.setText(f"캐릭터 템플릿을 저장했습니다. {template_path.name}")
+
+    color_button.clicked.connect(capture_reference_color)
+    template_button.clicked.connect(capture_character_template)
     return box
 
 
@@ -405,7 +566,7 @@ def build_pages(config) -> list[QWidget]:
     c = config
     pages = []
 
-    # 1. 연결·인식 — 영역/캡처는 드래그 후 색상(●설정됨)으로 완료 확인 (숫자 표시 안 함)
+    # 1. ?곌껐쨌?몄떇 ???곸뿭/罹≪쿂???쒕옒洹????됱긽(?륁꽕?뺣맖)?쇰줈 ?꾨즺 ?뺤씤 (?レ옄 ?쒖떆 ????
     minimap_picker = _make_region_picker(
         c, [("minimap", "region_x"), ("minimap", "region_y"),
             ("minimap", "width"), ("minimap", "height")],
@@ -417,14 +578,14 @@ def build_pages(config) -> list[QWidget]:
         c, [("attack", "hunt_area", "x"), ("attack", "hunt_area", "y"),
             ("attack", "hunt_area", "w"), ("attack", "hunt_area", "h")],
         None, "사냥", on_done=lambda: ha_status.refresh())
-    # 사냥 영역 옆에 색 허용오차 슬라이더(정수)
+    # ?щ깷 ?곸뿭 ?놁뿉 ???덉슜?ㅼ감 ?щ씪?대뜑(?뺤닔)
     tol_slider = SliderField("색 허용오차", c, ("minimap", "tolerance"),
                              lo=0, hi=255, default=30, is_int=True, label_w=74)
     char_controls = _make_character_color_controls(c)
     ha_status = StatusField("사냥 영역",
                             lambda: int(c.get("attack", "hunt_area", "w", default=0)) > 0,
                             [hunt_area_picker], extra=tol_slider.row)
-    # 몬스터 캡처 옆에 몬스터 임계값 슬라이더
+    # 紐ъ뒪??罹≪쿂 ?놁뿉 紐ъ뒪???꾧퀎媛??щ씪?대뜑
     monster_cap = _make_template_capture(
         c, "templates/monster_capture.png", ("attack", "monster_template"), "몬스터",
         on_done=lambda: mon_status.refresh())
@@ -432,7 +593,7 @@ def build_pages(config) -> list[QWidget]:
     mon_status = StatusField("몬스터 캡처",
                              lambda: bool(c.get("attack", "monster_template", default="")),
                              [monster_cap], extra=mon_thr.row)
-    # 닉네임 캡처 옆에 닉네임 임계값 슬라이더
+    # ?됰꽕??罹≪쿂 ?놁뿉 ?됰꽕???꾧퀎媛??щ씪?대뜑
     name_cap = _make_template_capture(
         c, "templates/name_tag.png", ("attack", "name_template"), "닉네임",
         on_done=lambda: name_status.refresh())
@@ -446,18 +607,26 @@ def build_pages(config) -> list[QWidget]:
         mm_status, char_controls, ha_status, mon_status, name_status,
     ]))
 
-    # 2. 동선·이동 — 좌표 동선은 블록 빌더로 (이동/공격/사다리 순차)
+    # 2. ?숈꽑쨌?대룞 ??醫뚰몴 ?숈꽑? 釉붾줉 鍮뚮뜑濡?(?대룞/怨듦꺽/?щ떎由??쒖감)
     from core_ui.block_editor import BlockEditor
     from PyQt6.QtWidgets import QLabel as _QLabel
     route_lbl = _QLabel("좌표 동선 블록 (위→아래 순서 실행)")
     route_lbl.setObjectName("subtle")
     block_editor = BlockEditor(c, ("floor_hunt", "route_steps"))
-    # 미니맵 편집 캔버스(RouteCanvas) + 블록타입 툴바. 캡처/모니터 폭 실패 시 캔버스 생략
+    # 誘몃땲留??몄쭛 罹붾쾭??RouteCanvas) + 釉붾줉????대컮. 罹≪쿂/紐⑤땲?????ㅽ뙣 ??罹붾쾭???앸왂
     hunt_name_field = TextField("현재 사냥터", c, ("hunt_grounds", "active"))
     current_position_checker = _make_current_position_checker(c)
     nav_extras = []
     from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
-    nav_extras.append(HuntGroundPresetWidget(c, name_field=hunt_name_field))
+    from core_ui.rednose2_coordinate_widget import Rednose2CoordinateWidget
+    hunt_ground_preset = HuntGroundPresetWidget(c, name_field=hunt_name_field)
+    rednose2_settings = Rednose2CoordinateWidget(c)
+    hunt_ground_preset.preset_loaded.connect(rednose2_settings.set_hunt_ground)
+    hunt_name_field.widget.editingFinished.connect(
+        lambda: rednose2_settings.set_hunt_ground(hunt_name_field.widget.text())
+    )
+    nav_extras.append(hunt_ground_preset)
+    nav_extras.append(rednose2_settings)
     try:
         import mss as _mss
         from PyQt6.QtWidgets import QWidget as _QWidget, QHBoxLayout as _QHBox, \
@@ -468,8 +637,8 @@ def build_pages(config) -> list[QWidget]:
             _sw = int(_s.monitors[1]["width"])
         route_canvas = RouteCanvas(c, ScreenReader().capture, screen_w=_sw,
                                    on_route_changed=block_editor.reload)
-        block_editor._on_change = route_canvas.sync_unplaced   # 리스트 변경→캔버스 노출/갱신
-        # 블록타입 툴바 (선택 안 함 기본)
+        block_editor._on_change = route_canvas.sync_unplaced   # 由ъ뒪??蹂寃썩넂罹붾쾭???몄텧/媛깆떊
+        # 釉붾줉????대컮 (?좏깮 ????湲곕낯)
         bar = _QWidget(); bl = _QHBox(bar)
         bl.setContentsMargins(0, 0, 0, 0)
         grp = _QBtnGroup(bar); grp.setExclusive(True)
@@ -481,7 +650,7 @@ def build_pages(config) -> list[QWidget]:
             grp.addButton(btn); bl.addWidget(btn)
             if typ is None:
                 btn.setChecked(True); none_btn = btn
-        # 블록 1개 배치하면 캔버스가 _active_type을 None으로 되돌리므로, 툴바도 '선택 안 함'으로
+        # 釉붾줉 1媛?諛곗튂?섎㈃ 罹붾쾭?ㅺ? _active_type??None?쇰줈 ?섎룎由щ?濡? ?대컮??'?좏깮 ?????쇰줈
         route_canvas.on_type_consumed = lambda b=none_btn: b.setChecked(True)
         bl.addStretch()
         nav_extras += [bar, route_canvas]
@@ -496,7 +665,7 @@ def build_pages(config) -> list[QWidget]:
                    labels={"relative": "게임창 기준(상대)", "absolute": "화면 기준(절대)"}),
     ], extras=nav_extras, fill_last=True))
 
-    # 3. 전투 — 공격범위 박스는 드래그 후 색상(●설정됨)으로 확인 (숫자 표시 안 함)
+    # 3. ?꾪닾 ??怨듦꺽踰붿쐞 諛뺤뒪???쒕옒洹????됱긽(?륁꽕?뺣맖)?쇰줈 ?뺤씤 (?レ옄 ?쒖떆 ????
     atk_picker = _make_attack_box_picker(c, None, on_done=lambda: atk_status.refresh())
     atk_status = StatusField(
         "공격 범위 박스",
@@ -504,7 +673,7 @@ def build_pages(config) -> list[QWidget]:
         [atk_picker])
     from core_ui.buff_editor import BuffEditor
     buff_editor = BuffEditor(c, ("attack", "normal_buffs"))
-    # HP/MP 실시간 % 미리보기 (A Detector 고정 상대좌표). 게임 없거나 실패 시 생략
+    # HP/MP ?ㅼ떆媛?% 誘몃━蹂닿린 (A Detector 怨좎젙 ?곷?醫뚰몴). 寃뚯엫 ?녾굅???ㅽ뙣 ???앸왂
     from core_ui.attack_sequence_editor import AttackSequenceEditor
     attack_sequence_editor = AttackSequenceEditor(c)
     combat_extras = []
@@ -538,7 +707,7 @@ def build_pages(config) -> list[QWidget]:
         IntField("펫 먹이 간격(분)", c, ("recovery", "pet_food", "interval_min"), 1, 120, default=10),
     ], extras=combat_extras))
 
-    # 4. 안전·안티밴 — 거탐 알림(소리+텔레그램) 통합
+    # 4. ?덉쟾쨌?덊떚諛???嫄고깘 ?뚮┝(?뚮━+?붾젅洹몃옩) ?듯빀
     anti_mob_widget = None
     try:
         from core_ui.anti_mob_profile_widget import AntiMobProfileWidget
@@ -550,12 +719,12 @@ def build_pages(config) -> list[QWidget]:
         CheckField("거탐 알림 (소리+텔레그램)", c, ("settings1", "lie_detector", "alert_enabled")),
         TextField("텔레그램 토큰", c, ("settings1", "lie_detector", "tg_token")),
         TextField("텔레그램 챗ID", c, ("settings1", "lie_detector", "tg_chat_id")),
-        CheckField("투명도형 자동풀이", c, ("settings1", "transparent_shape", "enabled")),
+        CheckField("투명도형 자동탐지", c, ("settings1", "transparent_shape", "enabled")),
         CheckField("다른 유저 감지", c, ("settings1", "user_detected", "enabled")),
         CheckField("방지몹 해제", c, ("anti_mob", "enabled")),
     ], extras=[anti_mob_widget] if anti_mob_widget is not None else None))
 
-    # 5. 자동화·운영 — 맵이탈 감지영역은 드래그 후 색상으로 확인
+    # 5. ?먮룞?붋룹슫????留듭씠??媛먯??곸뿭? ?쒕옒洹????됱긽?쇰줈 ?뺤씤
     mapexit_picker = _make_region_picker(
         c, [("map_exit", "region_x"), ("map_exit", "region_y"),
             ("map_exit", "width"), ("map_exit", "height")],
@@ -563,11 +732,29 @@ def build_pages(config) -> list[QWidget]:
     mapexit_status = StatusField(
         "맵이탈 영역", lambda: int(c.get("map_exit", "width", default=0)) > 0,
         [mapexit_picker])
-    pages.append(_page("자동화·운영", "자동판매·마을귀환·예약종료·픽업·텔레그램·찰리중사", [
+    auto_sell_manual_row = QWidget()
+    auto_sell_manual_layout = QHBoxLayout(auto_sell_manual_row)
+    auto_sell_manual_layout.setContentsMargins(0, 0, 0, 0)
+    auto_sell_manual_layout.setSpacing(SPACING["sm"])
+    auto_sell_manual_label = QLabel("수동 자동판매")
+    auto_sell_manual_label.setFixedWidth(130)
+    auto_sell_manual_label.setObjectName("subtle")
+    auto_sell_manual_layout.addWidget(auto_sell_manual_label)
+    auto_sell_run_btn = QPushButton("판매 실행")
+    auto_sell_run_btn.setObjectName("autoSellRunButton")
+    auto_sell_run_btn.setMinimumWidth(96)
+    auto_sell_stop_btn = QPushButton("판매 중단")
+    auto_sell_stop_btn.setObjectName("autoSellStopButton")
+    auto_sell_stop_btn.setMinimumWidth(96)
+    auto_sell_manual_layout.addWidget(auto_sell_run_btn)
+    auto_sell_manual_layout.addWidget(auto_sell_stop_btn)
+    auto_sell_manual_layout.addStretch(1)
+    pages.append(_page("자동화·운영", "자동판매·마을귀환·예약종료·픽업·텔레그램·찰리교환", [
         CheckField("자동판매 사용", c, ("settings2", "junk_sell", "auto_sell_enabled")),
         IntField("자동판매 주기(분)", c, ("settings2", "junk_sell", "auto_sell_interval_min"), 1, 240, default=10),
         CheckField("시작 시 자동판매", c, ("settings2", "junk_sell", "sell_on_start")),
         CheckField("기타템 판매", c, ("settings2", "junk_sell", "junk_sell_enabled")),
+        auto_sell_manual_row,
         CheckField("맵 이탈 감지", c, ("map_exit", "enabled")),
         mapexit_status,
         CheckField("긴급 마을귀환", c, ("town_scroll", "enabled")),
@@ -578,8 +765,8 @@ def build_pages(config) -> list[QWidget]:
         TextField("픽업 키", c, ("pickup_timer", "pickup_key")),
     ]))
 
-    # 6. 시스템
-    pages.append(_page("시스템", "라이선스·업데이트·저사양/원격·입력백엔드·YOLO캡처", [
+    # 6. ?쒖뒪??
+    pages.append(_page("시스템", "라이선스·업데이트·리소스·입력 백엔드·YOLO 캡처", [
         CheckField("공격 모듈", c, ("modules", "attack"), default=True),
         CheckField("이동 모듈", c, ("modules", "move"), default=True),
         CheckField("물약 모듈", c, ("modules", "potion"), default=True),

@@ -1,15 +1,16 @@
-# BlockRunner — Block 시퀀스를 실행해 목표 X로 이동. C CoordScriptRunner 방식 + Humanizer 경유
-# 모든 입력은 Humanizer(M1)를 통과한다(헌법). runner는 백엔드를 직접 들지 않는다.
+# BlockRunner - Block 시퀀스를 실행해 목표 X로 이동한다.
+# 방향키는 RouteInputOwner가 유지하고 단발 입력은 입력 백엔드로 직접 전달한다.
 from __future__ import annotations
 
 import time
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from core.navigation.block import Block
+from core.navigation.route_input_owner import RouteInputOwner
 from core.humanize.intent import Intent
-from core.humanize.timing import down_5
+from core.humanize.priority_input_executor import PriorityInputExecutor
 
 # C CoordScriptRunner/routine_runner 검증 상수
 TOLERANCE = 3           # 도착 판정 픽셀 (이 이내면 도달)
@@ -49,7 +50,7 @@ class BlockRunner:
     stop_fn:  callable() -> bool  True면 무한왕복/등반 루프 중단(정지/안전)
     """
 
-    def __init__(self, humanizer, pos_fn: Callable[[], tuple[int, int]],
+    def __init__(self, input_backend, pos_fn: Callable[[], tuple[int, int]],
                  jump_key: str = "alt", teleport_key: str = "space",
                  jump_while_move: bool = False,
                  sleep_fn: Callable[[float], None] | None = None,
@@ -61,8 +62,11 @@ class BlockRunner:
                  on_segment_exit: Callable[[Block], None] | None = None,
                  log_fn: Callable[[str], None] | None = None,
                  position_sample_fn=None, position_refresh_fn=None, monster_present_fn=None,
-                 ladder_motion_fn=None, ladder_profile: dict | None = None):
-        self._h = humanizer
+                 ladder_motion_fn=None, ladder_profile: dict | None = None,
+                 minimap_size_fn: Callable[[], tuple[int, int]] | None = None):
+        self._backend = input_backend
+        self._route_inputs = RouteInputOwner(input_backend)
+        self._priority_inputs = PriorityInputExecutor(input_backend, self._route_inputs, sleep_fn=sleep_fn)
         self._pos = pos_fn
         self._jump_key = jump_key
         self._jump_while_move = jump_while_move   # 걷기 동안 점프키 홀드(바니합)
@@ -79,6 +83,7 @@ class BlockRunner:
         self._position_refresh = position_refresh_fn
         self._monster_present = monster_present_fn or (lambda: False)
         self._ladder_motion = ladder_motion_fn or (lambda active: None)
+        self._minimap_size = minimap_size_fn
         profile = ladder_profile or {}
         self._ladder_profile = LadderProfile(
             launch_distance_right=float(profile.get("launch_distance_right", 7.0)),
@@ -93,7 +98,8 @@ class BlockRunner:
         )
         from core.navigation.ladder_controller import LadderController, LadderControllerConfig
         self._ladder_controller = LadderController(
-            humanizer=self._h,
+            input_backend=self._backend,
+            direction_owner=self._route_inputs,
             position_sample_fn=self._position_sample,
             position_fn=self._pos,
             finish_climb_fn=self._finish_climb,
@@ -123,7 +129,7 @@ class BlockRunner:
 
     def release_inputs(self) -> None:
         """유지 중인 모든 입력키 해제(정지/이탈 시 키 눌림 방지)."""
-        self._h.release_all()
+        self._route_inputs.release_all()
 
     def ladder_debug_state(self):
         return self._ladder_controller.debug_state() or (
@@ -137,13 +143,19 @@ class BlockRunner:
         if position is None or seen_at is None:
             return None, None
         age = max(0.0, time.monotonic() - seen_at)
+        max_age = max(0.0, self._ladder_profile.position_max_age_sec + stale_grace_sec)
+        if age > max_age:
+            return None, age
         return position, age
 
+    def _get_pos(self):
+        """좌표 샘플이 있으면 허용 시간 안의 최신 위치만 반환한다."""
+        position, _age = self._fresh_position()
+        return position
+
     def refresh_position(self):
-        """즉시 캡처로 최신 좌표를 한 번 갱신해 반환한다."""
-        if self._position_refresh is None:
-            return self._fresh_position()
-        return self._position_refresh()
+        """CharScanner가 저장한 최신 좌표를 추가 캡처 없이 반환한다."""
+        return self._fresh_position()
 
     def _log_once(self, msg: str) -> None:
         """직전과 같은 메시지는 생략(루트 반복 중 로그 폭주 방지)."""
@@ -172,6 +184,32 @@ class BlockRunner:
     def _jsleep(self, base: float) -> None:
         """좌표 확인과 내부 상태 대기는 설정된 고정값을 그대로 사용한다."""
         self._sleep(max(0.0, float(base)))
+
+    def _resolve_block_ratios(self, block: Block) -> Block:
+        """저장된 미니맵 비율 좌표를 현재 미니맵 픽셀 좌표로 환산한다."""
+        if self._minimap_size is None:
+            return block
+        try:
+            width, height = self._minimap_size()
+            width, height = int(width), int(height)
+        except Exception:
+            return block
+        if width <= 0 or height <= 0:
+            return block
+
+        values = {}
+        for key in (
+            "target_x", "start_x", "end_x", "pos_x", "ladder_x",
+            "rand_margin", "jump_offset",
+        ):
+            ratio = getattr(block, f"{key}_ratio", None)
+            if ratio is not None:
+                values[key] = int(round(float(ratio) * width))
+        for key in ("pos_y", "y_top", "y_bot"):
+            ratio = getattr(block, f"{key}_ratio", None)
+            if ratio is not None:
+                values[key] = int(round(float(ratio) * height))
+        return replace(block, **values) if values else block
 
     def run_route(self, blocks: list[Block], max_steps: int = 200) -> bool:
         """블록 리스트를 순서대로 실행. 모두 성공하면 True."""
@@ -225,6 +263,7 @@ class BlockRunner:
     def run_block(self, block: Block, max_steps: int = 200,
                   arrival_tolerance: float | None = None,
                   interrupt_fn: Callable[[], bool] | None = None) -> bool:
+        block = self._resolve_block_ratios(block)
         if self._on_seg_enter is not None:
             self._on_seg_enter(block)
         self._log_once(f"▶ {self._desc(block)}")
@@ -322,9 +361,9 @@ class BlockRunner:
                      and block.move_type != "teleport")
 
         def _stop_move_keys():
-            self._h.release_dir()
+            self._route_inputs.release_direction()
             if jump_hold:
-                self._h.release(self._jump_key)
+                self._route_inputs.release_action(self._jump_key)
 
         best = None
         no_progress = 0
@@ -391,12 +430,12 @@ class BlockRunner:
 
             # 좌우 이동키는 '한 번 누르고 계속 유지'(C _walk_to_x). 방향이 바뀌면
             # hold_dir가 기존 키를 떼고 새 키를 누른다. 도착 전까진 떼지 않는다.
-            self._h.hold_dir(direction)
+            self._route_inputs.hold_direction(direction)
             if jump_hold:
-                self._h.hold(self._jump_key)   # 걷는 동안 점프키도 누른 채 유지
+                self._route_inputs.hold_action(self._jump_key)   # 걷는 동안 점프키도 누른 채 유지
             if use_tele:
                 # 방향 유지한 채 텔포 키 (C _teleport_to_x)
-                self._h.perform(Intent(action="key", key=self._tele_key, base_hold_sec=0.05))
+                self._route_inputs.press_action(self._tele_key, 0.05)
             # 다음 위치 갱신을 기다린다 — 안 쉬면 스캐너(≈0.05s)보다 빨리 읽어
             # 위치가 안 변한 것처럼 보여 거짓 '멈춤'이 된다(시작 시 좌표 미수신 포함).
             self._jsleep(self._poll)
@@ -408,7 +447,7 @@ class BlockRunner:
         down: 현재 위치에서 바로 아래점프 — ladder_x로 이동 안 함(사용자 요청)."""
         x, y = self._pos()
         if x is None or y is None:
-            self._h.release_all()
+            self._route_inputs.release_all()
             return False   # 좌표 인식 실패 — 스킵
         if block.ladder_dir == "down":
             return self._descend_ladder(
@@ -423,19 +462,19 @@ class BlockRunner:
         while not self._stop():
             attempt += 1
             if self._stop():
-                self._h.release_all(); return False
+                self._route_inputs.release_all(); return False
             # 이미 위층(y_top)에 도달했으면 등반 완료 — 절대 아래로 복귀시키지 않는다.
             # (사다리 블록의 '목표 층'은 아래층이라, 정점 도달 후 복귀가 발동해 다시 내려가던 버그)
             _x, y0 = self._pos()
             if y0 is not None and y0 <= block.y_top + Y_ARRIVE_TOL:
-                self._h.release_all()
+                self._route_inputs.release_all()
                 self._log_once("✓ 사다리 등반 완료(정점 도달)")
                 return True
             # 아래로 떨어졌으면(몬스터 피격 등) 사다리 바닥층으로 복귀 후 재등반.
             self._recover_if_needed(block, max_steps)
             x, y = self._pos()
             if x is None or y is None:
-                self._h.release_all(); return False
+                self._route_inputs.release_all(); return False
             side = self._grab_side(block, x)   # 잡기·발판확인에 쓸 한 방향
             already_grabbed = (
                 y <= block.y_bot - 4
@@ -443,8 +482,8 @@ class BlockRunner:
                 and abs(x - block.ladder_x) <= LADDER_X_TOL
             )
             if already_grabbed:
-                self._h.release_dir()
-                self._h.hold("up")
+                self._route_inputs.release_direction()
+                self._route_inputs.hold_action("up")
                 self._log_once(
                     f"사다리 재시도 취소: 이미 잡은 상태 "
                     f"(x={x}, y={y}, X 오차={abs(x - block.ladder_x)}px) → Up 등반 계속"
@@ -466,7 +505,7 @@ class BlockRunner:
             if ok:
                 self._log_once("✓ 사다리 등반 완료")
                 return True
-            self._h.release_all()
+            self._route_inputs.release_all()
             self._log_once(f"↻ 사다리 못 잡음 → 재시도 {attempt}/{MAX_GRAB_RETRY}")
             self._jsleep(0.2)
         self._log_once(
@@ -479,7 +518,7 @@ class BlockRunner:
         if gs in ("left", "right"):
             return gs
         if gs == "random":
-            return self._h.random_side()
+            return random.choice(("left", "right"))
         return "left" if block.ladder_x < char_x else "right"   # auto
 
     def _climb_loop(self, y_top: int, max_steps: int) -> bool:
@@ -512,7 +551,7 @@ class BlockRunner:
         사다리에서 벗어나면(=발판 위) True. 로프 매달림이면 x 안 변함 → False(재시도).
         ↑를 떼지 않는다 — 좌우 이동 확인이 끝날 때까지 ↑ 유지(사용자 요청; ↑+좌우 동시 가능).
         한 방향만 써서 좌우 왔다갔다(이상한 움직임) 없음."""
-        self._h.hold_dir(confirm_dir)    # ↑ 유지한 상태에서 좌우 한 방향 추가
+        self._route_inputs.hold_direction(confirm_dir)    # ↑ 유지한 상태에서 좌우 한 방향 추가
         try:
             for _ in range(CONFIRM_MOVE_POLLS):
                 if self._stop():
@@ -523,19 +562,19 @@ class BlockRunner:
                     return True           # 한 방향으로 이동됨 = 발판 위 = 등반 완료
             return False                  # 안 움직임 = 아직 로프 → 미완료(재시도)
         finally:
-            self._h.release_dir()
+            self._route_inputs.release_direction()
 
     def _finish_climb(self, ladder_x: int, y_top: int, max_steps: int, confirm_dir: str) -> bool:
         """↑ 등반 → 정점 후 ↑ 더(dismount) → ↑ 유지한 채 한 방향 이동으로 발판 확인 → 완료.
         ↑는 좌우 이동 확인이 끝날 때까지 계속 유지된다(사용자 요청)."""
-        self._h.hold("up")
+        self._route_inputs.hold_action("up")
         try:
             if not self._climb_loop(y_top, max_steps):
                 return False
             self._jsleep(LADDER_TOP_SETTLE_SEC)   # 정점에서 ↑ 더 눌러 발판으로 올라섬
             return self._confirm_on_platform(ladder_x, confirm_dir, max_steps)
         finally:
-            self._h.release("up")
+            self._route_inputs.release_action("up")
 
     def _climb_hold_until(self, ladder_x: int, y_top: int, max_steps: int,
                           confirm_dir: str) -> bool:
@@ -560,7 +599,7 @@ class BlockRunner:
         previous_x = None
         for _ in range(max_steps):
             if self._stop():
-                self._h.release_all()
+                self._route_inputs.release_all()
                 return False
 
             x, _y = self._pos()
@@ -583,30 +622,30 @@ class BlockRunner:
                 break
 
             move_dir = "right" if approach_x > x else "left"
-            self._h.hold_dir(move_dir)
+            self._route_inputs.hold_direction(move_dir)
             previous_x = x
             self._jsleep(self._poll)
 
-        self._h.release_dir()
+        self._route_inputs.release_direction()
         if not reached:
-            self._h.release_all()
+            self._route_inputs.release_all()
             return False
         x, _y = self._pos()
         if x is None:
-            self._h.release_all()
+            self._route_inputs.release_all()
             return False
         jump_dir = "right" if ladder_x > x else "left"
-        self._h.hold_dir(jump_dir)
+        self._route_inputs.hold_direction(jump_dir)
         # 사다리 쪽으로 점프(방향 유지=모멘텀) → ↑ 매달림 → 방향키 해제
-        self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
+        self._route_inputs.press_action(self._jump_key, 0.05)
         self._jsleep(JUMP_TO_UP_SEC)    # 점프 직후 빠르게 ↑로 전환
-        self._h.hold("up")
+        self._route_inputs.hold_action("up")
         direction_hold = min(0.08, LADDER_HANG_SEC)
         self._jsleep(direction_hold)
-        self._h.release_dir()
+        self._route_inputs.release_direction()
         if LADDER_HANG_SEC > direction_hold:
             self._jsleep(LADDER_HANG_SEC - direction_hold)
-        self._h.release("up")           # 점프잡기 안정화 ↑ 해제 후 _finish_climb이 다시 등반
+        self._route_inputs.release_action("up")           # 점프잡기 안정화 ↑ 해제 후 _finish_climb이 다시 등반
         # y_top까지 등반 + 발판 확인(side 한 방향 이동돼야 완료). 미확인이면 False로 재시도 유도
         return self._finish_climb(ladder_x, y_top, max_steps, jump_dir)
 
@@ -618,20 +657,20 @@ class BlockRunner:
             self._ladder_motion(True)
             attack_paused = True
             self._log_once("사다리 판정 시작: 공격 스레드 중지")
-            right_launch_distance = down_5(profile.launch_distance_right)
-            left_launch_distance = down_5(profile.launch_distance_left)
+            right_launch_distance = profile.launch_distance_right
+            left_launch_distance = profile.launch_distance_left
             approach_x = None
             previous_x = None
             launch_sample = None
             jump_dir = None
-            approach_direction = self._h.held_dir()
+            approach_direction = self._route_inputs.direction
             for _ in range(max_steps):
                 if self._stop():
-                    self._h.release_all()
+                    self._route_inputs.release_all()
                     return False
                 sample, age = self._fresh_position()
                 if sample is None:
-                    self._h.release_dir()
+                    self._route_inputs.release_direction()
                     self._ladder_debug = {"phase": "APPROACH", "ladder_x": ladder_x, "stale_age": age}
                     self._log_once("사다리 점프 대기: 캐릭터 좌표 없음")
                     self._jsleep(self._poll)
@@ -653,7 +692,7 @@ class BlockRunner:
                                 if approach_direction in ("left", "right")
                                 else "right"
                             )
-                        self._h.hold_dir(jump_dir)
+                        self._route_inputs.hold_direction(jump_dir)
                         launch_sample = (x, y)
                         self._ladder_debug = {
                             "phase": "LAUNCH", "ladder_x": ladder_x,
@@ -686,7 +725,7 @@ class BlockRunner:
                             if approach_direction in ("left", "right")
                             else "right"
                         )
-                    self._h.hold_dir(jump_dir)
+                    self._route_inputs.hold_direction(jump_dir)
                     launch_sample = (x, y)
                     self._ladder_debug = {
                         "phase": "LAUNCH", "ladder_x": ladder_x, "character_x": x,
@@ -711,7 +750,7 @@ class BlockRunner:
                     error = approach_x - x
 
                 approach_direction = "right" if error > 0 else "left"
-                self._h.hold_dir(approach_direction)
+                self._route_inputs.hold_direction(approach_direction)
                 self._ladder_debug = {
                     "phase": "APPROACH", "ladder_x": ladder_x, "character_x": x,
                     "character_y": y, "target_x": approach_x, "error": error,
@@ -719,18 +758,18 @@ class BlockRunner:
                 previous_x = x
                 self._jsleep(self._poll)
             else:
-                self._h.release_all()
+                self._route_inputs.release_all()
                 return False
 
             if launch_sample is None or jump_dir is None:
-                self._h.release_all()
+                self._route_inputs.release_all()
                 return False
             x, start_y = launch_sample
             self._ladder_debug = {
                 "phase": "JUMP_GRAB", "ladder_x": ladder_x,
                 "character_x": x, "character_y": start_y,
             }
-            self._h.hold_dir(jump_dir)
+            self._route_inputs.hold_direction(jump_dir)
             jump_requested_at = time.monotonic()
             input_events = {}
 
@@ -749,8 +788,8 @@ class BlockRunner:
             trajectory = []
             last_position_seen_at = None
             self._log_once(f"[사다리진단] 점프 요청 t=0.0000초, Y={start_y}")
-            up_target = down_5(profile.up_delay_sec)
-            sequence = self._h.perform_ladder_jump(
+            up_target = profile.up_delay_sec
+            sequence = self._priority_inputs.perform_ladder_jump(
                 jump_key=self._jump_key,
                 jump_hold_sec=profile.jump_hold_sec,
                 up_delay_sec=up_target,
@@ -782,7 +821,7 @@ class BlockRunner:
                 f"점프 시작 후 위키 목표 {up_target:.4f}초"
             )
             if self._stop():
-                self._h.release_all()
+                self._route_inputs.release_all()
                 return False
             up_sample, up_age = self._fresh_position()
             up_y = None
@@ -807,7 +846,7 @@ class BlockRunner:
             polls = max(2, int(profile.grab_confirm_sec / max(self._poll, 0.001)))
             for _ in range(polls):
                 if self._stop():
-                    self._h.release_all()
+                    self._route_inputs.release_all()
                     return False
                 self._jsleep(self._poll)
                 sample, _age = self._fresh_position()
@@ -835,8 +874,8 @@ class BlockRunner:
                             f"{elapsed_after_jump:.4f}초 동안 Y={start_y}→{observed_min_y}. "
                             "실제 점프 여부는 확정하지 않고 재시도"
                         )
-                        self._h.release("up")
-                        self._h.release_dir()
+                        self._route_inputs.release_action("up")
+                        self._route_inputs.release_direction()
                         return False
                 self._ladder_debug = {
                     "phase": "VERIFY_GRAB", "ladder_x": ladder_x,
@@ -852,7 +891,7 @@ class BlockRunner:
                         "추가 점프 없이 Up 등반 전환"
                     )
                     return self._finish_climb(ladder_x, y_top, max_steps, jump_dir)
-            self._h.release("up")
+            self._route_inputs.release_action("up")
             if trajectory:
                 apex_at, apex_y = min(trajectory, key=lambda item: item[1])
                 apex_confirmed = any(
@@ -895,7 +934,7 @@ class BlockRunner:
 
         for _ in range(min(max_steps, 40)):
             if self._stop():
-                self._h.release_all()
+                self._route_inputs.release_all()
                 return False
             x, _y = self._pos()
             if x is None:
@@ -904,23 +943,23 @@ class BlockRunner:
             reached_safe_x = x <= safe_x if escape_dir == "left" else x >= safe_x
             if reached_safe_x:
                 break
-            self._h.hold_dir(escape_dir)
+            self._route_inputs.hold_direction(escape_dir)
             self._jsleep(self._poll)
-        self._h.release_dir()
+        self._route_inputs.release_direction()
         self._log_once(
             f"사다리 하강 준비: 밧줄 X={ladder_x}에서 {escape_dir} 방향으로 벗어난 뒤 아래점프"
         )
 
-        self._h.hold("down")
+        self._route_inputs.hold_action("down")
         self._jsleep(JUMP_TO_UP_SEC)    # 아래키 살짝 — 발판 드랍 인식
-        self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))  # ↓+점프
+        self._route_inputs.press_action(self._jump_key, 0.05)  # ↓+점프
         self._jsleep(0.1)
-        self._h.release("down")
+        self._route_inputs.release_action("down")
 
         last_escape_at = -1e9
         for _ in range(max_steps):
             if self._stop():
-                self._h.release_all()
+                self._route_inputs.release_all()
                 return False
             x, y = self._pos()
             if y is not None and abs(y - y_bot) <= Y_ARRIVE_TOL:
@@ -931,12 +970,10 @@ class BlockRunner:
                 and abs(x - ladder_x) <= 8
                 and now - last_escape_at >= 0.5
             ):
-                self._h.release_dir()
-                self._h.hold_dir(escape_dir)
-                self._h.perform(
-                    Intent(action="key", key=self._jump_key, base_hold_sec=0.12)
-                )
-                self._h.release_dir()
+                self._route_inputs.release_direction()
+                self._route_inputs.hold_direction(escape_dir)
+                self._route_inputs.press_action(self._jump_key, 0.12)
+                self._route_inputs.release_direction()
                 last_escape_at = now
                 self._log_once(
                     f"하강 중 밧줄 X={ladder_x} 감지 → {escape_dir}+점프 탈출"
@@ -947,12 +984,12 @@ class BlockRunner:
     def _do_jump(self, block: Block) -> bool:
         """단순 점프 — 방향 키(있으면) 유지한 채 점프키 1회(C _do_jump). 점프 후 키 정리."""
         if block.direction in ("left", "right"):
-            self._h.hold_dir(block.direction)
+            self._route_inputs.hold_direction(block.direction)
         elif block.direction == "down":
-            self._h.hold("down")
-        self._h.perform(Intent(action="key", key=self._jump_key, base_hold_sec=0.05))
+            self._route_inputs.hold_action("down")
+        self._route_inputs.press_action(self._jump_key, 0.05)
         if block.direction == "down":
-            self._h.release("down")
+            self._route_inputs.release_action("down")
         elif block.direction in ("left", "right"):
-            self._h.release_dir()   # 점프 후 방향키 떼기(잔류 이동 방지)
+            self._route_inputs.release_direction()   # 점프 후 방향키 떼기(잔류 이동 방지)
         return True

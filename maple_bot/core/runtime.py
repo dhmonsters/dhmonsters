@@ -1,4 +1,4 @@
-﻿# BotRuntime ??7媛?紐⑤뱢??議곕┰?????깆씠 ?꾨뒗 遊??고??? 寃뚯엫/?쒕씪?대쾭??二쇱엯???뚯뒪??媛??
+# BotRuntime ??7媛?紐⑤뱢??議곕┰?????깆씠 ?꾨뒗 遊??고??? 寃뚯엫/?쒕씪?대쾭??二쇱엯???뚯뒪??媛??
 from __future__ import annotations
 
 import queue
@@ -8,7 +8,6 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from core.humanize.humanizer import Humanizer
 from core.sensing.char_scanner import CharScanner
 from core.sensing.antimob_scanner import AntiMobScanner
 from core.sensing.lie_scanner import LieScanner
@@ -26,7 +25,6 @@ from core.humanize.timing import down_5
 from core.sensing.user_scanner import UserScanner
 from core.sensing import monster_vision
 from core.notify.telegram import TelegramNotifier
-from core.humanize.intent import Intent
 from core.minigame.registry import SolverRegistry
 
 
@@ -143,11 +141,13 @@ class RuntimeConfig:
     game_window_title: str = ""
     coord_anchor: list | None = None      # ?곸뿭 吏???쒖젏 李??먯젏 [ox, oy]
     char_rgb: tuple | None = None          # 誘몃땲留?罹먮┃??????RGB). None?대㈃ 湲곕낯 ?몃옉
+    char_h_low: int | None = None
+    char_h_high: int | None = None
     char_h_tol: int = 10
     char_s_min: int = 100
     char_v_min: int = 200
     char_area_min: float = 3.0
-    char_area_max: float = 100.0
+    char_area_max: float = 160.0
     # 紐ъ뒪??媛먯?(image 紐⑤뱶, B 硫붿빱?덉쬁: ?됰꽕??諛뺤뒪 ??紐ъ뒪??
     hunt_mode: str = "key"
     name_template: str = ""        # ?됰꽕???쒗뵆由?寃쎈줈
@@ -183,16 +183,42 @@ class BotRuntime:
         self._hp_mp_reader = hp_mp_reader
 
         # ?낅젰 怨꾩링
-        self.humanizer = Humanizer(backend=input_backend)
+        self.input_backend = input_backend
         self.route_position_store = LatestPositionStore()
 
         # 媛먯? 怨꾩링 ???대깽?명걧
         self.event_queue: queue.Queue = queue.Queue()
         self._lie_template_missing = None
+        marker_exclusions = (
+            (
+                (66, 62, 68, 64),
+        (66, 37, 68, 39),
+        (22, 51, 24, 53),
+        (83, 62, 85, 64),
+                (114, 63, 116, 65),
+                (131, 62, 133, 64),
+            )
+            if config.hunt_ground_active.strip() == "\ube68\ucf542"
+            else ()
+        )
         self.char_scanner = CharScanner(
             screen_capture, lambda: self._resolve_region(config.minimap_region),
-            log_fn=lambda m: self.log(m, "媛먯?"),
-            position_store=self.route_position_store)
+            log_fn=lambda m: self.log(m, "감지"),
+            position_store=self.route_position_store,
+            hsv_lower=(
+                int(config.char_h_low) if config.char_h_low is not None else 20,
+                int(config.char_s_min),
+                int(config.char_v_min),
+            ),
+            hsv_upper=(
+                int(config.char_h_high) if config.char_h_high is not None else 40,
+                255,
+                255,
+            ),
+            min_area=float(config.char_area_min),
+            max_area=float(config.char_area_max),
+            marker_exclusions=marker_exclusions,
+        )
         self.antimob_scanner = None
         if config.antimob_templates:
             self.antimob_scanner = AntiMobScanner(
@@ -235,6 +261,7 @@ class BotRuntime:
             on_pause=self._on_safety_pause,
             on_resume=lambda: None,
         )
+        self._lie_safety_active = False
 
         # ?됰룞/?숈꽑 怨꾩링
         self._bot_running = False    # 而⑦듃濡ㅻ윭 start/stop濡??좉? (猷⑦듃 ?ㅽ뻾 ?쒖꽦 議곌굔)
@@ -277,7 +304,7 @@ class BotRuntime:
         self._ladder_monster_cache = False
         self._ladder_monster_cache_at = -1e9
         self.block_runner = BlockRunner(
-            humanizer=self.humanizer,
+            input_backend=self.input_backend,
             # ?대룞 以묒뿉???대깽????吏???놁씠 ?ㅼ틦?덉쓽 理쒖떊 醫뚰몴瑜?吏곸젒 ?ъ슜?쒕떎.
             pos_fn=lambda: self.char_scanner.position()
                                 or self.orchestrator.state.get_position()
@@ -285,9 +312,9 @@ class BotRuntime:
             jump_key=config.jump_key or "alt",
             jump_while_move=config.jump_while_move,
             position_sample_fn=self.char_scanner.sample,
-            position_refresh_fn=self.char_scanner.refresh_position,
             monster_present_fn=self._ladder_monster_present,
             ladder_motion_fn=self._set_ladder_motion,
+            minimap_size_fn=lambda: self._resolve_region(config.minimap_region)[2:4],
             ladder_profile={
                 "launch_distance": config.ladder_launch_distance,
                 "launch_distance_right": config.ladder_launch_distance_right,
@@ -308,7 +335,7 @@ class BotRuntime:
             floor_judge=self.floor_judge, recovery_graph=_recovery_graph,
             on_segment_enter=self._on_route_segment_enter,
             on_segment_exit=self._on_route_segment_exit,
-            log_fn=lambda m: self.log(m, "?대룞"),
+            log_fn=lambda m: self.log(m, "이동"),
         )
         self._world_scanner = None
         self._world_runner = None
@@ -331,44 +358,29 @@ class BotRuntime:
                     tracker=tracker,
                 )
                 world_blocks = BlockRunner(
-                    humanizer=self.humanizer,
+                    input_backend=self.input_backend,
                     pos_fn=lambda: self.world_position() or (0, 0),
                     jump_key=config.jump_key or "alt",
                     jump_while_move=config.jump_while_move,
                     stop_fn=lambda: not self._world_can_run(),
-                    log_fn=lambda m: self.log(m, "?꾩뿭?대룞"),
+                    log_fn=lambda m: self.log(m, "전역이동"),
                 )
                 self._world_runner = WorldRouteRunner(
                     config.world_map,
                     world_blocks,
-                    ActionExecutor(self.humanizer, click_fn=getattr(input_backend, "click", None)),
+                    ActionExecutor(self.input_backend, click_fn=getattr(input_backend, "click", None)),
                 )
         self._image_trigger = (
-            ImageTrigger(ActionExecutor(self.humanizer, click_fn=getattr(input_backend, "click", None)))
+            ImageTrigger(ActionExecutor(self.input_backend, click_fn=getattr(input_backend, "click", None)))
             if config.image_trigger_spec is not None
             else None
         )
-        # ?ㅼ젙??罹먮┃?곗깋(char_r/g/b)???먯뒯??HSV濡?媛먯???諛섏쁺(誘몃땲留??몃????몄떇瑜졻넁)
-        if config.char_rgb:
-            from core.sensing.char_scanner import hsv_range_from_rgb
-            lo, hi = hsv_range_from_rgb(
-                *config.char_rgb,
-                h_tol=int(getattr(config, "char_h_tol", 10)),
-                s_min=int(getattr(config, "char_s_min", 100)),
-                v_min=int(getattr(config, "char_v_min", 200)),
-            )
-            self.char_scanner.set_filters(
-                lo,
-                hi,
-                min_area=float(getattr(config, "char_area_min", 3.0)),
-                max_area=float(getattr(config, "char_area_max", 100.0)),
-            )
+        self.reload_character_filter(config)
         self.combat = Combat(
-            self.humanizer,
+            self.input_backend,
             hp_rule=config.hp_rule,
             mp_rule=config.mp_rule,
             log_fn=lambda m, c: self.log(m, c),
-            input_backend=input_backend,
         )
         self.attack_sequence_runner = AttackSequenceRunner(
             config.attack_sequences,
@@ -376,9 +388,9 @@ class BotRuntime:
                 key, mode="duration", hold=hold or self._attack_hold()
             ),
         )
-        self.buffs = BuffManager(self.humanizer, config.buffs,
-                                 log_fn=lambda m: self.log(m, "踰꾪봽"))
-        self.pet = PetFeeder(self.humanizer, key=config.pet_key, interval=config.pet_interval,
+        self.buffs = BuffManager(self.input_backend, config.buffs,
+                                 log_fn=lambda m: self.log(m, "버프"))
+        self.pet = PetFeeder(self.input_backend, key=config.pet_key, interval=config.pet_interval,
                              log_fn=lambda m: self.log(m, "펫먹이"), label="펫먹이",
                              count=config.pet_count)
         # ?쎌뾽 ??대㉧ ??PetFeeder ?⑦꽩 ?ъ궗??二쇨린 以띻린 ??
@@ -432,7 +444,7 @@ class BotRuntime:
         if is_rednose3_route:
             self.floor_hunt_runner = RedNose3RouteRunner(
                 self.block_runner,
-                is_active=self._route_can_run,
+                is_active=self._floor_route_can_run,
                 profile=config.rednose3,
                 log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
@@ -441,13 +453,13 @@ class BotRuntime:
             self.floor_hunt_runner = RedNose2RouteRunner(
                 self.block_runner,
                 get_blocks=lambda: self._cfg.route,
-                is_active=self._route_can_run,
+                is_active=self._floor_route_can_run,
                 profile=config.rednose2_v5,
                 log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif config.route_mode and config.route_steps:
-            self.route_input_owner = RouteInputOwner(self.humanizer)
+            self.route_input_owner = self.block_runner._route_inputs
             self.floor_hunt_runner = RouteStateRunner(
                 get_steps=lambda: self._cfg.route_steps,
                 is_active=self._route_can_run,
@@ -477,6 +489,59 @@ class BotRuntime:
         self.orchestrator.on("user_detected", self._handle_user_detected)
         # 嫄고깘 媛먯? ???뚮┝(?뚮━+?붾젅洹몃옩) ?듯빀. ?먮룞??대뒗 safety_tick???대떦
         self.orchestrator.on("lie", self._handle_lie)
+
+    def _release_runtime_inputs(self) -> None:
+        """런타임이 소유한 지속 입력을 즉시 해제한다."""
+        if hasattr(self, "block_runner"):
+            self.block_runner.release_inputs()
+        self.release_pickup_key()
+        keys = {
+            "left", "right", "up", "down",
+            str(self._cfg.jump_key or "alt"),
+            str(getattr(self._cfg, "attack_key", "") or ""),
+        }
+        for profile_name in ("rednose2_v5", "rednose3"):
+            profile = getattr(self._cfg, profile_name, {}) or {}
+            keys.add(str(profile.get("teleport_key") or ""))
+            keys.add(str(profile.get("attack_key") or ""))
+        for key in keys:
+            if key:
+                self.input_backend.key_up(key)
+    def reload_character_filter(self, config) -> None:
+        self.char_scanner.reload_marker_templates()
+        self._cfg.char_rgb = getattr(config, "char_rgb", None)
+        self._cfg.char_h_low = getattr(config, "char_h_low", None)
+        self._cfg.char_h_high = getattr(config, "char_h_high", None)
+        self._cfg.char_h_tol = int(getattr(config, "char_h_tol", 10))
+        self._cfg.char_s_min = int(getattr(config, "char_s_min", 100))
+        self._cfg.char_v_min = int(getattr(config, "char_v_min", 200))
+        self._cfg.char_area_min = float(getattr(config, "char_area_min", 3.0))
+        self._cfg.char_area_max = float(getattr(config, "char_area_max", 100.0))
+
+        h_low = getattr(config, "char_h_low", None)
+        h_high = getattr(config, "char_h_high", None)
+        s_min = int(getattr(config, "char_s_min", 100))
+        v_min = int(getattr(config, "char_v_min", 200))
+        min_area = float(getattr(config, "char_area_min", 3.0))
+        max_area = float(getattr(config, "char_area_max", 100.0))
+
+        if h_low is not None and h_high is not None:
+            lo = (max(0, min(179, int(h_low))), s_min, v_min)
+            hi = (max(0, min(179, int(h_high))), 255, 255)
+            if lo[0] > hi[0]:
+                lo = (hi[0], lo[1], lo[2])
+            self.char_scanner.set_filters(lo, hi, min_area=min_area, max_area=max_area)
+            return
+
+        if getattr(config, "char_rgb", None):
+            from core.sensing.char_scanner import hsv_range_from_rgb
+            lo, hi = hsv_range_from_rgb(
+                *config.char_rgb,
+                h_tol=int(getattr(config, "char_h_tol", 10)),
+                s_min=s_min,
+                v_min=v_min,
+            )
+            self.char_scanner.set_filters(lo, hi, min_area=min_area, max_area=max_area)
 
     # ?? 媛먯? ?뚰봽 (?뚯뒪?? ?섎룞 / ?ㅺ린: ?ㅻ젅?? ??????????????????????
     def pump_scanners_once(self) -> None:
@@ -576,6 +641,7 @@ class BotRuntime:
         """而⑦듃濡ㅻ윭 start/stop媛 ?몄텧 ??猷⑦듃 ?ㅽ뻾湲??쒖꽦/?뺤? ?좉?."""
         self._bot_running = flag
         if flag:
+            self._refresh_auto_sell_config()
             # ???ㅽ뻾?먯꽌???댁쟾 ?대룞 ?ㅽ뙣 ?곹깭瑜?珥덇린?뷀븳??
             self._route_move_fault = False
             self._anti_mob_failed = False
@@ -586,7 +652,13 @@ class BotRuntime:
             self._auto_sell_on_start_done = False
 
     def _route_can_run(self) -> bool:
-        """遊뉗씠 耳쒖졇 ?덇퀬 ?щ깷 紐⑤뱶???뚮쭔 猷⑦듃 ?ㅽ뻾(?덉쟾紐⑤뱶쨌?뺤? ??利됱떆 ?댄깉)."""
+        """일반 동선은 사냥 모드일 때만 실행한다."""
+        return (self._bot_running and self.orchestrator.mode == "hunting"
+                and not self._world_navigation_active
+                and not self._junk_selling)
+
+    def _floor_route_can_run(self) -> bool:
+        """빨코 전용 동선은 시작 상태면 즉시 실행한다."""
         return (self._bot_running and self.orchestrator.mode == "hunting"
                 and not self._world_navigation_active
                 and not self._junk_selling)
@@ -604,12 +676,12 @@ class BotRuntime:
     def movement_tick(self) -> None:
         """?대룞 ?ㅻ젅???꾩슜 ?? 怨듦꺽쨌踰꾪봽? ?낅┰?곸쑝濡?route瑜??ㅽ뻾?쒕떎."""
         if self._junk_selling:
-            self.humanizer.release_dir()
+            self.block_runner._route_inputs.release_direction()
             return
         if self.orchestrator.mode != "hunting":
             return
         if self._anti_mob_busy or self._anti_mob_failed:
-            self.humanizer.release_dir()
+            self.block_runner._route_inputs.release_direction()
             return
         if self.floor_hunt_runner is not None:
             return  # 痢듬퀎 route???꾩슜 FloorHuntRunner媛 ?대떦?쒕떎.
@@ -618,10 +690,10 @@ class BotRuntime:
         with self._movement_lock:
             moved = self.block_runner.run_block(self._cfg.route[0], max_steps=200)
         if not moved:
-            self.humanizer.release_dir()
+            self.block_runner._route_inputs.release_direction()
             self.log(
-                "???대룞 ?ㅽ뙣: 諛⑺뼢?ㅻ? ?댁젣?섍퀬 ?ㅼ쓬 ?깆뿉 媛숈? ?대룞 釉붾줉???ъ떆?묓빀?덈떎.",
-                "?대룞",
+                "이동 실패: 방향키를 해제하고 다음 틱에 같은 이동 블록을 다시 시도합니다.",
+                "이동",
             )
 
     def attack_tick(self, now: float | None = None) -> None:
@@ -683,15 +755,15 @@ class BotRuntime:
             return
         if self._cfg.pickup_always:
             if self._pickup_held_key is None:
-                self.humanizer._backend.key_down(key)
+                self.input_backend.key_down(key)
                 self._pickup_held_key = key
                 self._pickup_always_last = now
-                self._pickup_always_interval = down_5(2.0)
+                self._pickup_always_interval = 2.0
             elif now - self._pickup_always_last >= self._pickup_always_interval:
-                self.humanizer._backend.key_up(key)
-                self.humanizer._backend.key_down(key)
+                self.input_backend.key_up(key)
+                self.input_backend.key_down(key)
                 self._pickup_always_last = now
-                self._pickup_always_interval = down_5(2.0)
+                self._pickup_always_interval = 2.0
         else:
             self.release_pickup_key()
             self._pickup_always_last = -1e9
@@ -702,7 +774,7 @@ class BotRuntime:
         if key is None:
             return
         try:
-            self.humanizer._backend.key_up(key)
+            self.input_backend.key_up(key)
         finally:
             self._pickup_held_key = None
 
@@ -719,13 +791,14 @@ class BotRuntime:
     def auto_sell_status_text(self) -> str:
         """?먮룞?먮ℓ ?곹깭瑜?UI ?쒖떆??臾몄옣?쇰줈 諛섑솚?쒕떎."""
         if self.auto_seller is None:
-            return "?먮룞?먮ℓ ?곌껐 ?놁쓬"
+            return "자동판매 연결 없음"
         return self.auto_seller.text()
 
     def _auto_sell_tick(self, now: float | None = None) -> None:
         """二쇨린 ?먮룞?먮ℓ媛 耳쒖졇 ?덉쑝硫??먮ℓ ?쒖젏??媛蹂띻쾶 ?뺤씤?쒕떎."""
         if not self._bot_running or self.auto_seller is None:
             return
+        self._refresh_auto_sell_config()
         now = time.time() if now is None else now
         if self.auto_seller.should_run(
             self._cfg.auto_sell_enabled,
@@ -734,8 +807,19 @@ class BotRuntime:
         ):
             self.start_junk_sell(reason="scheduled")
 
+    def _refresh_auto_sell_config(self) -> None:
+        """UI가 저장한 최신 자동판매 설정을 실행 중 런타임에 반영한다."""
+        source = getattr(self._cfg, "junk_config", None)
+        if source is None:
+            return
+        settings = source.get("settings2", "junk_sell", default={}) or {}
+        self._cfg.auto_sell_enabled = bool(settings.get("auto_sell_enabled", False))
+        self._cfg.auto_sell_interval_min = float(settings.get("auto_sell_interval_min", 10))
+        self._cfg.auto_sell_on_start = bool(settings.get("sell_on_start", False))
+
     def start_junk_sell(self, reason: str = "manual") -> bool:
         """?먮룞?먮ℓ瑜?蹂꾨룄 ?ㅻ젅?쒕줈 1???ㅽ뻾?쒕떎."""
+        self._refresh_auto_sell_config()
         if self.junk_seller is None or self.auto_seller is None:
             self.log("자동판매 설정 또는 템플릿 연결이 없습니다.", "자동판매")
             return False
@@ -763,10 +847,11 @@ class BotRuntime:
     def _run_junk_sell_once(self) -> None:
         """자동판매 실행 중 다른 행동 입력을 멈추고 판매를 수행한다."""
         rednose_prepared = False
+        sale_succeeded = False
         self._junk_selling = True
         try:
             self.release_pickup_key()
-            self.humanizer.release_all()
+            self._release_runtime_inputs()
             runner = self.floor_hunt_runner
             if isinstance(runner, RedNose2RouteRunner):
                 self.log("빨코2 자동판매 진입: 2층 X=123~136 정렬 후 윗텔포합니다.", "자동판매")
@@ -776,24 +861,33 @@ class BotRuntime:
                     return
             self.log("자동판매 시작: 이동·공격·픽업 입력을 일시정지합니다.", "자동판매")
             self.release_pickup_key()
-            self.humanizer.release_all()
-            self.auto_seller.run_once(
-                lambda msg: self.log(msg, "자동판매"),
-                self._junk_sell_stop,
-            )
+            self._release_runtime_inputs()
+            sale_started_at = time.perf_counter()
+            try:
+                sale_succeeded = self.auto_seller.run_once(
+                    lambda msg: self.log(msg, "자동판매"),
+                    self._junk_sell_stop,
+                )
+            finally:
+                elapsed = time.perf_counter() - sale_started_at
+                self.log(f"판매 위치 도착 후 자동판매 소요={elapsed:.3f}초", "자동판매")
         except Exception as exc:
             self.log(f"자동판매 오류: {exc}", "자동판매")
         finally:
             try:
                 self.release_pickup_key()
-                self.humanizer.release_all()
+                self._release_runtime_inputs()
                 if rednose_prepared and isinstance(self.floor_hunt_runner, RedNose2RouteRunner):
                     self.floor_hunt_runner.return_floor2_after_auto_sell()
             finally:
                 self._junk_selling = False
                 self._junk_sell_stop.clear()
                 if self.auto_seller is not None:
-                    self.auto_seller.schedule_after_minutes(self._cfg.auto_sell_interval_min)
+                    if sale_succeeded:
+                        self.auto_seller.schedule_after_minutes(self._cfg.auto_sell_interval_min)
+                    else:
+                        self.auto_seller.schedule_after_seconds(5.0)
+                        self.log("자동판매 미완료: 5초 후 다시 시도합니다.", "자동판매")
                 self.log("자동판매 종료: 사냥 입력을 다시 허용합니다.", "자동판매")
 
     def reload_lie_scanner(self, config) -> None:
@@ -877,7 +971,7 @@ class BotRuntime:
         if is_rednose3_route:
             self.floor_hunt_runner = RedNose3RouteRunner(
                 self.block_runner,
-                is_active=self._route_can_run,
+                is_active=self._floor_route_can_run,
                 profile=config.rednose3,
                 log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
@@ -886,13 +980,13 @@ class BotRuntime:
             self.floor_hunt_runner = RedNose2RouteRunner(
                 self.block_runner,
                 get_blocks=lambda: self._cfg.route,
-                is_active=self._route_can_run,
+                is_active=self._floor_route_can_run,
                 profile=config.rednose2_v5,
                 log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
         elif config.route_mode and config.route_steps:
-            self.route_input_owner = RouteInputOwner(self.humanizer)
+            self.route_input_owner = self.block_runner._route_inputs
             self.floor_hunt_runner = RouteStateRunner(
                 get_steps=lambda: self._cfg.route_steps,
                 is_active=self._route_can_run,
@@ -984,7 +1078,7 @@ class BotRuntime:
             return
 
         self._anti_mob_busy = True
-        self.humanizer.release_all()
+        self._release_runtime_inputs()
         try:
             self.log(
                 f"사냥영역 방지몹 이미지1 감지: score={first[0]:.3f} / "
@@ -997,7 +1091,7 @@ class BotRuntime:
             with self._movement_lock:
                 self._anti_mob_moving = True
                 try:
-                    self.humanizer._backend.key_down("left")
+                    self.input_backend.key_down("left")
                     deadline = time.monotonic() + 15.0
                     while self._bot_running and time.monotonic() < deadline:
                         current_scene = self._capture(region)
@@ -1009,7 +1103,7 @@ class BotRuntime:
                                 break
                         time.sleep(0.05)
                 finally:
-                    self.humanizer._backend.key_up("left")
+                    self.input_backend.key_up("left")
                     self._anti_mob_moving = False
 
             if not self._bot_running:
@@ -1018,7 +1112,7 @@ class BotRuntime:
 
             if second is None:
                 self._anti_mob_failed = True
-                self.humanizer.release_all()
+                self._release_runtime_inputs()
                 message = "방지몹 이미지2를 15초 동안 찾지 못해 왼쪽 이동을 해제하고 공격을 중지합니다."
                 self.log(message, "안티밴")
                 try:
@@ -1032,7 +1126,7 @@ class BotRuntime:
                 f"template={os.path.basename(str(second[1]))}",
                 "안티밴",
             )
-            click = getattr(self.humanizer._backend, "click", None)
+            click = getattr(self.input_backend, "click", None)
             if click is None:
                 raise RuntimeError("마우스 클릭 백엔드를 사용할 수 없습니다.")
 
@@ -1131,6 +1225,8 @@ class BotRuntime:
             self.buffs.tick(now)
             self.pet.tick(now)
             self.pickup.tick(now)
+            if getattr(self.floor_hunt_runner, "controls_attack", False):
+                return
             allowed = self._floor_runner_attack_allowed(density_on, dwelling)
             self._run_attacks(now, allowed)
             return
@@ -1153,7 +1249,7 @@ class BotRuntime:
 
         # ?대룞 XOR ?쒖옄由ш났寃???醫뚯슦 ?대룞?ㅻ뒗 ?꾨Ⅸ 梨??좎??섍퀬, 怨듦꺽???????
         if attacking:
-            self.humanizer.release_dir()   # ?쒖옄由?怨듦꺽: ?좎? 以묒씤 ?대룞???댁젣
+            self.block_runner._route_inputs.release_direction()   # ?쒖옄由?怨듦꺽: ?좎? 以묒씤 ?대룞???댁젣
             self._run_attacks(now, True)
         else:
             if self._cfg.hunt_mode != "key":
@@ -1163,7 +1259,7 @@ class BotRuntime:
             if self._cfg.route:
                 moved = self.block_runner.run_block(self._cfg.route[0], max_steps=200)
                 if not moved:
-                    self.humanizer.release_dir()
+                    self.block_runner._route_inputs.release_direction()
                     self.log(
                         "이동 실패: 방향키를 해제하고 다음 틱에 같은 이동 블록을 다시 시도합니다.",
                         "이동",
@@ -1183,7 +1279,7 @@ class BotRuntime:
         self.pet.tick(now)
 
     def _attack_hold(self) -> float:
-        """怨듦꺽??????쒓컙(珥? = 紐⑺몴 諛⑹닔 횞 ?ㅽ궗1???쒓컙. ??% ?쒕뜡? Humanizer媛 ?곸슜."""
+        """공격 유지시간을 반환한다. 기능별 입력 시점에 한 번만 시간 보정을 적용한다."""
         return max(1, int(self._cfg.hits_to_kill)) * float(self._cfg.skill_cast_sec)
 
     def _run_attacks(self, now: float, allowed: bool) -> None:
@@ -1374,7 +1470,27 @@ class BotRuntime:
             ctx={"frame_id": self._frame_id},
         )
         if result is not None and result.success:
-            self.orchestrator.clear_safety()
+            self._clear_lie_safety()
+
+    def _clear_lie_safety(self) -> None:
+        """거탐 안전 상태를 해제하고 수동 재개 상태도 초기화한다."""
+        self.orchestrator.clear_safety()
+        self._lie_safety_active = False
+
+    def resume_lie_safety_if_clear(self) -> bool:
+        """F1 재요청 시 거탐 창이 사라졌을 때만 사냥을 재개한다."""
+        if self.orchestrator.mode != "safety":
+            return False
+        if not self._lie_safety_active:
+            self.log("F1 재개 보류: 현재 안전 상태는 거탐 감지로 시작되지 않았습니다.", "시스템")
+            return False
+        scanner = self.lie_scanner
+        if scanner is None or scanner.is_present():
+            self.log("F1 재개 보류: 거탐 창이 아직 화면에 남아 있습니다.", "감지")
+            return False
+        self._clear_lie_safety()
+        self.log("F1 재개: 거탐 창이 사라져 사냥을 다시 시작합니다.", "감지")
+        return True
 
     # ?? ?대? ??????????????????????????????????????????????????????????
     def _lie_debug_dir(self) -> str:
@@ -1396,6 +1512,7 @@ class BotRuntime:
         self.log(message, "감지")
     def _handle_lie(self, ev) -> None:
         """거탐 감지 시 알림을 처리한다."""
+        self._lie_safety_active = True
         data = getattr(ev, "data", {}) or {}
         score = data.get("score")
         scale = data.get("scale", 1.0)
@@ -1459,9 +1576,8 @@ class BotRuntime:
             pass
 
     def _on_safety_pause(self) -> None:
-        """?덉쟾 吏꾩엯 ???좎? 以묒씤 ?대룞 諛⑺뼢???댁젣(?됰룞 ?뺤?)."""
-        self.humanizer.release_dir()           # 醫뚯슦 ?좎????댁젣(?곹깭 ?숆린??
-        self.humanizer._backend.key_up("up")   # ???щ떎由??? ?ㅻ룄 ?덉쟾 ?댁젣
+        """안전 모드 진입 시 런타임이 소유한 지속 입력을 모두 해제한다."""
+        self._release_runtime_inputs()
 
     def _handle_user_detected(self, ev) -> None:
         """?ㅻⅨ ?좎? 媛먯? ???붾젅洹몃옩 ?뚮┝ + ?먮룞?묐떟 梨꾪똿(硫붿떆吏 ?쒗솚)."""
@@ -1472,6 +1588,6 @@ class BotRuntime:
         msg = msgs[self._reply_idx % len(msgs)]
         self._reply_idx += 1
         # 梨꾪똿: enter ??硫붿떆吏 ?낅젰 ??enter (?ㅺ린 ?낅젰? 諛깆뿏???듯빐)
-        self.humanizer.perform(Intent(action="key", key="enter", base_hold_sec=0.05))
+        self.input_backend.press("enter", 0.05)
 
 
