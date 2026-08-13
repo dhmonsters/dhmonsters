@@ -404,13 +404,30 @@ def _validate_installed_runtime() -> dict[str, Any]:
     import numpy
     import torch
 
+    return _build_installed_runtime_info(torch, cv2, numpy)
+
+
+def _build_installed_runtime_info(
+    torch: Any,
+    cv2: Any,
+    numpy: Any,
+) -> dict[str, Any]:
+    cuda_available = bool(torch.cuda.is_available())
+    gpu = torch.cuda.get_device_name(0) if cuda_available else "CPU"
+    capability = (
+        tuple(torch.cuda.get_device_capability(0))
+        if cuda_available
+        else None
+    )
     info = {
         "python": __import__("sys").version.split()[0],
         "numpy": numpy.__version__,
         "opencv": cv2.__version__,
         "torch": torch.__version__,
-        "cuda": bool(torch.cuda.is_available()),
-        "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "",
+        "cuda": cuda_available,
+        "gpu": gpu,
+        "compute_capability": capability,
+        "mode": "CUDA" if cuda_available else "CPU FALLBACK",
     }
     if not info["cuda"]:
         raise RuntimeError("CUDA_GPU_NOT_AVAILABLE")

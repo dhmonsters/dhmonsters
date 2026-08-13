@@ -39,3 +39,11 @@
 - RTX 4060 CUDA 추론 PASS.
 - `sm_61` 포함 확인.
 - owner 연결 모드 `CLASSICAL_TEMPORAL_OWNER_GUARD` PASS.
+
+## 라이브 실행 후속 수정
+
+- 새 v4 `live_core.py`는 환경 검사 결과에서 `mode`를 요구한다.
+- Puzzle2의 대체 환경 검사에 `mode`가 없어 `'mode'` 예외와 `WAIT_RETRY` 반복이 발생했다.
+- `mode`, GPU 이름, compute capability를 원본 형식으로 반환하도록 수정했다.
+- Puzzle2 관련 테스트 30개 통과.
+- 기존 `2026-08-13_puzzle2_gpu_portable_v3.zip`은 이 수정 전 산출물이므로 재배포용으로 사용하지 않는다.

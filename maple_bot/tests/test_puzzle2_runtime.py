@@ -6,7 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.puzzle2.runtime import MouseGate, SotLiveRuntime, resolve_session_root
+from core.puzzle2.runtime import (
+    MouseGate,
+    SotLiveRuntime,
+    _build_installed_runtime_info,
+    resolve_session_root,
+)
 from core.puzzle2.vendor import VendorLayout, resolve_vendor_root
 
 
@@ -24,6 +29,26 @@ class FakeMouseController:
 
     def close(self) -> None:
         pass
+
+
+def test_installed_runtime_info_includes_v4_mode_and_gpu() -> None:
+    cuda = SimpleNamespace(
+        is_available=lambda: True,
+        get_device_name=lambda index: "NVIDIA GeForce RTX 4060",
+        get_device_capability=lambda index: (8, 9),
+    )
+    torch = SimpleNamespace(
+        __version__="2.6.0+cu124",
+        cuda=cuda,
+    )
+    cv2 = SimpleNamespace(__version__="4.10.0")
+    numpy = SimpleNamespace(__version__="2.1.0")
+
+    info = _build_installed_runtime_info(torch, cv2, numpy)
+
+    assert info["mode"] == "CUDA"
+    assert info["gpu"] == "NVIDIA GeForce RTX 4060"
+    assert info["compute_capability"] == (8, 9)
 
 
 def test_mouse_gate_defaults_off_and_swallows_move() -> None:
