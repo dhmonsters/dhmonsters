@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+from pathlib import Path
 
 
 def is_admin() -> bool:
@@ -23,10 +24,14 @@ def ensure_admin() -> None:
         if getattr(sys, "frozen", False):
             # 빌드된 exe — argv[0]은 exe 자신이므로 인자만 전달
             params = " ".join(f'"{a}"' for a in sys.argv[1:])
+            working_dir = str(Path(exe).resolve().parent)
         else:
             # 스크립트 — python.exe로 스크립트+인자 재실행
             params = " ".join(f'"{a}"' for a in sys.argv)
-        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+            working_dir = str(Path(sys.argv[0]).resolve().parent)
+        rc = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", exe, params, working_dir, 1
+        )
         if rc > 32:           # 성공 — 관리자 인스턴스가 떴으므로 현재(비관리자) 종료
             sys.exit(0)
     except Exception:

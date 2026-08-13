@@ -458,7 +458,7 @@ class BotRuntime:
                 log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
-        elif config.route_mode and config.route_steps:
+        elif config.route_steps:
             self.route_input_owner = self.block_runner._route_inputs
             self.floor_hunt_runner = RouteStateRunner(
                 get_steps=lambda: self._cfg.route_steps,
@@ -468,7 +468,7 @@ class BotRuntime:
                 block_runner=self.block_runner,
                 log_fn=lambda m: self.log(m, "이동"),
             )
-        elif config.route_mode and config.route:
+        elif config.route:
             self.floor_hunt_runner = FloorHuntRunner(
                 self.block_runner,
                 get_blocks=lambda: self._cfg.route,
@@ -987,7 +987,7 @@ class BotRuntime:
                 log_fn=lambda m: self.log(m, "이동"),
                 minimap_region_fn=lambda: self._resolve_region(config.minimap_region),
             )
-        elif config.route_mode and config.route_steps:
+        elif config.route_steps:
             self.route_input_owner = self.block_runner._route_inputs
             self.floor_hunt_runner = RouteStateRunner(
                 get_steps=lambda: self._cfg.route_steps,
@@ -997,7 +997,7 @@ class BotRuntime:
                 block_runner=self.block_runner,
                 log_fn=lambda m: self.log(m, "이동"),
             )
-        elif config.route_mode and config.route:
+        elif config.route:
             self.floor_hunt_runner = FloorHuntRunner(
                 self.block_runner,
                 get_blocks=lambda: self._cfg.route,

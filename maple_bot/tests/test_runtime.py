@@ -7,6 +7,8 @@ from core.navigation.floor_judge import Floor
 from core.navigation.floor_hunt_runner import FloorHuntRunner
 from core.navigation.rednose2_runner import RedNose2RouteRunner
 from core.navigation.rednose3_runner import RedNose3RouteRunner
+from core.navigation.route_state import RouteStep
+from core.navigation.route_state_runner import RouteStateRunner
 from core.minigame.sidecar import InMemoryChannel
 
 
@@ -240,9 +242,66 @@ def test_reload_generic_legacy_route_builds_floor_hunt_runner():
     assert isinstance(rt.floor_hunt_runner, FloorHuntRunner)
 
 
-def test_no_route_mode_keeps_tick_path():
-    """route_mode 아니면 FloorHuntRunner 없음(기존 틱 경로 유지)."""
+def test_reload_generic_route_steps_without_legacy_route_mode_flag():
+    """시작 버튼이 설정을 다시 읽을 때도 사용자 맵 새 블록을 연결한다."""
     rt, _ = _make_runtime(lambda r=None: _yellow_at(50, 75))
+    fresh = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        route_steps=[RouteStep.from_dict({
+            "id": "move_1",
+            "step_type": "move",
+            "start_x": 20,
+            "end_x": 125,
+            "mode": "infinite",
+        })],
+        route_mode=False,
+        hunt_ground_active="잠자는 사막",
+    )
+
+    rt.reload_floor_hunt_runner(fresh)
+
+    assert isinstance(rt.floor_hunt_runner, RouteStateRunner)
+
+
+def test_generic_route_steps_build_runner_without_legacy_route_mode_flag():
+    """사용자 맵의 저장된 새 블록은 구형 route_mode 값이 없어도 실행한다."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        route_steps=[RouteStep.from_dict({
+            "id": "move_1",
+            "step_type": "move",
+            "start_x": 20,
+            "end_x": 125,
+            "mode": "infinite",
+        })],
+        route_mode=False,
+        hunt_ground_active="잠자는 사막",
+    )
+
+    rt = BotRuntime(
+        screen_capture=lambda r=None: _yellow_at(50, 75),
+        input_backend=backend,
+        config=cfg,
+        sidecar_channel=InMemoryChannel(),
+    )
+
+    assert isinstance(rt.floor_hunt_runner, RouteStateRunner)
+
+
+def test_empty_routes_keep_floor_runner_disabled():
+    """저장된 동선이 없으면 일반 동선 실행기를 만들지 않는다."""
+    backend = RecordingBackend()
+    cfg = RuntimeConfig(
+        minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
+        hunt_ground_active="빈 사용자맵",
+    )
+    rt = BotRuntime(
+        screen_capture=lambda r=None: _yellow_at(50, 75),
+        input_backend=backend,
+        config=cfg,
+        sidecar_channel=InMemoryChannel(),
+    )
     assert rt.floor_hunt_runner is None
 
 
