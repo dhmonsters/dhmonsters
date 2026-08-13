@@ -275,6 +275,40 @@ def test_reference_color_button_applies_selected_game_region(app, monkeypatch):
     assert cfg.get("minimap", "hsv_v_low") == 215
 
 
+def test_reference_color_button_saves_even_when_values_do_not_change(app, monkeypatch):
+    """캡처값이 기존값과 같아 슬라이더 신호가 없어도 설정 파일을 저장한다."""
+    import cv2
+    import core_ui.shot_selector as shot_selector
+
+    hsv = np.full((5, 5, 3), (30, 140, 240), dtype=np.uint8)
+    image = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    monkeypatch.setattr(pages_module, "_capture_game_client", lambda _config, _owner: (image, (100, 200)))
+    monkeypatch.setattr(shot_selector, "ScreenshotRegionSelector", FakeRegionSelector)
+    cfg = FakeConfig()
+    for key, value in {
+        "hsv_h_low": 20,
+        "hsv_h_high": 40,
+        "hsv_s_low": 100,
+        "hsv_v_low": 200,
+    }.items():
+        cfg.set("minimap", key, value)
+    controls = pages_module._make_character_color_controls(cfg)
+    buttons = {button.text(): button for button in controls.findChildren(pages_module.QPushButton)}
+
+    buttons["기준색 캡처"].click()
+
+    assert cfg.saved == 1
+
+
+def test_character_template_path_uses_user_directory_in_frozen_app(tmp_path, monkeypatch):
+    import core.config_manager as config_manager
+
+    monkeypatch.setattr(pages_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(config_manager, "get_user_templates_dir", lambda: str(tmp_path / "templates"))
+
+    assert pages_module._character_template_path(Path("ignored")) == tmp_path / "templates" / "player" / "y_p.png"
+
+
 def test_character_template_button_saves_selected_game_region_to_loaded_path(app, monkeypatch):
     import cv2
     import core_ui.shot_selector as shot_selector
@@ -288,10 +322,61 @@ def test_character_template_button_saves_selected_game_region_to_loaded_path(app
         "imwrite",
         lambda path, crop: saved.update(path=Path(path), crop=crop.copy()) or True,
     )
+    monkeypatch.setattr(
+        pages_module.os,
+        "replace",
+        lambda source, target: saved.update(final_path=Path(target)),
+    )
     controls = pages_module._make_character_color_controls(FakeConfig())
     buttons = {button.text(): button for button in controls.findChildren(pages_module.QPushButton)}
 
     buttons["캐릭터 템플릿 캡처"].click()
 
-    assert saved["path"].name == "y_p.png"
+    assert saved["path"].name == ".y_p.pending.png"
+    assert saved["final_path"].name == "y_p.png"
     assert np.array_equal(saved["crop"], image[1:3, 1:3])
+
+
+def test_character_template_button_atomically_overwrites_fixed_file(app, monkeypatch, tmp_path):
+    import cv2
+    import core_ui.shot_selector as shot_selector
+
+    image = np.arange(5 * 5 * 3, dtype=np.uint8).reshape(5, 5, 3)
+    template_path = tmp_path / "player" / "y_p.png"
+    template_path.parent.mkdir(parents=True)
+    template_path.write_bytes(b"old-template")
+    writes = []
+    replacements = []
+    monkeypatch.setattr(pages_module, "_capture_game_client", lambda _config, _owner: (image, (100, 200)))
+    monkeypatch.setattr(pages_module, "_character_template_path", lambda _root: template_path)
+    monkeypatch.setattr(shot_selector, "ScreenshotRegionSelector", FakeRegionSelector)
+    monkeypatch.setattr(cv2, "imwrite", lambda path, crop: writes.append((Path(path), crop.copy())) or True)
+    monkeypatch.setattr(pages_module.os, "replace", lambda source, target: replacements.append((Path(source), Path(target))))
+    controls = pages_module._make_character_color_controls(FakeConfig())
+    buttons = {button.text(): button for button in controls.findChildren(pages_module.QPushButton)}
+
+    buttons["캐릭터 템플릿 캡처"].click()
+
+    assert writes[0][0].name == ".y_p.pending.png"
+    assert replacements == [(template_path.with_name(".y_p.pending.png"), template_path)]
+    assert np.array_equal(writes[0][1], image[1:3, 1:3])
+
+
+def test_character_template_button_replaces_existing_png_on_disk(app, monkeypatch, tmp_path):
+    import cv2
+    import core_ui.shot_selector as shot_selector
+
+    image = np.arange(5 * 5 * 3, dtype=np.uint8).reshape(5, 5, 3)
+    template_path = tmp_path / "player" / "y_p.png"
+    template_path.parent.mkdir(parents=True)
+    cv2.imwrite(str(template_path), np.zeros((2, 2, 3), dtype=np.uint8))
+    monkeypatch.setattr(pages_module, "_capture_game_client", lambda _config, _owner: (image, (100, 200)))
+    monkeypatch.setattr(pages_module, "_character_template_path", lambda _root: template_path)
+    monkeypatch.setattr(shot_selector, "ScreenshotRegionSelector", FakeRegionSelector)
+    controls = pages_module._make_character_color_controls(FakeConfig())
+    buttons = {button.text(): button for button in controls.findChildren(pages_module.QPushButton)}
+
+    buttons["캐릭터 템플릿 캡처"].click()
+
+    assert np.array_equal(cv2.imread(str(template_path)), image[1:3, 1:3])
+    assert not template_path.with_name(".y_p.pending.png").exists()

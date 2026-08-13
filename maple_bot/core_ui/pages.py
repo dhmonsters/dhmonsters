@@ -1,6 +1,10 @@
 # 6 移댄뀒怨좊━ ?ㅼ젙 ?섏씠吏 ??config ?ㅻ? ???꾨뱶濡?諛붿씤?? shell??移댄뀒怨좊━蹂꾨줈 ?몄텧
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton
 
 from core_ui.theme import SPACING
@@ -62,6 +66,10 @@ def _capture_game_client(config, owner):
 
 def _character_template_path(project_root):
     """CharScanner가 실제로 로드하는 노란 캐릭터 마커 템플릿 경로를 반환한다."""
+    if getattr(sys, "frozen", False):
+        from core.config_manager import get_user_templates_dir
+
+        return Path(get_user_templates_dir()) / "player" / "y_p.png"
     return project_root / "templates" / "player" / "y_p.png"
 
 
@@ -534,6 +542,11 @@ def _make_character_color_controls(config) -> QWidget:
         _set_slider(fields["h_high"], h_high)
         _set_slider(fields["s_low"], s_low)
         _set_slider(fields["v_low"], v_low)
+        config.set("minimap", "hsv_h_low", h_low)
+        config.set("minimap", "hsv_h_high", h_high)
+        config.set("minimap", "hsv_s_low", s_low)
+        config.set("minimap", "hsv_v_low", v_low)
+        config.save()
         capture_status.setText(
             f"기준색 HSV({h}, {s}, {value})를 적용했습니다. "
             f"범위 H {h_low}~{h_high}, S {s_low} 이상, V {v_low} 이상."
@@ -551,10 +564,20 @@ def _make_character_color_controls(config) -> QWidget:
         template_path = _character_template_path(project_root)
         template_dir = template_path.parent
         template_dir.mkdir(parents=True, exist_ok=True)
-        if not cv2.imwrite(str(template_path), crop):
+        pending_path = template_path.with_name(".y_p.pending.png")
+        if not cv2.imwrite(str(pending_path), crop):
             capture_status.setText("캐릭터 템플릿 저장에 실패했습니다.")
             return
-        capture_status.setText(f"캐릭터 템플릿을 저장했습니다. {template_path.name}")
+        try:
+            os.replace(pending_path, template_path)
+        except OSError:
+            try:
+                pending_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            capture_status.setText("캐릭터 템플릿 저장에 실패했습니다.")
+            return
+        capture_status.setText(f"캐릭터 템플릿을 저장했습니다. {template_path}")
 
     color_button.clicked.connect(capture_reference_color)
     template_button.clicked.connect(capture_character_template)
