@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 ROPE_MARGIN = 8        # 밧줄 X 기준 이 픽셀 이내면 "도달"로 판정
 CLIMB_DURATION = 2.0   # 밧줄 오르기 유지 시간(초)
+ROPE_JUMP_HOLD_SEC = 0.1077  # 기존 0.083~0.127초 분포의 평균 체감 유지용 기준값
+ROPE_UP_HOLD_SEC = 0.1559    # 기존 0.121~0.183초 분포의 평균 체감 유지용 기준값
+ATTACK_KEY_HOLD_SEC = 0.0533 # 기존 0.033~0.071초 분포의 평균 체감 유지용 기준값
 
 
 _PATROL   = "patrol"
@@ -296,7 +299,7 @@ class MapNavigator:
 
     def _do_jump(self) -> None:
         jump_key = self._minimap.config.jump_key if self._minimap.config else "alt"
-        self._input.press_key(jump_key, hold_sec=_rnd(0.083, 0.127))
+        self._input.press_key(jump_key, hold_sec=ROPE_JUMP_HOLD_SEC)
         self.release_direction()          # 점프키 입력 직후 방향키 해제 → up으로 전환
         time.sleep(_rnd(0.05, 0.10))
         self._state       = _CLIMB
@@ -306,7 +309,7 @@ class MapNavigator:
     def _do_climb(self) -> None:
         elapsed = time.time() - self._climb_start
         if elapsed < CLIMB_DURATION:
-            self._input.press_key("up", hold_sec=_rnd(0.121, 0.183))
+            self._input.press_key("up", hold_sec=ROPE_UP_HOLD_SEC)
         else:
             self._state       = _PATROL
             self._target_rope = None
@@ -362,8 +365,8 @@ class MapNavigator:
     # ── 공격 ──────────────────────────────────────────────────────────
     def _do_attack(self) -> None:
         if self._jump_before_attack:
-            self._input.press_key("space", hold_sec=_rnd(0.033, 0.071))
-        self._input.press_key(self._attack_key, hold_sec=_rnd(0.033, 0.071))
+            self._input.press_key("space", hold_sec=ATTACK_KEY_HOLD_SEC)
+        self._input.press_key(self._attack_key, hold_sec=ATTACK_KEY_HOLD_SEC)
 
     def _attack_if_monster(self, screenshot) -> None:
         if not self._monster_template:

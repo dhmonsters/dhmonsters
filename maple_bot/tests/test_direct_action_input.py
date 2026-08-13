@@ -19,14 +19,12 @@ def test_combat_uses_backend_without_humanizer():
 
     combat.attack("end", hold=0.9)
 
-    assert backend.presses[0][0] == "end"
-    assert 0.855 <= backend.presses[0][1] <= 0.9
+    assert backend.presses == [("end", 0.9)]
     assert not hasattr(combat, "_h")
 
 
-def test_buff_manager_uses_backend_without_humanizer(monkeypatch):
+def test_buff_manager_uses_backend_without_humanizer():
     backend = RecordingBackend()
-    monkeypatch.setattr("core.acting.buff.plus_minus_5", lambda value: value)
     manager = BuffManager(input_backend=backend, buffs=[Buff(key="f", interval=200, hold_sec=0.8)])
 
     manager.tick(100.0)
@@ -35,10 +33,9 @@ def test_buff_manager_uses_backend_without_humanizer(monkeypatch):
     assert not hasattr(manager, "_h")
 
 
-def test_pet_feeder_uses_backend_and_only_feature_gap(monkeypatch):
+def test_pet_feeder_uses_backend_and_only_feature_gap():
     backend = RecordingBackend()
     sleeps = []
-    monkeypatch.setattr("core.acting.pet.plus_minus_5", lambda value: value)
     feeder = PetFeeder(
         input_backend=backend,
         key="=",
@@ -55,10 +52,9 @@ def test_pet_feeder_uses_backend_and_only_feature_gap(monkeypatch):
     assert not hasattr(feeder, "_h")
 
 
-def test_charlie_exchange_uses_backend_without_humanizer(monkeypatch):
+def test_charlie_exchange_uses_backend_without_humanizer():
     backend = RecordingBackend()
     sleeps = []
-    monkeypatch.setattr("core.acting.charlie.plus_minus_5", lambda value: value)
     exchange = CharlieExchange(input_backend=backend, npc_key="u", sleep_fn=sleeps.append)
 
     exchange.run_one_routine()

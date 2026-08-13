@@ -3,9 +3,6 @@ from __future__ import annotations
 
 import time
 
-from core.humanize.timing import plus_minus_5
-
-
 class PetFeeder:
     def __init__(self, input_backend, key: str = "", interval: float = 600.0,
                  log_fn=None, label: str = "펫먹이", count: int = 1, gap: float = 0.4,
@@ -29,10 +26,10 @@ class PetFeeder:
         if now - self._last < interval:
             return
         for index in range(self._count):
-            self._input.press(self._key, plus_minus_5(0.05))
+            self._input.press(self._key, 0.05)
             if index < self._count - 1:
-                self._sleep(plus_minus_5(self._gap))
+                self._sleep(self._gap)
         self._last = now
-        self._iv = plus_minus_5(self._interval)
+        self._iv = self._interval
         suffix = f" {self._count}회" if self._count > 1 else ""
         self._log(f"{self._label}{suffix} [{self._key}]")

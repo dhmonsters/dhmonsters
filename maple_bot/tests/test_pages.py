@@ -62,6 +62,21 @@ def test_movement_page_has_rednose2_coordinate_card(app):
     assert pages[1].findChild(QWidget, "rednose2CoordinateCard") is not None
 
 
+def test_rednose2_card_tracks_loaded_hunt_ground(app):
+    from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
+    from core_ui.rednose2_coordinate_widget import Rednose2CoordinateWidget
+
+    pages = build_pages(FakeConfig())
+    preset = pages[1].findChild(HuntGroundPresetWidget)
+    rednose2 = pages[1].findChild(Rednose2CoordinateWidget)
+
+    assert rednose2.isHidden()
+    preset.preset_loaded.emit("빨코2")
+    assert not rednose2.isHidden()
+    preset.preset_loaded.emit("빨코3")
+    assert rednose2.isHidden()
+
+
 def test_combat_page_has_attack_sequence_editor(app):
     from PyQt6.QtWidgets import QWidget
 

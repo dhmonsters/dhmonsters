@@ -4,9 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from core.humanize.timing import plus_minus_5
-
-
 @dataclass(frozen=True)
 class AttackSequence:
     name: str
@@ -81,6 +78,4 @@ class AttackSequenceRunner:
 
     @staticmethod
     def _jitter(value: float) -> float:
-        if value <= 0:
-            return 0.0
-        return plus_minus_5(value)
+        return max(0.0, float(value))

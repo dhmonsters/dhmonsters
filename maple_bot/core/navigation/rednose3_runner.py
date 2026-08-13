@@ -6,9 +6,6 @@ import threading
 import time
 from typing import Callable
 
-from core.humanize.timing import down_5
-
-
 class RedNose3RouteRunner:
     """Runs RedNose3 by switching platforms with teleport-only inputs."""
 
@@ -91,7 +88,7 @@ class RedNose3RouteRunner:
         return str(self._profile.get("jump_key") or "alt").strip()
 
     def _humanized(self, key: str, fallback: float) -> float:
-        return down_5(float(self._profile.get(key, fallback)))
+        return float(self._profile.get(key, fallback))
 
     def _random_hunt_cycle_sec(self) -> float:
         min_sec = float(self._profile.get("hunt_cycle_min_sec", 92.83))
@@ -181,9 +178,9 @@ class RedNose3RouteRunner:
         for index in range(max(1, int(count))):
             if not self._active():
                 return
-            h.press_action(key, down_5(hold_sec))
+            h.press_action(key, hold_sec)
             if index < count - 1:
-                self._sleep(down_5(gap_sec))
+                self._sleep(gap_sec)
 
     def _teleport(self, direction: str) -> None:
         key = self._teleport_key()
@@ -201,7 +198,7 @@ class RedNose3RouteRunner:
             h.hold_direction(direction)
             try:
                 self._sleep(lead_sec)
-                h.press_action(key, down_5(float(self._profile.get("teleport_hold_sec", 0.07))))
+                h.press_action(key, float(self._profile.get("teleport_hold_sec", 0.07)))
                 remaining = direction_hold_sec - (time.monotonic() - started_at)
                 if remaining > 0:
                     self._sleep(remaining)
@@ -214,7 +211,7 @@ class RedNose3RouteRunner:
         h.hold_action(direction)
         self._sleep(self._humanized("vertical_teleport_lead_sec", 0.02))
         try:
-            h.press_action(key, down_5(float(self._profile.get("teleport_hold_sec", 0.3))))
+            h.press_action(key, float(self._profile.get("teleport_hold_sec", 0.3)))
         finally:
             h.release_action(direction)
         self._sleep(self._humanized("after_teleport_wait_sec", 0.12))
@@ -228,7 +225,7 @@ class RedNose3RouteRunner:
         h.hold_action("down")
         self._sleep(self._humanized("down_jump_lead_sec", 0.03))
         try:
-            h.press_action(jump_key, down_5(float(self._profile.get("down_jump_hold_sec", 0.12))))
+            h.press_action(jump_key, float(self._profile.get("down_jump_hold_sec", 0.12)))
         finally:
             h.release_action("down")
         self._sleep(self._humanized("after_down_jump_wait_sec", 0.25))

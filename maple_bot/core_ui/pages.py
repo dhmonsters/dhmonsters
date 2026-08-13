@@ -619,8 +619,14 @@ def build_pages(config) -> list[QWidget]:
     nav_extras = []
     from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
     from core_ui.rednose2_coordinate_widget import Rednose2CoordinateWidget
-    nav_extras.append(HuntGroundPresetWidget(c, name_field=hunt_name_field))
-    nav_extras.append(Rednose2CoordinateWidget(c))
+    hunt_ground_preset = HuntGroundPresetWidget(c, name_field=hunt_name_field)
+    rednose2_settings = Rednose2CoordinateWidget(c)
+    hunt_ground_preset.preset_loaded.connect(rednose2_settings.set_hunt_ground)
+    hunt_name_field.widget.editingFinished.connect(
+        lambda: rednose2_settings.set_hunt_ground(hunt_name_field.widget.text())
+    )
+    nav_extras.append(hunt_ground_preset)
+    nav_extras.append(rednose2_settings)
     try:
         import mss as _mss
         from PyQt6.QtWidgets import QWidget as _QWidget, QHBoxLayout as _QHBox, \

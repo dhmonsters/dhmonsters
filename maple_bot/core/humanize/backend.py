@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from core.humanize.timing import down_5
+
 
 class InputBackend(ABC):
     """?낅젰 ?≪텧 諛깆뿏??怨꾩빟. 援ы쁽泥대뒗 援먯껜 媛??肄섏꽱??."""
@@ -89,7 +91,7 @@ class SendInputBackend(InputBackend):
     def press(self, key: str, hold_sec: float = 0.05) -> None:
         import time
         self.key_down(key)
-        time.sleep(max(0.0, hold_sec))
+        time.sleep(down_5(hold_sec))
         self.key_up(key)
 
     def click(self, x: int, y: int) -> None:

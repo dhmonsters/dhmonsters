@@ -1,7 +1,5 @@
 # 전역 노드 경로를 기존 이동기와 등록된 제한 액션으로 실행하는 조정기
 import time
-
-from core.humanize.timing import down_5
 from core.navigation.block import Block
 from core.navigation.world_graph import shortest_edge_path
 
@@ -19,7 +17,7 @@ class ActionExecutor:
                     raise RuntimeError("마우스 클릭 입력 백엔드를 사용할 수 없습니다")
                 self._click(spec.click_x, spec.click_y)
             else:
-                self._backend.press(spec.key, down_5(spec.hold_sec))
+                self._backend.press(spec.key, spec.hold_sec)
             if index + 1 < spec.repeat and spec.repeat_interval_sec > 0:
                 self._sleep(spec.repeat_interval_sec)
         if spec.wait_after_sec > 0:

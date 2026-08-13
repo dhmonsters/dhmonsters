@@ -115,6 +115,19 @@ class ScreenReader:
         score, _ = self._match_multiscale(screenshot, template)
         return score
 
+    def find_template_match(
+        self,
+        screenshot: np.ndarray,
+        template_path: str,
+        threshold: float = 0.65,
+    ) -> tuple[float, tuple[int, int] | None]:
+        """한 번의 멀티스케일 탐색으로 점수와 임계값을 통과한 중심을 반환한다."""
+        template = cv2.imread(template_path)
+        if template is None:
+            return 0.0, None
+        score, center = self._match_multiscale(screenshot, template)
+        return score, center if score >= threshold else None
+
     def find_template(
         self,
         screenshot: np.ndarray,

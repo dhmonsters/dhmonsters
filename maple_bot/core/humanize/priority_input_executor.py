@@ -26,7 +26,7 @@ class PriorityInputExecutor:
     ) -> dict[str, float]:
         self._ladder_critical = True
         jump_hold = down_5(jump_hold_sec)
-        up_delay = down_5(up_delay_sec)
+        up_delay = max(0.0, float(up_delay_sec))
         started_at = time.monotonic()
         try:
             self._backend.begin_priority()

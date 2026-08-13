@@ -11,7 +11,6 @@ from core.navigation.block import Block
 from core.navigation.route_input_owner import RouteInputOwner
 from core.humanize.intent import Intent
 from core.humanize.priority_input_executor import PriorityInputExecutor
-from core.humanize.timing import down_5
 
 # C CoordScriptRunner/routine_runner 검증 상수
 TOLERANCE = 3           # 도착 판정 픽셀 (이 이내면 도달)
@@ -436,7 +435,7 @@ class BlockRunner:
                 self._route_inputs.hold_action(self._jump_key)   # 걷는 동안 점프키도 누른 채 유지
             if use_tele:
                 # 방향 유지한 채 텔포 키 (C _teleport_to_x)
-                self._route_inputs.press_action(self._tele_key, down_5(0.05))
+                self._route_inputs.press_action(self._tele_key, 0.05)
             # 다음 위치 갱신을 기다린다 — 안 쉬면 스캐너(≈0.05s)보다 빨리 읽어
             # 위치가 안 변한 것처럼 보여 거짓 '멈춤'이 된다(시작 시 좌표 미수신 포함).
             self._jsleep(self._poll)
@@ -638,7 +637,7 @@ class BlockRunner:
         jump_dir = "right" if ladder_x > x else "left"
         self._route_inputs.hold_direction(jump_dir)
         # 사다리 쪽으로 점프(방향 유지=모멘텀) → ↑ 매달림 → 방향키 해제
-        self._route_inputs.press_action(self._jump_key, down_5(0.05))
+        self._route_inputs.press_action(self._jump_key, 0.05)
         self._jsleep(JUMP_TO_UP_SEC)    # 점프 직후 빠르게 ↑로 전환
         self._route_inputs.hold_action("up")
         direction_hold = min(0.08, LADDER_HANG_SEC)
@@ -658,8 +657,8 @@ class BlockRunner:
             self._ladder_motion(True)
             attack_paused = True
             self._log_once("사다리 판정 시작: 공격 스레드 중지")
-            right_launch_distance = down_5(profile.launch_distance_right)
-            left_launch_distance = down_5(profile.launch_distance_left)
+            right_launch_distance = profile.launch_distance_right
+            left_launch_distance = profile.launch_distance_left
             approach_x = None
             previous_x = None
             launch_sample = None
@@ -789,7 +788,7 @@ class BlockRunner:
             trajectory = []
             last_position_seen_at = None
             self._log_once(f"[사다리진단] 점프 요청 t=0.0000초, Y={start_y}")
-            up_target = down_5(profile.up_delay_sec)
+            up_target = profile.up_delay_sec
             sequence = self._priority_inputs.perform_ladder_jump(
                 jump_key=self._jump_key,
                 jump_hold_sec=profile.jump_hold_sec,
@@ -953,7 +952,7 @@ class BlockRunner:
 
         self._route_inputs.hold_action("down")
         self._jsleep(JUMP_TO_UP_SEC)    # 아래키 살짝 — 발판 드랍 인식
-        self._route_inputs.press_action(self._jump_key, down_5(0.05))  # ↓+점프
+        self._route_inputs.press_action(self._jump_key, 0.05)  # ↓+점프
         self._jsleep(0.1)
         self._route_inputs.release_action("down")
 
@@ -973,7 +972,7 @@ class BlockRunner:
             ):
                 self._route_inputs.release_direction()
                 self._route_inputs.hold_direction(escape_dir)
-                self._route_inputs.press_action(self._jump_key, down_5(0.12))
+                self._route_inputs.press_action(self._jump_key, 0.12)
                 self._route_inputs.release_direction()
                 last_escape_at = now
                 self._log_once(
@@ -988,7 +987,7 @@ class BlockRunner:
             self._route_inputs.hold_direction(block.direction)
         elif block.direction == "down":
             self._route_inputs.hold_action("down")
-        self._route_inputs.press_action(self._jump_key, down_5(0.05))
+        self._route_inputs.press_action(self._jump_key, 0.05)
         if block.direction == "down":
             self._route_inputs.release_action("down")
         elif block.direction in ("left", "right"):

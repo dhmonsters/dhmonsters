@@ -41,6 +41,10 @@ class AutoSeller:
         now = time.time() if now is None else now
         self.status.next_run_at = now + max(0.1, float(minutes)) * 60.0
 
+    def schedule_after_seconds(self, seconds: float, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        self.status.next_run_at = now + max(0.1, float(seconds))
+
     def should_run(self, enabled: bool, interval_min: float, now: float | None = None) -> bool:
         if not enabled or self.status.state in ("selling", "stopping"):
             return False
@@ -54,17 +58,22 @@ class AutoSeller:
         if self.status.state == "selling":
             self.status.state = "stopping"
 
-    def run_once(self, status_cb, stop_event) -> None:
+    def run_once(self, status_cb, stop_event) -> bool:
         self.status.state = "selling"
         self.status.last_started_at = time.time()
         self.status.last_error = ""
         try:
-            self.seller.sell(status_cb=status_cb, stop_event=stop_event)
+            succeeded = self.seller.sell(status_cb=status_cb, stop_event=stop_event)
         except Exception as exc:
             self.status.state = "failed"
             self.status.last_error = str(exc)
             raise
         else:
+            if succeeded is False:
+                self.status.state = "failed"
+                self.status.last_error = "판매 단계 미완료"
+                return False
             self.status.state = "completed"
+            return True
         finally:
             self.status.last_finished_at = time.time()

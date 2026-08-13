@@ -166,11 +166,11 @@ class RedNose2RouteRunner:
         )))
 
     def _teleport_interval(self) -> float:
-        return max(0.05, float(self._profile.get("teleport_interval_sec", 0.4)))
+        return max(0.0, float(self._profile.get("teleport_interval_sec", 0.4)))
 
     def _segment_interval(self, key: str, fallback: float | None = None) -> float:
         base = self._teleport_interval() if fallback is None else fallback
-        return max(0.05, float(self._profile.get(key, base)))
+        return max(0.0, float(self._profile.get(key, base)))
 
     def _teleport_step_px(self) -> float:
         return max(
@@ -453,16 +453,16 @@ class RedNose2RouteRunner:
             if lead_sec is None:
                 lead_sec = float(self._profile.get("teleport_lead_sec", 0.07))
             if lead_sec > 0:
-                self._sleep(down_5(lead_sec))
-            h.press_action(teleport_key, down_5(hold_sec))
+                self._sleep(lead_sec)
+            h.press_action(teleport_key, hold_sec)
             h.release_direction()
             return
 
         h.release_direction()
         h.hold_action(direction)
-        self._sleep(down_5(float(self._profile.get("vertical_teleport_lead_sec", 0.15))))
+        self._sleep(float(self._profile.get("vertical_teleport_lead_sec", 0.15)))
         try:
-            h.press_action(teleport_key, down_5(hold_sec))
+            h.press_action(teleport_key, hold_sec)
         finally:
             h.release_action(direction)
 
@@ -472,13 +472,19 @@ class RedNose2RouteRunner:
         if not attack_key or not teleport_key:
             return
         h = self._route_inputs()
+        attack_hold = down_5(float(self._profile.get("attack_hold_sec", 0.08)))
+        started_at = time.monotonic()
         h.hold_direction(direction)
         h.hold_action(attack_key)
-        self._sleep(down_5(float(self._profile.get("attack_to_teleport_sec", 0.05))))
-        h.press_action(teleport_key, down_5(float(self._profile.get("teleport_hold_sec", 0.05))))
-        h.release_direction()
-        self._sleep(max(0.0, float(self._profile.get("attack_hold_sec", 0.08)) - 0.05))
-        h.release_action(attack_key)
+        try:
+            self._sleep(float(self._profile.get("attack_to_teleport_sec", 0.05)))
+            h.press_action(teleport_key, float(self._profile.get("teleport_hold_sec", 0.05)))
+            remaining = attack_hold - (time.monotonic() - started_at)
+            if remaining > 0.0:
+                self._sleep(remaining)
+        finally:
+            h.release_direction()
+            h.release_action(attack_key)
 
     def _tap_attack(self, count: int = 1) -> None:
         attack_key = self._attack_key()
@@ -488,9 +494,9 @@ class RedNose2RouteRunner:
         hold_sec = float(self._profile.get("attack_hold_sec", 0.08))
         interval_sec = float(self._profile.get("retry_attack_interval_sec", 0.12))
         for index in range(max(1, int(count))):
-            h.press_action(attack_key, down_5(hold_sec))
+            h.press_action(attack_key, hold_sec)
             if index < count - 1:
-                self._sleep(down_5(interval_sec))
+                self._sleep(interval_sec)
 
     def _retry_attack_once(self) -> None:
         attack_key = self._attack_key()
@@ -498,7 +504,7 @@ class RedNose2RouteRunner:
             return
         h = self._route_inputs()
         hold_sec = float(self._profile.get("retry_attack_hold_sec", 1.5))
-        h.press_action(attack_key, down_5(hold_sec))
+        h.press_action(attack_key, hold_sec)
 
     def _stair7_up_right_teleport_once(self) -> None:
         self._teleport_once("up")
@@ -507,7 +513,7 @@ class RedNose2RouteRunner:
         if bias_correct_sec > 0.0 and pos is not None and float(pos[0]) >= self._stair7_right_bias_x():
             h = self._route_inputs()
             h.hold_direction("left")
-            self._sleep(down_5(bias_correct_sec))
+            self._sleep(bias_correct_sec)
             h.release_direction()
         self._teleport_once_with_hold(
             "right",
@@ -664,9 +670,8 @@ class RedNose2RouteRunner:
                         self._teleport_once(direction)
                         log_label = "teleport-move"
                     last_teleport_position = current_position
-                    next_teleport_at = now + down_5(
-                        self._teleport_interval() if interval_sec is None else interval_sec
-                    )
+                    interval = self._teleport_interval() if interval_sec is None else interval_sec
+                    next_teleport_at = time.monotonic() + max(0.0, float(interval))
                     if now - self._last_teleport_log_at >= 0.5:
                         self._last_teleport_log_at = now
                         self._log(
@@ -1055,14 +1060,80 @@ class RedNose2RouteRunner:
             return False
         return not self._stop.is_set()
 
+    def _auto_sell_floor(self) -> str:
+        """자동판매 진입용으로 허용 오차 없이 현재 층을 구분한다."""
+        pos = self._current_pos()
+        if pos is None or pos[1] is None:
+            return "unknown"
+        x = float(pos[0])
+        y = int(pos[1])
+        floor3_min, floor3_max = self._floor3_y_range()
+        floor2_min, floor2_max = self._floor2_y_range()
+        floor1_min, floor1_max = self._floor1_y_range()
+        if floor3_min <= y <= floor3_max:
+            entry_min = self._profile_x("auto_sell_entry_x_min", 123)
+            entry_max = self._profile_x("auto_sell_entry_x_max", 136)
+            return "shop-entry" if entry_min <= x <= entry_max else "upper-platform"
+        if floor2_min <= y <= floor2_max:
+            return "floor2"
+        if floor1_min <= y <= floor1_max:
+            return "floor1"
+        if y < floor2_min:
+            return "upper-platform"
+        return "between"
+
+    def _drop_to_floor2_for_auto_sell(self) -> bool:
+        """회수 중 상단 발판에서 아랫텔포로 2층까지 내려온다."""
+        for attempt in range(1, 9):
+            if not self._manual_active():
+                return False
+            self._log(f"[rednose2v5] auto-sell floor2 recovery: down-teleport ({attempt}/8)")
+            self._teleport_once("down")
+            for _wait in range(10):
+                self._fresh_pos()
+                floor_name = self._auto_sell_floor()
+                if floor_name == "floor2":
+                    return True
+                if floor_name == "floor1":
+                    return self._return_floor2_from_stair7(active_fn=self._manual_active)
+                self._sleep(0.03)
+        return False
+
     def prepare_auto_sell_from_floor2(self) -> bool:
         """빨코2 자동판매 전용 진입. 2층 X=123~136 범위에서 윗텔포한다."""
         x_min = self._profile_x("auto_sell_entry_x_min", 123)
         x_max = self._profile_x("auto_sell_entry_x_max", 136)
         target_x = self._profile_x("auto_sell_entry_x", 129.5)
-        if not self._is_upper_floor_v5(None):
-            self._log("[rednose2v5] auto-sell entry skipped: not on floor2")
-            return False
+        floor_name = self._auto_sell_floor()
+        if floor_name == "shop-entry":
+            self._log("[rednose2v5] auto-sell entry ready: already on shop entry floor")
+            return True
+        if floor_name == "floor1":
+            self._log("[rednose2v5] auto-sell entry: recover floor1 through stair7")
+            if not self._return_floor2_from_stair7(active_fn=self._manual_active):
+                return False
+        elif floor_name == "upper-platform":
+            if not self._drop_to_floor2_for_auto_sell():
+                return False
+        elif floor_name != "floor2":
+            for _attempt in range(10):
+                self._fresh_pos()
+                floor_name = self._auto_sell_floor()
+                if floor_name not in {"unknown", "between"}:
+                    break
+                self._sleep(0.05)
+            if floor_name == "shop-entry":
+                self._log("[rednose2v5] auto-sell entry ready after refresh: shop entry floor")
+                return True
+            if floor_name == "floor1":
+                if not self._return_floor2_from_stair7(active_fn=self._manual_active):
+                    return False
+            elif floor_name == "upper-platform":
+                if not self._drop_to_floor2_for_auto_sell():
+                    return False
+            elif floor_name != "floor2":
+                self._log(f"[rednose2v5] auto-sell entry blocked: unsupported floor={floor_name}")
+                return False
         self._log(
             f"[rednose2v5] auto-sell entry: align X={target_x:.0f} "
             f"range {x_min:.0f}-{x_max:.0f}, up-teleport"
@@ -1185,7 +1256,7 @@ class RedNose2RouteRunner:
                 return True
         return False
 
-    def _return_floor2_from_stair7(self) -> bool:
+    def _return_floor2_from_stair7(self, active_fn: Callable[[], bool] | None = None) -> bool:
         stair_x = self._point_x("stair7", 41)
         stair_left, stair_right = self._stair7_x_range()
         attempts = max(1, int(self._profile.get("stair7_return_attempts", 10)))
@@ -1193,10 +1264,13 @@ class RedNose2RouteRunner:
             f"[rednose2v5] step stair7: approach X={stair_x:.0f} "
             f"range {stair_left:.0f}-{stair_right:.0f}, up/right teleport"
         )
+        is_active = active_fn or self._active
         if self._is_upper_floor_v5(None):
             self._log("[rednose2v5] already on floor2 before stair7 return")
             return True
         for attempt in range(1, attempts + 1):
+            if not is_active():
+                return False
             if self._is_upper_floor_v5(None):
                 self._log("[rednose2v5] floor2 reached during stair7 recovery")
                 return True
@@ -1213,6 +1287,7 @@ class RedNose2RouteRunner:
                 teleport_stop_range=self._stair7_floor1_teleport_stop_range(),
                 arrival_tolerance=3.0,
                 allow_crossed_arrival=False,
+                active_fn=is_active,
             ):
                 return False
             pos = self._current_pos()

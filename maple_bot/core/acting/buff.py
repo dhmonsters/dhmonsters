@@ -3,9 +3,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.humanize.timing import down_5, plus_minus_5
-
-
 @dataclass
 class Buff:
     key: str = ""
@@ -34,9 +31,9 @@ class BuffManager:
             last = self._last.get(index, -1e9)
             interval = self._iv.get(index, buff.interval)
             if now - last >= interval:
-                self._input.press(buff.key, plus_minus_5(buff.hold_sec))
+                self._input.press(buff.key, buff.hold_sec)
                 self._last[index] = now
-                self._iv[index] = down_5(buff.interval)
-                self._next_allowed = now + plus_minus_5(self._gap)
+                self._iv[index] = buff.interval
+                self._next_allowed = now + self._gap
                 self._log(f"버프 [{buff.key}]")
                 return

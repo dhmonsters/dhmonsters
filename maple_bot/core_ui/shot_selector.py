@@ -226,7 +226,9 @@ class _Canvas(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, e):
-        if self.start and self.cur:
+        if self.start is not None:
+            self.cur = self._clamp(e.position().toPoint())
+            self.update()
             self._on_release(QRect(self.start, self.cur).normalized())
 
     def paintEvent(self, e):
