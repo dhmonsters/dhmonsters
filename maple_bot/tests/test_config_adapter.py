@@ -205,3 +205,38 @@ def test_rednose2_x_overrides_do_not_change_rednose3_profile():
     data["rednose2_v5"] = {"floor2_left_x": 58, "floor2_right_x": 121}
 
     assert to_runtime_config(data).rednose3 == baseline
+
+
+def test_legacy_rednose2_timing_uses_completion_interval_compatibility_defaults():
+    data = _sample_config()
+    data["rednose2_v5"] = {
+        "attack_hold_sec": 0.9,
+        "floor2_hunt_teleport_interval_sec": 0.4,
+        "floor2_right_edge_teleport_interval_sec": 1.8,
+    }
+
+    profile = to_runtime_config(data).rednose2_v5
+
+    assert profile["timing_version"] == 2
+    assert profile["floor2_hunt_teleport_interval_sec"] == 0.72
+    assert profile["floor2_right_edge_teleport_interval_sec"] == 0.90
+
+
+def test_versioned_rednose2_timing_preserves_valid_saved_values():
+    data = _sample_config()
+    data["rednose2_v5"] = {
+        "timing_version": 2,
+        "teleport_hold_sec": 0.21,
+        "attack_hold_sec": 0.77,
+        "floor2_hunt_teleport_interval_sec": 0.66,
+        "stair7_right_teleport_hold_sec": 0.08,
+        "floor2_right_edge_teleport_interval_sec": 0.88,
+    }
+
+    profile = to_runtime_config(data).rednose2_v5
+
+    assert profile["teleport_hold_sec"] == 0.21
+    assert profile["attack_hold_sec"] == 0.77
+    assert profile["floor2_hunt_teleport_interval_sec"] == 0.66
+    assert profile["stair7_right_teleport_hold_sec"] == 0.08
+    assert profile["floor2_right_edge_teleport_interval_sec"] == 0.88

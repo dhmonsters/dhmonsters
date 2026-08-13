@@ -1,6 +1,7 @@
 ﻿# config_adapter ??config.json ?뺤뀛?덈━瑜?RuntimeConfig濡?留ㅽ븨 (湲곗〈 ?ㅼ젙 ???좉퇋 ?고????ㅻ━)
 from __future__ import annotations
 
+import math
 from dataclasses import fields
 
 try:
@@ -255,6 +256,15 @@ REDNOSE2_X_DEFAULTS = {
     "platform27_bypass_x_max": 89,
 }
 
+REDNOSE2_TIMING_VERSION = 2
+REDNOSE2_TIMING_DEFAULTS = {
+    "teleport_hold_sec": 0.30,
+    "attack_hold_sec": 0.90,
+    "floor2_hunt_teleport_interval_sec": 0.72,
+    "stair7_right_teleport_hold_sec": 0.10,
+    "floor2_right_edge_teleport_interval_sec": 0.90,
+}
+
 
 def rednose2_x_validation_error(values: dict) -> str | None:
     for key in REDNOSE2_X_DEFAULTS:
@@ -319,6 +329,28 @@ def _merge_rednose2_x_settings(raw: dict | None) -> dict[str, int]:
     return merged
 
 
+def _valid_rednose2_timing(value) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and 0.0 <= float(value) <= 10.0
+    )
+
+
+def _merge_rednose2_timing_settings(raw: dict | None) -> dict[str, float | int]:
+    merged: dict[str, float | int] = {
+        "timing_version": REDNOSE2_TIMING_VERSION,
+        **REDNOSE2_TIMING_DEFAULTS,
+    }
+    if not isinstance(raw, dict) or raw.get("timing_version") != REDNOSE2_TIMING_VERSION:
+        return merged
+    for key in REDNOSE2_TIMING_DEFAULTS:
+        if _valid_rednose2_timing(raw.get(key)):
+            merged[key] = float(raw[key])
+    return merged
+
+
 def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     """Build RedNose2 v5 runtime profile from one fixed source."""
     mm = d.get("minimap", {}) or {}
@@ -372,6 +404,7 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     forced["minimap_width"] = int(mm.get("width", forced["base_minimap_width"]))
     forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
     forced.update(_merge_rednose2_x_settings(d.get("rednose2_v5")))
+    forced.update(_merge_rednose2_timing_settings(d.get("rednose2_v5")))
     return _with_minimap_ratios(
         forced,
         x_keys=(
