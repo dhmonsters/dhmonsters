@@ -641,6 +641,7 @@ class BotRuntime:
         """而⑦듃濡ㅻ윭 start/stop媛 ?몄텧 ??猷⑦듃 ?ㅽ뻾湲??쒖꽦/?뺤? ?좉?."""
         self._bot_running = flag
         if flag:
+            self._refresh_auto_sell_config()
             # ???ㅽ뻾?먯꽌???댁쟾 ?대룞 ?ㅽ뙣 ?곹깭瑜?珥덇린?뷀븳??
             self._route_move_fault = False
             self._anti_mob_failed = False
@@ -797,6 +798,7 @@ class BotRuntime:
         """二쇨린 ?먮룞?먮ℓ媛 耳쒖졇 ?덉쑝硫??먮ℓ ?쒖젏??媛蹂띻쾶 ?뺤씤?쒕떎."""
         if not self._bot_running or self.auto_seller is None:
             return
+        self._refresh_auto_sell_config()
         now = time.time() if now is None else now
         if self.auto_seller.should_run(
             self._cfg.auto_sell_enabled,
@@ -805,8 +807,19 @@ class BotRuntime:
         ):
             self.start_junk_sell(reason="scheduled")
 
+    def _refresh_auto_sell_config(self) -> None:
+        """UI가 저장한 최신 자동판매 설정을 실행 중 런타임에 반영한다."""
+        source = getattr(self._cfg, "junk_config", None)
+        if source is None:
+            return
+        settings = source.get("settings2", "junk_sell", default={}) or {}
+        self._cfg.auto_sell_enabled = bool(settings.get("auto_sell_enabled", False))
+        self._cfg.auto_sell_interval_min = float(settings.get("auto_sell_interval_min", 10))
+        self._cfg.auto_sell_on_start = bool(settings.get("sell_on_start", False))
+
     def start_junk_sell(self, reason: str = "manual") -> bool:
         """?먮룞?먮ℓ瑜?蹂꾨룄 ?ㅻ젅?쒕줈 1???ㅽ뻾?쒕떎."""
+        self._refresh_auto_sell_config()
         if self.junk_seller is None or self.auto_seller is None:
             self.log("자동판매 설정 또는 템플릿 연결이 없습니다.", "자동판매")
             return False
@@ -834,6 +847,7 @@ class BotRuntime:
     def _run_junk_sell_once(self) -> None:
         """자동판매 실행 중 다른 행동 입력을 멈추고 판매를 수행한다."""
         rednose_prepared = False
+        sale_succeeded = False
         self._junk_selling = True
         try:
             self.release_pickup_key()
@@ -848,10 +862,15 @@ class BotRuntime:
             self.log("자동판매 시작: 이동·공격·픽업 입력을 일시정지합니다.", "자동판매")
             self.release_pickup_key()
             self._release_runtime_inputs()
-            self.auto_seller.run_once(
-                lambda msg: self.log(msg, "자동판매"),
-                self._junk_sell_stop,
-            )
+            sale_started_at = time.perf_counter()
+            try:
+                sale_succeeded = self.auto_seller.run_once(
+                    lambda msg: self.log(msg, "자동판매"),
+                    self._junk_sell_stop,
+                )
+            finally:
+                elapsed = time.perf_counter() - sale_started_at
+                self.log(f"판매 위치 도착 후 자동판매 소요={elapsed:.3f}초", "자동판매")
         except Exception as exc:
             self.log(f"자동판매 오류: {exc}", "자동판매")
         finally:
@@ -864,7 +883,11 @@ class BotRuntime:
                 self._junk_selling = False
                 self._junk_sell_stop.clear()
                 if self.auto_seller is not None:
-                    self.auto_seller.schedule_after_minutes(self._cfg.auto_sell_interval_min)
+                    if sale_succeeded:
+                        self.auto_seller.schedule_after_minutes(self._cfg.auto_sell_interval_min)
+                    else:
+                        self.auto_seller.schedule_after_seconds(5.0)
+                        self.log("자동판매 미완료: 5초 후 다시 시도합니다.", "자동판매")
                 self.log("자동판매 종료: 사냥 입력을 다시 허용합니다.", "자동판매")
 
     def reload_lie_scanner(self, config) -> None:

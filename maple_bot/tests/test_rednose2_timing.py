@@ -131,3 +131,65 @@ def test_platform27_manual_attack_hold_applies_down_five_once(monkeypatch):
     assert runner._finish_platform27_and_return_floor2()
 
     assert route_inputs.action_events == [("down", "end", 0.0), ("up", "end", 1.9)]
+
+
+def test_auto_sell_starts_immediately_when_already_on_shop_entry_floor(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    monkeypatch.setattr(runner, "_current_pos", lambda: (130.0, 49.0))
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: (130.0, 49.0))
+    monkeypatch.setattr(
+        runner,
+        "_move_to_target_v5",
+        lambda *_args, **_kwargs: pytest.fail("상점 진입층에서는 이동하면 안 됩니다."),
+    )
+    monkeypatch.setattr(
+        runner,
+        "_teleport_once",
+        lambda *_args, **_kwargs: pytest.fail("상점 진입층에서는 텔포하면 안 됩니다."),
+    )
+
+    assert runner.prepare_auto_sell_from_floor2() is True
+
+
+def test_auto_sell_recovers_floor1_before_alignment(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    position = [41.0, 75.0]
+    events = []
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
+
+    def recover(*, active_fn=None):
+        events.append(("recover", active_fn is not None))
+        position[:] = [129.0, 62.0]
+        return True
+
+    monkeypatch.setattr(runner, "_return_floor2_from_stair7", recover)
+    monkeypatch.setattr(runner, "_teleport_once", lambda direction: events.append(("teleport", direction)))
+
+    assert runner.prepare_auto_sell_from_floor2() is True
+    assert events == [("recover", True), ("teleport", "up")]
+
+
+def test_auto_sell_drops_from_upper_collection_platform_to_floor2(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    position = [95.0, 54.0]
+    events = []
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
+
+    def teleport(direction):
+        events.append(direction)
+        if direction == "down":
+            position[:] = [95.0, 62.0]
+
+    monkeypatch.setattr(runner, "_teleport_once", teleport)
+    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: position.__setitem__(0, 129.0) or True)
+
+    assert runner.prepare_auto_sell_from_floor2() is True
+    assert events == ["down", "up"]
