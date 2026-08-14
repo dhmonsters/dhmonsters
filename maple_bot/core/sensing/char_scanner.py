@@ -133,18 +133,20 @@ def _load_marker_templates() -> list[tuple[str, np.ndarray]]:
     """미니맵 캐릭터 마커 템플릿을 로드한다."""
     templates: list[tuple[str, np.ndarray]] = []
     user_dir = Path(get_user_templates_dir()) / "player"
-    for name in ("y_p.png", "r_p.png"):
-        candidates = (user_dir / name, _resource_path("templates", "player", name))
-        checked = set()
-        for path in candidates:
-            identity = str(path.resolve(strict=False)).lower()
-            if identity in checked:
-                continue
-            checked.add(identity)
-            img = cv2.imread(str(path), cv2.IMREAD_COLOR)
-            if img is not None and img.size > 0:
-                templates.append((name, img))
-                break
+    name = "y_p.png"
+    candidates = (user_dir / name, _resource_path("templates", "player", name))
+    checked = set()
+    for path in candidates:
+        identity = str(path.resolve(strict=False)).lower()
+        if identity in checked:
+            continue
+        checked.add(identity)
+        if not path.is_file():
+            continue
+        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        if img is not None and img.size > 0:
+            templates.append((name, img))
+            break
     return templates
 
 

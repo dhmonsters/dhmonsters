@@ -85,7 +85,7 @@ def test_runtime_character_filter_builds_automatic_range_from_reference_rgb():
     )
 
 
-def test_marker_template_loader_prefers_user_y_p_over_bundled(tmp_path, monkeypatch):
+def test_marker_template_loader_prefers_user_y_p_and_ignores_legacy_r_p(tmp_path, monkeypatch):
     user_templates = tmp_path / "user_templates"
     bundled_templates = tmp_path / "bundled" / "templates"
     (user_templates / "player").mkdir(parents=True)
@@ -102,5 +102,27 @@ def test_marker_template_loader_prefers_user_y_p_over_bundled(tmp_path, monkeypa
 
     loaded = dict(char_scanner_module._load_marker_templates())
 
+    assert set(loaded) == {"y_p.png"}
     assert int(loaded["y_p.png"][0, 0, 0]) == 77
-    assert int(loaded["r_p.png"][0, 0, 0]) == 22
+
+
+def test_marker_template_loader_does_not_read_missing_files(tmp_path, monkeypatch):
+    user_templates = tmp_path / "user_templates"
+    bundled_templates = tmp_path / "bundled" / "templates"
+    read_calls = []
+    monkeypatch.setattr(char_scanner_module, "get_user_templates_dir", lambda: str(user_templates), raising=False)
+    monkeypatch.setattr(
+        char_scanner_module,
+        "_resource_path",
+        lambda *parts: bundled_templates.parent.joinpath(*parts),
+    )
+    monkeypatch.setattr(
+        char_scanner_module.cv2,
+        "imread",
+        lambda path, mode: read_calls.append((path, mode)) or None,
+    )
+
+    loaded = char_scanner_module._load_marker_templates()
+
+    assert loaded == []
+    assert read_calls == []
