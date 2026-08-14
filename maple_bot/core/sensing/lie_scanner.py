@@ -11,6 +11,7 @@ import numpy as np
 
 from core.sensing.event import Event
 from core.sensing.scanner import Scanner
+from core.internal_trace import trace_event
 
 
 def _to_gray(image: np.ndarray) -> np.ndarray:
@@ -113,22 +114,40 @@ class LieScanner(Scanner):
         return templates
 
     def scan_once(self) -> Event | None:
+        total_started = time.perf_counter()
+        capture_started = total_started
         try:
             region = self._region() if callable(self._region) else self._region
             scene = self._capture(region) if region else self._capture()
         except Exception as exc:
             self._debug_log(f"거탐 감시 오류: {exc}")
             return None
+        capture_finished = time.perf_counter()
         if scene is None or not self._templates:
             self._debug_log("거탐 감시 실패: 캡처 또는 템플릿 없음")
             return None
 
         scene_gray = _to_gray(scene)
+        match_started = time.perf_counter()
         score, scale, loc, size = _best_scaled_match(scene_gray, self._templates, self.scales)
+        match_finished = time.perf_counter()
+        capture_ms = (capture_finished - capture_started) * 1000.0
+        match_ms = (match_finished - match_started) * 1000.0
+        total_ms = (match_finished - total_started) * 1000.0
         detected = score >= self._threshold
+        trace_event(
+            "lie_scan",
+            "complete",
+            capture_ms=round(capture_ms, 3),
+            match_ms=round(match_ms, 3),
+            total_ms=round(total_ms, 3),
+            score=round(score, 4),
+            detected=detected,
+        )
         self._debug_log(
             f"거탐 감시중: score={score:.3f}, scale={scale:.3f}, "
-            f"threshold={self._threshold:.3f}, region={region or '전체화면'}"
+            f"threshold={self._threshold:.3f}, region={region or '전체화면'}, "
+            f"capture={capture_ms:.1f}ms, match={match_ms:.1f}ms, total={total_ms:.1f}ms"
         )
         if not detected:
             self._save_debug_images(scene, loc, size, score, scale)
@@ -139,6 +158,10 @@ class LieScanner(Scanner):
         if not detected and self._present:
             self._present = False
         return None
+
+    def is_present(self) -> bool:
+        """최근 스캔에서 거탐 제목이 화면에 남아 있는지 반환한다."""
+        return self._present
 
     def _debug_log(self, message: str) -> None:
         if self._debug_log_fn is None:

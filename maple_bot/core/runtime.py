@@ -148,6 +148,8 @@ class RuntimeConfig:
     char_v_min: int = 200
     char_area_min: float = 3.0
     char_area_max: float = 160.0
+    char_position_offset_x: int = 0
+    char_position_offset_y: int = 0
     # 紐ъ뒪??媛먯?(image 紐⑤뱶, B 硫붿빱?덉쬁: ?됰꽕??諛뺤뒪 ??紐ъ뒪??
     hunt_mode: str = "key"
     name_template: str = ""        # ?됰꽕???쒗뵆由?寃쎈줈
@@ -218,6 +220,10 @@ class BotRuntime:
             min_area=float(config.char_area_min),
             max_area=float(config.char_area_max),
             marker_exclusions=marker_exclusions,
+            position_offset=(
+                int(config.char_position_offset_x),
+                int(config.char_position_offset_y),
+            ),
         )
         self.antimob_scanner = None
         if config.antimob_templates:
@@ -519,6 +525,14 @@ class BotRuntime:
         self._cfg.char_v_min = int(getattr(config, "char_v_min", 200))
         self._cfg.char_area_min = float(getattr(config, "char_area_min", 3.0))
         self._cfg.char_area_max = float(getattr(config, "char_area_max", 100.0))
+        self._cfg.char_position_offset_x = int(getattr(config, "char_position_offset_x", 0))
+        self._cfg.char_position_offset_y = int(getattr(config, "char_position_offset_y", 0))
+        set_position_offset = getattr(self.char_scanner, "set_position_offset", None)
+        if callable(set_position_offset):
+            set_position_offset(
+                self._cfg.char_position_offset_x,
+                self._cfg.char_position_offset_y,
+            )
 
         h_low = getattr(config, "char_h_low", None)
         h_high = getattr(config, "char_h_high", None)
@@ -1094,7 +1108,7 @@ class BotRuntime:
                 self._anti_mob_moving = True
                 try:
                     self.input_backend.key_down("left")
-                    deadline = time.monotonic() + 15.0
+                    deadline = time.monotonic() + 1.0
                     while self._bot_running and time.monotonic() < deadline:
                         current_scene = self._capture(region)
                         if current_scene is not None:
@@ -1115,7 +1129,7 @@ class BotRuntime:
             if second is None:
                 self._anti_mob_failed = True
                 self._release_runtime_inputs()
-                message = "방지몹 이미지2를 15초 동안 찾지 못해 왼쪽 이동을 해제하고 공격을 중지합니다."
+                message = "방지몹 이미지2를 1초 동안 찾지 못해 왼쪽 이동을 해제하고 공격을 중지합니다."
                 self.log(message, "안티밴")
                 try:
                     self.telegram.send(message)
@@ -1351,7 +1365,7 @@ class BotRuntime:
             return region
         if region.get("x_ratio") is not None:
             try:
-                from core.puzzle.game_window import (
+                from core.game_window import (
                     find_game_hwnd,
                     find_window_hwnd_by_title,
                     get_game_client_rect_screen,

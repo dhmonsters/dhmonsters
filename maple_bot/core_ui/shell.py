@@ -257,7 +257,10 @@ class MainShell(QMainWindow):
 
     def append_log(self, msg: str, cat: str = "시스템") -> None:
         """카테고리 태그와 함께 로그 적재. 켜진 카테고리만 화면에 표시(전체는 버퍼 보관)."""
-        self.log_requested.emit(str(msg), str(cat))
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        self.log_requested.emit(f"[{timestamp}] {msg}", str(cat))
 
     def _queue_log(self, msg: str, cat: str) -> None:
         if cat not in LOG_CATEGORIES:

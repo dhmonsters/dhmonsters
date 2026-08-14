@@ -85,14 +85,12 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
     btn.setToolTip(f"{label} 영역을 스크린샷에서 드래그해 지정합니다.")
 
     def on_click():
-        import mss as _mss
-        import numpy as np
         from core_ui.shot_selector import ScreenshotRegionSelector
-        # ?꾩껜 二쇰え?덊꽣 罹≪쿂
-        with _mss.mss() as sct:
-            mon = sct.monitors[1]
-            raw = np.array(sct.grab(mon))[:, :, :3]   # BGRA?묪GR
-            origin = (mon["left"], mon["top"])
+
+        captured = _capture_game_client(config, btn.window())
+        if captured is None:
+            return
+        raw, origin = captured
         dlg = ScreenshotRegionSelector(raw, src_origin=origin)
 
         def apply(x, y, w, h):
@@ -107,6 +105,19 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
                 config.set(*key, val)
                 if fields_xywh and i < len(fields_xywh) and fields_xywh[i] is not None:
                     fields_xywh[i].widget.setValue(val)
+            is_minimap = bool(
+                keys_xywh
+                and tuple(keys_xywh[0]) == ("minimap", "region_x")
+            )
+            if is_minimap and raw.shape[1] > 0 and raw.shape[0] > 0:
+                client_w = int(raw.shape[1])
+                client_h = int(raw.shape[0])
+                relative_x = int(x) - int(origin[0])
+                relative_y = int(y) - int(origin[1])
+                config.set("minimap", "region_x_ratio", relative_x / client_w)
+                config.set("minimap", "region_y_ratio", relative_y / client_h)
+                config.set("minimap", "width_ratio", int(w) / client_w)
+                config.set("minimap", "height_ratio", int(h) / client_h)
             config.save()
             if on_done:
                 on_done()
@@ -492,9 +503,43 @@ def _make_character_color_controls(config) -> QWidget:
     fields = {
         "area_min": SliderField("점 크기 최소", config, ("minimap", "char_area_min"), lo=1, hi=80, default=3, is_int=True, label_w=120),
         "area_max": SliderField("점 크기 최대", config, ("minimap", "char_area_max"), lo=10, hi=500, default=160, is_int=True, label_w=120),
+        "offset_x": IntField("감지 X 보정", config, ("minimap", "position_offset_x"), lo=-400, hi=400, default=0, label_w=120),
+        "offset_y": IntField("감지 Y 보정", config, ("minimap", "position_offset_y"), lo=-400, hi=400, default=0, label_w=120),
     }
+    fields["offset_x"].widget.setObjectName("characterPositionOffsetX")
+    fields["offset_y"].widget.setObjectName("characterPositionOffsetY")
     for field in fields.values():
         v.addWidget(field.row)
+
+    offset_nudge_row = QHBoxLayout()
+    offset_nudge_label = QLabel("감지 좌표 미세 조절")
+    offset_nudge_label.setFixedWidth(120)
+    offset_nudge_row.addWidget(offset_nudge_label)
+    for text, object_name, field_name, delta in (
+        ("←", "characterPositionNudgeLeft", "offset_x", -1),
+        ("→", "characterPositionNudgeRight", "offset_x", 1),
+        ("↑", "characterPositionNudgeUp", "offset_y", -1),
+        ("↓", "characterPositionNudgeDown", "offset_y", 1),
+    ):
+        button = QPushButton(text)
+        button.setObjectName(object_name)
+        button.setFixedWidth(44)
+        spinbox = fields[field_name].widget
+        button.clicked.connect(
+            lambda _checked=False, target=spinbox, amount=delta:
+                target.setValue(target.value() + amount)
+        )
+        offset_nudge_row.addWidget(button)
+    offset_nudge_row.addStretch()
+    v.addLayout(offset_nudge_row)
+
+    offset_reset = QPushButton("감지 좌표 보정 초기화")
+    offset_reset.setObjectName("characterPositionOffsetReset")
+    offset_reset.clicked.connect(lambda: (
+        fields["offset_x"].widget.setValue(0),
+        fields["offset_y"].widget.setValue(0),
+    ))
+    v.addWidget(offset_reset)
 
     capture_row = QHBoxLayout()
     def _run_character_capture_selector(selector):

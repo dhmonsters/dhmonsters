@@ -115,7 +115,7 @@ class BlockRunner:
                 x_tolerance=3,
                 y_rise_required=3,
                 stable_samples=2,
-                verify_timeout_sec=0.50,
+                verify_timeout_sec=0.10,
                 arrival_tolerance=Y_ARRIVE_TOL,
                 poll_sec=0.03,
             ),
@@ -130,6 +130,10 @@ class BlockRunner:
     def release_inputs(self) -> None:
         """유지 중인 모든 입력키 해제(정지/이탈 시 키 눌림 방지)."""
         self._route_inputs.release_all()
+
+    @property
+    def teleport_key(self) -> str:
+        return self._tele_key
 
     def ladder_debug_state(self):
         return self._ladder_controller.debug_state() or (

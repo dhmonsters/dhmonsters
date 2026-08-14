@@ -62,7 +62,7 @@ class _DictConfigView:
 def _resolve_window_ratio_region(region_cfg: dict, window_title: str) -> dict | None:
     """寃뚯엫李?湲곗? 鍮꾩쑉 ?곸뿭???꾩옱 寃뚯엫李??붾㈃ 醫뚰몴濡?蹂?섑븳??"""
     try:
-        from core.puzzle.game_window import (
+        from core.game_window import (
             find_game_hwnd,
             find_window_hwnd_by_title,
             get_game_client_rect_screen,
@@ -94,7 +94,7 @@ def _legacy_absolute_region_to_window_ratio(region_cfg, window_title: str) -> di
     """예전 절대좌표 거탐 영역을 현재 게임창 기준 상대좌표로 변환한다."""
     x, y, w, h = [int(v) for v in region_cfg]
     try:
-        from core.puzzle.game_window import (
+        from core.game_window import (
             find_game_hwnd,
             find_window_hwnd_by_title,
             get_game_client_rect_screen,
@@ -455,7 +455,7 @@ def _rednose3_profile(d: dict, attack: dict) -> dict:
         "hunt_cycle_min_sec": 92.83,
         "hunt_cycle_max_sec": 102.483,
         "fall_y_threshold": 70,
-        "confirm_timeout_sec": 0.55,
+        "confirm_timeout_sec": 0.10,
         "step_attempts": 5,
         "recover_attempts": 10,
         "platforms": {
@@ -688,6 +688,8 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         char_v_min=int(mm.get("char_v_min", 200)),
         char_area_min=float(mm.get("char_area_min", 3)),
         char_area_max=float(mm.get("char_area_max", 160)),
+        char_position_offset_x=int(mm.get("position_offset_x", 0)),
+        char_position_offset_y=int(mm.get("position_offset_y", 0)),
         floors=_floors(zones),
         route=[Block.from_dict(b) for b in _route_blocks_with_minimap_ratios(
                    d.get("floor_hunt", {}).get("route") or [], mm)

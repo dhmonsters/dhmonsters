@@ -6,6 +6,7 @@ import time
 
 from core.humanize.timing import down_5
 from core.navigation.block import Block
+from core.navigation.block_runner import TELEPORT_MIN_DIST
 from core.navigation.route_recovery import RouteRecoveryResolver
 from core.navigation.route_state import RouteStep, RouteStepType
 
@@ -18,6 +19,7 @@ class RouteStateRunner:
         self._positions = position_store
         self._input = input_owner
         self._block_runner = block_runner
+        self._teleport_key = str(getattr(block_runner, "teleport_key", "space") or "space")
         self._log = log_fn or (lambda _m: None)
         self._idle_sleep = max(0.01, float(idle_sleep))
         self._stop = threading.Event()
@@ -137,7 +139,7 @@ class RouteStateRunner:
 
         while progress < len(targets):
             target = targets[progress]
-            started = time.monotonic()
+            missing_since = None
             recovery_target = None
             if start_x == end_x:
                 travel_direction = None
@@ -150,10 +152,16 @@ class RouteStateRunner:
                 sample = self._positions.latest(max_age_sec=0.25)
                 if sample is None:
                     self._input.release_direction()
-                    if time.monotonic() - started >= timeout:
+                    now = time.monotonic()
+                    if missing_since is None:
+                        missing_since = now
+                    if now - missing_since >= timeout:
                         return False
                     time.sleep(self._idle_sleep)
                     continue
+
+                if missing_since is not None:
+                    missing_since = None
 
                 nearest_index = self._recovery.nearest_move_index(steps, sample)
                 if (nearest_index is not None and nearest_index != self._index
@@ -194,8 +202,9 @@ class RouteStateRunner:
 
                 direction = travel_direction or ("right" if target > sample.x else "left")
                 self._input.hold_direction(direction)
-                if time.monotonic() - started >= timeout:
-                    return False
+                if (str(params.get("move_type", "walk")) == "teleport"
+                        and abs(sample.x - target) > TELEPORT_MIN_DIST):
+                    self._input.press_action(self._teleport_key, 0.05)
                 time.sleep(self._idle_sleep)
             else:
                 return False

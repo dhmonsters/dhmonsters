@@ -218,7 +218,8 @@ class CharScanner(Scanner):
                  hsv_lower=(20, 100, 200), hsv_upper=(40, 255, 255),
                  min_area: float = 3, max_area: float = 100,
                  log_fn=None, position_store=None,
-                 marker_exclusions: tuple[tuple[int, int, int, int], ...] = ()):
+                 marker_exclusions: tuple[tuple[int, int, int, int], ...] = (),
+                 position_offset: tuple[int, int] = (0, 0)):
         super().__init__()
         self._capture = screen_capture   # callable(region) -> BGR ndarray
         self._region = region
@@ -234,15 +235,22 @@ class CharScanner(Scanner):
         self._scan_lock = threading.Lock()
         self._last_position: tuple[int, int] | None = None
         self._last_position_at: float | None = None
+        self._preview_frame: np.ndarray | None = None
         self._history = CoordinateHistory(maxlen=10)
         self._position_store = position_store
         self._marker_templates = _load_marker_templates()
         self._marker_exclusions = marker_exclusions
+        self._position_offset = (int(position_offset[0]), int(position_offset[1]))
 
     def position(self) -> tuple[int, int] | None:
         """이벤트 큐 처리와 무관하게 읽을 수 있는 최신 캐릭터 좌표."""
         with self._position_lock:
             return self._last_position
+
+    def capture_region(self) -> dict | None:
+        """현재 스캔에 사용하는 화면 캡처 영역을 반환한다."""
+        region = self._region() if callable(self._region) else self._region
+        return dict(region) if region else None
 
     def position_ratio(self) -> tuple[float, float] | None:
         """최신 위치를 현재 미니맵 내부 0~1 비율로 반환한다."""
@@ -250,7 +258,7 @@ class CharScanner(Scanner):
             position = self._last_position
         if position is None:
             return None
-        region = self._region() if callable(self._region) else self._region
+        region = self.capture_region()
         if not region:
             return None
         width = max(1, int(region.get("width", 0)))
@@ -269,6 +277,10 @@ class CharScanner(Scanner):
         if max_area is not None:
             self._max_area = float(max_area)
 
+    def set_position_offset(self, x: int, y: int) -> None:
+        """감지한 미니맵 좌표에 적용할 사용자 보정값을 갱신한다."""
+        self._position_offset = (int(x), int(y))
+
     def reload_marker_templates(self) -> None:
         """디스크에 저장된 캐릭터 마커 템플릿을 다시 로드한다."""
         templates = _load_marker_templates()
@@ -278,6 +290,12 @@ class CharScanner(Scanner):
     def sample(self) -> tuple[tuple[int, int] | None, float | None]:
         with self._position_lock:
             return self._last_position, self._last_position_at
+
+    def preview_snapshot(self) -> tuple[np.ndarray | None, tuple[int, int] | None, float | None]:
+        """동일 스캔에서 얻은 미니맵 이미지와 보정 좌표를 함께 반환한다."""
+        with self._position_lock:
+            frame = None if self._preview_frame is None else self._preview_frame.copy()
+            return frame, self._last_position, self._last_position_at
 
     def latest_sample(self) -> CoordinateSample | None:
         return self._history.latest()
@@ -336,7 +354,7 @@ class CharScanner(Scanner):
 
     def _scan_once_locked(self) -> Event | None:
         scan_started = time.monotonic()
-        region = self._region() if callable(self._region) else self._region
+        region = self.capture_region()
         capture_started = time.perf_counter()
         try:
             img = self._capture(region)
@@ -370,6 +388,12 @@ class CharScanner(Scanner):
         if pos is None:
             self._diag(f"⚠ 노란점 미검출 (캡처 {tuple(img.shape)}, HSV {tuple(self._lo)}~{tuple(self._hi)})")
             return None
+        image_height, image_width = img.shape[:2]
+        raw_pos = pos
+        pos = (
+            int(raw_pos[0]) + self._position_offset[0],
+            int(raw_pos[1]) + self._position_offset[1],
+        )
         candidate_bbox = (
             template_timing.get("candidate_bbox")
             if detection_source == "template"
@@ -382,7 +406,6 @@ class CharScanner(Scanner):
         )
         observed_at = time.monotonic()
         scan_duration = observed_at - scan_started
-        image_height, image_width = img.shape[:2]
         with self._position_lock:
             previous_position = self._last_position
         if previous_position is not None:
@@ -443,6 +466,7 @@ class CharScanner(Scanner):
         with self._position_lock:
             self._last_position = pos
             self._last_position_at = observed_at
+            self._preview_frame = img.copy()
         sample = self._history.append(pos, observed_at, scan_duration)
         if self._position_store is not None:
             self._position_store.publish(pos[0], pos[1], observed_at)
@@ -450,7 +474,7 @@ class CharScanner(Scanner):
         if now - self._last_position_log_ts >= 1.0:
             self._last_position_log_ts = now
             self._diag(
-                f"✓ 캐릭터 감지 source={detection_source} raw=({pos[0]},{pos[1]}) "
+                f"✓ 캐릭터 감지 source={detection_source} raw=({raw_pos[0]},{raw_pos[1]}) "
                 f"candidate={candidate_text} "
                 f"x={pos[0]} y={pos[1]} "
                 f"ratio=({x_ratio:.4f},{y_ratio:.4f}) minimap={image_width}x{image_height}"

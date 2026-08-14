@@ -32,6 +32,68 @@ class FakeConfig:
     def save(self): self.saved += 1
 
 
+def test_character_position_offset_controls_save_and_reset(app):
+    from PyQt6.QtWidgets import QPushButton, QSpinBox
+
+    cfg = FakeConfig()
+    cfg.set("minimap", "position_offset_x", 3)
+    cfg.set("minimap", "position_offset_y", -2)
+    controls = pages_module._make_character_color_controls(cfg)
+    offset_x = controls.findChild(QSpinBox, "characterPositionOffsetX")
+    offset_y = controls.findChild(QSpinBox, "characterPositionOffsetY")
+    reset = controls.findChild(QPushButton, "characterPositionOffsetReset")
+
+    assert offset_x is not None
+    assert offset_y is not None
+    assert reset is not None
+    offset_x.setValue(8)
+    offset_y.setValue(-5)
+    assert cfg.get("minimap", "position_offset_x") == 8
+    assert cfg.get("minimap", "position_offset_y") == -5
+
+    reset.click()
+
+    assert offset_x.value() == 0
+    assert offset_y.value() == 0
+    assert cfg.get("minimap", "position_offset_x") == 0
+    assert cfg.get("minimap", "position_offset_y") == 0
+
+
+def test_character_position_nudge_buttons_change_only_detection_offsets(app):
+    from PyQt6.QtWidgets import QPushButton, QSpinBox
+
+    cfg = FakeConfig()
+    cfg.set("minimap", "region_x", 19)
+    cfg.set("minimap", "region_y", 132)
+    cfg.set("minimap", "width", 142)
+    cfg.set("minimap", "height", 62)
+    cfg.set("minimap", "position_offset_x", 3)
+    cfg.set("minimap", "position_offset_y", -2)
+    controls = pages_module._make_character_color_controls(cfg)
+    offset_x = controls.findChild(QSpinBox, "characterPositionOffsetX")
+    offset_y = controls.findChild(QSpinBox, "characterPositionOffsetY")
+    left = controls.findChild(QPushButton, "characterPositionNudgeLeft")
+    right = controls.findChild(QPushButton, "characterPositionNudgeRight")
+    up = controls.findChild(QPushButton, "characterPositionNudgeUp")
+    down = controls.findChild(QPushButton, "characterPositionNudgeDown")
+
+    assert all(button is not None for button in (left, right, up, down))
+    left.click()
+    up.click()
+    assert (offset_x.value(), offset_y.value()) == (2, -3)
+    right.click()
+    down.click()
+    assert (offset_x.value(), offset_y.value()) == (3, -2)
+    assert cfg.get("minimap", "position_offset_x") == 3
+    assert cfg.get("minimap", "position_offset_y") == -2
+    assert (
+        cfg.get("minimap", "region_x"),
+        cfg.get("minimap", "region_y"),
+        cfg.get("minimap", "width"),
+        cfg.get("minimap", "height"),
+    ) == (19, 132, 142, 62)
+
+
 def test_build_pages_returns_six(app):
     pages = build_pages(FakeConfig())
     assert len(pages) == 6
@@ -298,6 +360,57 @@ class FakeRegionSelector:
 
     def exec(self):
         self.region_selected.emit(*self.selected_region)
+
+
+def test_minimap_region_picker_updates_window_ratios_with_absolute_region(app, monkeypatch):
+    import core.config_manager as config_manager
+    import core_ui.shot_selector as shot_selector
+
+    game_image = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+    class MinimapSelector(FakeRegionSelector):
+        selected_region = (19, 132, 142, 62)
+
+    monkeypatch.setattr(
+        pages_module,
+        "_capture_game_client",
+        lambda _config, _owner: (game_image, (1, 31)),
+    )
+    monkeypatch.setattr(shot_selector, "ScreenshotRegionSelector", MinimapSelector)
+    monkeypatch.setattr(
+        config_manager,
+        "cached_window_origin",
+        lambda _title: (1, 31, 1280, 720),
+    )
+    cfg = FakeConfig()
+    cfg.set("coord_mode", "relative")
+    cfg.set("settings2", "game_window_title", "MapleStory Worlds")
+    cfg.set("minimap", "region_x_ratio", 0.025520833333333333)
+    cfg.set("minimap", "region_y_ratio", 0.1377601585728444)
+    cfg.set("minimap", "width_ratio", 0.12708333333333333)
+    cfg.set("minimap", "height_ratio", 0.14271555996035679)
+    button = pages_module._make_region_picker(
+        cfg,
+        [
+            ("minimap", "region_x"),
+            ("minimap", "region_y"),
+            ("minimap", "width"),
+            ("minimap", "height"),
+        ],
+        None,
+        "미니맵",
+    )
+
+    button.click()
+
+    assert cfg.get("minimap", "region_x") == 19
+    assert cfg.get("minimap", "region_y") == 132
+    assert cfg.get("minimap", "width") == 142
+    assert cfg.get("minimap", "height") == 62
+    assert cfg.get("minimap", "region_x_ratio") == pytest.approx(18 / 1280)
+    assert cfg.get("minimap", "region_y_ratio") == pytest.approx(101 / 720)
+    assert cfg.get("minimap", "width_ratio") == pytest.approx(142 / 1280)
+    assert cfg.get("minimap", "height_ratio") == pytest.approx(62 / 720)
 
 
 def test_reference_color_button_applies_selected_game_region(app, monkeypatch):

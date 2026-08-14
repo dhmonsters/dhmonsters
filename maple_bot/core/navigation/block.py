@@ -56,6 +56,8 @@ class Block:
     ladder_x_ratio: float | None = None
     y_top_ratio: float | None = None
     y_bot_ratio: float | None = None
+    rand_margin_ratio: float | None = None
+    jump_offset_ratio: float | None = None
 
     def __post_init__(self) -> None:
         if self.type not in _VALID_TYPES:

@@ -147,7 +147,7 @@ class RedNose3RouteRunner:
         return x_min <= float(pos[0]) <= x_max and y_min <= int(pos[1]) <= y_max
 
     def _wait_platform(self, number: int, timeout_sec: float | None = None) -> bool:
-        deadline = time.monotonic() + float(timeout_sec or self._profile.get("confirm_timeout_sec", 0.55))
+        deadline = time.monotonic() + float(timeout_sec or self._profile.get("confirm_timeout_sec", 0.10))
         while self._active() and time.monotonic() < deadline:
             pos = self._fresh_pos()
             if self._is_on_platform(number, pos):

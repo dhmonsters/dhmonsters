@@ -5,7 +5,7 @@ import math
 import time
 
 import numpy as np
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QWidget, QSizePolicy
 from PyQt6.QtCore import QTimer, Qt, QRectF
 from PyQt6.QtGui import QImage, QPainter, QPen, QColor
 
@@ -33,10 +33,13 @@ class MinimapCanvas(QWidget):
         self._last_seen: float | None = None    # 留덉?留??깃났 寃異??쒓컖
         self._shot: QImage | None = None
         self._mm_size = (0, 0)        # (W_mm, H_mm)
-        self.setMinimumHeight(340)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedSize(240, 140)
         self._auto_fit = True         # 媛濡쒗룺 ?먮룞留욎땄(諛곌꼍 ?뺣?), ??以????댁젣
         self._monster_provider = None  # () -> [(dx,dy)] 罹먮┃ 湲곗? ?붾㈃px ?ㅽ봽??
         self._character_provider = None
+        self._region_provider = None
+        self._snapshot_provider = None
         self._monsters_rel: list = []  # 理쒓렐 ?먯? 罹먯떆
         self._mon_last = 0.0           # 留덉?留??먯? ?쒓컖(?ㅻ줈?)
         self._timer = QTimer(self)
@@ -57,6 +60,18 @@ class MinimapCanvas(QWidget):
         return hsv_range_from_rgb(int(r), int(g), int(b))
 
     def _region(self) -> dict:
+        if self._region_provider is not None:
+            try:
+                region = self._region_provider()
+            except Exception:
+                region = None
+            if region:
+                return {
+                    "left": int(region["left"]),
+                    "top": int(region["top"]),
+                    "width": int(region["width"]),
+                    "height": int(region["height"]),
+                }
         c = self._cfg
         left = int(c.get("minimap", "region_x", default=0))
         top = int(c.get("minimap", "region_y", default=0))
@@ -72,6 +87,8 @@ class MinimapCanvas(QWidget):
 
     def minimap_size(self) -> tuple[int, int]:
         """誘몃땲留?(W,H) ??_region 湲곕컲?대씪 ??대㉧ ???꾩뿉???좏슚(?대옩?꾩슜)."""
+        if self._mm_size[0] > 0 and self._mm_size[1] > 0:
+            return self._mm_size
         r = self._region()
         return (r["width"], r["height"])
 
@@ -83,6 +100,14 @@ class MinimapCanvas(QWidget):
         """실행 스캐너가 보관한 최신 캐릭터 좌표를 미리보기에 공급한다."""
         self._character_provider = fn
 
+    def set_region_provider(self, fn) -> None:
+        """실행 스캐너와 동일한 화면 캡처 영역을 미리보기에 공급한다."""
+        self._region_provider = fn
+
+    def set_snapshot_provider(self, fn) -> None:
+        """동일 스캔의 미니맵 이미지와 캐릭터 좌표를 함께 공급받는다."""
+        self._snapshot_provider = fn
+
     def track_state(self) -> str:
         """?꾩옱 罹먮┃??異붿쟻 ?곹깭: tracking | lost | stale (??踰덈룄 寃異??꾩씠硫?stale)."""
         if self._last_seen is None:
@@ -90,6 +115,24 @@ class MinimapCanvas(QWidget):
         return char_track_state(self._clock() - self._last_seen)
 
     def _tick(self) -> None:
+        if self._snapshot_provider is not None:
+            try:
+                frame, live_pos, _observed_at = self._snapshot_provider()
+            except Exception:
+                frame, live_pos = None, None
+            if frame is not None:
+                if live_pos is not None:
+                    self._last_char = live_pos
+                    self._last_seen = self._clock()
+                h, w = frame.shape[:2]
+                self._mm_size = (w, h)
+                if self._auto_fit:
+                    self.fit_width()
+                rgb = np.ascontiguousarray(frame[:, :, ::-1])
+                self._shot = QImage(rgb.data, w, h, 3 * w,
+                                    QImage.Format.Format_RGB888).copy()
+                self.update()
+                return
         if self._character_provider is not None:
             try:
                 live_pos = self._character_provider()
@@ -140,7 +183,7 @@ class MinimapCanvas(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#0d0e10"))
         if self._shot is None:
-            self._hint(p, "?곌껐쨌?몄떇?먯꽌 誘몃땲留??곸뿭??癒쇱? 吏?뺥븯?몄슂")
+            self._hint(p, "연결·인식에서 미니맵 영역을 먼저 지정하세요")
             return
         W, H = self._mm_size
         p.setOpacity(0.30)
@@ -204,31 +247,41 @@ class MinimapCanvas(QWidget):
     def set_zoom(self, zoom: float) -> None:
         """以?諛곗쑉 ?ㅼ젙(0.5~8.0 ?대옩??."""
         self._zoom = max(0.5, min(8.0, zoom))
+        self._sync_canvas_size()
         self.update()
 
     def fit(self) -> None:
         """誘몃땲留??꾩껜媛 罹붾쾭?ㅼ뿉 ?ㅼ뼱?ㅻ룄濡?以?留욎땄."""
-        W, H = self._mm_size
-        if W > 0 and H > 0 and self.width() > 0 and self.height() > 0:
-            self.set_zoom(min(self.width() / W, self.height() / H))
+        self.fit_width()
 
     def fit_width(self) -> None:
         """誘몃땲留듭쓣 罹붾쾭??媛濡쒗룺??苑?李④쾶 ?뺣?(諛곌꼍 ?ш쾶)."""
-        W = self._region()["width"] or self._mm_size[0]
-        if W > 0 and self.width() > 0:
-            self.set_zoom(self.width() / W)
+        W, H = self._mm_size
+        if W <= 0 or H <= 0:
+            r = self._region()
+            W, H = int(r["width"]), int(r["height"])
+        if W > 0 and H > 0:
+            self._zoom = 1.0
+            self._sync_canvas_size()
+            self.update()
+
+    def _sync_canvas_size(self) -> None:
+        """표시 캔버스를 실제 미니맵 이미지 크기만큼만 유지한다."""
+        W, H = self._mm_size
+        if W <= 0 or H <= 0:
+            r = self._region()
+            W, H = int(r["width"]), int(r["height"])
+        if W <= 0 or H <= 0:
+            return
+        view_w = max(1, int(round(W * self._zoom)))
+        view_h = max(1, int(round(H * self._zoom)))
+        if self.width() != view_w or self.height() != view_h:
+            self.setFixedSize(view_w, view_h)
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
-        if getattr(self, "_auto_fit", True):
-            self.fit_width()
-            # 罹붾쾭???믪씠瑜?誘몃땲留?鍮꾩쑉??留욎떠 ?꾩껜 留듭씠 ?꾨옒源뚯? 蹂댁씠寃?猷⑦봽 諛⑹? 媛??
-            r = self._region()
-            W, H = r["width"], r["height"]
-            if W > 0 and H > 0 and self.width() > 0:
-                need = int(self.width() * H / W)
-                if abs(self.minimumHeight() - need) > 4:
-                    self.setMinimumHeight(need)
+        if getattr(self, "_auto_fit", True) and self._zoom != 1.0:
+            self._zoom = 1.0
 
     def wheelEvent(self, ev) -> None:
         self._auto_fit = False        # ?섎룞 以??쒖옉 ???먮룞 媛濡쒕쭪異??댁젣
