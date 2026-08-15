@@ -83,13 +83,9 @@ def test_hsv_diagnostics_report_selected_candidate_bbox():
 
 
 def test_template_diagnostics_report_selected_match_bbox():
-    template = np.array([
-        [[10, 20, 30], [30, 10, 20], [20, 30, 10]],
-        [[40, 50, 60], [60, 40, 50], [50, 60, 40]],
-        [[70, 80, 90], [90, 70, 80], [80, 90, 70]],
-    ], dtype=np.uint8)
+    template = np.random.default_rng(3).integers(0, 256, size=(8, 8, 3), dtype=np.uint8)
     image = np.zeros((20, 30, 3), dtype=np.uint8)
-    image[7:10, 11:14] = template
+    image[7:15, 11:19] = template
     diagnostics = {}
 
     position = find_char_by_template(
@@ -99,11 +95,11 @@ def test_template_diagnostics_report_selected_match_bbox():
         timing_out=diagnostics,
     )
 
-    assert position == (12, 8)
-    assert diagnostics["candidate_bbox"] == (11, 7, 3, 3)
+    assert position == (15, 11)
+    assert diagnostics["candidate_bbox"] == (11, 7, 8, 8)
 
 
-def test_marker_template_loader_ignores_capture_smaller_than_eight_pixels(tmp_path, monkeypatch):
+def test_marker_template_loader_keeps_small_capture_as_color_sample(tmp_path, monkeypatch):
     user_templates = tmp_path / "user_templates"
     (user_templates / "player").mkdir(parents=True)
     tiny = np.full((2, 3, 3), 225, dtype=np.uint8)
@@ -115,7 +111,41 @@ def test_marker_template_loader_ignores_capture_smaller_than_eight_pixels(tmp_pa
         lambda *parts: tmp_path / "missing" / Path(*parts),
     )
 
-    assert char_scanner_module._load_marker_templates() == []
+    loaded = char_scanner_module._load_marker_templates()
+
+    assert len(loaded) == 1
+    assert loaded[0][0] == "y_p.png"
+    assert np.array_equal(loaded[0][1], tiny)
+
+
+def test_small_marker_sample_finds_round_marker_center_when_background_changes(monkeypatch):
+    sample = np.array([
+        [[15, 245, 248], [125, 253, 254], [125, 253, 253]],
+        [[15, 245, 248], [125, 253, 254], [125, 253, 253]],
+    ], dtype=np.uint8)
+    frames = []
+    for background in ((10, 20, 30), (145, 200, 200)):
+        frame = np.full((70, 120, 3), background, dtype=np.uint8)
+        char_scanner_module.cv2.circle(frame, (60, 35), 6, (15, 245, 248), -1)
+        frames.append(frame)
+    frame_iter = iter(frames)
+    monkeypatch.setattr(
+        char_scanner_module,
+        "_load_marker_templates",
+        lambda: [("y_p.png", sample)],
+    )
+    scanner = CharScanner(
+        lambda _region: next(frame_iter),
+        {"left": 0, "top": 0, "width": 120, "height": 70},
+        min_area=20,
+        max_area=160,
+    )
+
+    first = scanner.scan_once()
+    second = scanner.scan_once()
+
+    assert (first.data["x"], first.data["y"]) == (60, 35)
+    assert (second.data["x"], second.data["y"]) == (60, 35)
 
 
 def test_template_search_prefers_previous_position_neighborhood_over_distant_higher_score():
@@ -211,7 +241,7 @@ def test_char_scanner_uses_30ms_interval():
 
 
 def test_char_scanner_applies_position_offset_to_published_position(monkeypatch):
-    monkeypatch.setattr(char_scanner_module, "_load_marker_templates", lambda: [("marker", np.ones((4, 4, 3), dtype=np.uint8))])
+    monkeypatch.setattr(char_scanner_module, "_load_marker_templates", lambda: [("marker", np.ones((8, 8, 3), dtype=np.uint8))])
     monkeypatch.setattr(char_scanner_module, "find_char_by_template", lambda *_args, **_kwargs: (20, 30))
     published = []
 
@@ -236,7 +266,7 @@ def test_char_scanner_applies_position_offset_to_published_position(monkeypatch)
 
 def test_char_scanner_snapshot_keeps_frame_and_position_together(monkeypatch):
     marker = np.full((60, 90, 3), 17, dtype=np.uint8)
-    monkeypatch.setattr(char_scanner_module, "_load_marker_templates", lambda: [("marker", np.ones((4, 4, 3), dtype=np.uint8))])
+    monkeypatch.setattr(char_scanner_module, "_load_marker_templates", lambda: [("marker", np.ones((8, 8, 3), dtype=np.uint8))])
     monkeypatch.setattr(char_scanner_module, "find_char_by_template", lambda *_args, **_kwargs: (40, 25))
     scanner = CharScanner(lambda _region: marker, {"width": 90, "height": 60})
 
@@ -249,7 +279,10 @@ def test_char_scanner_snapshot_keeps_frame_and_position_together(monkeypatch):
     assert frame is not marker
 
 
-@pytest.mark.parametrize("templates, expected_source", [([], "color"), ([('y_p.png', object())], "template")])
+@pytest.mark.parametrize(
+    "templates, expected_source",
+    [([], "color"), ([("y_p.png", np.ones((8, 8, 3), dtype=np.uint8))], "template")],
+)
 def test_success_log_reports_detection_source_and_raw_position(monkeypatch, templates, expected_source):
     logs = []
     image = np.zeros((20, 30, 3), dtype=np.uint8)

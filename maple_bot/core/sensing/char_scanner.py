@@ -147,15 +147,28 @@ def _load_marker_templates() -> list[tuple[str, np.ndarray]]:
         if not path.is_file():
             continue
         img = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if (
-            img is not None
-            and img.size > 0
-            and img.shape[0] >= MIN_MARKER_TEMPLATE_SIDE
-            and img.shape[1] >= MIN_MARKER_TEMPLATE_SIDE
-        ):
+        if img is not None and img.size > 0:
             templates.append((name, img))
             break
     return templates
+
+
+def _partition_marker_assets(
+    templates: list[tuple[str, np.ndarray]],
+) -> tuple[list[tuple[str, np.ndarray]], tuple[tuple[int, int, int], tuple[int, int, int]] | None]:
+    """큰 이미지는 형태 템플릿으로, 작은 이미지는 HSV 색상 샘플로 분리한다."""
+    shape_templates = []
+    sample_range = None
+    for name, image in templates:
+        height, width = image.shape[:2]
+        if height >= MIN_MARKER_TEMPLATE_SIDE and width >= MIN_MARKER_TEMPLATE_SIDE:
+            shape_templates.append((name, image))
+            continue
+        if sample_range is None:
+            pixels = image.reshape(-1, 3)
+            b, g, r = (int(value) for value in np.median(pixels, axis=0))
+            sample_range = auto_hsv_range_from_rgb(r, g, b, h_tol=10, sv_margin=40)
+    return shape_templates, sample_range
 
 
 def find_char_by_template(
@@ -171,6 +184,12 @@ def find_char_by_template(
     if timing_out is not None:
         timing_out.clear()
         timing_out.update(template_match_sec=0.0, candidate_filter_sec=0.0)
+    templates = [
+        (name, template)
+        for name, template in templates
+        if template.shape[0] >= MIN_MARKER_TEMPLATE_SIDE
+        and template.shape[1] >= MIN_MARKER_TEMPLATE_SIDE
+    ]
     if bgr_img is None or not templates:
         return None
     template_match_sec = 0.0
@@ -279,7 +298,9 @@ class CharScanner(Scanner):
         self._preview_frame: np.ndarray | None = None
         self._history = CoordinateHistory(maxlen=10)
         self._position_store = position_store
-        self._marker_templates = _load_marker_templates()
+        self._marker_templates, self._marker_sample_hsv = _partition_marker_assets(
+            _load_marker_templates()
+        )
         self._marker_exclusions = marker_exclusions
         self._position_offset = (int(position_offset[0]), int(position_offset[1]))
         self._pending_jump_position: tuple[int, int] | None = None
@@ -326,9 +347,10 @@ class CharScanner(Scanner):
 
     def reload_marker_templates(self) -> None:
         """디스크에 저장된 캐릭터 마커 템플릿을 다시 로드한다."""
-        templates = _load_marker_templates()
+        templates, sample_hsv = _partition_marker_assets(_load_marker_templates())
         with self._scan_lock:
             self._marker_templates = templates
+            self._marker_sample_hsv = sample_hsv
 
     def sample(self) -> tuple[tuple[int, int] | None, float | None]:
         with self._position_lock:
@@ -428,11 +450,22 @@ class CharScanner(Scanner):
         detection_source = "template" if pos is not None else None
         hsv_candidate_sec = 0.0
         hsv_diagnostics: dict[str, object] = {}
-        if pos is None and not self._marker_templates:
+        if pos is None and self._marker_sample_hsv is not None:
+            hsv_started = time.perf_counter()
+            sample_lo, sample_hi = self._marker_sample_hsv
+            pos = find_char_in_hsv(
+                img, sample_lo, sample_hi, self._min_area, self._max_area,
+                previous_position=previous_raw,
+                diagnostic_out=hsv_diagnostics,
+            )
+            hsv_candidate_sec = time.perf_counter() - hsv_started
+            if pos is not None:
+                detection_source = "sample_color"
+        if pos is None and not self._marker_templates and self._marker_sample_hsv is None:
             hsv_started = time.perf_counter()
             pos = find_char_in_hsv(
                 img, self._lo, self._hi, self._min_area, self._max_area,
-                previous_position=self.position(),
+                previous_position=previous_raw,
                 diagnostic_out=hsv_diagnostics,
             )
             hsv_candidate_sec = time.perf_counter() - hsv_started
