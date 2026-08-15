@@ -15,6 +15,9 @@ from core.sensing.scanner import Scanner
 from core.sensing.coordinate_history import CoordinateHistory, CoordinateSample
 
 
+MIN_MARKER_TEMPLATE_SIDE = 8
+
+
 def hsv_range_from_rgb(r: int, g: int, b: int,
                        h_tol: int = 10, s_min: int = 100, v_min: int = 200):
     """캐릭터색 RGB → HSV (하한, 상한). H는 색상 ±h_tol, S/V는 높은 하한으로 밝고 진한
@@ -144,7 +147,12 @@ def _load_marker_templates() -> list[tuple[str, np.ndarray]]:
         if not path.is_file():
             continue
         img = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if img is not None and img.size > 0:
+        if (
+            img is not None
+            and img.size > 0
+            and img.shape[0] >= MIN_MARKER_TEMPLATE_SIDE
+            and img.shape[1] >= MIN_MARKER_TEMPLATE_SIDE
+        ):
             templates.append((name, img))
             break
     return templates
@@ -156,49 +164,82 @@ def find_char_by_template(
     threshold: float = 0.72,
     excluded_regions: tuple[tuple[int, int, int, int], ...] = (),
     timing_out: dict[str, object] | None = None,
+    previous_position: tuple[int, int] | None = None,
+    search_radius: int | None = None,
 ) -> tuple[int, int] | None:
-    """미니맵 안에서 고정 캐릭터 마커 템플릿을 찾아 중심 좌표를 반환한다."""
+    """이전 위치 주변을 우선해 고정 캐릭터 마커 중심 좌표를 반환한다."""
     if timing_out is not None:
         timing_out.clear()
         timing_out.update(template_match_sec=0.0, candidate_filter_sec=0.0)
     if bgr_img is None or not templates:
         return None
-    best: tuple[float, int, int, tuple[int, int, int, int]] | None = None
     template_match_sec = 0.0
     candidate_filter_sec = 0.0
     img_h, img_w = bgr_img.shape[:2]
-    for _name, template in templates:
-        th, tw = template.shape[:2]
-        if th <= 0 or tw <= 0:
-            continue
-        for scale in (0.8, 0.9, 1.0, 1.1, 1.2, 1.35):
-            sw = max(1, int(round(tw * scale)))
-            sh = max(1, int(round(th * scale)))
-            if sw > img_w or sh > img_h:
+
+    def search(search_image, offset_x: int, offset_y: int):
+        nonlocal template_match_sec, candidate_filter_sec
+        best: tuple[float, int, int, tuple[int, int, int, int]] | None = None
+        search_h, search_w = search_image.shape[:2]
+        for _name, template in templates:
+            th, tw = template.shape[:2]
+            if th <= 0 or tw <= 0:
                 continue
-            match_started = time.perf_counter()
-            scaled = cv2.resize(template, (sw, sh), interpolation=cv2.INTER_AREA)
-            result = cv2.matchTemplate(bgr_img, scaled, cv2.TM_CCOEFF_NORMED)
-            template_match_sec += time.perf_counter() - match_started
-            candidate_started = time.perf_counter()
-            while result.size:
-                _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(result)
-                if max_val < threshold:
-                    break
-                cx = int(max_loc[0] + sw / 2)
-                cy = int(max_loc[1] + sh / 2)
-                if any(x1 <= cx <= x2 and y1 <= cy <= y2
-                       for x1, y1, x2, y2 in excluded_regions):
-                    result[max_loc[1], max_loc[0]] = -1.0
+            for scale in (0.8, 0.9, 1.0, 1.1, 1.2, 1.35):
+                sw = max(1, int(round(tw * scale)))
+                sh = max(1, int(round(th * scale)))
+                if sw > search_w or sh > search_h:
                     continue
-                if best is None or max_val > best[0]:
-                    best = (float(max_val), cx, cy, (max_loc[0], max_loc[1], sw, sh))
-                break
-            candidate_filter_sec += time.perf_counter() - candidate_started
+                match_started = time.perf_counter()
+                scaled = cv2.resize(template, (sw, sh), interpolation=cv2.INTER_AREA)
+                result = cv2.matchTemplate(search_image, scaled, cv2.TM_CCOEFF_NORMED)
+                template_match_sec += time.perf_counter() - match_started
+                candidate_started = time.perf_counter()
+                while result.size:
+                    _min_val, max_val, _min_loc, max_loc = cv2.minMaxLoc(result)
+                    if max_val < threshold:
+                        break
+                    cx = int(offset_x + max_loc[0] + sw / 2)
+                    cy = int(offset_y + max_loc[1] + sh / 2)
+                    if any(x1 <= cx <= x2 and y1 <= cy <= y2
+                           for x1, y1, x2, y2 in excluded_regions):
+                        result[max_loc[1], max_loc[0]] = -1.0
+                        continue
+                    if best is None or max_val > best[0]:
+                        best = (
+                            float(max_val),
+                            cx,
+                            cy,
+                            (offset_x + max_loc[0], offset_y + max_loc[1], sw, sh),
+                        )
+                    break
+                candidate_filter_sec += time.perf_counter() - candidate_started
+        return best
+
+    best = None
+    search_mode = "global"
+    if previous_position is not None:
+        radius = (
+            max(12, int(round(min(img_w, img_h) * 0.20)))
+            if search_radius is None
+            else max(1, int(search_radius))
+        )
+        px, py = int(previous_position[0]), int(previous_position[1])
+        left = max(0, px - radius)
+        top = max(0, py - radius)
+        right = min(img_w, px + radius + 1)
+        bottom = min(img_h, py + radius + 1)
+        if right > left and bottom > top:
+            best = search(bgr_img[top:bottom, left:right], left, top)
+        if best is not None:
+            search_mode = "local"
+    if best is None:
+        best = search(bgr_img, 0, 0)
     if timing_out is not None:
         timing_out.update(
             template_match_sec=template_match_sec,
             candidate_filter_sec=candidate_filter_sec,
+            search_mode=search_mode,
         )
         if best is not None:
             timing_out["candidate_bbox"] = best[3]
@@ -241,6 +282,8 @@ class CharScanner(Scanner):
         self._marker_templates = _load_marker_templates()
         self._marker_exclusions = marker_exclusions
         self._position_offset = (int(position_offset[0]), int(position_offset[1]))
+        self._pending_jump_position: tuple[int, int] | None = None
+        self._pending_jump_count = 0
 
     def position(self) -> tuple[int, int] | None:
         """이벤트 큐 처리와 무관하게 읽을 수 있는 최신 캐릭터 좌표."""
@@ -366,11 +409,21 @@ class CharScanner(Scanner):
             return None
         capture_sec = time.perf_counter() - capture_started
         template_timing: dict[str, object] = {}
+        previous_adjusted = self.position()
+        previous_raw = (
+            (
+                previous_adjusted[0] - self._position_offset[0],
+                previous_adjusted[1] - self._position_offset[1],
+            )
+            if previous_adjusted is not None
+            else None
+        )
         pos = find_char_by_template(
             img,
             self._marker_templates,
             excluded_regions=self._marker_exclusions,
             timing_out=template_timing,
+            previous_position=previous_raw,
         )
         detection_source = "template" if pos is not None else None
         hsv_candidate_sec = 0.0
@@ -386,6 +439,8 @@ class CharScanner(Scanner):
             if pos is not None:
                 detection_source = "color"
         if pos is None:
+            self._pending_jump_position = None
+            self._pending_jump_count = 0
             self._diag(f"⚠ 노란점 미검출 (캡처 {tuple(img.shape)}, HSV {tuple(self._lo)}~{tuple(self._hi)})")
             return None
         image_height, image_width = img.shape[:2]
@@ -414,36 +469,46 @@ class CharScanner(Scanner):
                 + (float(pos[1]) - float(previous_position[1])) ** 2
             ) ** 0.5
             jump_threshold = max(30.0, min(image_width, image_height) * 0.35)
-            if jump_distance > jump_threshold:
-                pending = getattr(self, "_pending_jump_position", None)
+            needs_confirmation = (
+                template_timing.get("search_mode") == "global"
+                or jump_distance > jump_threshold
+            )
+            if needs_confirmation:
+                pending = self._pending_jump_position
                 confirm_radius = max(8.0, min(image_width, image_height) * 0.08)
                 pending_matches = pending is not None and (
                     (float(pos[0]) - float(pending[0])) ** 2
                     + (float(pos[1]) - float(pending[1])) ** 2
                 ) ** 0.5 <= confirm_radius
-                if not pending_matches:
+                if pending_matches:
+                    self._pending_jump_count += 1
+                else:
                     self._pending_jump_position = pos
+                    self._pending_jump_count = 1
+                if self._pending_jump_count < 3:
                     trace_event(
                         "character",
                         "position_rejected",
-                        reason="transient_jump",
+                        reason="unconfirmed_global_candidate",
                         previous_x=previous_position[0],
                         previous_y=previous_position[1],
                         candidate_x=pos[0],
                         candidate_y=pos[1],
                         jump_distance=jump_distance,
                         threshold=jump_threshold,
+                        confirmations=self._pending_jump_count,
                     )
                     return None
                 trace_event(
                     "character",
                     "position_selected",
-                    reason="confirmed_jump",
+                    reason="confirmed_global_candidate",
                     x=pos[0],
                     y=pos[1],
                     jump_distance=jump_distance,
                 )
         self._pending_jump_position = None
+        self._pending_jump_count = 0
         x_ratio = pos[0] / max(1, image_width)
         y_ratio = pos[1] / max(1, image_height)
         trace_event(

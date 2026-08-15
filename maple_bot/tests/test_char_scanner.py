@@ -1,6 +1,9 @@
 # CharScanner의 HSV 위치 감지(순수 함수)를 합성 이미지로 검증 (C vision.py 방식)
+from pathlib import Path
+
 import numpy as np
 import pytest
+
 import core.sensing.char_scanner as char_scanner_module
 from core.sensing.char_scanner import CharScanner, find_char_by_template, find_char_in_hsv
 from core.sensing.coordinate_history import CoordinateHistory
@@ -98,6 +101,70 @@ def test_template_diagnostics_report_selected_match_bbox():
 
     assert position == (12, 8)
     assert diagnostics["candidate_bbox"] == (11, 7, 3, 3)
+
+
+def test_marker_template_loader_ignores_capture_smaller_than_eight_pixels(tmp_path, monkeypatch):
+    user_templates = tmp_path / "user_templates"
+    (user_templates / "player").mkdir(parents=True)
+    tiny = np.full((2, 3, 3), 225, dtype=np.uint8)
+    assert char_scanner_module.cv2.imwrite(str(user_templates / "player" / "y_p.png"), tiny)
+    monkeypatch.setattr(char_scanner_module, "get_user_templates_dir", lambda: str(user_templates))
+    monkeypatch.setattr(
+        char_scanner_module,
+        "_resource_path",
+        lambda *parts: tmp_path / "missing" / Path(*parts),
+    )
+
+    assert char_scanner_module._load_marker_templates() == []
+
+
+def test_template_search_prefers_previous_position_neighborhood_over_distant_higher_score():
+    rng = np.random.default_rng(7)
+    template = rng.integers(0, 256, size=(8, 8, 3), dtype=np.uint8)
+    image = np.zeros((70, 120, 3), dtype=np.uint8)
+    nearby = template.copy()
+    nearby[0, 0] = 255 - nearby[0, 0]
+    image[20:28, 20:28] = nearby
+    image[40:48, 90:98] = template
+
+    position = find_char_by_template(
+        image,
+        [("y_p.png", template)],
+        threshold=0.72,
+        previous_position=(24, 24),
+        search_radius=15,
+    )
+
+    assert position == (24, 24)
+
+
+def test_scanner_requires_three_consistent_global_candidates_before_large_reacquisition(monkeypatch):
+    positions = iter([(20, 20), (100, 20), (100, 20), (100, 20)])
+    monkeypatch.setattr(
+        char_scanner_module,
+        "_load_marker_templates",
+        lambda: [("marker", np.ones((8, 8, 3), dtype=np.uint8))],
+    )
+
+    def fake_template(*_args, **kwargs):
+        kwargs["timing_out"].update(candidate_bbox=(0, 0, 8, 8), search_mode="global")
+        return next(positions)
+
+    monkeypatch.setattr(char_scanner_module, "find_char_by_template", fake_template)
+    scanner = CharScanner(
+        lambda _region: np.zeros((80, 120, 3), dtype=np.uint8),
+        {"left": 0, "top": 0, "width": 120, "height": 80},
+    )
+
+    first = scanner.scan_once()
+    second = scanner.scan_once()
+    third = scanner.scan_once()
+    fourth = scanner.scan_once()
+
+    assert (first.data["x"], first.data["y"]) == (20, 20)
+    assert second is None
+    assert third is None
+    assert (fourth.data["x"], fourth.data["y"]) == (100, 20)
 
 
 def test_default_filter_still_rejects_larger_round_background_object():
