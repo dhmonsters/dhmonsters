@@ -1,1 +1,1 @@
-{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.0/Claude_v2.4.0_Setup.exe","version":"2.4.0","notes":"미니맵·캐릭터 좌표 정렬과 감지 좌표 조절 UI를 개선하고, F1 실행 시 공격 연속기·항시 픽업 설정을 갱신하도록 변경했으며, 퍼즐·검증도구 연결 해제와 주요 동작 타임아웃을 조정했습니다."}
+{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.1/Claude_v2.4.1_Setup.exe","version":"2.4.1","notes":"캐릭터 위치 감지의 연속성을 강화하고 작은 캐릭터 캡처를 색상 기준으로 사용하도록 개선했으며, 자동판매 상점 나가기를 템플릿으로 인식하고 ESC 대체 동작을 0.5초 홀드로 조정했습니다."}

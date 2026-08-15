@@ -9,15 +9,17 @@ from core.runtime import BotRuntime
 
 
 def test_char_scanner_reloads_marker_templates(monkeypatch):
-    loaded = [[("old.png", object())]]
+    loaded = [[("old.png", np.zeros((8, 8, 3), dtype=np.uint8))]]
     monkeypatch.setattr(char_scanner_module, "_load_marker_templates", lambda: loaded[-1])
     scanner = char_scanner_module.CharScanner(lambda _region: None, {"width": 10, "height": 10})
-    replacement = [("y_p.png", object())]
+    replacement_image = np.full((8, 8, 3), 255, dtype=np.uint8)
+    replacement = [("y_p.png", replacement_image)]
     loaded.append(replacement)
 
     scanner.reload_marker_templates()
 
-    assert scanner._marker_templates == replacement
+    assert scanner._marker_templates[0][0] == "y_p.png"
+    assert scanner._marker_templates[0][1] is replacement_image
 
 
 def test_runtime_character_filter_reload_refreshes_marker_templates():
