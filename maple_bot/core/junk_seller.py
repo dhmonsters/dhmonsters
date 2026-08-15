@@ -292,17 +292,28 @@ def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     return shop_confirmed or not has_shop_open_tpl
 
 
-def _exit_shop(input_ctrl, shop_exit_btn, status_cb) -> None:
-    """상점 나가기 버튼 클릭 또는 ESC 2회."""
-    if shop_exit_btn:
-        status_cb(f"상점 나가기 클릭: {shop_exit_btn}")
-        input_ctrl.click(*shop_exit_btn)
-        time.sleep(0.12)
-    else:
-        time.sleep(0.3)
-        input_ctrl.press_key("esc")
-        time.sleep(0.3)
-        input_ctrl.press_key("esc")
+def _exit_shop(config, screen, input_ctrl, status_cb) -> None:
+    """상점 나가기 템플릿을 클릭하고 미검출 시 ESC를 2회 누른다."""
+    template_path = "templates/junk/shop_exit.png"
+    if os.path.exists(template_path):
+        scene, capture_region = _capture_scene(config, screen)
+        score, position = _match_template(screen, scene, template_path, threshold=0.70)
+        status_cb(f"상점 나가기 매칭 점수: {score:.2f}")
+        if position is not None:
+            click_pos = (
+                int(capture_region["left"] + position[0]),
+                int(capture_region["top"] + position[1]),
+            )
+            status_cb(f"상점 나가기 템플릿 클릭: {click_pos}")
+            input_ctrl.click(*click_pos)
+            time.sleep(0.12)
+            return
+
+    status_cb("상점 나가기 템플릿 미검출 → ESC 2회")
+    time.sleep(0.3)
+    input_ctrl.press_key("esc", hold_sec=0.5)
+    time.sleep(0.3)
+    input_ctrl.press_key("esc", hold_sec=0.5)
 
 
 class JunkSeller:
@@ -331,7 +342,6 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     cfg = config.get("settings2", "junk_sell") or {}
     pt, region = _resolve_coords(config, cfg)  # 비율 우선, 없으면 절대 좌표 폴백
 
-    shop_exit_btn      = pt("shop_exit_btn")
     junk_sell_enabled  = bool(cfg.get("junk_sell_enabled", False))
     etc_tab            = pt("shop_etc_tab")
     shop_area          = region("shop_area")
@@ -416,7 +426,7 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
             time.sleep(0.1)
         else:
             status_cb("⚠ 장비 일괄 판매 버튼 미감지 — 판매 실패로 처리")
-            _exit_shop(input_ctrl, shop_exit_btn, status_cb)
+            _exit_shop(config, screen, input_ctrl, status_cb)
             return False
         if stopped():
             return False
@@ -425,7 +435,7 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     if not junk_sell_enabled or not has_templates:
         reason = "기타템 판매 미활성" if not junk_sell_enabled else "아이템 템플릿 없음"
         status_cb(f"판매 완료 ({reason})")
-        _exit_shop(input_ctrl, shop_exit_btn, status_cb)
+        _exit_shop(config, screen, input_ctrl, status_cb)
         return True
 
     # ── 4. 기타탭 더블클릭 → 활성화 확인 ────────────────────────────
@@ -541,5 +551,5 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     status_cb(f"기타템 판매 완료 — 총 {total_sold}개 판매됨")
 
     # ── 7. 상점 나가기 ───────────────────────────────────────────────
-    _exit_shop(input_ctrl, shop_exit_btn, status_cb)
+    _exit_shop(config, screen, input_ctrl, status_cb)
     return not stopped()

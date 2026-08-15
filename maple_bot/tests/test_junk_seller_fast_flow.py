@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from core.junk_seller import sell_junk
+from core.junk_seller import _exit_shop, sell_junk
 
 
 class FakeClock:
@@ -63,6 +63,7 @@ class FakeScreen:
             "shop_open.png": (550, 180),
             "equip_sell_btn.png": (620, 240),
             "equip_sell_confirm.png": (400, 400),
+            "shop_exit.png": (650, 100),
         }
         position = None if name in self.missing else positions.get(name)
         return (0.9, position) if position else (0.0, None)
@@ -84,7 +85,7 @@ class FakeInput:
         self.events.append(("focus",))
 
     def press_key(self, key, hold_sec=0.05):
-        self.events.append(("press", key))
+        self.events.append(("press", key, hold_sec))
 
     def click(self, x, y):
         self.events.append(("click", x, y))
@@ -107,6 +108,40 @@ class FakeMss:
 
     def grab(self, _region):
         return np.zeros((600, 800, 4), dtype=np.uint8)
+
+
+def test_exit_shop_uses_template_center_in_game_window_instead_of_saved_coordinate(monkeypatch):
+    clock = FakeClock()
+    screen = FakeScreen()
+    input_ctrl = FakeInput()
+    config = FakeConfig()
+    monkeypatch.setattr("core.junk_seller.time.sleep", clock.sleep)
+    monkeypatch.setattr("core.junk_seller.os.path.exists", lambda path: os.path.basename(path) == "shop_exit.png")
+    monkeypatch.setattr("core.config_manager.get_game_window_rect", lambda _config: (100, 200, 800, 600))
+
+    _exit_shop(config, screen, input_ctrl, lambda _message: None)
+
+    assert ("click", 750, 300) in input_ctrl.events
+    assert ("click", 700, 210) not in input_ctrl.events
+    assert not [event for event in input_ctrl.events if event[0] == "press"]
+
+
+def test_exit_shop_fallback_presses_both_escape_keys_for_half_second(monkeypatch):
+    clock = FakeClock()
+    screen = FakeScreen(missing={"shop_exit.png"})
+    input_ctrl = FakeInput()
+    config = FakeConfig()
+    monkeypatch.setattr("core.junk_seller.time.sleep", clock.sleep)
+    monkeypatch.setattr("core.junk_seller.os.path.exists", lambda path: os.path.basename(path) == "shop_exit.png")
+    monkeypatch.setattr("core.config_manager.get_game_window_rect", lambda _config: (100, 200, 800, 600))
+
+    _exit_shop(config, screen, input_ctrl, lambda _message: None)
+
+    assert [event for event in input_ctrl.events if event[0] == "press"] == [
+        ("press", "esc", 0.5),
+        ("press", "esc", 0.5),
+    ]
+    assert not [event for event in input_ctrl.events if event[0] == "click"]
 
 
 def test_equipment_sale_uses_game_window_single_match_and_finishes_within_five_seconds(monkeypatch):
@@ -159,4 +194,8 @@ def test_missing_equipment_sell_button_reports_failure(monkeypatch):
     result = sell_junk(config, screen, input_ctrl, lambda _message: None)
 
     assert result is False
-    assert ("click", 700, 210) in input_ctrl.events
+    assert ("click", 700, 210) not in input_ctrl.events
+    assert [event for event in input_ctrl.events if event[0] == "press"][-2:] == [
+        ("press", "esc", 0.5),
+        ("press", "esc", 0.5),
+    ]
