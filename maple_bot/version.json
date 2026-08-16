@@ -1,1 +1,1 @@
-{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.1/Claude_v2.4.1_Setup.exe","version":"2.4.1","notes":"캐릭터 위치 감지의 연속성을 강화하고 작은 캐릭터 캡처를 색상 기준으로 사용하도록 개선했으며, 자동판매 상점 나가기를 템플릿으로 인식하고 ESC 대체 동작을 0.5초 홀드로 조정했습니다."}
+{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.2/Claude_v2.4.2_Setup.exe","version":"2.4.2","notes":"빨코2 캐릭터 미검출 시 마지막 이동 방향을 유지하고 자동판매 안전지대 진입·복귀와 미니맵 영역 동기화를 안정화했으며, 기타템 템플릿을 게임창 캡처에서 동적으로 추가·덮어쓰기·삭제할 수 있도록 개선했습니다."}
