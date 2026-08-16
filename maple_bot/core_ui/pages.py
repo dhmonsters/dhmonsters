@@ -5,12 +5,19 @@ import os
 import sys
 from pathlib import Path
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton
 
 from core_ui.theme import SPACING
 from core_ui.widgets import (
     CheckField, TextField, IntField, ComboField, FloatField, StatusField, SliderField,
 )
+
+
+class RegionPickerButton(QPushButton):
+    """영역 저장 완료를 런타임 연결부에 알리는 버튼."""
+
+    region_applied = pyqtSignal()
 
 
 def _capture_game_client(config, owner):
@@ -80,9 +87,15 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
     keys_xywh: ((sec,..,'region_x'), y키, w키, h키)
     fields_xywh: 갱신할 IntField 4개(없으면 None) / on_done: 완료 후 콜백(상태 갱신)
     """
-    btn = QPushButton("영역 지정"); btn.setMinimumWidth(78)
+    btn = RegionPickerButton("영역 지정"); btn.setMinimumWidth(78)
     btn.setObjectName("primary")
     btn.setToolTip(f"{label} 영역을 스크린샷에서 드래그해 지정합니다.")
+    is_minimap = bool(
+        keys_xywh
+        and tuple(keys_xywh[0]) == ("minimap", "region_x")
+    )
+    if is_minimap:
+        btn.setProperty("regionRole", "minimap")
 
     def on_click():
         from core_ui.shot_selector import ScreenshotRegionSelector
@@ -105,10 +118,6 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
                 config.set(*key, val)
                 if fields_xywh and i < len(fields_xywh) and fields_xywh[i] is not None:
                     fields_xywh[i].widget.setValue(val)
-            is_minimap = bool(
-                keys_xywh
-                and tuple(keys_xywh[0]) == ("minimap", "region_x")
-            )
             if is_minimap and raw.shape[1] > 0 and raw.shape[0] > 0:
                 client_w = int(raw.shape[1])
                 client_h = int(raw.shape[0])
@@ -118,9 +127,13 @@ def _make_region_picker(config, keys_xywh, fields_xywh, label: str,
                 config.set("minimap", "region_y_ratio", relative_y / client_h)
                 config.set("minimap", "width_ratio", int(w) / client_w)
                 config.set("minimap", "height_ratio", int(h) / client_h)
+                from core.hunt_ground_presets import sync_active_minimap
+
+                sync_active_minimap(config)
             config.save()
             if on_done:
                 on_done()
+            btn.region_applied.emit()
         dlg.region_selected.connect(apply)
         dlg.exec()
 

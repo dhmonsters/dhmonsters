@@ -168,7 +168,13 @@ def test_auto_sell_recovers_floor1_before_alignment(monkeypatch):
         return True
 
     monkeypatch.setattr(runner, "_return_floor2_from_stair7", recover)
-    monkeypatch.setattr(runner, "_teleport_once", lambda direction: events.append(("teleport", direction)))
+
+    def teleport(direction):
+        events.append(("teleport", direction))
+        if direction == "up":
+            position[:] = [129.0, 49.0]
+
+    monkeypatch.setattr(runner, "_teleport_once", teleport)
 
     assert runner.prepare_auto_sell_from_floor2() is True
     assert events == [("recover", True), ("teleport", "up")]
@@ -187,6 +193,8 @@ def test_auto_sell_drops_from_upper_collection_platform_to_floor2(monkeypatch):
         events.append(direction)
         if direction == "down":
             position[:] = [95.0, 62.0]
+        elif direction == "up":
+            position[:] = [129.0, 49.0]
 
     monkeypatch.setattr(runner, "_teleport_once", teleport)
     monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: position.__setitem__(0, 129.0) or True)
@@ -208,6 +216,8 @@ def test_auto_sell_does_not_mistake_platform16_for_shop_entry(monkeypatch):
         events.append(direction)
         if direction == "down":
             position[:] = [95.0, 62.0]
+        elif direction == "up":
+            position[:] = [129.0, 49.0]
 
     monkeypatch.setattr(runner, "_teleport_once", teleport)
     monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: position.__setitem__(0, 129.0) or True)

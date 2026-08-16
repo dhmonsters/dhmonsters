@@ -44,6 +44,20 @@ def save_active_preset(config, mapping_completed: bool = True, name: str | None 
     return deepcopy(snapshot)
 
 
+def sync_active_minimap(config) -> bool:
+    """현재 미니맵 설정만 활성 사냥터 프리셋에 즉시 동기화한다."""
+    name = str(config.get("hunt_grounds", "active", default="") or "").strip()
+    presets = deepcopy(config.get("hunt_grounds", "presets", default={}) or {})
+    if not name or not isinstance(presets.get(name), dict):
+        return False
+    minimap = config.get("minimap", default=None)
+    if not isinstance(minimap, dict):
+        return False
+    presets[name]["minimap"] = deepcopy(minimap)
+    config.set("hunt_grounds", "presets", presets)
+    return True
+
+
 def load_preset(config, name: str | None = None) -> dict:
     """선택한 사냥터 프리셋을 관련 설정에만 병합한다."""
     resolved = _active_name(config, name)

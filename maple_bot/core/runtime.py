@@ -1359,6 +1359,27 @@ class BotRuntime:
     def ladder_debug_state(self):
         return self.block_runner.ladder_debug_state()
 
+    def update_minimap_region(self, minimap: dict) -> None:
+        """UI에서 새로 지정한 미니맵 영역을 실행 중 스캐너들에 즉시 반영한다."""
+        region = {
+            "left": int(minimap.get("region_x", 0)),
+            "top": int(minimap.get("region_y", 0)),
+            "width": max(1, int(minimap.get("width", 1))),
+            "height": max(1, int(minimap.get("height", 1))),
+        }
+        ratio_keys = ("region_x_ratio", "region_y_ratio", "width_ratio", "height_ratio")
+        if all(minimap.get(key) is not None for key in ratio_keys):
+            region.update({
+                "x_ratio": float(minimap["region_x_ratio"]),
+                "y_ratio": float(minimap["region_y_ratio"]),
+                "w_ratio": float(minimap["width_ratio"]),
+                "h_ratio": float(minimap["height_ratio"]),
+                "base_region": [
+                    region["left"], region["top"], region["width"], region["height"],
+                ],
+            })
+        self._cfg.minimap_region = region
+
     def _resolve_region(self, region: dict | None) -> dict | None:
         """?곷? ?곸뿭 dict瑜??꾩옱 寃뚯엫李??먯젏?쇰줈 ?댁꽍(absolute硫?洹몃?濡? None?대㈃ None)."""
         if not region:

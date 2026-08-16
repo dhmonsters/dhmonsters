@@ -206,6 +206,18 @@ def bind_character_offset_controls(shell, runtime):
     apply_offset()
 
 
+def bind_minimap_region_controls(shell, runtime, config):
+    """미니맵 영역 저장 완료를 실행 중 런타임 영역 갱신에 연결한다."""
+    from core_ui.pages import RegionPickerButton
+
+    for button in shell.findChildren(RegionPickerButton):
+        if button.property("regionRole") != "minimap":
+            continue
+        button.region_applied.connect(
+            lambda: runtime.update_minimap_region(config.get("minimap") or {})
+        )
+
+
 def _start_update_check(parent_window) -> None:
     from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -477,6 +489,7 @@ def main():
     _write_runtime_log("BOOT", "main: shell created")
     bind_world_editor(shell, rt)
     bind_character_offset_controls(shell, rt)
+    bind_minimap_region_controls(shell, rt, cm)
     _write_runtime_log("BOOT", "main: world editor bound")
     backend = getattr(rt, "input_backend", None)
     backend_name = str(getattr(backend, "name", "unknown"))

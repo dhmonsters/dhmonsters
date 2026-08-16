@@ -50,6 +50,7 @@ class RedNose2RouteRunner:
         self._collection_stage: str | None = None
         self._coord_scaled: bool | None = None
         self._coord_mode_logged: str | None = None
+        self._last_horizontal_intent: str | None = None
 
     def start(self) -> None:
         thread = self._thread
@@ -111,6 +112,7 @@ class RedNose2RouteRunner:
         self._next_collection_at = self._last_pickup_at + self._random_hunt_cycle_sec()
         self._main_move_index = 0
         self._collection_stage = None
+        self._last_horizontal_intent = None
 
     @staticmethod
     def _block_signature(block) -> tuple:
@@ -449,6 +451,7 @@ class RedNose2RouteRunner:
             return
         h = self._route_inputs()
         if direction in ("left", "right"):
+            self._last_horizontal_intent = direction
             h.hold_direction(direction)
             if lead_sec is None:
                 lead_sec = float(self._profile.get("teleport_lead_sec", 0.07))
@@ -460,7 +463,12 @@ class RedNose2RouteRunner:
 
         h.release_direction()
         h.hold_action(direction)
-        self._sleep(float(self._profile.get("vertical_teleport_lead_sec", 0.15)))
+        vertical_lead_sec = (
+            float(self._profile.get("vertical_teleport_lead_sec", 0.15))
+            if lead_sec is None
+            else max(0.0, float(lead_sec))
+        )
+        self._sleep(vertical_lead_sec)
         try:
             h.press_action(teleport_key, hold_sec)
         finally:
@@ -547,6 +555,8 @@ class RedNose2RouteRunner:
         is_active = active_fn or self._active
         tolerance = self._arrival_tolerance() if arrival_tolerance is None else max(0.0, float(arrival_tolerance))
         previous_x = None
+        last_direction = self._last_horizontal_intent
+        position_missing_since: float | None = None
         next_teleport_at = 0.0
         last_teleport_position: tuple[float, float] | None = None
         crossed_target = False
@@ -569,8 +579,23 @@ class RedNose2RouteRunner:
             while is_active():
                 pos = self._current_pos()
                 if pos is None:
+                    now = time.monotonic()
+                    if position_missing_since is None:
+                        position_missing_since = now
+                    recovery_sec = max(
+                        0.0,
+                        float(self._profile.get("position_loss_recovery_sec", 0.8)),
+                    )
+                    if (
+                        last_direction in {"left", "right"}
+                        and now - position_missing_since <= recovery_sec
+                    ):
+                        h.hold_direction(last_direction)
+                    else:
+                        h.release_direction()
                     self._sleep(0.03)
                     continue
+                position_missing_since = None
                 if floor_guard is not None and not floor_guard():
                     first_off_floor = pos
                     fresh_pos, _fresh_seen_at = self._fresh_sample()
@@ -627,6 +652,8 @@ class RedNose2RouteRunner:
                     return True
 
                 direction = "right" if dist > 0 else "left"
+                last_direction = direction
+                self._last_horizontal_intent = direction
                 previous_direction = h.direction
                 direction_changed = previous_direction != direction
                 if direction_changed:
@@ -1082,6 +1109,16 @@ class RedNose2RouteRunner:
             return "upper-platform"
         return "between"
 
+    def _wait_auto_sell_floor(self, expected: str, timeout_sec: float) -> bool:
+        """자동판매 텔포 뒤 실제 도착 층이 확인될 때까지만 짧게 기다린다."""
+        deadline = time.monotonic() + max(0.05, float(timeout_sec))
+        while self._manual_active() and time.monotonic() < deadline:
+            self._fresh_pos()
+            if self._auto_sell_floor() == expected:
+                return True
+            self._sleep(0.03)
+        return self._auto_sell_floor() == expected
+
     def _drop_to_floor2_for_auto_sell(self) -> bool:
         """회수 중 상단 발판에서 아랫텔포로 2층까지 내려온다."""
         for attempt in range(1, 9):
@@ -1184,10 +1221,24 @@ class RedNose2RouteRunner:
                 )
                 return False
             self._release_attack_key()
-            self._teleport_once("up")
-            self._sleep(0.25)
-            self._log("[rednose2v5] auto-sell entry complete")
-            return True
+            entry_attempts = max(1, int(self._profile.get("auto_sell_entry_attempts", 3)))
+            for attempt in range(1, entry_attempts + 1):
+                self._teleport_once("up")
+                if self._wait_auto_sell_floor("shop-entry", 0.6):
+                    self._log(
+                        f"[rednose2v5] auto-sell entry complete "
+                        f"({attempt}/{entry_attempts})"
+                    )
+                    return True
+                floor_name = self._auto_sell_floor()
+                self._log(
+                    f"[rednose2v5] auto-sell entry not confirmed "
+                    f"({attempt}/{entry_attempts}): floor={floor_name}"
+                )
+                if floor_name not in {"floor2", "unknown", "between"}:
+                    break
+            self._log("[rednose2v5] auto-sell entry failed: safe zone not confirmed")
+            return False
         finally:
             self._route_inputs().release_direction()
             self.owns_movement = previous_owns_movement
@@ -1199,8 +1250,19 @@ class RedNose2RouteRunner:
         self.owns_movement = True
         try:
             self._release_attack_key()
-            self._teleport_once("down")
-            if self._wait_floor(lambda: self._is_upper_floor_v5(None), 0.75):
+            return_attempts = max(1, int(self._profile.get("auto_sell_return_attempts", 3)))
+            for attempt in range(1, return_attempts + 1):
+                self._teleport_once_with_hold(
+                    "down",
+                    float(self._profile.get("teleport_hold_sec", 0.3)),
+                    lead_sec=0.30,
+                )
+                if not self._wait_floor(lambda: self._is_upper_floor_v5(None), 0.75):
+                    self._log(
+                        f"[rednose2v5] auto-sell return retry "
+                        f"({attempt}/{return_attempts})"
+                    )
+                    continue
                 self._last_pickup_at = time.monotonic()
                 self._next_collection_at = self._last_pickup_at + self._random_hunt_cycle_sec()
                 self._collection_stage = None
