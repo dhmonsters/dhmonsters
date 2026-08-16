@@ -156,7 +156,7 @@ def test_equipment_sale_uses_game_window_single_match_and_finishes_within_five_s
     monkeypatch.setattr("core.junk_seller.time.time", clock.time)
     monkeypatch.setattr("core.junk_seller.time.sleep", clock.sleep)
     monkeypatch.setattr("core.junk_seller.os.path.exists", lambda path: os.path.basename(path) in existing)
-    monkeypatch.setattr("core.junk_seller.glob.glob", lambda _pattern: [])
+    monkeypatch.setattr("core.junk_seller._item_template_paths", lambda: [])
     monkeypatch.setattr("core.config_manager.get_game_window_rect", lambda _config: (100, 200, 800, 600))
     monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(mss=FakeMss))
     monkeypatch.setitem(
@@ -188,7 +188,7 @@ def test_missing_equipment_sell_button_reports_failure(monkeypatch):
     monkeypatch.setattr("core.junk_seller.time.time", clock.time)
     monkeypatch.setattr("core.junk_seller.time.sleep", clock.sleep)
     monkeypatch.setattr("core.junk_seller.os.path.exists", lambda path: os.path.basename(path) in existing)
-    monkeypatch.setattr("core.junk_seller.glob.glob", lambda _pattern: [])
+    monkeypatch.setattr("core.junk_seller._item_template_paths", lambda: [])
     monkeypatch.setattr("core.config_manager.get_game_window_rect", lambda _config: (100, 200, 800, 600))
 
     result = sell_junk(config, screen, input_ctrl, lambda _message: None)

@@ -333,6 +333,143 @@ def _make_template_capture(config, save_path, config_key, label: str,
     return btn
 
 
+def _make_junk_template_list(config, template_dir=Path("templates/junk")) -> QWidget:
+    """기타템 템플릿 행을 추가·덮어쓰기·삭제하는 세로 목록을 만든다."""
+    from PyQt6.QtWidgets import QMessageBox
+
+    template_dir = Path(template_dir)
+    box = QWidget()
+    box.setObjectName("junkTemplateList")
+    layout = QVBoxLayout(box)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(SPACING["xs"])
+
+    rows = QWidget()
+    rows_layout = QVBoxLayout(rows)
+    rows_layout.setContentsMargins(0, 0, 0, 0)
+    rows_layout.setSpacing(SPACING["xs"])
+    layout.addWidget(rows)
+
+    add_button = QPushButton("+")
+    add_button.setObjectName("junkTemplateAddButton")
+    add_button.setToolTip("판매할 기타템 항목을 하나 추가합니다.")
+    add_button.setFixedWidth(42)
+    layout.addWidget(add_button)
+
+    existing_numbers = [
+        int(path.stem.split("_", 1)[1])
+        for path in template_dir.glob("item_*.png")
+        if path.stem.split("_", 1)[-1].isdigit()
+    ]
+    configured_count = int(config.get(
+        "settings2", "junk_sell", "item_template_count", default=0,
+    ) or 0)
+    state = {"count": max(configured_count, max(existing_numbers, default=0))}
+
+    def save_count() -> None:
+        config.set("settings2", "junk_sell", "item_template_count", state["count"])
+        config.save()
+
+    def template_path(index: int) -> Path:
+        return template_dir / f"item_{index}.png"
+
+    def clear_rows() -> None:
+        while rows_layout.count():
+            item = rows_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def capture_template(index: int) -> None:
+        import cv2
+        from core_ui.shot_selector import ScreenshotRegionSelector
+
+        captured = _capture_game_client(config, box.window())
+        if captured is None:
+            return
+        image, origin = captured
+        selector = ScreenshotRegionSelector(image, src_origin=origin, parent=box.window())
+
+        def save_selection(x: int, y: int, width: int, height: int) -> None:
+            relative_x = max(0, int(x) - int(origin[0]))
+            relative_y = max(0, int(y) - int(origin[1]))
+            width = min(int(width), image.shape[1] - relative_x)
+            height = min(int(height), image.shape[0] - relative_y)
+            crop = image[relative_y:relative_y + height, relative_x:relative_x + width]
+            if width <= 0 or height <= 0 or crop.size == 0:
+                QMessageBox.warning(box, "캡처 오류", "선택한 영역을 저장할 수 없습니다.")
+                return
+            template_dir.mkdir(parents=True, exist_ok=True)
+            path = template_path(index)
+            if not cv2.imwrite(str(path), crop):
+                QMessageBox.warning(box, "저장 오류", "기타템 템플릿을 저장하지 못했습니다.")
+                return
+            status = box.findChild(QLabel, f"junkTemplateStatus{index}")
+            if status is not None:
+                status.setText("등록됨")
+            QMessageBox.information(box, "완료", f"기타템 {index} 템플릿을 저장했습니다.")
+
+        selector.region_selected.connect(save_selection)
+        selector.exec()
+
+    def remove_template(index: int) -> None:
+        answer = QMessageBox.question(
+            box,
+            "기타템 삭제",
+            f"기타템 {index}과 등록된 템플릿을 삭제하시겠습니까?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        target = template_path(index)
+        if target.exists():
+            target.unlink()
+        for source_index in range(index + 1, state["count"] + 1):
+            source = template_path(source_index)
+            if source.exists():
+                source.replace(template_path(source_index - 1))
+        state["count"] -= 1
+        save_count()
+        refresh_rows()
+
+    def refresh_rows() -> None:
+        clear_rows()
+        for index in range(1, state["count"] + 1):
+            row = QWidget()
+            row.setObjectName(f"junkTemplateRow{index}")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(SPACING["sm"])
+
+            label = QLabel(f"기타템 {index}")
+            label.setFixedWidth(130)
+            status = QLabel("등록됨" if template_path(index).exists() else "미등록")
+            status.setObjectName(f"junkTemplateStatus{index}")
+            set_button = QPushButton("템플릿 설정")
+            set_button.setObjectName(f"junkTemplateSet{index}")
+            remove_button = QPushButton("−")
+            remove_button.setObjectName(f"junkTemplateRemove{index}")
+            remove_button.setFixedWidth(42)
+
+            set_button.clicked.connect(lambda _checked=False, i=index: capture_template(i))
+            remove_button.clicked.connect(lambda _checked=False, i=index: remove_template(i))
+            row_layout.addWidget(label)
+            row_layout.addWidget(status)
+            row_layout.addWidget(set_button)
+            row_layout.addWidget(remove_button)
+            row_layout.addStretch(1)
+            rows_layout.addWidget(row)
+
+    def add_row() -> None:
+        state["count"] += 1
+        save_count()
+        refresh_rows()
+
+    add_button.clicked.connect(add_row)
+    refresh_rows()
+    return box
+
+
 def _page(title: str, desc: str, fields: list, buttons: list | None = None,
           extras: list | None = None, fill_last: bool = False) -> QWidget:
     """제목 + 설명 + (버튼들) + 폼 필드들 + (임의 위젯 extras)를 담은 스크롤 페이지.
@@ -845,11 +982,13 @@ def build_pages(config) -> list[QWidget]:
     auto_sell_manual_layout.addWidget(auto_sell_run_btn)
     auto_sell_manual_layout.addWidget(auto_sell_stop_btn)
     auto_sell_manual_layout.addStretch(1)
+    junk_template_list = _make_junk_template_list(c)
     pages.append(_page("자동화·운영", "자동판매·마을귀환·예약종료·픽업·텔레그램·찰리교환", [
         CheckField("자동판매 사용", c, ("settings2", "junk_sell", "auto_sell_enabled")),
         IntField("자동판매 주기(분)", c, ("settings2", "junk_sell", "auto_sell_interval_min"), 1, 240, default=10),
         CheckField("시작 시 자동판매", c, ("settings2", "junk_sell", "sell_on_start")),
         CheckField("기타템 판매", c, ("settings2", "junk_sell", "junk_sell_enabled")),
+        junk_template_list,
         auto_sell_manual_row,
         CheckField("맵 이탈 감지", c, ("map_exit", "enabled")),
         mapexit_status,

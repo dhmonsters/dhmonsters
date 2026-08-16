@@ -1,9 +1,9 @@
 # 인벤토리 캐시탭 → NPC 상점 기타탭에서 잡템을 자동으로 판매하는 모듈
 from __future__ import annotations
-import glob
 import os
 import random
 import time
+from pathlib import Path
 
 
 def _tab_color_changed(cx: int, cy: int, radius: int = 20, threshold: float = 6.0) -> "callable":
@@ -107,6 +107,16 @@ def _match_template(screen, scene, template_path: str, threshold: float):
     score = screen.find_template_score(scene, template_path)
     position = screen.find_template(scene, template_path, threshold=threshold)
     return score, position
+
+
+def _item_template_paths(template_dir=Path("templates/junk")) -> list[Path]:
+    """등록된 기타템 템플릿을 번호순으로 반환한다."""
+    numbered = []
+    for path in Path(template_dir).glob("item_*.png"):
+        suffix = path.stem.split("_", 1)[-1]
+        if suffix.isdigit():
+            numbered.append((int(suffix), path))
+    return [path for _number, path in sorted(numbered)]
 
 
 def open_shop(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
@@ -354,18 +364,7 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
     has_equip_conf_tpl  = os.path.exists(equip_confirm_tpl)
     has_scroll_bot_tpl  = os.path.exists(scroll_bottom_tpl)
 
-    _system_tpls = {
-        "cash_tab.png", "cash_tab_active.png", "inventory.png", "shop_open.png",
-        "equip_sell_btn.png", "equip_sell_confirm.png",
-        "etc_tab_active.png", "scroll_bottom.png",
-        "shop_item.png", "shop_exit.png", "item_1.png",
-        "step1.png", "step1_check.png", "step2.png", "step3.png", "step4.png",
-        "step5.png", "step6.png", "ok.png", "sell.png", "shop.png", "end.png",
-    }
-    item_templates = sorted(
-        f for f in glob.glob("templates/junk/*.png")
-        if os.path.basename(f) not in _system_tpls
-    )
+    item_templates = _item_template_paths()
 
     has_templates  = bool(item_templates)
     has_equip_sell = has_equip_sell_tpl
@@ -475,7 +474,7 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
                     if stopped():
                         break
                     scene = screen.capture(shop_area)
-                    pos   = screen.find_template(scene, tpl_path, threshold=0.75)
+                    pos   = screen.find_template(scene, str(tpl_path), threshold=0.75)
                     if pos is None:
                         break
                     abs_x = shop_area["left"] + pos[0]
@@ -524,7 +523,7 @@ def sell_junk(config, screen, input_ctrl, status_cb, stop_event=None) -> bool:
                             if stopped():
                                 break
                             scene = screen.capture(shop_area)
-                            pos   = screen.find_template(scene, tpl_path, threshold=0.75)
+                            pos   = screen.find_template(scene, str(tpl_path), threshold=0.75)
                             if pos is None:
                                 break
                             abs_x = shop_area["left"] + pos[0]
