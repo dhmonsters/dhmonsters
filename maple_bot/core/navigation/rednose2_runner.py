@@ -1373,7 +1373,10 @@ class RedNose2RouteRunner:
                 continue
             floor1_min, floor1_max = self._floor1_y_range()
             tolerance = self._floor_y_tolerance()
-            if not (floor1_min - tolerance <= float(pos[1]) <= floor1_max + tolerance):
+            stair7_return_max = self._profile_y("stair7_return_y_max", 68)
+            y_min = stair7_return_max + 1
+            y_max = floor1_max + tolerance
+            if not (y_min <= float(pos[1]) <= y_max):
                 self._log(
                     f"[rednose2v5] stair7 fresh Y blocked before up-teleport: "
                     f"x={float(pos[0]):.0f}, y={float(pos[1]):.0f}, "
