@@ -1,0 +1,31 @@
+Claude용 Interception 드라이버 안내
+
+출처
+https://github.com/oblitum/Interception/releases/tag/v1.0.1
+
+용도
+Interception은 키보드와 마우스 입력을 저수준에서 전달하는 선택 드라이버입니다.
+Claude는 드라이버가 없어도 일반 Win32 입력 방식으로 실행됩니다.
+
+설치
+1. Claude 설치 프로그램에서 Interception 드라이버 설치를 선택합니다.
+2. 설치 프로그램을 관리자 권한으로 허용합니다.
+3. 설치가 끝나면 컴퓨터를 재부팅합니다.
+
+주의
+- 키보드와 마우스에 영향을 주는 시스템 드라이버입니다.
+- 일부 게임이나 보안 프로그램은 Interception 드라이버 사용을 제한할 수 있습니다.
+- 문제가 발생하면 아래 제거 절차를 사용하십시오.
+
+제거
+1. 관리자 권한 명령 프롬프트를 실행합니다.
+2. Claude 설치 폴더의 drivers\Interception 폴더로 이동합니다.
+3. 다음 명령을 실행합니다.
+
+install-interception.exe /uninstall
+
+4. 컴퓨터를 재부팅합니다.
+
+라이선스
+Claude는 무료·비상업적 용도로 배포됩니다.
+동봉된 licenses\LGPL 3.0.txt를 확인하십시오.
