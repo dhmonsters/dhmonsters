@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo  Claude v2.4.2 Build (PyArmor + PyInstaller)
+echo  Claude v2.4.3 Build (PyArmor + PyInstaller)
 echo ========================================
 
 set PYTHON=C:\Users\PC\AppData\Local\Programs\Python\Python314\python.exe
@@ -17,7 +17,7 @@ if errorlevel 1 "%PYTHON%" -m pip install pyarmor
 "%PYTHON%" -m pip show pyinstaller >nul 2>&1
 if errorlevel 1 "%PYTHON%" -m pip install pyinstaller
 
-if exist dist\Claude_2.4.2 rmdir /s /q dist\Claude_2.4.2
+if exist dist\Claude_2.4.3 rmdir /s /q dist\Claude_2.4.3
 if exist build rmdir /s /q build
 if exist .obf_build rmdir /s /q .obf_build
 
@@ -49,28 +49,28 @@ if not "%PYINSTALLER_EXIT%"=="0" (echo PyInstaller failed & exit /b %PYINSTALLER
 echo.
 echo [3/3] Copying files...
 if not exist dist mkdir dist
-xcopy /E /I /Y .obf_build\dist\Claude dist\Claude_2.4.2
-xcopy /E /I /Y .obf_build\core dist\Claude_2.4.2\core
-xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.4.2\core_ui
-xcopy /E /I /Y .obf_build\ui dist\Claude_2.4.2\ui
-if exist dist\Claude_2.4.2\_internal xcopy /E /I /Y .obf_build\core dist\Claude_2.4.2\_internal\core
-if exist dist\Claude_2.4.2\_internal xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.4.2\_internal\core_ui
-if exist dist\Claude_2.4.2\_internal xcopy /E /I /Y .obf_build\ui dist\Claude_2.4.2\_internal\ui
-"%PYTHON%" build_release_config.py config.json dist\Claude_2.4.2\config.json
+xcopy /E /I /Y .obf_build\dist\Claude dist\Claude_2.4.3
+xcopy /E /I /Y .obf_build\core dist\Claude_2.4.3\core
+xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.4.3\core_ui
+xcopy /E /I /Y .obf_build\ui dist\Claude_2.4.3\ui
+if exist dist\Claude_2.4.3\_internal xcopy /E /I /Y .obf_build\core dist\Claude_2.4.3\_internal\core
+if exist dist\Claude_2.4.3\_internal xcopy /E /I /Y .obf_build\core_ui dist\Claude_2.4.3\_internal\core_ui
+if exist dist\Claude_2.4.3\_internal xcopy /E /I /Y .obf_build\ui dist\Claude_2.4.3\_internal\ui
+"%PYTHON%" build_release_config.py config.json dist\Claude_2.4.3\config.json
 if errorlevel 1 (echo Release config generation failed & exit /b 1)
-copy /Y version.txt dist\Claude_2.4.2\version.txt
-if exist templates xcopy /E /I /Y templates dist\Claude_2.4.2\templates
-if exist monsters xcopy /E /I /Y monsters dist\Claude_2.4.2\monsters
-if exist models xcopy /E /I /Y models dist\Claude_2.4.2\models
-if exist maps xcopy /E /I /Y maps dist\Claude_2.4.2\maps
-if exist "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" copy /Y "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" "dist\Claude_2.4.2\interception.dll"
+copy /Y version.txt dist\Claude_2.4.3\version.txt
+if exist templates xcopy /E /I /Y templates dist\Claude_2.4.3\templates
+if exist monsters xcopy /E /I /Y monsters dist\Claude_2.4.3\monsters
+if exist models xcopy /E /I /Y models dist\Claude_2.4.3\models
+if exist maps xcopy /E /I /Y maps dist\Claude_2.4.3\maps
+if exist "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" copy /Y "third_party\Interception-v1.0.1\Interception\library\x64\interception.dll" "dist\Claude_2.4.3\interception.dll"
 
-for /d /r "dist\Claude_2.4.2" %%D in (__pycache__) do @if exist "%%D" rmdir /s /q "%%D"
-del /s /q "dist\Claude_2.4.2\*.pyc" >nul 2>&1
+for /d /r "dist\Claude_2.4.3" %%D in (__pycache__) do @if exist "%%D" rmdir /s /q "%%D"
+del /s /q "dist\Claude_2.4.3\*.pyc" >nul 2>&1
 
 echo.
 echo ========================================
-echo  Done! dist\Claude_2.4.2\Claude.exe
+echo  Done! dist\Claude_2.4.3\Claude.exe
 echo ========================================
 
 

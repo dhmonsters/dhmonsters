@@ -2,7 +2,7 @@
 ; Build with ISCC.exe installer.iss
 
 #define AppName    "Claude"
-#define AppVersion "2.4.2"
+#define AppVersion "2.4.3"
 #define AppExe     "Claude.exe"
 #define AppPublisher "Claude"
 #define SourceDir  "dist\Claude_" + AppVersion
