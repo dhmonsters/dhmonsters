@@ -208,6 +208,35 @@ def test_rednose2_user_x_settings_override_defaults_and_rebuild_ratios():
     assert profile["platform27_bypass_x_max_ratio"] == pytest.approx(90 / 172)
 
 
+def test_rednose2_user_y_settings_override_defaults_and_rebuild_ratios():
+    data = _sample_config()
+    data["hunt_grounds"] = {"active": "빨코2"}
+    data["rednose2_v5"] = {
+        "floor2_y_min": 60,
+        "floor2_y_max": 64,
+        "floor1_y_min": 74,
+        "floor1_y_max": 78,
+        "floor3_y_min": 46,
+        "floor3_y_max": 52,
+        "stair7_y": 69,
+        "platform24_y": 62,
+        "platform1415_y_min": 53,
+        "platform1415_y_max": 56,
+        "platform16_y_min": 46,
+        "platform16_y_max": 49,
+        "platform27_y_min": 49,
+        "platform27_y_max": 51,
+    }
+
+    profile = to_runtime_config(data).rednose2_v5
+
+    assert profile["floor2_y_min"] == 60
+    assert profile["stair7_y"] == 69
+    assert profile["platform27_y_max"] == 51
+    assert profile["floor2_y_min_ratio"] == pytest.approx(60 / 103)
+    assert profile["platform27_y_max_ratio"] == pytest.approx(51 / 103)
+
+
 def test_rednose2_invalid_external_ranges_fall_back_by_group():
     data = _sample_config()
     data["rednose2_v5"] = {

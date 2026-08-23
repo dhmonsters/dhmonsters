@@ -19,7 +19,9 @@ from core.config_adapter import (
     REDNOSE2_TIMING_DEFAULTS,
     REDNOSE2_TIMING_VERSION,
     REDNOSE2_X_DEFAULTS,
+    REDNOSE2_Y_DEFAULTS,
     rednose2_x_validation_error,
+    rednose2_y_validation_error,
 )
 from core_ui.theme import SPACING
 
@@ -32,6 +34,7 @@ class Rednose2CoordinateWidget(QFrame):
         super().__init__(parent)
         self._config = config
         self.inputs: dict[str, QSpinBox] = {}
+        self.y_inputs: dict[str, QSpinBox] = {}
         self.timing_inputs: dict[str, QDoubleSpinBox] = {}
         self.setObjectName("rednose2CoordinateCard")
         self._build_ui()
@@ -123,6 +126,23 @@ class Rednose2CoordinateWidget(QFrame):
                 grid.addWidget(spin, row, 1)
             layout.addLayout(grid)
 
+        y_groups = (
+            ("층 Y 범위", (("floor1_y_min", "1층 최소 Y"), ("floor1_y_max", "1층 최대 Y"), ("floor2_y_min", "2층 최소 Y"), ("floor2_y_max", "2층 최대 Y"), ("floor3_y_min", "3층 최소 Y"), ("floor3_y_max", "3층 최대 Y"))),
+            ("회수 Y 좌표", (("platform24_y", "24번 발판 Y"), ("stair7_y", "7번 계단 Y"), ("platform1415_y_min", "14/15 최소 Y"), ("platform1415_y_max", "14/15 최대 Y"), ("platform16_y_min", "16번 최소 Y"), ("platform16_y_max", "16번 최대 Y"), ("platform27_y_min", "27번 최소 Y"), ("platform27_y_max", "27번 최대 Y"))),
+        )
+        for group_title, fields in y_groups:
+            layout.addWidget(QLabel(group_title))
+            grid = QGridLayout()
+            grid.setHorizontalSpacing(SPACING["sm"])
+            grid.setVerticalSpacing(SPACING["xs"])
+            for row, (key, label) in enumerate(fields):
+                grid.addWidget(QLabel(label), row, 0)
+                spin = QSpinBox()
+                spin.setRange(0, 102)
+                self.y_inputs[key] = spin
+                grid.addWidget(spin, row, 1)
+            layout.addLayout(grid)
+
         controls = QHBoxLayout()
         save_button = QPushButton("저장")
         save_button.setObjectName("primaryButton")
@@ -187,7 +207,10 @@ class Rednose2CoordinateWidget(QFrame):
         self.setHidden(normalized not in _REDNOSE2_NAMES)
 
     def _current_values(self) -> dict[str, int]:
-        return {key: spin.value() for key, spin in self.inputs.items()}
+        return {
+            **{key: spin.value() for key, spin in self.inputs.items()},
+            **{key: spin.value() for key, spin in self.y_inputs.items()},
+        }
 
     def _load(self) -> None:
         saved = self._config.get("rednose2_v5", default={}) or {}
@@ -196,6 +219,10 @@ class Rednose2CoordinateWidget(QFrame):
             value = saved.get(key, default)
             valid = isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 171
             self.inputs[key].setValue(value if valid else default)
+        for key, default in REDNOSE2_Y_DEFAULTS.items():
+            value = saved.get(key, default)
+            valid = isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 102
+            self.y_inputs[key].setValue(value if valid else default)
 
         versioned = saved.get("timing_version") == REDNOSE2_TIMING_VERSION
         for key, default in REDNOSE2_TIMING_DEFAULTS.items():
@@ -211,6 +238,8 @@ class Rednose2CoordinateWidget(QFrame):
     def restore_defaults(self) -> None:
         for key, value in REDNOSE2_X_DEFAULTS.items():
             self.inputs[key].setValue(value)
+        for key, value in REDNOSE2_Y_DEFAULTS.items():
+            self.y_inputs[key].setValue(value)
         self.status.setText("기본값을 불러왔습니다. 저장을 눌러야 반영됩니다.")
 
     def restore_timing_defaults(self) -> None:
@@ -221,6 +250,8 @@ class Rednose2CoordinateWidget(QFrame):
     def save_values(self) -> None:
         values = self._current_values()
         error = rednose2_x_validation_error(values)
+        if error is None:
+            error = rednose2_y_validation_error(values)
         if error:
             self.status.setText(error)
             return

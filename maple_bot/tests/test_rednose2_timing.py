@@ -120,17 +120,114 @@ def test_next_teleport_interval_starts_after_action_completion(monkeypatch):
         assert following[0] - previous[1] >= 0.72
 
 
-def test_platform27_manual_attack_hold_applies_down_five_once(monkeypatch):
+def test_platform1415_move_continues_until_position_enters_allowed_range(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)
-    runner = make_runner(clock, route_inputs, {"platform27_attack_sec": 2.0})
+    runner = make_runner(clock, route_inputs)
+    position = [97.0, 62.0]
+    held_directions = []
+
+    def hold_direction(direction):
+        held_directions.append(direction)
+        route_inputs.direction = direction
+        position[0] = 96.0
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr(route_inputs, "hold_direction", hold_direction)
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+
+    assert runner._move_to_target_v5(
+        95.0,
+        attack=False,
+        arrival_range=(94.0, 96.0),
+    )
+    assert held_directions == ["left"]
+
+
+@pytest.mark.parametrize(
+    ("move_index", "start_x", "expected_direction"),
+    [(0, 119.0, "right"), (1, 60.0, "left")],
+)
+def test_floor2_end_move_allows_teleport_inside_default_stop_distance(
+    monkeypatch,
+    move_index,
+    start_x,
+    expected_direction,
+):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(
+        clock,
+        route_inputs,
+        {"floor2_left_x": 55, "floor2_right_x": 124},
+    )
+    runner._main_move_index = move_index
+    runner._next_collection_at = float("inf")
+    position = [start_x, 62.0]
+    teleports = []
+
+    def teleport(direction):
+        teleports.append(direction)
+        position[0] += 13.0 if direction == "right" else -13.0
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_sample", lambda: (tuple(position), clock.now))
+    monkeypatch.setattr(runner, "_teleport_attack", teleport)
+
+    assert runner._run_floor2_hunt_once() is True
+    assert teleports == [expected_direction]
+
+
+def test_floor2_collection_right_edge_allows_teleport_inside_default_stop_distance(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs, {"floor2_right_safe_x": 126})
+    position = [120.0, 62.0]
+    teleports = []
+
+    def teleport(direction):
+        teleports.append(direction)
+        position[0] += 13.0
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_sample", lambda: (tuple(position), clock.now))
+    monkeypatch.setattr(runner, "_teleport_attack", teleport)
+
+    assert runner._move_floor2_right_edge() is True
+    assert teleports == ["right"]
+
+
+def test_platform27_manual_attack_hold_uses_half_second_default(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
     monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
     monkeypatch.setattr(runner, "_teleport_once", lambda direction: None)
     monkeypatch.setattr(runner, "_wait_floor", lambda predicate, timeout: True)
 
     assert runner._finish_platform27_and_return_floor2()
 
-    assert route_inputs.action_events == [("down", "end", 0.0), ("up", "end", 1.9)]
+    assert route_inputs.action_events == [("down", "end", 0.0), ("up", "end", 0.475)]
+
+
+def test_platform27_return_stops_after_five_down_teleports(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    directions = []
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr(runner, "_teleport_once", directions.append)
+    monkeypatch.setattr(runner, "_wait_floor", lambda _predicate, _timeout: False)
+    monkeypatch.setattr(runner, "_is_lower_floor_v5", lambda _position: False)
+
+    assert runner._finish_platform27_and_return_floor2() is False
+    assert directions == ["left", "down", "down", "down", "down", "down"]
 
 
 def test_auto_sell_starts_immediately_when_already_on_shop_entry_floor(monkeypatch):
@@ -224,3 +321,140 @@ def test_auto_sell_does_not_mistake_platform16_for_shop_entry(monkeypatch):
 
     assert runner.prepare_auto_sell_from_floor2() is True
     assert events == ["down", "up"]
+
+
+def test_platform24_uses_three_attempts_and_strict_point_tolerances(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    waits = []
+    teleports = []
+
+    monkeypatch.setattr(runner, "_is_upper_floor_v5", lambda _position: True)
+    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(runner, "_teleport_once", teleports.append)
+
+    def wait_point(prefix, fallback_x, fallback_y, **kwargs):
+        waits.append((prefix, fallback_x, fallback_y, kwargs))
+        return False
+
+    monkeypatch.setattr(runner, "_wait_point", wait_point)
+
+    assert runner._enter_platform24() is False
+    assert teleports == ["left", "left", "left"]
+    assert waits == [
+        ("platform24", 30, 61, {"timeout_sec": 0.45, "x_tolerance": 2, "y_tolerance": 1}),
+    ] * 3
+
+
+def test_platform24_drop_rejects_y_outside_one_pixel_tolerance_and_tries_three_times(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs, {"floor1_y_min": 75, "floor1_y_max": 77})
+    teleports = []
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr(runner, "_current_pos", lambda: (30.0, 73.0))
+    monkeypatch.setattr(runner, "_teleport_once", teleports.append)
+
+    assert runner._drop_from_platform24_to_floor1() is False
+    assert teleports == ["down", "down", "down"]
+
+
+@pytest.mark.parametrize(
+    ("y", "expected"),
+    [(63.0, False), (64.0, True), (70.0, True), (74.0, True), (75.0, False)],
+)
+def test_stair7_intermediate_y_uses_open_range_between_floor2_and_floor1(y, expected):
+    clock = FakeClock()
+    runner = make_runner(
+        clock,
+        RecordingRouteInputs(clock),
+        {"floor2_y_max": 63, "floor1_y_min": 75},
+    )
+    runner._current_pos = lambda: (41.0, y)
+
+    assert runner._is_stair7_return_y() is expected
+
+
+def test_platform1415_retries_three_times_with_point_six_second_attacks(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    teleports = []
+
+    monkeypatch.setattr(runner, "_current_pos", lambda: (95.0, 62.0))
+    monkeypatch.setattr(runner, "_teleport_once", teleports.append)
+    monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: False)
+
+    assert runner._enter_platform1415() is False
+    assert teleports == ["up", "up", "up"]
+    assert route_inputs.presses == [("end", 0.6, 0.0), ("end", 0.6, 0.6)]
+
+
+def test_platform16_attacks_then_teleports_three_times_and_uses_simple_bypass(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    teleports = []
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr(
+        runner,
+        "_move_to_target_v5",
+        lambda *_args, **_kwargs: pytest.fail("16번 진입에서는 X 재정렬 이동을 하면 안 됩니다."),
+    )
+    monkeypatch.setattr(runner, "_teleport_once", teleports.append)
+    monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: False)
+
+    assert runner._enter_platform16() is True
+    assert teleports == ["up", "up", "up", "up", "left"]
+    assert [event for event in route_inputs.action_events if event[0] == "down"] == [
+        ("down", "end", 0.0),
+        ("down", "end", 0.475),
+        ("down", "end", 0.95),
+    ]
+    assert clock.now == pytest.approx(1.425)
+
+
+def test_platform27_uses_three_attempts_and_attacks_after_arrival(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    waits = iter((False, False, True))
+    teleports = []
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(runner, "_teleport_once", teleports.append)
+    monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: next(waits))
+
+    assert runner._enter_platform27() is True
+    assert teleports == ["left", "left", "left"]
+    assert [event for event in route_inputs.action_events if event[0] == "down"] == [
+        ("down", "end", 0.0),
+    ]
+    assert clock.now == pytest.approx(0.475)
+
+
+def test_collection_completion_randomizes_next_floor2_direction(monkeypatch):
+    clock = FakeClock()
+    runner = make_runner(clock, RecordingRouteInputs(clock))
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.random.choice", lambda values: values[1])
+    monkeypatch.setattr(runner, "_is_upper_floor_v5", lambda _position: True)
+    for method_name in (
+        "_enter_platform24",
+        "_drop_from_platform24_to_floor1",
+        "_return_floor2_from_stair7",
+        "_move_floor2_right_edge",
+        "_enter_platform1415",
+        "_enter_platform16",
+        "_enter_platform27",
+        "_finish_platform27_and_return_floor2",
+    ):
+        monkeypatch.setattr(runner, method_name, lambda: True)
+
+    assert runner._run_rednose_new_v5_collection() is True
+    assert runner._main_move_index == 1

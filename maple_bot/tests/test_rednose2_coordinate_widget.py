@@ -144,3 +144,31 @@ def test_coordinate_save_preserves_timing_values(app):
     widget.save_values()
 
     assert config.get("rednose2_v5", "attack_hold_sec") == 0.77
+
+
+def test_y_coordinates_load_and_save_with_x_coordinates(app):
+    config = FakeConfig({"floor1_y_min": 74, "platform27_y_max": 52})
+    widget = Rednose2CoordinateWidget(config)
+
+    assert widget.y_inputs["floor1_y_min"].value() == 74
+    assert widget.y_inputs["platform27_y_max"].value() == 52
+
+    widget.y_inputs["floor2_y_min"].setValue(60)
+    widget.y_inputs["floor2_y_max"].setValue(64)
+    widget.save_values()
+
+    assert config.get("rednose2_v5", "floor2_y_min") == 60
+    assert config.get("rednose2_v5", "floor2_y_max") == 64
+    assert config.saved == 1
+
+
+def test_invalid_y_range_does_not_save(app):
+    config = FakeConfig()
+    widget = Rednose2CoordinateWidget(config)
+    widget.y_inputs["platform16_y_min"].setValue(50)
+    widget.y_inputs["platform16_y_max"].setValue(49)
+
+    widget.save_values()
+
+    assert config.saved == 0
+    assert "16번" in widget.status.text()

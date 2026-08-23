@@ -413,9 +413,17 @@ class RedNose2RouteRunner:
         return abs(float(pos[0]) - target_x) <= x_tolerance
 
     def _wait_point(self, prefix: str, fallback_x: float, fallback_y: float,
-                    timeout_sec: float = 0.8, require_x: bool = True) -> bool:
+                    timeout_sec: float = 0.8, require_x: bool = True,
+                    x_tolerance: int = 4, y_tolerance: int = 2) -> bool:
         return self._wait_floor(
-            lambda: self._is_near_point(prefix, fallback_x, fallback_y, require_x=require_x),
+            lambda: self._is_near_point(
+                prefix,
+                fallback_x,
+                fallback_y,
+                x_tolerance=x_tolerance,
+                y_tolerance=y_tolerance,
+                require_x=require_x,
+            ),
             timeout_sec,
         )
 
@@ -428,7 +436,24 @@ class RedNose2RouteRunner:
         )
 
     def _is_stair7_return_y(self) -> bool:
-        return self._is_y_between("stair7_return_y_min", "stair7_return_y_max", 66, 68, tolerance=0)
+        pos = self._current_pos()
+        if pos is None or pos[1] is None:
+            return False
+        _floor2_min, floor2_max = self._floor2_y_range()
+        floor1_min, _floor1_max = self._floor1_y_range()
+        return floor2_max < float(pos[1]) < floor1_min
+
+    def _is_platform24_floor1_y(self) -> bool:
+        return self._is_y_between("floor1_y_min", "floor1_y_max", 75, 77, tolerance=1)
+
+    def _hold_attack_for(self, seconds: float) -> None:
+        attack_key = self._attack_key()
+        if not attack_key:
+            return
+        h = self._route_inputs()
+        h.hold_action(attack_key)
+        self._sleep(down_5(seconds))
+        h.release_action(attack_key)
 
     def _release_attack_key(self) -> None:
         attack_key = self._attack_key()
@@ -547,13 +572,20 @@ class RedNose2RouteRunner:
                            guard_label: str = "",
                            teleport_landing_range: tuple[float, float] | None = None,
                            teleport_stop_range: tuple[float, float] | None = None,
+                           teleport_stop_distance: float | None = None,
                            arrival_tolerance: float | None = None,
+                           arrival_range: tuple[float, float] | None = None,
                            allow_crossed_arrival: bool = True,
                            arrival_side: str | None = None,
                            active_fn: Callable[[], bool] | None = None) -> bool:
         h = self._route_inputs()
         is_active = active_fn or self._active
         tolerance = self._arrival_tolerance() if arrival_tolerance is None else max(0.0, float(arrival_tolerance))
+        stop_distance = (
+            self._teleport_stop_px()
+            if teleport_stop_distance is None
+            else max(0.0, float(teleport_stop_distance))
+        )
         previous_x = None
         last_direction = self._last_horizontal_intent
         position_missing_since: float | None = None
@@ -632,7 +664,12 @@ class RedNose2RouteRunner:
                     (arrival_side == "left" and x <= target_x + tolerance)
                     or (arrival_side == "right" and x >= target_x - tolerance)
                 )
-                if side_reached or abs(dist) <= tolerance or (allow_crossed_arrival and crossed):
+                if arrival_range is not None:
+                    arrival_left, arrival_right = sorted(arrival_range)
+                    reached = arrival_left <= x <= arrival_right
+                else:
+                    reached = side_reached or abs(dist) <= tolerance or (allow_crossed_arrival and crossed)
+                if reached:
                     released_direction = h.direction
                     release_started = time.perf_counter()
                     self._log(
@@ -682,7 +719,7 @@ class RedNose2RouteRunner:
                     outside_stop_range = x < stop_left or x > stop_right
                 can_teleport = (
                     not crossed_target
-                    and abs(dist) > self._teleport_stop_px()
+                    and abs(dist) > stop_distance
                     and teleport_lands_in_range
                     and outside_stop_range
                     and now >= next_teleport_at
@@ -944,6 +981,7 @@ class RedNose2RouteRunner:
             interval_sec=self._segment_interval("floor2_hunt_teleport_interval_sec"),
             floor_guard=lambda: self._is_upper_floor_v5(None),
             guard_label="rednose-new floor2 timed hunt",
+            teleport_stop_distance=0.0,
             arrival_side=arrival_side,
         ):
             self._main_move_index += 1
@@ -1070,7 +1108,7 @@ class RedNose2RouteRunner:
 
             self._last_pickup_at = time.monotonic()
             self._next_collection_at = self._last_pickup_at + self._random_hunt_cycle_sec()
-            self._main_move_index = 0
+            self._main_move_index = random.choice((0, 1))
             self._collection_stage = None
             self._log(
                 f"[rednose2v5] rednose-new collection route complete; "
@@ -1280,7 +1318,7 @@ class RedNose2RouteRunner:
 
     def _enter_platform24(self) -> bool:
         approach_x = self._profile_x("platform24_approach_x", 43)
-        attempts = max(1, int(self._profile.get("platform24_attempts", 6)))
+        attempts = max(1, int(self._profile.get("platform24_attempts", 3)))
         self._log(f"[rednose2v5] step 24: approach X={approach_x:.0f}, left-teleport")
         for attempt in range(1, attempts + 1):
             if not self._is_upper_floor_v5(None):
@@ -1295,7 +1333,14 @@ class RedNose2RouteRunner:
                 return False
             self._release_attack_key()
             self._teleport_once("left")
-            if self._wait_point("platform24", 30, 61, timeout_sec=0.7):
+            if self._wait_point(
+                "platform24",
+                30,
+                61,
+                timeout_sec=0.45,
+                x_tolerance=2,
+                y_tolerance=1,
+            ):
                 self._log(f"[rednose2v5] step 24 reached ({attempt}/{attempts})")
                 return True
             if not self._is_upper_floor_v5(None):
@@ -1305,15 +1350,15 @@ class RedNose2RouteRunner:
         return False
 
     def _drop_from_platform24_to_floor1(self) -> bool:
-        attempts = max(1, int(self._profile.get("drop_teleport_attempts", 8)))
+        attempts = max(1, int(self._profile.get("drop_teleport_attempts", 3)))
         self._release_attack_key()
         self._log("[rednose2v5] step floor1: down-teleport from platform24")
-        if self._is_lower_floor_v5(None):
+        if self._is_platform24_floor1_y():
             self._log("[rednose2v5] floor1 already reached before down-teleport")
             return True
         for attempt in range(1, attempts + 1):
             self._teleport_once("down")
-            if self._wait_floor(lambda: self._is_lower_floor_v5(None), 0.45):
+            if self._wait_floor(self._is_platform24_floor1_y, 0.45):
                 self._log(f"[rednose2v5] floor1 reached ({attempt}/{attempts})")
                 return True
         return False
@@ -1412,6 +1457,7 @@ class RedNose2RouteRunner:
             interval_sec=self._segment_interval("floor2_right_edge_teleport_interval_sec", 1.8),
             floor_guard=lambda: self._is_upper_floor_v5(None),
             guard_label="rednose-new right edge",
+            teleport_stop_distance=0.0,
             arrival_tolerance=0.0,
             arrival_side="right",
         )
@@ -1419,7 +1465,7 @@ class RedNose2RouteRunner:
     def _enter_platform1415(self) -> bool:
         approach_x = self._profile_x("platform1415_16_approach_x", 95)
         platform_left, platform_right = self._platform1415_x_range()
-        attempts = max(1, int(self._profile.get("platform1415_attempts", 6)))
+        attempts = max(1, int(self._profile.get("platform1415_attempts", 3)))
         self._log(
             f"[rednose2v5] step 14/15: approach X={approach_x:.0f} "
             f"range {platform_left:.0f}-{platform_right:.0f}, up-teleport"
@@ -1429,7 +1475,7 @@ class RedNose2RouteRunner:
                 approach_x,
                 attack=True,
                 interval_sec=self._segment_interval("platform1415_approach_interval_sec"),
-                arrival_tolerance=2.0,
+                arrival_range=(platform_left, platform_right),
             ):
                 return False
             if not self._is_in_platform1415_x_range():
@@ -1441,25 +1487,22 @@ class RedNose2RouteRunner:
             if self._wait_y_range("platform1415_y_min", "platform1415_y_max", 54, 55, 0.75):
                 self._log(f"[rednose2v5] platform 14/15 reached ({attempt}/{attempts})")
                 return True
-            self._retry_attack_once()
+            if attempt < attempts:
+                self._route_inputs().press_action(
+                    self._attack_key(),
+                    float(self._profile.get("platform1415_retry_attack_sec", 0.6)),
+                )
             self._log(f"[rednose2v5] platform 14/15 retry ({attempt}/{attempts})")
         return False
 
     def _enter_platform16(self) -> bool:
-        approach_x = self._profile_x("platform1415_16_approach_x", 95)
-        attempts = max(1, int(self._profile.get("platform16_attempts", 6)))
+        attempts = max(1, int(self._profile.get("platform16_attempts", 3)))
         self._release_attack_key()
-        self._log(f"[rednose2v5] step 16: align X={approach_x:.0f}, up-teleport")
+        self._log("[rednose2v5] step 16: attack, up-teleport")
         for attempt in range(1, attempts + 1):
-            if not self._move_to_target_v5(
-                approach_x,
-                attack=True,
-                interval_sec=self._segment_interval("platform16_approach_interval_sec", 0.25),
-            ):
-                return False
-            self._release_attack_key()
+            self._hold_attack_for(float(self._profile.get("platform16_attack_sec", 0.5)))
             self._teleport_once("up")
-            if self._wait_y_range("platform16_y_min", "platform16_y_max", 47, 48, 0.75):
+            if self._wait_y_range("platform16_y_min", "platform16_y_max", 47, 48, 0.55):
                 self._log(f"[rednose2v5] platform 16 reached ({attempt}/{attempts})")
                 return True
             self._log(f"[rednose2v5] platform 16 retry ({attempt}/{attempts})")
@@ -1467,38 +1510,15 @@ class RedNose2RouteRunner:
         return self._enter_platform27_bypass_from_floor2()
 
     def _enter_platform27_bypass_from_floor2(self) -> bool:
-        approach_x = self._profile_x("platform27_bypass_approach_x", 80)
-        left_x = self._profile_x("platform27_bypass_x_min", 72)
-        right_x = self._profile_x("platform27_bypass_x_max", 89)
-        attempts = max(1, int(self._profile.get("platform27_bypass_attempts", 6)))
         self._release_attack_key()
-        self._log(
-            f"[rednose2v5] platform27 bypass: align X={approach_x:.0f} "
-            f"range {left_x:.0f}-{right_x:.0f}, up-teleport"
-        )
-        for attempt in range(1, attempts + 1):
-            if not self._move_to_target_v5(
-                approach_x,
-                attack=True,
-                interval_sec=self._segment_interval("platform27_bypass_interval_sec", 0.25),
-                arrival_tolerance=4.0,
-            ):
-                return False
-            pos = self._current_pos()
-            if pos is None or not (left_x <= float(pos[0]) <= right_x):
-                self._log(f"[rednose2v5] platform27 bypass X not aligned ({attempt}/{attempts})")
-                continue
-            self._release_attack_key()
-            self._teleport_once("up")
-            if self._wait_y_range("platform27_y_min", "platform27_y_max", 50, 50, 0.75):
-                self._log(f"[rednose2v5] platform27 bypass reached ({attempt}/{attempts})")
-                return True
-            self._log(f"[rednose2v5] platform27 bypass retry ({attempt}/{attempts})")
-        return False
+        self._log("[rednose2v5] platform27 bypass: up-teleport, left-teleport")
+        self._teleport_once("up")
+        self._teleport_once("left")
+        return True
 
     def _enter_platform27(self) -> bool:
         approach_x = self._profile_x("platform27_approach_x", 91)
-        attempts = max(1, int(self._profile.get("platform27_attempts", 6)))
+        attempts = max(1, int(self._profile.get("platform27_attempts", 3)))
         self._release_attack_key()
         self._log(f"[rednose2v5] step 27: align X={approach_x:.0f}, left-teleport from platform16")
         for attempt in range(1, attempts + 1):
@@ -1512,21 +1532,17 @@ class RedNose2RouteRunner:
             self._release_attack_key()
             self._teleport_once("left")
             if self._wait_y_range("platform27_y_min", "platform27_y_max", 50, 50, 0.75):
+                self._hold_attack_for(float(self._profile.get("platform27_entry_attack_sec", 0.5)))
                 self._log(f"[rednose2v5] platform 27 reached by Y ({attempt}/{attempts})")
                 return True
             self._log(f"[rednose2v5] platform 27 retry ({attempt}/{attempts})")
         return False
 
     def _finish_platform27_and_return_floor2(self) -> bool:
-        h = self._route_inputs()
-        attack_key = self._attack_key()
-        down_attempts = max(1, int(self._profile.get("platform27_down_attempts", 20)))
-        self._log("[rednose2v5] step 27 finish: extra left-teleport, 2s attack, down-teleport")
+        down_attempts = max(1, int(self._profile.get("platform27_down_attempts", 5)))
+        self._log("[rednose2v5] step 27 finish: extra left-teleport, 0.5s attack, down-teleport")
         self._teleport_once("left")
-        if attack_key:
-            h.hold_action(attack_key)
-            self._sleep(down_5(float(self._profile.get("platform27_attack_sec", 2.0))))
-            h.release_action(attack_key)
+        self._hold_attack_for(float(self._profile.get("platform27_attack_sec", 0.5)))
         for attempt in range(1, down_attempts + 1):
             self._teleport_once("down")
             if self._wait_floor(lambda: self._is_upper_floor_v5(None), 0.45):

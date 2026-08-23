@@ -256,6 +256,23 @@ REDNOSE2_X_DEFAULTS = {
     "platform27_bypass_x_max": 89,
 }
 
+REDNOSE2_Y_DEFAULTS = {
+    "floor2_y_min": 61,
+    "floor2_y_max": 63,
+    "floor1_y_min": 75,
+    "floor1_y_max": 77,
+    "floor3_y_min": 47,
+    "floor3_y_max": 51,
+    "stair7_y": 67,
+    "platform24_y": 61,
+    "platform1415_y_min": 54,
+    "platform1415_y_max": 55,
+    "platform16_y_min": 47,
+    "platform16_y_max": 48,
+    "platform27_y_min": 50,
+    "platform27_y_max": 50,
+}
+
 REDNOSE2_TIMING_VERSION = 2
 REDNOSE2_TIMING_DEFAULTS = {
     "teleport_hold_sec": 0.30,
@@ -279,6 +296,25 @@ def rednose2_x_validation_error(values: dict) -> str | None:
         return "14/15번과 16번 공통 접근 X는 14/15 허용 범위 안에 있어야 합니다."
     if not values["platform27_bypass_x_min"] <= values["platform27_bypass_approach_x"] <= values["platform27_bypass_x_max"]:
         return "27번 우회 접근 X는 우회 허용 범위 안에 있어야 합니다."
+    return None
+
+
+def rednose2_y_validation_error(values: dict) -> str | None:
+    for key in REDNOSE2_Y_DEFAULTS:
+        value = values.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 102:
+            return "모든 Y 좌표는 0~102 사이의 정수여야 합니다."
+    ranges = (
+        ("1층", "floor1_y_min", "floor1_y_max"),
+        ("2층", "floor2_y_min", "floor2_y_max"),
+        ("3층", "floor3_y_min", "floor3_y_max"),
+        ("14/15번", "platform1415_y_min", "platform1415_y_max"),
+        ("16번", "platform16_y_min", "platform16_y_max"),
+        ("27번", "platform27_y_min", "platform27_y_max"),
+    )
+    for label, min_key, max_key in ranges:
+        if values[min_key] > values[max_key]:
+            return f"{label} 최소 Y는 최대 Y보다 클 수 없습니다."
     return None
 
 
@@ -329,6 +365,18 @@ def _merge_rednose2_x_settings(raw: dict | None) -> dict[str, int]:
     return merged
 
 
+def _merge_rednose2_y_settings(raw: dict | None) -> dict[str, int]:
+    raw = raw if isinstance(raw, dict) else {}
+    candidate = dict(REDNOSE2_Y_DEFAULTS)
+    for key in REDNOSE2_Y_DEFAULTS:
+        value = raw.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 102:
+            candidate[key] = value
+    if rednose2_y_validation_error(candidate) is not None:
+        return dict(REDNOSE2_Y_DEFAULTS)
+    return candidate
+
+
 def _valid_rednose2_timing(value) -> bool:
     return (
         isinstance(value, (int, float))
@@ -372,29 +420,16 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
         "arrival_tolerance": 3,
         "max_step_sec": 18.0,
         **REDNOSE2_X_DEFAULTS,
+        **REDNOSE2_Y_DEFAULTS,
         "auto_sell_entry_x_min": 123,
         "auto_sell_entry_x_max": 136,
         "auto_sell_entry_x": 129.5,
-        "floor2_y_min": 61,
-        "floor2_y_max": 63,
-        "floor1_y_min": 75,
-        "floor1_y_max": 77,
-        "floor3_y_min": 47,
-        "floor3_y_max": 51,
-        "stair7_y": 67,
         "stair7_return_y_min": 66,
         "stair7_return_y_max": 68,
         "stair7_right_bias_x": 45,
         "stair7_right_bias_correct_sec": 0.0,
         "stair7_right_teleport_hold_sec": 0.1,
         "stair7_right_teleport_lead_sec": 0.02,
-        "platform24_y": 61,
-        "platform1415_y_min": 54,
-        "platform1415_y_max": 55,
-        "platform16_y_min": 47,
-        "platform16_y_max": 48,
-        "platform27_y_min": 50,
-        "platform27_y_max": 50,
         "pickup_route_enabled": True,
         "hunt_cycle_min_sec": 92.83,
         "hunt_cycle_max_sec": 102.483,
@@ -404,6 +439,7 @@ def _rednose2_v5_profile(d: dict, attack: dict) -> dict:
     forced["minimap_width"] = int(mm.get("width", forced["base_minimap_width"]))
     forced["minimap_height"] = int(mm.get("height", forced["base_minimap_height"]))
     forced.update(_merge_rednose2_x_settings(d.get("rednose2_v5")))
+    forced.update(_merge_rednose2_y_settings(d.get("rednose2_v5")))
     forced.update(_merge_rednose2_timing_settings(d.get("rednose2_v5")))
     return _with_minimap_ratios(
         forced,
