@@ -290,6 +290,8 @@ def test_versioned_rednose2_timing_preserves_valid_saved_values():
         "floor2_hunt_teleport_interval_sec": 0.66,
         "stair7_right_teleport_hold_sec": 0.08,
         "floor2_right_edge_teleport_interval_sec": 0.88,
+        "platform1415_attack_hold_sec": 0.81,
+        "platform27_entry_attack_hold_sec": 0.73,
     }
 
     profile = to_runtime_config(data).rednose2_v5
@@ -299,3 +301,15 @@ def test_versioned_rednose2_timing_preserves_valid_saved_values():
     assert profile["floor2_hunt_teleport_interval_sec"] == 0.66
     assert profile["stair7_right_teleport_hold_sec"] == 0.08
     assert profile["floor2_right_edge_teleport_interval_sec"] == 0.88
+    assert profile["platform1415_attack_hold_sec"] == 0.81
+    assert profile["platform27_entry_attack_hold_sec"] == 0.73
+
+
+def test_rednose2_platform_attack_timing_defaults_are_half_second():
+    data = _sample_config()
+    data["hunt_grounds"] = {"active": "빨코2"}
+
+    profile = to_runtime_config(data).rednose2_v5
+
+    assert profile["platform1415_attack_hold_sec"] == 0.5
+    assert profile["platform27_entry_attack_hold_sec"] == 0.5

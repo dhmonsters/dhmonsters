@@ -361,6 +361,28 @@ def test_platform24_drop_rejects_y_outside_one_pixel_tolerance_and_tries_three_t
     assert teleports == ["down", "down", "down"]
 
 
+def test_collection_teleports_right_twice_after_confirmed_platform24_drop(monkeypatch):
+    clock = FakeClock()
+    runner = make_runner(clock, RecordingRouteInputs(clock))
+    runner._collection_stage = "floor1_drop"
+    teleports = []
+    events = []
+
+    monkeypatch.setattr(runner, "_is_upper_floor_v5", lambda _position: True)
+    monkeypatch.setattr(runner, "_drop_from_platform24_to_floor1", lambda: events.append("drop") or True)
+    monkeypatch.setattr(runner, "_teleport_once", teleports.append)
+    monkeypatch.setattr(runner, "_return_floor2_from_stair7", lambda: events.append("stair7") or True)
+    monkeypatch.setattr(runner, "_move_floor2_right_edge", lambda: True)
+    monkeypatch.setattr(runner, "_enter_platform1415", lambda: True)
+    monkeypatch.setattr(runner, "_enter_platform16", lambda: True)
+    monkeypatch.setattr(runner, "_enter_platform27", lambda: True)
+    monkeypatch.setattr(runner, "_finish_platform27_and_return_floor2", lambda: True)
+
+    assert runner._run_rednose_new_v5_collection() is True
+    assert events == ["drop", "stair7"]
+    assert teleports == ["right", "right"]
+
+
 @pytest.mark.parametrize(
     ("y", "expected"),
     [(63.0, False), (64.0, True), (70.0, True), (74.0, True), (75.0, False)],
@@ -417,6 +439,19 @@ def test_platform16_attacks_then_teleports_three_times_and_uses_simple_bypass(mo
     assert clock.now == pytest.approx(1.425)
 
 
+def test_platform1415_attack_hold_uses_saved_duration_before_platform16_teleport(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs, {"platform1415_attack_hold_sec": 0.8})
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: value)
+    monkeypatch.setattr(runner, "_teleport_once", lambda _direction: None)
+    monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: True)
+
+    assert runner._enter_platform16() is True
+    assert route_inputs.action_events[-2:] == [("down", "end", 0.0), ("up", "end", 0.8)]
+
+
 def test_platform27_uses_three_attempts_and_attacks_after_arrival(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)
@@ -435,6 +470,20 @@ def test_platform27_uses_three_attempts_and_attacks_after_arrival(monkeypatch):
         ("down", "end", 0.0),
     ]
     assert clock.now == pytest.approx(0.475)
+
+
+def test_platform27_entry_attack_hold_uses_saved_duration(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs, {"platform27_entry_attack_hold_sec": 0.7})
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: value)
+    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(runner, "_teleport_once", lambda _direction: None)
+    monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: True)
+
+    assert runner._enter_platform27() is True
+    assert route_inputs.action_events[-2:] == [("down", "end", 0.0), ("up", "end", 0.7)]
 
 
 def test_collection_completion_randomizes_next_floor2_direction(monkeypatch):

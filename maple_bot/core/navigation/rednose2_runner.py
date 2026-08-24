@@ -1003,6 +1003,8 @@ class RedNose2RouteRunner:
     def _run_rednose_new_v5_once(self) -> bool:
         if self._next_collection_at <= 0:
             self._next_collection_at = time.monotonic() + self._random_hunt_cycle_sec()
+        if self._collection_stage is not None:
+            return self._run_rednose_new_v5_collection()
         return self._run_floor2_hunt_once()
 
     def _run_rednose_new_v5_collection(self) -> bool:
@@ -1037,26 +1039,23 @@ class RedNose2RouteRunner:
             if stage == "platform24":
                 if not self._enter_platform24():
                     if not self._is_upper_floor_v5(None):
-                        self._log("[rednose2v5] step 24 failed off floor2; recover through stair7")
-                        recovered = self._return_floor2_from_stair7()
-                        if recovered:
-                            self._last_pickup_at = time.monotonic()
-                            self._next_collection_at = self._last_pickup_at + self._random_hunt_cycle_sec()
-                            self._collection_stage = None
-                            self._log(
-                                f"[rednose2v5] platform24 fall recovery complete; resume floor2 hunt, "
-                                f"collection timer reset to {self._next_collection_at - self._last_pickup_at:.4f}s"
-                            )
-                        return recovered
-                    self._collection_stage = None
-                    return False
-                stage = "floor1_drop"
-                self._collection_stage = stage
+                        self._log("[rednose2v5] step 24 reached floor1 early; continue collection through stair7")
+                        stage = "stair7_return"
+                        self._collection_stage = stage
+                    else:
+                        self._collection_stage = None
+                        return False
+                else:
+                    stage = "floor1_drop"
+                    self._collection_stage = stage
 
             if stage == "floor1_drop":
                 if not self._drop_from_platform24_to_floor1():
                     self._collection_stage = None
                     return False
+                self._log("[rednose2v5] floor1 drop confirmed; right-teleport twice before stair7")
+                self._teleport_once("right")
+                self._teleport_once("right")
                 stage = "stair7_return"
                 self._collection_stage = stage
 
@@ -1500,7 +1499,7 @@ class RedNose2RouteRunner:
         self._release_attack_key()
         self._log("[rednose2v5] step 16: attack, up-teleport")
         for attempt in range(1, attempts + 1):
-            self._hold_attack_for(float(self._profile.get("platform16_attack_sec", 0.5)))
+            self._hold_attack_for(float(self._profile.get("platform1415_attack_hold_sec", 0.5)))
             self._teleport_once("up")
             if self._wait_y_range("platform16_y_min", "platform16_y_max", 47, 48, 0.55):
                 self._log(f"[rednose2v5] platform 16 reached ({attempt}/{attempts})")
@@ -1532,7 +1531,7 @@ class RedNose2RouteRunner:
             self._release_attack_key()
             self._teleport_once("left")
             if self._wait_y_range("platform27_y_min", "platform27_y_max", 50, 50, 0.75):
-                self._hold_attack_for(float(self._profile.get("platform27_entry_attack_sec", 0.5)))
+                self._hold_attack_for(float(self._profile.get("platform27_entry_attack_hold_sec", 0.5)))
                 self._log(f"[rednose2v5] platform 27 reached by Y ({attempt}/{attempts})")
                 return True
             self._log(f"[rednose2v5] platform 27 retry ({attempt}/{attempts})")

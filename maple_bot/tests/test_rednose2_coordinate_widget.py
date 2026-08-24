@@ -126,6 +126,8 @@ def test_timing_save_preserves_coordinates_and_writes_version(app):
     widget = Rednose2CoordinateWidget(config)
     widget.timing_inputs["attack_hold_sec"].setValue(0.77)
     widget.timing_inputs["floor2_hunt_teleport_interval_sec"].setValue(0.66)
+    widget.timing_inputs["platform1415_attack_hold_sec"].setValue(0.81)
+    widget.timing_inputs["platform27_entry_attack_hold_sec"].setValue(0.73)
 
     widget.save_timing_values()
 
@@ -134,6 +136,8 @@ def test_timing_save_preserves_coordinates_and_writes_version(app):
     assert saved["timing_version"] == 2
     assert saved["attack_hold_sec"] == 0.77
     assert saved["floor2_hunt_teleport_interval_sec"] == 0.66
+    assert saved["platform1415_attack_hold_sec"] == 0.81
+    assert saved["platform27_entry_attack_hold_sec"] == 0.73
 
 
 def test_coordinate_save_preserves_timing_values(app):

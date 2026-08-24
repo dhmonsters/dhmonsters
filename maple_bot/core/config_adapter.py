@@ -280,6 +280,8 @@ REDNOSE2_TIMING_DEFAULTS = {
     "floor2_hunt_teleport_interval_sec": 0.72,
     "stair7_right_teleport_hold_sec": 0.10,
     "floor2_right_edge_teleport_interval_sec": 0.90,
+    "platform1415_attack_hold_sec": 0.50,
+    "platform27_entry_attack_hold_sec": 0.50,
 }
 
 
