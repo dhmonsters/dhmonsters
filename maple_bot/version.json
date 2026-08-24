@@ -1,1 +1,5 @@
-{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.3/Claude_v2.4.3_Setup.exe","version":"2.4.3","notes":"빨코2 회수 루틴의 발판 확인과 텔레포트 순서를 단축하고, 14/15번 도착 범위와 2층 끝 이동을 안정화했으며, 빨코2 Y 좌표를 UI에서 조절할 수 있도록 개선했습니다."}
+{
+  "version": "2.4.4",
+  "notes": "빨코2 회수 단계가 중간에 일반 사냥으로 전환되지 않도록 연속 실행을 보강하고, 24번 발판 하강 후 오른쪽 텔레포트 2회와 사다리 복귀를 적용했으며, 14/15번·27번 발판 공격 홀드 시간을 설정할 수 있도록 개선했습니다.",
+  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.4/Claude_v2.4.4_Setup.exe"
+}
