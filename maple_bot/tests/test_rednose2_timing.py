@@ -231,7 +231,7 @@ def test_floor2_collection_right_edge_allows_teleport_inside_default_stop_distan
     position = [120.0, 62.0]
     teleports = []
 
-    def teleport(direction):
+    def teleport(direction, **_kwargs):
         teleports.append(direction)
         position[0] += 13.0
 
@@ -293,7 +293,7 @@ def test_auto_sell_starts_immediately_when_already_on_shop_entry_floor(monkeypat
     assert runner.prepare_auto_sell_from_floor2() is True
 
 
-def test_auto_sell_recovers_floor1_before_alignment(monkeypatch):
+def test_auto_sell_is_deferred_on_floor1_without_collection_recovery(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs)
@@ -302,25 +302,14 @@ def test_auto_sell_recovers_floor1_before_alignment(monkeypatch):
     monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
     monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
 
-    def recover(*, active_fn=None):
-        events.append(("recover", active_fn is not None))
-        position[:] = [129.0, 62.0]
-        return True
+    monkeypatch.setattr(runner, "_return_floor2_from_stair7", lambda **_kwargs: events.append("recover") or True)
+    monkeypatch.setattr(runner, "_teleport_once", lambda direction: events.append(("teleport", direction)))
 
-    monkeypatch.setattr(runner, "_return_floor2_from_stair7", recover)
-
-    def teleport(direction):
-        events.append(("teleport", direction))
-        if direction == "up":
-            position[:] = [129.0, 49.0]
-
-    monkeypatch.setattr(runner, "_teleport_once", teleport)
-
-    assert runner.prepare_auto_sell_from_floor2() is True
-    assert events == [("recover", True), ("teleport", "up")]
+    assert runner.prepare_auto_sell_from_floor2() is False
+    assert events == []
 
 
-def test_auto_sell_drops_from_upper_collection_platform_to_floor2(monkeypatch):
+def test_auto_sell_is_deferred_on_platform1415_without_down_teleport(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs)
@@ -329,21 +318,14 @@ def test_auto_sell_drops_from_upper_collection_platform_to_floor2(monkeypatch):
     monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
     monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
 
-    def teleport(direction):
-        events.append(direction)
-        if direction == "down":
-            position[:] = [95.0, 62.0]
-        elif direction == "up":
-            position[:] = [129.0, 49.0]
+    monkeypatch.setattr(runner, "_teleport_once", lambda direction: events.append(direction))
+    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: events.append("move") or True)
 
-    monkeypatch.setattr(runner, "_teleport_once", teleport)
-    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: position.__setitem__(0, 129.0) or True)
-
-    assert runner.prepare_auto_sell_from_floor2() is True
-    assert events == ["down", "up"]
+    assert runner.prepare_auto_sell_from_floor2() is False
+    assert events == []
 
 
-def test_auto_sell_does_not_mistake_platform16_for_shop_entry(monkeypatch):
+def test_auto_sell_is_deferred_on_platform16_without_down_teleport(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs)
@@ -352,18 +334,11 @@ def test_auto_sell_does_not_mistake_platform16_for_shop_entry(monkeypatch):
     monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
     monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
 
-    def teleport(direction):
-        events.append(direction)
-        if direction == "down":
-            position[:] = [95.0, 62.0]
-        elif direction == "up":
-            position[:] = [129.0, 49.0]
+    monkeypatch.setattr(runner, "_teleport_once", lambda direction: events.append(direction))
+    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: events.append("move") or True)
 
-    monkeypatch.setattr(runner, "_teleport_once", teleport)
-    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: position.__setitem__(0, 129.0) or True)
-
-    assert runner.prepare_auto_sell_from_floor2() is True
-    assert events == ["down", "up"]
+    assert runner.prepare_auto_sell_from_floor2() is False
+    assert events == []
 
 
 def test_platform24_uses_three_attempts_and_strict_point_tolerances(monkeypatch):
