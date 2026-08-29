@@ -172,6 +172,12 @@ class Rednose2CoordinateWidget(QFrame):
             ("floor2_right_edge_teleport_interval_sec", "7번 이후 우측 끝 완료 후 간격"),
             ("platform1415_attack_hold_sec", "14/15번 공격 홀드"),
             ("platform27_entry_attack_hold_sec", "27번 진입 공격 홀드"),
+            ("floor2_recovery_first_attack_hold_sec", "복귀 첫 공격 홀드"),
+            ("floor2_recovery_first_teleport_hold_sec", "복귀 첫 텔포 홀드"),
+            ("floor2_recovery_first_interval_sec", "복귀 첫 완료 후 간격"),
+            ("floor2_recovery_second_attack_hold_sec", "복귀 두 번째 공격 홀드"),
+            ("floor2_recovery_second_teleport_hold_sec", "복귀 두 번째 텔포 홀드"),
+            ("floor2_recovery_second_interval_sec", "복귀 두 번째 완료 후 간격"),
         )
         grid = QGridLayout()
         grid.setHorizontalSpacing(SPACING["sm"])

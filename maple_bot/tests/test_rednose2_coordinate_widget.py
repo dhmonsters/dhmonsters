@@ -176,3 +176,24 @@ def test_invalid_y_range_does_not_save(app):
 
     assert config.saved == 0
     assert "16번" in widget.status.text()
+
+
+def test_timing_card_saves_first_two_recovery_attack_teleport_values(app):
+    config = FakeConfig({"timing_version": 2})
+    widget = Rednose2CoordinateWidget(config)
+    expected = {
+        "floor2_recovery_first_attack_hold_sec": 0.61,
+        "floor2_recovery_first_teleport_hold_sec": 0.11,
+        "floor2_recovery_first_interval_sec": 0.71,
+        "floor2_recovery_second_attack_hold_sec": 0.62,
+        "floor2_recovery_second_teleport_hold_sec": 0.12,
+        "floor2_recovery_second_interval_sec": 0.72,
+    }
+    for key, value in expected.items():
+        widget.timing_inputs[key].setValue(value)
+
+    widget.save_timing_values()
+
+    saved = config.get("rednose2_v5")
+    for key, value in expected.items():
+        assert saved[key] == value

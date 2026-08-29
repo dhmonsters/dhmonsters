@@ -282,6 +282,12 @@ REDNOSE2_TIMING_DEFAULTS = {
     "floor2_right_edge_teleport_interval_sec": 0.90,
     "platform1415_attack_hold_sec": 0.50,
     "platform27_entry_attack_hold_sec": 0.50,
+    "floor2_recovery_first_attack_hold_sec": 0.90,
+    "floor2_recovery_first_teleport_hold_sec": 0.30,
+    "floor2_recovery_first_interval_sec": 0.90,
+    "floor2_recovery_second_attack_hold_sec": 0.90,
+    "floor2_recovery_second_teleport_hold_sec": 0.30,
+    "floor2_recovery_second_interval_sec": 0.90,
 }
 
 

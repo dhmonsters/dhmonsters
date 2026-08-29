@@ -166,3 +166,24 @@ def test_platform1415_does_not_start_x_movement_from_floor1():
 
     assert runner._enter_platform1415() is False
     assert moves == []
+
+
+def test_platform1415_approach_keeps_floor2_right_edge_slow_interval():
+    runner = _collection_runner((80, 62), "platform1415")
+    runner._profile["floor2_right_edge_teleport_interval_sec"] = 0.88
+    aligned = False
+    intervals = []
+
+    def move_to_target(_target, **kwargs):
+        nonlocal aligned
+        intervals.append(kwargs["interval_sec"])
+        aligned = True
+        return True
+
+    runner._is_in_platform1415_x_range = lambda: aligned
+    runner._move_to_target_v5 = move_to_target
+    runner._teleport_once = lambda _direction: None
+    runner._wait_y_range = lambda *_args, **_kwargs: True
+
+    assert runner._enter_platform1415() is True
+    assert intervals == [0.88]

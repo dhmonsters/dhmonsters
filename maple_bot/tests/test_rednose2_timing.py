@@ -120,6 +120,49 @@ def test_next_teleport_interval_starts_after_action_completion(monkeypatch):
         assert following[0] - previous[1] >= 0.72
 
 
+def test_floor2_recovery_uses_distinct_first_two_attack_teleport_timings(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs, {
+        "floor2_right_safe_x": 39,
+        "teleport_stop_px": 1,
+        "floor2_y_min": 61,
+        "floor2_y_max": 63,
+        "floor2_recovery_first_attack_hold_sec": 0.61,
+        "floor2_recovery_first_teleport_hold_sec": 0.11,
+        "floor2_recovery_first_interval_sec": 0.71,
+        "floor2_recovery_second_attack_hold_sec": 0.62,
+        "floor2_recovery_second_teleport_hold_sec": 0.12,
+        "floor2_recovery_second_interval_sec": 0.72,
+        "floor2_right_edge_teleport_interval_sec": 0.9,
+    })
+    position = [0.0, 62.0]
+
+    def fresh_sample():
+        position[0] += 13.0
+        return tuple(position), clock.now
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: value)
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_sample", fresh_sample)
+
+    assert runner._move_floor2_right_edge()
+
+    assert [(key, hold) for key, hold, _started in route_inputs.presses] == [
+        ("x", 0.11),
+        ("x", 0.12),
+        ("x", 0.3),
+    ]
+    attack_windows = []
+    for down_event, up_event in zip(route_inputs.action_events[::2], route_inputs.action_events[1::2]):
+        attack_windows.append((down_event[2], up_event[2]))
+    assert [end - start for start, end in attack_windows] == pytest.approx([0.61, 0.62, 0.9])
+    assert attack_windows[1][0] - attack_windows[0][1] >= 0.71
+    assert attack_windows[2][0] - attack_windows[1][1] >= 0.72
+
+
 def test_platform1415_move_continues_until_position_enters_allowed_range(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)

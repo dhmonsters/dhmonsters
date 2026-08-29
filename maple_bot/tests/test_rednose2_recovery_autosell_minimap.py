@@ -204,6 +204,77 @@ def test_vertical_teleport_is_blocked_when_last_detected_position_was_floor1(mon
     assert inputs.action_events == []
 
 
+def test_current_position_preserves_last_confirmed_floor2_x():
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    positions = iter([(30.0, 62.0), (30.0, 76.0)])
+    runner = make_runner(clock, inputs)
+    runner._br._get_pos = lambda: next(positions)
+
+    assert runner._current_pos() == (30.0, 62.0)
+    assert runner._current_pos() == (30.0, 76.0)
+    assert runner._last_floor2_x == 30.0
+
+
+def test_left_side_floor1_fall_recovers_slowly_to_right_edge_without_platform1415(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs, {"stair7_x": 41})
+    runner._last_floor2_x = 30.0
+    on_floor2 = False
+    calls = []
+
+    def return_floor2():
+        nonlocal on_floor2
+        calls.append("stair7")
+        on_floor2 = True
+        return True
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr(runner, "_is_upper_floor_v5", lambda _position: on_floor2)
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: (30.0, 76.0))
+    monkeypatch.setattr(runner, "_return_floor2_from_stair7", return_floor2)
+    monkeypatch.setattr(runner, "_move_floor2_right_edge", lambda: calls.append("right-edge") or True)
+    monkeypatch.setattr(
+        runner,
+        "_enter_platform1415",
+        lambda: pytest.fail("일반 추락 복구는 14/15에 진입하면 안 됩니다."),
+    )
+
+    assert runner._run_floor2_hunt_once() is True
+    assert calls == ["stair7", "right-edge"]
+    assert runner._main_move_index == 1
+
+
+def test_right_side_floor1_fall_returns_to_normal_hunt_without_recovery_sweep(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs, {"stair7_x": 41})
+    runner._last_floor2_x = 100.0
+    on_floor2 = False
+    calls = []
+
+    def return_floor2():
+        nonlocal on_floor2
+        calls.append("stair7")
+        on_floor2 = True
+        return True
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr(runner, "_is_upper_floor_v5", lambda _position: on_floor2)
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: (100.0, 76.0))
+    monkeypatch.setattr(runner, "_return_floor2_from_stair7", return_floor2)
+    monkeypatch.setattr(
+        runner,
+        "_move_floor2_right_edge",
+        lambda: pytest.fail("우측 추락은 회수용 우측 끝 이동을 실행하면 안 됩니다."),
+    )
+
+    assert runner._run_floor2_hunt_once() is True
+    assert calls == ["stair7"]
+    assert runner._main_move_index == 0
+
+
 def test_auto_sell_does_not_start_when_shop_entry_teleport_never_lands(monkeypatch):
     clock = FakeClock()
     inputs = RecordingInputs(clock)
