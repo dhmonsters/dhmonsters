@@ -1,1 +1,1 @@
-{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.4/Claude_v2.4.4_Setup.exe","version":"2.4.4","notes":"빨코2 회수 중 사다리 복귀가 일시적으로 실패해도 회수 단계를 계속 진행하도록 개선하고, 24번 하강 후 우측 텔레포트 2회를 추가했으며, 14/15번과 27번 진입 공격 홀드시간을 UI에서 설정할 수 있도록 했습니다."}
+{"download_url":"https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.5/Claude_v2.4.5_Setup.exe","version":"2.4.5","notes":"빨코2 회수 루틴에서 7번 복귀 후 첫 두 공격 텔레포트의 공격 홀드·텔레포트 홀드·간격을 각각 설정할 수 있도록 개선하고, 우측 끝부터 14/15 접근까지 느린 이동을 유지했으며, 일반 사냥 중 좌측 추락 시 7번 복귀 후 우측 끝까지 느리게 회수하도록 안정화했습니다."}
