@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication
 from core_ui.shell import MainShell, CATEGORIES
+from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
 
 
 @pytest.fixture(scope="module")
@@ -57,3 +58,34 @@ def test_shell_can_shrink_to_compact_width(app):
 
     assert shell.minimumWidth() == 760
     assert shell.minimumHeight() == 560
+
+
+def test_bottom_save_button_is_global_save_and_emits_apply_request(app):
+    class Config:
+        def __init__(self):
+            self.saved = 0
+
+        def save(self):
+            self.saved += 1
+
+    config = Config()
+    shell = MainShell()
+    shell._config = config
+    applied = []
+    shell.settings_apply_requested.connect(lambda: applied.append(True))
+
+    shell.global_save_button.click()
+
+    assert shell.global_save_button.text() == "전체 설정 저장 및 적용"
+    assert config.saved == 1
+    assert applied == [True]
+
+
+def test_hunt_ground_button_is_labeled_as_map_save(app):
+    class Config:
+        def get(self, *_keys, default=None):
+            return default
+
+    widget = HuntGroundPresetWidget(Config())
+
+    assert widget.save_button.text() == "현재 맵 설정 저장"

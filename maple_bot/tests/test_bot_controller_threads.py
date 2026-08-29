@@ -161,6 +161,7 @@ def test_f1_refreshes_attack_and_pickup_before_resuming_running_bot():
         _pickup_always_interval=2.0,
     )
     runtime.release_pickup_key = lambda: released.append(runtime._cfg.pickup_key)
+    runtime.reload_combat_support = lambda _fresh: None
     resumed = []
     controller = SimpleNamespace(
         is_running=lambda: True,
@@ -181,3 +182,81 @@ def test_f1_refreshes_attack_and_pickup_before_resuming_running_bot():
     assert attacks == [("end", "duration", 0.8)]
     assert pickup_inputs == [("down", "z")]
     assert resumed == [True]
+
+
+def test_f1_refreshes_potions_buffs_and_pet_before_resuming_running_bot():
+    data = deepcopy(DEFAULT_CONFIG)
+    data["recovery"]["hp_potion"].update({"enabled": True, "key": "home", "threshold": 71})
+    data["recovery"]["mp_potion"].update({"enabled": True, "key": "delete", "threshold": 43})
+    data["recovery"].setdefault("pet_food", {}).update(
+        {"enabled": True, "key": "9", "interval_min": 7}
+    )
+    data["attack"]["normal_buffs"] = [{
+        "enabled": True,
+        "key": "8",
+        "interval_sec": 90,
+        "hold_sec": 0.4,
+    }]
+
+    refreshed = []
+    runtime = SimpleNamespace(
+        _cfg=SimpleNamespace(
+            attack_key="old",
+            attack_sequences=[],
+            pickup_key="",
+            pickup_interval=60.0,
+            pickup_always=False,
+        ),
+        combat=SimpleNamespace(attack=lambda *_args, **_kwargs: None),
+        release_pickup_key=lambda: None,
+        reload_combat_support=lambda fresh: refreshed.append(fresh),
+    )
+    controller = SimpleNamespace(is_running=lambda: True, start=lambda: None)
+    shell = SimpleNamespace(append_log=lambda *_args: None)
+
+    run_integrated._start_with_fresh_config(
+        controller,
+        runtime,
+        SimpleNamespace(_data=data),
+        shell,
+    )
+
+    assert len(refreshed) == 1
+    fresh = refreshed[0]
+    assert fresh.hp_rule.key == "home"
+    assert fresh.mp_rule.key == "delete"
+    assert fresh.buffs[0].key == "8"
+    assert fresh.pet_key == "9"
+    assert fresh.pet_interval == 420.0
+
+
+def test_runtime_rebuilds_combat_support_objects_from_fresh_config():
+    from core.config_adapter import to_runtime_config
+    from core.runtime import BotRuntime
+
+    data = deepcopy(DEFAULT_CONFIG)
+    data["recovery"]["hp_potion"].update({"enabled": True, "key": "home"})
+    data["recovery"]["mp_potion"].update({"enabled": True, "key": "delete"})
+    data["recovery"].setdefault("pet_food", {}).update(
+        {"enabled": True, "key": "9", "interval_min": 7, "pet_count": 2}
+    )
+    data["attack"]["normal_buffs"] = [{
+        "enabled": True,
+        "key": "8",
+        "interval_sec": 90,
+        "hold_sec": 0.4,
+    }]
+    fresh = to_runtime_config(data)
+    runtime = BotRuntime.__new__(BotRuntime)
+    runtime._cfg = SimpleNamespace()
+    runtime.input_backend = SimpleNamespace()
+    runtime.log = lambda *_args: None
+
+    runtime.reload_combat_support(fresh)
+
+    assert runtime.combat._hp.key == "home"
+    assert runtime.combat._mp.key == "delete"
+    assert runtime.buffs._buffs[0].key == "8"
+    assert runtime.pet._key == "9"
+    assert runtime.pet._interval == 420.0
+    assert runtime.pet._count == 2

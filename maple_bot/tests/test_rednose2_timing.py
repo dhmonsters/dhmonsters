@@ -507,3 +507,61 @@ def test_collection_completion_randomizes_next_floor2_direction(monkeypatch):
 
     assert runner._run_rednose_new_v5_collection() is True
     assert runner._main_move_index == 1
+
+
+def test_platform27_manual_attack_hold_applies_down_five_once(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs, {"platform27_attack_sec": 2.0})
+    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr(runner, "_teleport_once", lambda _direction: None)
+    monkeypatch.setattr(runner, "_wait_floor", lambda _predicate, _timeout: True)
+
+    assert runner._finish_platform27_and_return_floor2()
+    assert route_inputs.action_events == [("down", "end", 0.0), ("up", "end", 1.9)]
+
+
+def test_auto_sell_is_deferred_on_floor1_without_running_collection_recovery(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    position = [41.0, 75.0]
+    events = []
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
+    monkeypatch.setattr(
+        runner,
+        "_return_floor2_from_stair7",
+        lambda **_kwargs: events.append("recover") or True,
+    )
+
+    assert runner.prepare_auto_sell_from_floor2() is False
+    assert events == []
+
+
+def test_auto_sell_is_deferred_on_collection_platform_without_down_teleport(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    position = [95.0, 54.0]
+    events = []
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_teleport_once", lambda direction: events.append(direction))
+
+    assert runner.prepare_auto_sell_from_floor2() is False
+    assert events == []
+
+
+def test_auto_sell_is_deferred_on_platform16_without_down_teleport(monkeypatch):
+    clock = FakeClock()
+    route_inputs = RecordingRouteInputs(clock)
+    runner = make_runner(clock, route_inputs)
+    position = [95.0, 49.0]
+    events = []
+    monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_fresh_pos", lambda: tuple(position))
+    monkeypatch.setattr(runner, "_teleport_once", lambda direction: events.append(direction))
+
+    assert runner.prepare_auto_sell_from_floor2() is False
+    assert events == []

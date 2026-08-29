@@ -498,6 +498,34 @@ class BotRuntime:
         # 嫄고깘 媛먯? ???뚮┝(?뚮━+?붾젅洹몃옩) ?듯빀. ?먮룞??대뒗 safety_tick???대떦
         self.orchestrator.on("lie", self._handle_lie)
 
+    def reload_combat_support(self, config) -> None:
+        """저장된 물약·버프·펫 설정으로 실행 객체를 다시 구성한다."""
+        self._cfg.hp_rule = config.hp_rule
+        self._cfg.mp_rule = config.mp_rule
+        self._cfg.buffs = config.buffs
+        self._cfg.pet_key = config.pet_key
+        self._cfg.pet_interval = config.pet_interval
+        self._cfg.pet_count = config.pet_count
+        self.combat = Combat(
+            self.input_backend,
+            hp_rule=config.hp_rule,
+            mp_rule=config.mp_rule,
+            log_fn=lambda message, category: self.log(message, category),
+        )
+        self.buffs = BuffManager(
+            self.input_backend,
+            config.buffs,
+            log_fn=lambda message: self.log(message, "버프"),
+        )
+        self.pet = PetFeeder(
+            self.input_backend,
+            key=config.pet_key,
+            interval=config.pet_interval,
+            log_fn=lambda message: self.log(message, "펫먹이"),
+            label="펫먹이",
+            count=config.pet_count,
+        )
+
     def _release_runtime_inputs(self) -> None:
         """런타임이 소유한 지속 입력을 즉시 해제한다."""
         if hasattr(self, "block_runner"):
@@ -837,6 +865,13 @@ class BotRuntime:
         if self.junk_seller is None or self.auto_seller is None:
             self.log("자동판매 설정 또는 템플릿 연결이 없습니다.", "자동판매")
             return False
+        runner = self.floor_hunt_runner
+        can_start = getattr(runner, "can_start_auto_sell", None)
+        if callable(can_start) and not can_start():
+            self.log("빨코2 회수 또는 층 이동 중이므로 자동판매를 보류합니다.", "자동판매")
+            if reason == "scheduled":
+                self.auto_seller.schedule_after_seconds(1.0)
+            return False
         with self._junk_sell_lock:
             if self._junk_sell_thread and self._junk_sell_thread.is_alive():
                 self.log("자동판매가 이미 실행 중입니다.", "자동판매")
@@ -844,12 +879,26 @@ class BotRuntime:
             self._junk_sell_stop.clear()
             if reason == "scheduled":
                 self.log("주기 자동판매 실행 시점입니다.", "자동판매")
+            self._junk_selling = True
+            self.release_pickup_key()
+            self._release_runtime_inputs()
+            if callable(can_start) and not can_start():
+                self._junk_selling = False
+                self.log("빨코2 입력 해제가 확인되지 않아 자동판매를 보류합니다.", "자동판매")
+                if reason == "scheduled":
+                    self.auto_seller.schedule_after_seconds(1.0)
+                return False
             self._junk_sell_thread = threading.Thread(
                 target=self._run_junk_sell_once,
                 daemon=True,
                 name="JunkSellWorker",
             )
-            self._junk_sell_thread.start()
+            try:
+                self._junk_sell_thread.start()
+            except Exception:
+                self._junk_selling = False
+                self._junk_sell_thread = None
+                raise
         return True
 
     def stop_junk_sell(self) -> None:
@@ -862,7 +911,6 @@ class BotRuntime:
         """자동판매 실행 중 다른 행동 입력을 멈추고 판매를 수행한다."""
         rednose_prepared = False
         sale_succeeded = False
-        self._junk_selling = True
         try:
             self.release_pickup_key()
             self._release_runtime_inputs()

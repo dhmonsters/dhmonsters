@@ -93,7 +93,7 @@ class HuntGroundPresetWidget(QFrame):
         self.load_button.clicked.connect(self._load)
         controls.addWidget(self.load_button)
 
-        self.save_button = QPushButton("현재 설정 저장")
+        self.save_button = QPushButton("현재 맵 설정 저장")
         self.save_button.setObjectName("primaryButton")
         self.save_button.clicked.connect(self._save)
         controls.addWidget(self.save_button)
@@ -285,7 +285,7 @@ class HuntGroundPresetWidget(QFrame):
         self.status.setText(f"'{name}' 설정과 맵핑 완료 상태를 저장했습니다.")
 
     def save_current(self) -> None:
-        """공통 저장 버튼에서 현재 사냥터 프리셋 저장을 호출한다."""
+        """현재 사냥터 프리셋 저장을 호출한다."""
         self._save()
 
     def _load(self) -> None:

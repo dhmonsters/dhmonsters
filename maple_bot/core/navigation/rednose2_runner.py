@@ -51,6 +51,7 @@ class RedNose2RouteRunner:
         self._coord_scaled: bool | None = None
         self._coord_mode_logged: str | None = None
         self._last_horizontal_intent: str | None = None
+        self._last_detected_position: tuple[float, float] | None = None
 
     def start(self) -> None:
         thread = self._thread
@@ -113,6 +114,7 @@ class RedNose2RouteRunner:
         self._main_move_index = 0
         self._collection_stage = None
         self._last_horizontal_intent = None
+        self._last_detected_position = None
 
     @staticmethod
     def _block_signature(block) -> tuple:
@@ -130,7 +132,10 @@ class RedNose2RouteRunner:
         getter = getattr(self._br, "_get_pos", None)
         if not callable(getter):
             getter = getattr(self._br, "_pos", None)
-        return getter() if callable(getter) else None
+        position = getter() if callable(getter) else None
+        if position is not None and position[0] is not None and position[1] is not None:
+            self._last_detected_position = (float(position[0]), float(position[1]))
+        return position
 
     def _fresh_pos(self):
         position, _seen_at = self._fresh_sample()
@@ -474,6 +479,15 @@ class RedNose2RouteRunner:
         teleport_key = self._teleport_key()
         if not teleport_key:
             return
+        if direction in ("up", "down"):
+            current = self._current_pos()
+            if current is None and self._last_position_was_floor1():
+                self._route_inputs().release_direction()
+                self._log(
+                    f"[rednose2v5] {direction} teleport blocked: "
+                    "position missing after floor1 detection"
+                )
+                return
         h = self._route_inputs()
         if direction in ("left", "right"):
             self._last_horizontal_intent = direction
@@ -498,6 +512,36 @@ class RedNose2RouteRunner:
             h.press_action(teleport_key, hold_sec)
         finally:
             h.release_action(direction)
+
+    def _last_position_was_floor1(self) -> bool:
+        position = self._last_detected_position
+        if position is None:
+            return False
+        floor1_min, floor1_max = self._floor1_y_range()
+        tolerance = self._floor_y_tolerance()
+        return floor1_min - tolerance <= float(position[1]) <= floor1_max + tolerance
+
+    def _position_loss_direction(
+        self,
+        last_position: tuple[float, float] | None,
+        last_direction: str | None,
+    ) -> str | None:
+        if last_position is None:
+            return last_direction
+        x = float(last_position[0])
+        left_edge = self._profile_x(
+            "position_loss_left_edge_x",
+            self._floor2_left_x(),
+        )
+        right_edge = self._profile_x(
+            "position_loss_right_edge_x",
+            self._floor2_right_safe_x(),
+        )
+        if x <= left_edge:
+            return "right"
+        if x >= right_edge:
+            return "left"
+        return last_direction
 
     def _teleport_attack(self, direction: str) -> None:
         attack_key = self._attack_key()
@@ -588,6 +632,7 @@ class RedNose2RouteRunner:
         )
         previous_x = None
         last_direction = self._last_horizontal_intent
+        last_detected_position = self._last_detected_position
         position_missing_since: float | None = None
         next_teleport_at = 0.0
         last_teleport_position: tuple[float, float] | None = None
@@ -596,6 +641,8 @@ class RedNose2RouteRunner:
         previous_owns_movement = self.owns_movement
         self.owns_movement = True
         first_pos = self._current_pos()
+        if first_pos is not None:
+            last_detected_position = (float(first_pos[0]), float(first_pos[1]))
         if first_pos is None:
             self._log(
                 f"[rednose2v5] move enter target={target_x:.0f}, "
@@ -618,16 +665,22 @@ class RedNose2RouteRunner:
                         0.0,
                         float(self._profile.get("position_loss_recovery_sec", 0.8)),
                     )
+                    recovery_direction = self._position_loss_direction(
+                        last_detected_position,
+                        last_direction,
+                    )
                     if (
-                        last_direction in {"left", "right"}
+                        recovery_direction in {"left", "right"}
                         and now - position_missing_since <= recovery_sec
                     ):
-                        h.hold_direction(last_direction)
+                        h.hold_direction(recovery_direction)
                     else:
                         h.release_direction()
                     self._sleep(0.03)
                     continue
                 position_missing_since = None
+                last_detected_position = (float(pos[0]), float(pos[1]))
+                self._last_detected_position = last_detected_position
                 if floor_guard is not None and not floor_guard():
                     first_off_floor = pos
                     fresh_pos, _fresh_seen_at = self._fresh_sample()
@@ -1014,7 +1067,9 @@ class RedNose2RouteRunner:
         try:
             collection_in_progress = self._collection_stage is not None
             stage = self._collection_stage or "platform24"
-            if not self._is_upper_floor_v5(None):
+            stage, upper_platform_confirmed = self._advance_collection_stage_from_position(stage)
+            self._collection_stage = stage
+            if not self._is_upper_floor_v5(None) and not upper_platform_confirmed:
                 self._log("[rednose2v5] collection requested off floor2; recover through stair7 first")
                 if not self._return_floor2_from_stair7():
                     return False
@@ -1085,14 +1140,14 @@ class RedNose2RouteRunner:
 
             if stage == "platform16":
                 if not self._enter_platform16():
-                    self._collection_stage = None
+                    self._collection_stage = "platform16"
                     return False
                 stage = "platform27"
                 self._collection_stage = stage
 
             if stage == "platform27":
                 if not self._enter_platform27():
-                    self._collection_stage = None
+                    self._collection_stage = "platform27"
                     return False
                 stage = "return_floor2"
                 self._collection_stage = stage
@@ -1118,11 +1173,39 @@ class RedNose2RouteRunner:
             self._release_owned_inputs()
             self.owns_movement = previous_owns_movement
 
+    def _advance_collection_stage_from_position(self, stage: str) -> tuple[str, bool]:
+        """현재 Y가 이미 도착한 상위 발판이면 앞 단계를 건너뛴다."""
+        position = self._current_pos()
+        if position is None or position[1] is None:
+            return stage, False
+        y = float(position[1])
+
+        def in_range(min_key: str, max_key: str, fallback_min: float, fallback_max: float) -> bool:
+            lower = self._profile_y(min_key, fallback_min)
+            upper = self._profile_y(max_key, fallback_max)
+            return min(lower, upper) <= y <= max(lower, upper)
+
+        if in_range("platform27_y_min", "platform27_y_max", 50, 50):
+            return "return_floor2", True
+        if in_range("platform16_y_min", "platform16_y_max", 47, 48):
+            return "platform27", True
+        if in_range("platform1415_y_min", "platform1415_y_max", 54, 55):
+            return "platform16", True
+        return stage, False
+
     def _manual_active(self) -> bool:
         block_stop = getattr(self._br, "_stop", None)
         if callable(block_stop) and block_stop():
             return False
         return not self._stop.is_set()
+
+    def can_start_auto_sell(self) -> bool:
+        """회수 입력이 끝난 2층 일반 사냥 상태에서만 자동판매를 허용한다."""
+        return (
+            self._collection_stage is None
+            and not self.owns_movement
+            and self._auto_sell_floor() in {"floor2", "shop-entry"}
+        )
 
     def _auto_sell_floor(self) -> str:
         """자동판매 진입용으로 허용 오차 없이 현재 층을 구분한다."""
@@ -1182,14 +1265,7 @@ class RedNose2RouteRunner:
         if floor_name == "shop-entry":
             self._log("[rednose2v5] auto-sell entry ready: already on shop entry floor")
             return True
-        if floor_name == "floor1":
-            self._log("[rednose2v5] auto-sell entry: recover floor1 through stair7")
-            if not self._return_floor2_from_stair7(active_fn=self._manual_active):
-                return False
-        elif floor_name == "upper-platform":
-            if not self._drop_to_floor2_for_auto_sell():
-                return False
-        elif floor_name != "floor2":
+        if floor_name != "floor2":
             for _attempt in range(10):
                 self._fresh_pos()
                 floor_name = self._auto_sell_floor()
@@ -1199,13 +1275,7 @@ class RedNose2RouteRunner:
             if floor_name == "shop-entry":
                 self._log("[rednose2v5] auto-sell entry ready after refresh: shop entry floor")
                 return True
-            if floor_name == "floor1":
-                if not self._return_floor2_from_stair7(active_fn=self._manual_active):
-                    return False
-            elif floor_name == "upper-platform":
-                if not self._drop_to_floor2_for_auto_sell():
-                    return False
-            elif floor_name != "floor2":
+            if floor_name != "floor2":
                 self._log(f"[rednose2v5] auto-sell entry blocked: unsupported floor={floor_name}")
                 return False
         self._log(
@@ -1470,11 +1540,16 @@ class RedNose2RouteRunner:
             f"range {platform_left:.0f}-{platform_right:.0f}, up-teleport"
         )
         for attempt in range(1, attempts + 1):
+            if self._is_lower_floor_v5(None):
+                self._log(f"[rednose2v5] platform 14/15 blocked on floor1 ({attempt}/{attempts})")
+                return False
             if not self._is_in_platform1415_x_range() and not self._move_to_target_v5(
                 approach_x,
                 attack=True,
                 interval_sec=self._segment_interval("platform1415_approach_interval_sec"),
                 arrival_range=(platform_left, platform_right),
+                floor_guard=self._collection_x_move_allowed,
+                guard_label="platform 14/15 approach",
             ):
                 return False
             if not self._is_in_platform1415_x_range():
@@ -1499,6 +1574,9 @@ class RedNose2RouteRunner:
         self._release_attack_key()
         self._log("[rednose2v5] step 16: attack, up-teleport")
         for attempt in range(1, attempts + 1):
+            if self._is_lower_floor_v5(None):
+                self._log(f"[rednose2v5] platform 16 blocked on floor1 ({attempt}/{attempts})")
+                return False
             self._hold_attack_for(float(self._profile.get("platform1415_attack_hold_sec", 0.5)))
             self._teleport_once("up")
             if self._wait_y_range("platform16_y_min", "platform16_y_max", 47, 48, 0.55):
@@ -1510,6 +1588,9 @@ class RedNose2RouteRunner:
 
     def _enter_platform27_bypass_from_floor2(self) -> bool:
         self._release_attack_key()
+        if self._is_lower_floor_v5(None):
+            self._log("[rednose2v5] platform27 bypass blocked on floor1")
+            return False
         self._log("[rednose2v5] platform27 bypass: up-teleport, left-teleport")
         self._teleport_once("up")
         self._teleport_once("left")
@@ -1521,11 +1602,16 @@ class RedNose2RouteRunner:
         self._release_attack_key()
         self._log(f"[rednose2v5] step 27: align X={approach_x:.0f}, left-teleport from platform16")
         for attempt in range(1, attempts + 1):
+            if self._is_lower_floor_v5(None):
+                self._log(f"[rednose2v5] platform 27 blocked on floor1 ({attempt}/{attempts})")
+                return False
             if not self._move_to_target_v5(
                 approach_x,
                 attack=True,
                 interval_sec=self._segment_interval("platform27_approach_interval_sec", 0.25),
                 arrival_side="left",
+                floor_guard=self._collection_x_move_allowed,
+                guard_label="platform 27 approach",
             ):
                 return False
             self._release_attack_key()
@@ -1536,6 +1622,15 @@ class RedNose2RouteRunner:
                 return True
             self._log(f"[rednose2v5] platform 27 retry ({attempt}/{attempts})")
         return False
+
+    def _collection_x_move_allowed(self) -> bool:
+        position = self._current_pos()
+        if position is None or position[1] is None:
+            return False
+        floor1_min, floor1_max = self._floor1_y_range()
+        tolerance = self._floor_y_tolerance()
+        y = float(position[1])
+        return not (floor1_min - tolerance <= y <= floor1_max + tolerance)
 
     def _finish_platform27_and_return_floor2(self) -> bool:
         down_attempts = max(1, int(self._profile.get("platform27_down_attempts", 5)))

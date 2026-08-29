@@ -154,6 +154,56 @@ def test_next_move_keeps_previous_horizontal_intent_when_position_starts_missing
     )
 
 
+@pytest.mark.parametrize(
+    ("start_x", "target_x", "expected_recovery"),
+    [
+        (38.0, 0.0, "right"),
+        (130.0, 170.0, "left"),
+    ],
+)
+def test_position_loss_near_portal_reverses_toward_map_center(
+    monkeypatch, start_x, target_x, expected_recovery
+):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs)
+    positions = iter([(start_x, 62.0), (start_x, 62.0), None, None, (target_x, 62.0)])
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr(runner, "_current_pos", lambda: next(positions))
+
+    assert runner._move_to_target_v5(target_x, attack=False)
+    assert ("hold", expected_recovery) in [event[:2] for event in inputs.direction_events]
+
+
+def test_position_loss_in_map_center_keeps_original_direction(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs)
+    positions = iter([(80.0, 62.0), (80.0, 62.0), None, None, (120.0, 62.0)])
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr(runner, "_current_pos", lambda: next(positions))
+
+    assert runner._move_to_target_v5(120.0, attack=False)
+    assert ("hold", "right") in [event[:2] for event in inputs.direction_events]
+
+
+def test_vertical_teleport_is_blocked_when_last_detected_position_was_floor1(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs, {"floor1_y_min": 72, "floor1_y_max": 82})
+    runner._last_detected_position = (40.0, 76.0)
+    monkeypatch.setattr(runner, "_current_pos", lambda: None)
+
+    runner._teleport_once("up")
+    runner._teleport_once("down")
+
+    assert inputs.action_events == []
+
+
 def test_auto_sell_does_not_start_when_shop_entry_teleport_never_lands(monkeypatch):
     clock = FakeClock()
     inputs = RecordingInputs(clock)

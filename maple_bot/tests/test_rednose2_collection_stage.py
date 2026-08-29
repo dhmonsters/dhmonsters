@@ -89,3 +89,80 @@ def test_floor2_hunt_and_collection_edge_use_their_distinct_right_targets():
     assert runner._run_floor2_hunt_once() is True
     assert runner._move_floor2_right_edge() is True
     assert targets == [118.0, 126.0]
+
+
+def _collection_runner(position, stage):
+    runner = RedNose2RouteRunner(
+        FakeBlockRunner(),
+        get_blocks=lambda: [],
+        is_active=lambda: True,
+        profile={
+            "base_minimap_width": 172,
+            "base_minimap_height": 103,
+            "minimap_width": 172,
+            "minimap_height": 103,
+            "floor1_y_min": 72,
+            "floor1_y_max": 82,
+            "floor2_y_min": 61,
+            "floor2_y_max": 63,
+            "platform16_y_min": 47,
+            "platform16_y_max": 48,
+            "platform27_y_min": 50,
+            "platform27_y_max": 50,
+        },
+        sleep_fn=lambda _seconds: None,
+    )
+    runner._collection_stage = stage
+    runner._current_pos = lambda: position
+    runner._release_attack_key = lambda: None
+    runner._release_owned_inputs = lambda: None
+    return runner
+
+
+def test_platform16_failure_keeps_platform16_as_next_collection_stage():
+    runner = _collection_runner((95, 54), "platform16")
+    runner._enter_platform16 = lambda: False
+
+    assert runner._run_rednose_new_v5_collection() is False
+    assert runner._collection_stage == "platform16"
+
+
+def test_platform27_failure_keeps_platform27_as_next_collection_stage():
+    runner = _collection_runner((95, 47), "platform27")
+    runner._enter_platform27 = lambda: False
+
+    assert runner._run_rednose_new_v5_collection() is False
+    assert runner._collection_stage == "platform27"
+
+
+def test_platform16_position_skips_platform1415_and_platform16_actions():
+    runner = _collection_runner((95, 47), "platform1415")
+    calls = []
+    runner._enter_platform1415 = lambda: calls.append("1415") or True
+    runner._enter_platform16 = lambda: calls.append("16") or True
+    runner._enter_platform27 = lambda: calls.append("27") or True
+    runner._finish_platform27_and_return_floor2 = lambda: calls.append("return") or True
+
+    assert runner._run_rednose_new_v5_collection() is True
+    assert calls == ["27", "return"]
+
+
+def test_platform27_position_finishes_collection_without_previous_platform_actions():
+    runner = _collection_runner((91, 50), "platform1415")
+    calls = []
+    runner._enter_platform1415 = lambda: calls.append("1415") or True
+    runner._enter_platform16 = lambda: calls.append("16") or True
+    runner._enter_platform27 = lambda: calls.append("27") or True
+    runner._finish_platform27_and_return_floor2 = lambda: calls.append("return") or True
+
+    assert runner._run_rednose_new_v5_collection() is True
+    assert calls == ["return"]
+
+
+def test_platform1415_does_not_start_x_movement_from_floor1():
+    runner = _collection_runner((95, 76), "platform1415")
+    moves = []
+    runner._move_to_target_v5 = lambda *_args, **_kwargs: moves.append(True) or True
+
+    assert runner._enter_platform1415() is False
+    assert moves == []

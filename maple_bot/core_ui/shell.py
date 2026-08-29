@@ -46,6 +46,7 @@ def _read_version() -> str:
 
 class MainShell(QMainWindow):
     log_requested = pyqtSignal(str, str)
+    settings_apply_requested = pyqtSignal()
 
     """통합 봇 메인 셸. 상단 내비 탭 + 중앙 페이지 스택 + 하단 컨트롤바(시작/정지·상태·로그)."""
 
@@ -119,16 +120,11 @@ class MainShell(QMainWindow):
         h.addWidget(self.status_chip)
         return bar
 
-    def _save_current_hunt_ground(self) -> None:
-        from core_ui.hunt_ground_preset_widget import HuntGroundPresetWidget
-
-        preset = self.findChild(HuntGroundPresetWidget)
-        if preset is not None:
-            preset.save_current()
-            return
+    def _save_all_settings(self) -> None:
         if self._config is not None:
             self._config.save()
-            self.set_status("설정 저장 완료")
+        self.settings_apply_requested.emit()
+        self.set_status("전체 설정 저장 및 적용 완료")
 
     # ── 로그 드로어 (기본 숨김, 컨트롤바 버튼으로 토글) ──────────────
     def _build_log_drawer(self) -> QWidget:
@@ -207,11 +203,11 @@ class MainShell(QMainWindow):
                             0, Qt.AlignmentFlag.AlignVCenter)
             except Exception:
                 pass
-        save_btn = QPushButton("현재 설정 저장")
-        save_btn.setObjectName("primaryButton")
-        save_btn.setToolTip("현재 사냥터 이름, 영역, 맵핑, 이탈 설정을 한 번에 저장합니다.")
-        save_btn.clicked.connect(self._save_current_hunt_ground)
-        h.addWidget(save_btn)
+        self.global_save_button = QPushButton("전체 설정 저장 및 적용")
+        self.global_save_button.setObjectName("primaryButton")
+        self.global_save_button.setToolTip("현재 설정을 저장하고 실행 중인 봇에 다시 적용합니다.")
+        self.global_save_button.clicked.connect(self._save_all_settings)
+        h.addWidget(self.global_save_button)
         return bar
 
     # ── 단축키 (전역: 게임 포커스 중에도 동작) ────────────────────────

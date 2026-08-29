@@ -421,18 +421,17 @@ class BotController:
             self._stop.wait(0.03)
 
 
-def _start_with_fresh_config(controller, runtime, config_manager, shell) -> None:
-    """F1 입력마다 공격과 픽업 설정을 갱신한 뒤 봇을 시작하거나 재개한다."""
-    from core.config_adapter import to_runtime_config
+def _apply_fresh_action_config(runtime, fresh, shell) -> None:
+    """공격·픽업·물약·버프·펫 설정을 실행 중 객체에 함께 반영한다."""
     from core.acting.attack_sequence import AttackSequenceRunner
 
-    fresh = to_runtime_config(config_manager._data)
     runtime.release_pickup_key()
     runtime._cfg.attack_key = fresh.attack_key
     runtime._cfg.attack_sequences = fresh.attack_sequences
     runtime._cfg.pickup_key = fresh.pickup_key
     runtime._cfg.pickup_interval = fresh.pickup_interval
     runtime._cfg.pickup_always = fresh.pickup_always
+    runtime.reload_combat_support(fresh)
     runtime.attack_sequence_runner = AttackSequenceRunner(
         fresh.attack_sequences,
         lambda key, hold: runtime.combat.attack(
@@ -445,6 +444,14 @@ def _start_with_fresh_config(controller, runtime, config_manager, shell) -> None
         f"pickup=[{fresh.pickup_key or 'off'}], always={fresh.pickup_always}",
         "system",
     )
+
+
+def _start_with_fresh_config(controller, runtime, config_manager, shell) -> None:
+    """F1 입력마다 행동 설정을 갱신한 뒤 봇을 시작하거나 재개한다."""
+    from core.config_adapter import to_runtime_config
+
+    fresh = to_runtime_config(config_manager._data)
+    _apply_fresh_action_config(runtime, fresh, shell)
 
     if controller.is_running():
         controller.start()
@@ -519,6 +526,15 @@ def main():
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(shell, "Claude start error", str(exc))
 
+    def save_and_apply_settings():
+        try:
+            from core.config_adapter import to_runtime_config
+
+            fresh = to_runtime_config(cm._data)
+            _apply_fresh_action_config(rt, fresh, shell)
+        except Exception as exc:
+            shell.append_log(f"[settings apply error] {exc}", "system")
+
     def safe_stop():
         try:
             controller.stop()
@@ -548,6 +564,7 @@ def main():
 
     shell.btn_start.clicked.connect(safe_start)
     shell.btn_stop.clicked.connect(safe_stop)
+    shell.settings_apply_requested.connect(save_and_apply_settings)
     from PyQt6.QtWidgets import QPushButton
     sell_btn = shell.findChild(QPushButton, "autoSellRunButton")
     sell_stop_btn = shell.findChild(QPushButton, "autoSellStopButton")
