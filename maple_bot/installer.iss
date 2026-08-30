@@ -100,12 +100,14 @@ begin
     Exit;
 
   try
-    DownloadedSetup := DownloadTemporaryFile(
+    DownloadTemporaryFile(
       '{#PreviousSetupUrl}',
       'Claude_v{#PreviousVersion}_Setup.exe',
       '{#PreviousSetupSha}',
       @OnDownloadProgress
     );
+    DownloadedSetup := AddBackslash(ExpandConstant('{tmp}')) +
+      'Claude_v{#PreviousVersion}_Setup.exe';
     if CompareText(GetSHA256OfFile(DownloadedSetup), '{#PreviousSetupSha}') <> 0 then
       RaiseException('이전 버전 설치 파일의 무결성 검증에 실패했습니다.');
     if not ForceDirectories(RecoveryDirectory) then
