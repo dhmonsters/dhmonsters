@@ -44,4 +44,6 @@
 - Task 2에서 공식 GitHub Release URL과 SHA-256 검증, 현재 버전 복구본 원자 교체, 같은 복구본 재사용을 구현했다.
 - 업데이트 설치기 생성 성공 후에만 `update_handoff` 정상 종료 신호를 기록하도록 했다.
 - Task 2 검증은 Task 1 회귀 테스트를 포함해 21개가 통과했고 변경된 Python 파일 컴파일도 통과했다.
+- Task 3에서 .NET Framework C# 5 기반 실행기, 종료 판정, 시작·실행 중 장애 구분, 복구 저장소와 관리자 전용 쓰기 ACL을 구현했다.
+- Task 3 C# 소스를 Framework64 `csc.exe`로 직접 컴파일한 행동 테스트 1개가 통과했다.
 - 원격 푸시와 GitHub Release 생성은 로컬 검증 후 별도 승인 대상으로 남긴다.
