@@ -53,4 +53,7 @@
 - Task 5에서 PyInstaller 실제 앱을 `ClaudeApp.exe`로 분리하고 `--disable-windowed-traceback`을 적용했으며, 독립 C# 실행기를 최종 `Claude.exe`로 빌드하도록 변경했다.
 - Framework64 관리 실행기는 정적 `mscoree.dll` import 없이 CLR COM descriptor를 사용했다. 검증은 구현 세부값이 아니라 Qt·Python DLL import 부재를 확인하도록 정리했다.
 - Task 5의 C# 빌드 스크립트와 배포 구조·PE import 테스트 6개가 통과했다.
+- Task 6에서 2.4.6 설치본의 고정 SHA-256 검증과 원자적 복구 캐시 교체를 본 설치기에 연결했다.
+- 설치 완료 시 실행 중인 설치 파일의 SHA-256으로 `{app}\release.json`을 생성하고, 복구 캐시는 사용자가 제거를 선택할 때만 삭제하도록 했다.
+- 공용 Inno Setup 코드를 실제 컴파일·자동 설치하는 행동 테스트 1개가 통과했다.
 - 원격 푸시와 GitHub Release 생성은 로컬 검증 후 별도 승인 대상으로 남긴다.
