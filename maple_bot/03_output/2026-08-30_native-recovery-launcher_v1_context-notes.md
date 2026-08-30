@@ -39,5 +39,6 @@
 ## 구현 상태
 
 - 설계 문서 커밋은 `fe2e39d`이다.
-- 구현 코드는 아직 수정하지 않았다.
+- Task 1에서 `core/recovery_protocol.py`를 추가하고 `run_integrated.py`에 런처 관리, 준비 완료, 정상 종료, 치명적 오류 연결을 적용했다.
+- Task 1 검증은 `tests/test_recovery_protocol.py`와 `tests/test_admin_util.py`에서 12개가 통과했고 Python 컴파일도 통과했다.
 - 원격 푸시와 GitHub Release 생성은 로컬 검증 후 별도 승인 대상으로 남긴다.

@@ -10,12 +10,41 @@ import time
 import traceback
 from pathlib import Path
 
+from core import recovery_protocol
+
 ROOT = Path(__file__).resolve().parent
 for _extra_path in (ROOT, ROOT / "_internal", ROOT.parent):
     _path_text = str(_extra_path)
     if _extra_path.exists() and _path_text not in sys.path:
         sys.path.insert(0, _path_text)
 _CRASH_LOG_HANDLE = None
+
+
+def _ensure_admin_if_unmanaged() -> None:
+    """독립 복구 실행기가 관리하지 않는 직접 실행에서만 관리자 권한을 요청한다."""
+    if recovery_protocol.is_launcher_managed():
+        return
+    from core.admin_util import ensure_admin
+
+    ensure_admin()
+
+
+def _record_unhandled_exception(exc_type, exc_value, exc_tb) -> str:
+    """처리되지 않은 예외를 런타임 로그와 복구 실행기 오류 파일에 기록한다."""
+    text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    _write_runtime_log("UNHANDLED EXCEPTION", text)
+    recovery_protocol.write_fatal(
+        "UNHANDLED_EXCEPTION", str(exc_value), text, exit_code=1
+    )
+    return text
+
+
+def _finalize_event_loop(exit_code: int) -> int:
+    """정상 이벤트 루프 종료만 복구 실행기에 정상 종료로 알린다."""
+    code = int(exit_code)
+    if code == 0:
+        recovery_protocol.write_normal_exit("user_close")
+    return code
 
 
 def _load_core_runtime_attr(name: str):
@@ -69,8 +98,7 @@ def _install_runtime_logging() -> None:
         _CRASH_LOG_HANDLE = None
 
     def handle_exception(exc_type, exc_value, exc_tb):
-        text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-        _write_runtime_log("UNHANDLED EXCEPTION", text)
+        _record_unhandled_exception(exc_type, exc_value, exc_tb)
         sys.__excepthook__(exc_type, exc_value, exc_tb)
 
     sys.excepthook = handle_exception
@@ -466,9 +494,8 @@ def _start_with_fresh_config(controller, runtime, config_manager, shell) -> None
 
 def main():
     _install_runtime_logging()
-    from core.admin_util import ensure_admin
     _write_runtime_log("BOOT", "main: before ensure_admin")
-    ensure_admin()
+    _ensure_admin_if_unmanaged()
     _write_runtime_log("BOOT", "main: after ensure_admin")
 
     from PyQt6.QtWidgets import QApplication
@@ -577,11 +604,12 @@ def main():
     else:
         shell.append_log("auto sell stop button not found in automation page", "auto")
     shell.show()
+    recovery_protocol.write_ready()
     _write_runtime_log("BOOT", "main: shell shown")
     _start_update_check(shell)
     exit_code = app.exec()
     _write_runtime_log("NORMAL EXIT", f"code={exit_code}")
-    sys.exit(exit_code)
+    sys.exit(_finalize_event_loop(exit_code))
 if __name__ == "__main__":
     main()
 
