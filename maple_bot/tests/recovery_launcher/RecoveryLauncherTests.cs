@@ -5,6 +5,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
+using System.Windows.Forms;
 
 internal static class RecoveryLauncherTests
 {
@@ -95,6 +96,84 @@ internal static class RecoveryLauncherTests
         AssertTrue(crash.message.Contains("읽지 못했습니다"), "malformed crash fallback");
     }
 
+    private static void TestUpdatePolicyAndUrl()
+    {
+        AssertTrue(UpdateClient.IsAllowedReleaseUrl(
+            "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.7/Claude_v2.4.7_Setup.exe"),
+            "official release URL");
+        AssertFalse(UpdateClient.IsAllowedReleaseUrl("http://github.com/dhmonsters/dhmonsters/releases/download/v2/a.exe"), "HTTP rejected");
+        AssertFalse(UpdateClient.IsAllowedReleaseUrl("https://example.com/Claude.exe"), "foreign host rejected");
+        AssertEqual(UpdateAction.Update, UpdatePolicy.Decide("2.4.7", "2.4.8"), "newer update");
+        AssertEqual(UpdateAction.Reinstall, UpdatePolicy.Decide("2.4.7", "2.4.7"), "same reinstall");
+        AssertEqual(UpdateAction.None, UpdatePolicy.Decide("2.4.7", "2.4.6"), "older ignored");
+    }
+
+    private static void TestCommitPreviousInstaller(string root)
+    {
+        string recovery = Path.Combine(root, "CommitRecovery");
+        string install = Path.Combine(root, "CommitInstall");
+        Directory.CreateDirectory(recovery);
+        Directory.CreateDirectory(install);
+        string candidate = Path.Combine(root, "candidate.exe");
+        byte[] content = Encoding.UTF8.GetBytes("current official setup");
+        File.WriteAllBytes(candidate, content);
+        ReleaseInfo release = new ReleaseInfo
+        {
+            version = "2.4.7",
+            download_url = "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.7/Claude_v2.4.7_Setup.exe",
+            sha256 = Sha256(content)
+        };
+
+        RecoveryStore store = new RecoveryStore(recovery, install);
+        store.CommitPreviousInstaller(candidate, release);
+
+        RecoveryValidation validation = store.ValidatePreviousInstaller();
+        AssertTrue(validation.IsValid, "committed current installer valid");
+        AssertEqual("2.4.7", validation.Metadata.previous_version, "committed version");
+        AssertFalse(File.Exists(candidate), "candidate moved into cache");
+    }
+
+    private static void TestRollbackSafety(string root)
+    {
+        AssertTrue(RollbackWorker.IsCleanupTarget("_internal"), "runtime cleanup allowed");
+        AssertTrue(RollbackWorker.IsCleanupTarget("ClaudeApp.exe"), "app cleanup allowed");
+        AssertFalse(RollbackWorker.IsCleanupTarget("drivers"), "driver preserved");
+        AssertFalse(RollbackWorker.IsCleanupTarget("user-data"), "unknown directory preserved");
+        AssertFalse(RollbackWorker.IsSafeInstallDirectory(Path.GetPathRoot(root)), "filesystem root rejected");
+        string install = Path.Combine(root, "SafeInstall");
+        Directory.CreateDirectory(install);
+        File.WriteAllText(Path.Combine(install, "version.txt"), "2.4.7");
+        AssertTrue(RollbackWorker.IsSafeInstallDirectory(install), "versioned install accepted");
+    }
+
+    private static void TestRecoveryFormButtons(string root)
+    {
+        RecoveryStore store = new RecoveryStore(Path.Combine(root, "FormRecovery"), Path.Combine(root, "FormInstall"));
+        Directory.CreateDirectory(store.RecoveryRoot);
+        Directory.CreateDirectory(store.InstallDirectory);
+        using (RecoveryForm form = new RecoveryForm(
+            new CrashInfo { kind = "BOOT", message = "QtWidgets failure", traceback = "trace", exit_code = 1 },
+            store,
+            "2.4.7"))
+        {
+            HashSet<string> labels = new HashSet<string>();
+            foreach (Control control in form.Controls)
+                CollectButtonLabels(control, labels);
+            AssertTrue(labels.Contains("이전 버전으로 되돌리기"), "rollback button");
+            AssertTrue(labels.Contains("업데이트 확인"), "update button");
+            AssertTrue(labels.Contains("오류 내용 복사"), "copy button");
+            AssertTrue(labels.Contains("닫기"), "close button");
+        }
+    }
+
+    private static void CollectButtonLabels(Control parent, HashSet<string> labels)
+    {
+        Button button = parent as Button;
+        if (button != null) labels.Add(button.Text);
+        foreach (Control child in parent.Controls) CollectButtonLabels(child, labels);
+    }
+
+    [STAThread]
     public static int Main()
     {
         string root = Path.Combine(Path.GetTempPath(), "ClaudeRecoveryTests-" + Guid.NewGuid().ToString("N"));
@@ -103,10 +182,31 @@ internal static class RecoveryLauncherTests
             TestLaunchDecision();
             TestRecoveryStoreValidation(root);
             TestMalformedCrashIsSafe(root);
+            TestUpdatePolicyAndUrl();
+            TestCommitPreviousInstaller(root);
+            TestRollbackSafety(root);
+            TestRecoveryFormButtons(root);
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine("UNHANDLED_TYPE " + error.GetType().FullName);
+            Console.Error.WriteLine("UNHANDLED_MESSAGE " + error.Message);
+            Console.Error.WriteLine("UNHANDLED_STACK " + error.StackTrace);
+            _failures++;
         }
         finally
         {
-            if (Directory.Exists(root)) Directory.Delete(root, true);
+            try
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+            catch (Exception error)
+            {
+                Console.Error.WriteLine("CLEANUP_TYPE " + error.GetType().FullName);
+                Console.Error.WriteLine("CLEANUP_MESSAGE " + error.Message);
+                Console.Error.WriteLine("CLEANUP_STACK " + error.StackTrace);
+                _failures++;
+            }
         }
         if (_failures != 0) return 1;
         Console.WriteLine("PASS");

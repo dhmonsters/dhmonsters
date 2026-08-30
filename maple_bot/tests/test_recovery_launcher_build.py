@@ -11,6 +11,9 @@ SOURCES = [
     ROOT / "recovery_launcher" / "Program.cs",
     ROOT / "recovery_launcher" / "RecoveryModels.cs",
     ROOT / "recovery_launcher" / "RecoveryStore.cs",
+    ROOT / "recovery_launcher" / "UpdateClient.cs",
+    ROOT / "recovery_launcher" / "RecoveryForm.cs",
+    ROOT / "recovery_launcher" / "RollbackWorker.cs",
 ]
 
 

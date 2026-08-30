@@ -12,6 +12,8 @@ internal static class Program
     [STAThread]
     internal static int Main(string[] args)
     {
+        if (args != null && args.Length > 0 && args[0] == "--rollback-worker")
+            return RollbackWorker.Run(args);
         bool createdNew;
         using (Mutex instance = new Mutex(true, MutexName, out createdNew))
         {
@@ -73,11 +75,9 @@ internal static class Program
         crash = crash ?? new CrashInfo { kind = "PROCESS_EXIT", message = "ClaudeApp.exe가 비정상 종료되었습니다." };
         crash.exit_code = exitCode;
         crash.phase = LaunchDecision.GetFailurePhase(readySeen);
-        MessageBox.Show(
-            crash.message + Environment.NewLine + Environment.NewLine + "종료 코드: " + exitCode,
-            "Claude 복구",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error);
+        string version = ReadCurrentVersion(installDirectory);
+        using (RecoveryForm recovery = new RecoveryForm(crash, store, version))
+            Application.Run(recovery);
         return 0;
     }
 
@@ -88,5 +88,11 @@ internal static class Program
         for (int index = 0; index < args.Length; index++)
             quoted[index] = "\"" + (args[index] ?? string.Empty).Replace("\"", "\\\"") + "\"";
         return string.Join(" ", quoted);
+    }
+
+    private static string ReadCurrentVersion(string installDirectory)
+    {
+        try { return File.ReadAllText(Path.Combine(installDirectory, "version.txt")).Trim(); }
+        catch { return "0.0.0"; }
     }
 }

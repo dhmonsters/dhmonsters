@@ -7,6 +7,38 @@ internal enum FailurePhase
     Runtime
 }
 
+internal enum UpdateAction
+{
+    None,
+    Reinstall,
+    Update
+}
+
+internal static class UpdatePolicy
+{
+    internal static UpdateAction Decide(string current, string latest)
+    {
+        Version currentVersion;
+        Version latestVersion;
+        if (!Version.TryParse(NormalizeVersion(current), out currentVersion)) return UpdateAction.None;
+        if (!Version.TryParse(NormalizeVersion(latest), out latestVersion)) return UpdateAction.None;
+        int comparison = latestVersion.CompareTo(currentVersion);
+        if (comparison > 0) return UpdateAction.Update;
+        if (comparison == 0) return UpdateAction.Reinstall;
+        return UpdateAction.None;
+    }
+
+    private static string NormalizeVersion(string value)
+    {
+        string text = (value ?? string.Empty).Trim();
+        if (text.StartsWith("v", StringComparison.OrdinalIgnoreCase)) text = text.Substring(1);
+        string[] parts = text.Split('.');
+        if (parts.Length == 1) return text + ".0.0";
+        if (parts.Length == 2) return text + ".0";
+        return text;
+    }
+}
+
 internal static class LaunchDecision
 {
     internal static bool ShouldShowRecovery(int exitCode, bool readySeen, bool normalMarkerSeen)
