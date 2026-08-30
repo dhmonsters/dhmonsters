@@ -108,6 +108,7 @@ class UpdateDialog(QDialog):
         try:
             path = updater.download_update(
                 url,
+                self._info.get("sha256", ""),
                 progress_cb=lambda d, t: self._signals.progress.emit(d, t),
             )
             self._installer_path = path
@@ -132,7 +133,7 @@ class UpdateDialog(QDialog):
 
     def _apply(self):
         if self._installer_path:
-            updater.apply_update(self._installer_path)
+            updater.apply_update(self._installer_path, self._info)
 
     def _on_error(self, msg: str):
         self._status_lbl.setText(f"오류: {msg}")
