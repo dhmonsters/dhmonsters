@@ -16,6 +16,8 @@ def test_rejects_codex_runtime_sources_and_root_poppler_icu(tmp_path: Path) -> N
     internal.mkdir(parents=True)
     (internal / "icuuc.dll").write_bytes(b"foreign-icu")
     (internal / "icudt78.dll").write_bytes(b"foreign-icu-data")
+    (internal.parent / "Claude.exe").write_bytes(b"launcher")
+    (internal.parent / "ClaudeApp.exe").write_bytes(b"app")
 
     errors = validate_release_bundle(analysis, internal.parent)
 
@@ -32,5 +34,21 @@ def test_accepts_bundle_without_foreign_runtime_files(tmp_path: Path) -> None:
     analysis.write_text("C:\\\\Windows\\\\System32\\\\kernel32.dll", encoding="utf-8")
     bundle = tmp_path / "dist" / "Claude"
     (bundle / "_internal").mkdir(parents=True)
+    (bundle / "Claude.exe").write_bytes(b"launcher")
+    (bundle / "ClaudeApp.exe").write_bytes(b"app")
 
     assert validate_release_bundle(analysis, bundle) == []
+
+
+def test_rejects_bundle_missing_launcher_and_real_app(tmp_path: Path) -> None:
+    from release_bundle_validation import validate_release_bundle
+
+    analysis = tmp_path / "Analysis-00.toc"
+    analysis.write_text("C:\\Windows\\System32\\kernel32.dll", encoding="utf-8")
+    bundle = tmp_path / "dist" / "Claude"
+    (bundle / "_internal").mkdir(parents=True)
+
+    assert validate_release_bundle(analysis, bundle) == [
+        "복구 실행기 Claude.exe가 없습니다.",
+        "실제 앱 ClaudeApp.exe가 없습니다.",
+    ]

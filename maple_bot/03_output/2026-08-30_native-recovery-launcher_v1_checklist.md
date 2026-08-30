@@ -8,8 +8,8 @@
 - [x] `ClaudeApp.exe` 종료 코드와 준비 완료 신호를 감시한다.
 - [x] 이전 버전 복원, 업데이트 확인, 오류 복사, 닫기 버튼을 구현한다.
 - [x] 롤백 작업자의 설치 경로 검증과 삭제 허용 목록을 구현한다.
-- [ ] PyInstaller 앱 이름을 `ClaudeApp.exe`로 변경한다.
-- [ ] PyInstaller 기본 windowed traceback 창을 비활성화한다.
+- [x] PyInstaller 앱 이름을 `ClaudeApp.exe`로 변경한다.
+- [x] PyInstaller 기본 windowed traceback 창을 비활성화한다.
 - [ ] 2.4.6에서 2.4.7 전환 전에 2.4.6 설치본을 검증·보관한다.
 - [ ] 설치 시 현재 버전 `release.json`을 생성한다.
 - [ ] 버전 네 파일과 `version.json.sha256`을 일치시킨다.

@@ -9,6 +9,23 @@ from pathlib import Path
 _FORBIDDEN_ROOT_DLLS = ("icudt78.dll", "icuuc.dll")
 
 
+def read_pe_imports(path: Path) -> set[str]:
+    """PE 파일이 정적으로 가져오는 DLL 이름을 소문자로 반환한다."""
+    import pefile
+
+    image = pefile.PE(str(path), fast_load=True)
+    try:
+        image.parse_data_directories(
+            directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"]]
+        )
+        return {
+            entry.dll.decode("ascii", errors="replace").lower()
+            for entry in getattr(image, "DIRECTORY_ENTRY_IMPORT", [])
+        }
+    finally:
+        image.close()
+
+
 def validate_release_bundle(analysis_path: Path, bundle_path: Path) -> list[str]:
     errors: list[str] = []
     analysis_text = analysis_path.read_text(encoding="utf-8", errors="replace")
@@ -26,6 +43,10 @@ def validate_release_bundle(analysis_path: Path, bundle_path: Path) -> list[str]
             "배포본 _internal 루트에 금지된 DLL이 있습니다: "
             + ", ".join(forbidden)
         )
+    if not (bundle_path / "Claude.exe").is_file():
+        errors.append("복구 실행기 Claude.exe가 없습니다.")
+    if not (bundle_path / "ClaudeApp.exe").is_file():
+        errors.append("실제 앱 ClaudeApp.exe가 없습니다.")
     return errors
 
 

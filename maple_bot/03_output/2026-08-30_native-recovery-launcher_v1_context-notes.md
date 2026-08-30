@@ -50,4 +50,7 @@
 - 롤백 작업자는 파일시스템 루트를 거부하고 프로그램 파일 허용 목록만 제거하며 `drivers`와 알 수 없는 사용자 폴더를 보존한다.
 - 테스트 중 복구 캐시 커밋 함수가 ACL을 다시 설정해 자체 쓰기를 차단하는 책임 중복을 확인했다. ACL은 실행기 시작과 설치기에서만 설정하고 커밋 함수는 기존 보안 폴더 안에서 파일 교체만 수행하도록 수정했다.
 - Task 4와 이전 회귀 테스트 22개가 함께 통과했다.
+- Task 5에서 PyInstaller 실제 앱을 `ClaudeApp.exe`로 분리하고 `--disable-windowed-traceback`을 적용했으며, 독립 C# 실행기를 최종 `Claude.exe`로 빌드하도록 변경했다.
+- Framework64 관리 실행기는 정적 `mscoree.dll` import 없이 CLR COM descriptor를 사용했다. 검증은 구현 세부값이 아니라 Qt·Python DLL import 부재를 확인하도록 정리했다.
+- Task 5의 C# 빌드 스크립트와 배포 구조·PE import 테스트 6개가 통과했다.
 - 원격 푸시와 GitHub Release 생성은 로컬 검증 후 별도 승인 대상으로 남긴다.
