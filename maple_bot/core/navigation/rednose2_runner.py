@@ -1288,10 +1288,27 @@ class RedNose2RouteRunner:
     def can_start_auto_sell(self) -> bool:
         """회수 입력이 끝난 2층 일반 사냥 상태에서만 자동판매를 허용한다."""
         return (
-            self._collection_stage is None
+            self.can_pause_for_auto_sell()
             and not self.owns_movement
+        )
+
+    def can_pause_for_auto_sell(self) -> bool:
+        """회수 중이 아니고 판매 진입 가능한 층이면 정상 사냥을 멈출 수 있다."""
+        return (
+            self._collection_stage is None
             and self._auto_sell_floor() in {"floor2", "shop-entry"}
         )
+
+    def auto_sell_block_reason(self, require_idle: bool = False) -> str:
+        """자동판매 진입을 막는 빨코2 상태를 로그용으로 반환한다."""
+        if self._collection_stage is not None:
+            return f"회수 단계 진행 중({self._collection_stage})"
+        floor = self._auto_sell_floor()
+        if floor not in {"floor2", "shop-entry"}:
+            return f"자동판매 진입 불가 위치({floor})"
+        if require_idle and self.owns_movement:
+            return "정상 사냥 이동 입력 반환 대기 초과"
+        return ""
 
     def _auto_sell_floor(self) -> str:
         """자동판매 진입용으로 허용 오차 없이 현재 층을 구분한다."""

@@ -142,6 +142,72 @@ def test_junk_selling_flag_is_set_before_worker_thread_starts(monkeypatch):
     assert created[0].flag_at_start is True
 
 
+def test_scheduled_auto_sell_pauses_normal_rednose_movement_then_starts(monkeypatch):
+    runtime = BotRuntime.__new__(BotRuntime)
+    runtime._junk_selling = False
+    runtime._junk_sell_lock = threading.Lock()
+    runtime._junk_sell_thread = None
+    runtime._junk_sell_stop = threading.Event()
+    runtime.junk_seller = object()
+    runtime.auto_seller = SimpleNamespace(schedule_after_seconds=lambda _seconds: None)
+    runtime.log = lambda *_args: None
+    runtime._refresh_auto_sell_config = lambda: None
+    runtime.release_pickup_key = lambda: None
+    runtime._release_runtime_inputs = lambda: None
+    state = {"idle": False}
+    runtime.floor_hunt_runner = SimpleNamespace(
+        can_pause_for_auto_sell=lambda: True,
+        can_start_auto_sell=lambda: state["idle"],
+    )
+    created = []
+
+    def build_thread(*, target, **kwargs):
+        thread = DeferredThread(target, **kwargs)
+        thread.runtime = runtime
+        created.append(thread)
+        return thread
+
+    monkeypatch.setattr("core.runtime.threading.Thread", build_thread)
+    monkeypatch.setattr(
+        "core.runtime.time.sleep",
+        lambda _seconds: state.__setitem__("idle", True),
+    )
+
+    assert runtime.start_junk_sell(reason="scheduled") is True
+    assert created[0].flag_at_start is True
+
+
+def test_scheduled_auto_sell_retries_if_movement_is_not_released_within_point_one_second(monkeypatch):
+    runtime = BotRuntime.__new__(BotRuntime)
+    runtime._junk_selling = False
+    runtime._junk_sell_lock = threading.Lock()
+    runtime._junk_sell_thread = None
+    runtime._junk_sell_stop = threading.Event()
+    runtime.junk_seller = object()
+    scheduled = []
+    runtime.auto_seller = SimpleNamespace(
+        schedule_after_seconds=lambda seconds: scheduled.append(seconds),
+    )
+    runtime.log = lambda *_args: None
+    runtime._refresh_auto_sell_config = lambda: None
+    runtime.release_pickup_key = lambda: None
+    runtime._release_runtime_inputs = lambda: None
+    runtime.floor_hunt_runner = SimpleNamespace(
+        can_pause_for_auto_sell=lambda: True,
+        can_start_auto_sell=lambda: False,
+    )
+    clock = iter([0.0, 0.05, 0.1])
+    sleeps = []
+    monkeypatch.setattr("core.runtime.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("core.runtime.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    assert runtime.start_junk_sell(reason="scheduled") is False
+    assert runtime._junk_selling is False
+    assert runtime._junk_sell_thread is None
+    assert sum(sleeps) <= 0.1
+    assert scheduled == [1.0]
+
+
 def test_auto_sell_aborts_if_rednose_starts_moving_during_handoff(monkeypatch):
     runtime = BotRuntime.__new__(BotRuntime)
     runtime._junk_selling = False

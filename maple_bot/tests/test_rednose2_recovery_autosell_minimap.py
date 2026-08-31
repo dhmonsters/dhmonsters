@@ -291,6 +291,30 @@ def test_auto_sell_does_not_start_when_shop_entry_teleport_never_lands(monkeypat
     assert teleports == ["up", "up", "up"]
 
 
+def test_normal_floor2_movement_can_be_paused_for_auto_sell(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs)
+    runner.owns_movement = True
+
+    monkeypatch.setattr(runner, "_current_pos", lambda: (100.0, 62.0))
+
+    assert runner.can_pause_for_auto_sell() is True
+    assert runner.can_start_auto_sell() is False
+
+
+def test_collection_stage_cannot_be_paused_for_auto_sell(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs)
+    runner._collection_stage = "platform1415"
+
+    monkeypatch.setattr(runner, "_current_pos", lambda: (95.0, 62.0))
+
+    assert runner.can_pause_for_auto_sell() is False
+    assert runner.can_start_auto_sell() is False
+
+
 def test_auto_sell_retries_entry_teleport_until_shop_entry_is_confirmed(monkeypatch):
     clock = FakeClock()
     inputs = RecordingInputs(clock)

@@ -867,8 +867,12 @@ class BotRuntime:
             return False
         runner = self.floor_hunt_runner
         can_start = getattr(runner, "can_start_auto_sell", None)
-        if callable(can_start) and not can_start():
-            self.log("빨코2 회수 또는 층 이동 중이므로 자동판매를 보류합니다.", "자동판매")
+        can_pause = getattr(runner, "can_pause_for_auto_sell", None)
+        preflight = can_pause if callable(can_pause) else can_start
+        if callable(preflight) and not preflight():
+            reason_fn = getattr(runner, "auto_sell_block_reason", None)
+            detail = reason_fn(False) if callable(reason_fn) else "회수 또는 층 이동 중"
+            self.log(f"빨코2 {detail}이므로 자동판매를 보류합니다.", "자동판매")
             if reason == "scheduled":
                 self.auto_seller.schedule_after_seconds(1.0)
             return False
@@ -882,9 +886,22 @@ class BotRuntime:
             self._junk_selling = True
             self.release_pickup_key()
             self._release_runtime_inputs()
-            if callable(can_start) and not can_start():
+            ready = True
+            if callable(can_start):
+                ready = can_start()
+                if not ready and callable(can_pause):
+                    deadline = time.monotonic() + 0.1
+                    while not ready:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        time.sleep(min(0.01, remaining))
+                        ready = can_start()
+            if not ready:
                 self._junk_selling = False
-                self.log("빨코2 입력 해제가 확인되지 않아 자동판매를 보류합니다.", "자동판매")
+                reason_fn = getattr(runner, "auto_sell_block_reason", None)
+                detail = reason_fn(True) if callable(reason_fn) else "입력 해제 미확인"
+                self.log(f"빨코2 {detail}으로 자동판매를 보류합니다.", "자동판매")
                 if reason == "scheduled":
                     self.auto_seller.schedule_after_seconds(1.0)
                 return False
