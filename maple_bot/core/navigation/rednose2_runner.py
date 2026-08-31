@@ -53,6 +53,7 @@ class RedNose2RouteRunner:
         self._last_horizontal_intent: str | None = None
         self._last_detected_position: tuple[float, float] | None = None
         self._last_floor2_x: float | None = None
+        self._portal_position_loss_active = False
 
     def start(self) -> None:
         thread = self._thread
@@ -117,6 +118,7 @@ class RedNose2RouteRunner:
         self._last_horizontal_intent = None
         self._last_detected_position = None
         self._last_floor2_x = None
+        self._portal_position_loss_active = False
 
     @staticmethod
     def _block_signature(block) -> tuple:
@@ -454,6 +456,18 @@ class RedNose2RouteRunner:
         floor1_min, _floor1_max = self._floor1_y_range()
         return floor2_max < float(pos[1]) < floor1_min
 
+    def _is_stair7_return_position(self) -> bool:
+        pos = self._current_pos()
+        if pos is None or pos[0] is None or pos[1] is None:
+            return False
+        stair_left, stair_right = self._stair7_x_range()
+        _floor2_min, floor2_max = self._floor2_y_range()
+        floor1_min, _floor1_max = self._floor1_y_range()
+        return (
+            stair_left <= float(pos[0]) <= stair_right
+            and floor2_max < float(pos[1]) < floor1_min
+        )
+
     def _is_platform24_floor1_y(self) -> bool:
         return self._is_y_between("floor1_y_min", "floor1_y_max", 75, 77, tolerance=1)
 
@@ -487,11 +501,14 @@ class RedNose2RouteRunner:
             return
         if direction in ("up", "down"):
             current = self._current_pos()
-            if current is None and self._last_position_was_floor1():
+            if current is None and (
+                self._last_position_was_floor1()
+                or self._portal_position_loss_active
+            ):
                 self._route_inputs().release_direction()
                 self._log(
                     f"[rednose2v5] {direction} teleport blocked: "
-                    "position missing after floor1 detection"
+                    "position missing after floor1 or portal-edge detection"
                 )
                 return
         h = self._route_inputs()
@@ -548,6 +565,31 @@ class RedNose2RouteRunner:
         if x >= right_edge:
             return "left"
         return last_direction
+
+    def _position_loss_near_portal(
+        self,
+        last_position: tuple[float, float] | None,
+    ) -> bool:
+        if last_position is None:
+            return False
+        x = float(last_position[0])
+        left_edge = self._profile_x(
+            "position_loss_left_edge_x",
+            self._floor2_left_x(),
+        )
+        right_edge = self._profile_x(
+            "position_loss_right_edge_x",
+            self._floor2_right_safe_x(),
+        )
+        return x <= left_edge or x >= right_edge
+
+    @staticmethod
+    def _opposite_direction(direction: str | None) -> str | None:
+        if direction == "left":
+            return "right"
+        if direction == "right":
+            return "left"
+        return None
 
     def _teleport_attack(
         self,
@@ -688,20 +730,27 @@ class RedNose2RouteRunner:
                         0.0,
                         float(self._profile.get("position_loss_recovery_sec", 0.8)),
                     )
-                    recovery_direction = self._position_loss_direction(
-                        last_detected_position,
-                        last_direction,
+                    near_portal = self._position_loss_near_portal(
+                        last_detected_position
                     )
-                    if (
-                        recovery_direction in {"left", "right"}
-                        and now - position_missing_since <= recovery_sec
-                    ):
+                    self._portal_position_loss_active = near_portal
+                    if near_portal:
+                        recovery_direction = self._position_loss_direction(
+                            last_detected_position,
+                            last_direction,
+                        )
+                    elif now - position_missing_since <= recovery_sec:
+                        recovery_direction = last_direction
+                    else:
+                        recovery_direction = self._opposite_direction(last_direction)
+                    if recovery_direction in {"left", "right"}:
                         h.hold_direction(recovery_direction)
                     else:
                         h.release_direction()
                     self._sleep(0.03)
                     continue
                 position_missing_since = None
+                self._portal_position_loss_active = False
                 last_detected_position = (float(pos[0]), float(pos[1]))
                 self._last_detected_position = last_detected_position
                 if floor_guard is not None and not floor_guard():
@@ -1553,7 +1602,7 @@ class RedNose2RouteRunner:
             if self._is_upper_floor_v5(None):
                 self._log("[rednose2v5] floor2 reached during stair7 recovery")
                 return True
-            if self._is_stair7_return_y():
+            if self._is_stair7_return_position():
                 self._log(f"[rednose2v5] stair7 intermediate Y confirmed ({attempt}/{attempts})")
                 self._stair7_up_right_teleport_once()
                 if self._wait_floor(lambda: self._is_upper_floor_v5(None), 0.55):

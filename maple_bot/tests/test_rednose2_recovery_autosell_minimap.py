@@ -191,6 +191,78 @@ def test_position_loss_in_map_center_keeps_original_direction(monkeypatch):
     assert ("hold", "right") in [event[:2] for event in inputs.direction_events]
 
 
+def test_position_loss_reverses_after_point_eight_seconds_instead_of_stopping(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs, {"position_loss_recovery_sec": 0.8})
+    reads = 0
+
+    def current_pos():
+        nonlocal reads
+        reads += 1
+        if reads <= 2:
+            return (80.0, 62.0)
+        if clock.now < 1.0:
+            return None
+        return (120.0, 62.0)
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr(runner, "_current_pos", current_pos)
+
+    assert runner._move_to_target_v5(
+        120.0,
+        attack=False,
+        teleport_stop_distance=999.0,
+    )
+    assert any(
+        event[0:2] == ("hold", "left") and event[2] >= 0.8
+        for event in inputs.direction_events
+    )
+
+
+@pytest.mark.parametrize(
+    ("start_x", "target_x", "expected_direction"),
+    [
+        (40.0, 0.0, "right"),
+        (130.0, 170.0, "left"),
+    ],
+)
+def test_position_loss_at_portal_keeps_moving_toward_center_until_detected(
+    monkeypatch,
+    start_x,
+    target_x,
+    expected_direction,
+):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs, {"position_loss_recovery_sec": 0.8})
+    reads = 0
+
+    def current_pos():
+        nonlocal reads
+        reads += 1
+        if reads <= 2:
+            return (start_x, 62.0)
+        if clock.now < 1.2:
+            return None
+        return (target_x, 62.0)
+
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
+    monkeypatch.setattr(runner, "_current_pos", current_pos)
+
+    assert runner._move_to_target_v5(
+        target_x,
+        attack=False,
+        teleport_stop_distance=999.0,
+    )
+    assert any(
+        event[0:2] == ("hold", expected_direction) and event[2] >= 1.0
+        for event in inputs.direction_events
+    )
+
+
 def test_vertical_teleport_is_blocked_when_last_detected_position_was_floor1(monkeypatch):
     clock = FakeClock()
     inputs = RecordingInputs(clock)
@@ -202,6 +274,55 @@ def test_vertical_teleport_is_blocked_when_last_detected_position_was_floor1(mon
     runner._teleport_once("down")
 
     assert inputs.action_events == []
+
+
+def test_vertical_teleport_is_blocked_during_portal_position_loss(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs)
+    runner._last_detected_position = (130.0, 62.0)
+    runner._portal_position_loss_active = True
+    monkeypatch.setattr(runner, "_current_pos", lambda: None)
+
+    runner._teleport_once("up")
+
+    assert inputs.action_events == []
+
+
+def test_stair7_intermediate_y_does_not_press_up_outside_stair_x(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs, {"stair7_return_attempts": 1})
+    up_calls = []
+
+    monkeypatch.setattr(runner, "_current_pos", lambda: (130.0, 68.0))
+    monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        runner,
+        "_stair7_up_right_teleport_once",
+        lambda: up_calls.append("up-right"),
+    )
+
+    assert runner._return_floor2_from_stair7() is False
+    assert up_calls == []
+
+
+def test_stair7_intermediate_position_still_uses_up_right_teleport(monkeypatch):
+    clock = FakeClock()
+    inputs = RecordingInputs(clock)
+    runner = make_runner(clock, inputs, {"stair7_return_attempts": 1})
+    up_calls = []
+
+    monkeypatch.setattr(runner, "_current_pos", lambda: (41.0, 68.0))
+    monkeypatch.setattr(
+        runner,
+        "_stair7_up_right_teleport_once",
+        lambda: up_calls.append("up-right"),
+    )
+    monkeypatch.setattr(runner, "_wait_floor", lambda _predicate, _timeout: True)
+
+    assert runner._return_floor2_from_stair7() is True
+    assert up_calls == ["up-right"]
 
 
 def test_current_position_preserves_last_confirmed_floor2_x():
