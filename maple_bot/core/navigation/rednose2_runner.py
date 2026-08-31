@@ -1127,11 +1127,12 @@ class RedNose2RouteRunner:
                         f"collection timer reset to {self._next_collection_at - self._last_pickup_at:.4f}s"
                     )
                     return True
-                if stage in {"stair7_return", "right_edge", "platform1415", "platform16", "platform27", "return_floor2"}:
-                    self._collection_stage = stage
-                    return True
-                stage = "platform24"
-                self._collection_stage = stage
+                self._collection_stage = "right_edge"
+                self._log(
+                    f"[rednose2v5] collection floor1 recovery reselected "
+                    f"stage={stage} -> right_edge"
+                )
+                return True
 
             self._log(f"[rednose2v5] rednose-new collection route start · stage={stage}")
             self._release_attack_key()
@@ -1178,31 +1179,36 @@ class RedNose2RouteRunner:
 
             if stage == "platform1415":
                 if not self._enter_platform1415():
-                    self._collection_stage = "platform1415"
+                    self._collection_stage = self._reselect_collection_stage_after_failure(
+                        "right_edge"
+                    )
                     return False
                 stage = "platform16"
                 self._collection_stage = stage
 
             if stage == "platform16":
                 if not self._enter_platform16():
-                    self._collection_stage = "platform16"
+                    self._collection_stage = self._reselect_collection_stage_after_failure(
+                        "platform1415"
+                    )
                     return False
                 stage = "platform27"
                 self._collection_stage = stage
 
             if stage == "platform27":
                 if not self._enter_platform27():
-                    self._collection_stage = "platform27"
+                    self._collection_stage = self._reselect_collection_stage_after_failure(
+                        "platform16"
+                    )
                     return False
                 stage = "return_floor2"
                 self._collection_stage = stage
 
             if stage == "return_floor2":
                 if not self._finish_platform27_and_return_floor2():
-                    if not self._is_upper_floor_v5(None):
-                        self._collection_stage = "right_edge"
-                        return True
-                    self._collection_stage = None
+                    self._collection_stage = self._reselect_collection_stage_after_failure(
+                        "platform27"
+                    )
                     return False
 
             self._last_pickup_at = time.monotonic()
@@ -1237,6 +1243,41 @@ class RedNose2RouteRunner:
         if in_range("platform1415_y_min", "platform1415_y_max", 54, 55):
             return "platform16", True
         return stage, False
+
+    def _reselect_collection_stage_after_failure(self, confirmed_stage: str) -> str:
+        """실패 후 실제 위치를 우선하고 미검출이면 확정 단계의 다음 순서를 유지한다."""
+        next_by_confirmed = {
+            "right_edge": "platform1415",
+            "platform1415": "platform16",
+            "platform16": "platform27",
+            "platform27": "return_floor2",
+        }
+        fallback_stage = next_by_confirmed[confirmed_stage]
+        position = self._current_pos()
+        if position is None or position[1] is None:
+            self._log(
+                f"[rednose2v5] collection stage reselect position=missing, "
+                f"confirmed={confirmed_stage}, next={fallback_stage}"
+            )
+            return fallback_stage
+
+        detected_stage, upper_platform_confirmed = self._advance_collection_stage_from_position(
+            fallback_stage
+        )
+        if upper_platform_confirmed:
+            selected_stage = detected_stage
+        elif self._is_lower_floor_v5(None):
+            selected_stage = "stair7_return"
+        elif self._is_upper_floor_v5(None):
+            selected_stage = "right_edge"
+        else:
+            selected_stage = fallback_stage
+        self._log(
+            f"[rednose2v5] collection stage reselect "
+            f"x={float(position[0]):.0f}, y={float(position[1]):.0f}, "
+            f"confirmed={confirmed_stage}, next={selected_stage}"
+        )
+        return selected_stage
 
     def _manual_active(self) -> bool:
         block_stop = getattr(self._br, "_stop", None)

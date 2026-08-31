@@ -135,6 +135,55 @@ def test_platform27_failure_keeps_platform27_as_next_collection_stage():
     assert runner._collection_stage == "platform27"
 
 
+def test_platform27_floor1_recovery_resumes_from_right_edge_after_stair7():
+    runner = _collection_runner((4, 76), "platform27")
+    calls = []
+    runner._return_floor2_from_stair7 = lambda: calls.append("stair7") or True
+    runner._enter_platform27 = lambda: calls.append("27") or True
+
+    assert runner._run_rednose_new_v5_collection() is True
+    assert calls == ["stair7"]
+    assert runner._collection_stage == "right_edge"
+
+
+def test_platform27_failure_reselects_platform16_from_detected_platform1415():
+    state = {"position": (95, 47)}
+    runner = _collection_runner(state["position"], "platform27")
+    runner._current_pos = lambda: state["position"]
+
+    def fail_after_falling_to_platform1415():
+        state["position"] = (95, 54)
+        return False
+
+    runner._enter_platform27 = fail_after_falling_to_platform1415
+
+    assert runner._run_rednose_new_v5_collection() is False
+    assert runner._collection_stage == "platform16"
+
+
+def test_platform27_failure_reselects_right_edge_from_detected_floor2():
+    runner = _collection_runner((40, 62), "platform27")
+    runner._enter_platform27 = lambda: False
+
+    assert runner._run_rednose_new_v5_collection() is False
+    assert runner._collection_stage == "right_edge"
+
+
+def test_return_floor2_missing_position_uses_previous_platform27_stage():
+    state = {"position": (91, 50)}
+    runner = _collection_runner(state["position"], "return_floor2")
+    runner._current_pos = lambda: state["position"]
+
+    def fail_after_position_loss():
+        state["position"] = None
+        return False
+
+    runner._finish_platform27_and_return_floor2 = fail_after_position_loss
+
+    assert runner._run_rednose_new_v5_collection() is False
+    assert runner._collection_stage == "return_floor2"
+
+
 def test_platform16_position_skips_platform1415_and_platform16_actions():
     runner = _collection_runner((95, 47), "platform1415")
     calls = []
