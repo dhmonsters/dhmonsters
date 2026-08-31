@@ -76,7 +76,7 @@ def test_teleport_attack_uses_randomized_total_attack_hold_once(monkeypatch):
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs)
     monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: round(value * 0.95, 4))
 
     runner._teleport_attack("right")
 
@@ -108,7 +108,7 @@ def test_next_teleport_interval_starts_after_action_completion(monkeypatch):
 
     monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
     monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: round(value * 0.95, 4))
     monkeypatch.setattr(runner, "_current_pos", current_pos)
     monkeypatch.setattr(runner, "_fresh_sample", fresh_sample)
     monkeypatch.setattr(runner, "_teleport_attack", record_attack)
@@ -144,7 +144,7 @@ def test_floor2_recovery_uses_distinct_first_two_attack_teleport_timings(monkeyp
 
     monkeypatch.setattr("core.navigation.rednose2_runner.time.monotonic", clock.monotonic)
     monkeypatch.setattr("core.navigation.rednose2_runner.time.perf_counter", clock.perf_counter)
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: value)
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: value)
     monkeypatch.setattr(runner, "_current_pos", lambda: tuple(position))
     monkeypatch.setattr(runner, "_fresh_sample", fresh_sample)
 
@@ -249,7 +249,7 @@ def test_platform27_manual_attack_hold_uses_half_second_default(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs)
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: round(value * 0.95, 4))
     monkeypatch.setattr(runner, "_teleport_once", lambda direction: None)
     monkeypatch.setattr(runner, "_wait_floor", lambda predicate, timeout: True)
 
@@ -264,7 +264,7 @@ def test_platform27_return_stops_after_five_down_teleports(monkeypatch):
     runner = make_runner(clock, route_inputs)
     directions = []
 
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: round(value * 0.95, 4))
     monkeypatch.setattr(runner, "_teleport_once", directions.append)
     monkeypatch.setattr(runner, "_wait_floor", lambda _predicate, _timeout: False)
     monkeypatch.setattr(runner, "_is_lower_floor_v5", lambda _position: False)
@@ -438,7 +438,7 @@ def test_platform16_attacks_then_teleports_three_times_and_uses_simple_bypass(mo
     runner = make_runner(clock, route_inputs)
     teleports = []
 
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: round(value * 0.95, 4))
     monkeypatch.setattr(
         runner,
         "_move_to_target_v5",
@@ -462,7 +462,7 @@ def test_platform1415_attack_hold_uses_saved_duration_before_platform16_teleport
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs, {"platform1415_attack_hold_sec": 0.8})
 
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: value)
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: value)
     monkeypatch.setattr(runner, "_teleport_once", lambda _direction: None)
     monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: True)
 
@@ -477,7 +477,7 @@ def test_platform27_uses_three_attempts_and_attacks_after_arrival(monkeypatch):
     waits = iter((False, False, True))
     teleports = []
 
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: round(value * 0.95, 4))
     monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(runner, "_teleport_once", teleports.append)
     monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: next(waits))
@@ -495,7 +495,7 @@ def test_platform27_entry_attack_hold_uses_saved_duration(monkeypatch):
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs, {"platform27_entry_attack_hold_sec": 0.7})
 
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: value)
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: value)
     monkeypatch.setattr(runner, "_move_to_target_v5", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(runner, "_teleport_once", lambda _direction: None)
     monkeypatch.setattr(runner, "_wait_y_range", lambda *_args, **_kwargs: True)
@@ -531,7 +531,7 @@ def test_platform27_manual_attack_hold_applies_down_five_once(monkeypatch):
     clock = FakeClock()
     route_inputs = RecordingRouteInputs(clock)
     runner = make_runner(clock, route_inputs, {"platform27_attack_sec": 2.0})
-    monkeypatch.setattr("core.navigation.rednose2_runner.down_5", lambda value: round(value * 0.95, 4))
+    monkeypatch.setattr("core.navigation.rednose2_runner.randomize_hold", lambda value: round(value * 0.95, 4))
     monkeypatch.setattr(runner, "_teleport_once", lambda _direction: None)
     monkeypatch.setattr(runner, "_wait_floor", lambda _predicate, _timeout: True)
 

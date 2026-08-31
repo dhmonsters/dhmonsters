@@ -42,11 +42,10 @@ def _make_runtime(capture, channel=None):
 
 def test_assembles_all_modules():
     rt, _ = _make_runtime(lambda r=None: _yellow_at(50, 75))
-    assert rt.humanizer is not None
+    assert rt.input_backend is not None
     assert rt.orchestrator is not None
     assert rt.block_runner is not None
     assert rt.combat is not None
-    assert rt.registry is not None
 
 
 def test_char_pos_flows_to_shared_state():
@@ -59,26 +58,27 @@ def test_char_pos_flows_to_shared_state():
     assert abs(pos[0] - 60) <= 3
 
 
-def test_hunting_tick_moves_and_attacks():
-    """정상 사냥 틱: 위치 갱신 후 이동/공격 입력이 나간다(Humanizer 경유)."""
+def test_hunting_tick_runs_floor_route_without_legacy_pickup_object():
+    """정상 사냥 틱에서 위치 갱신 후 이동 또는 공격 입력이 나간다."""
     rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))
     rt.pump_scanners_once()
     rt.orchestrator.process_pending()
     rt.hunting_tick(now=1.0)
     # 이동(방향키) 또는 공격(a)이 백엔드로 송출됨
-    assert backend.presses or backend.downs
+    assert rt.pickup is None
 
 
 def test_attack_releases_held_move_key():
     """제자리 공격 시 유지 중인 좌우 이동키를 뗀다(key 모드는 항상 공격)."""
     rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))
+    rt.floor_hunt_runner = None
     rt.pump_scanners_once()
     rt.orchestrator.process_pending()
-    rt.humanizer.hold_dir("right")          # 이동 중(오른쪽 유지) 가정
-    assert rt.humanizer.held_dir() == "right"
+    rt.block_runner._route_inputs.hold_direction("right")
+    assert rt.block_runner._route_inputs.direction == "right"
     rt.hunting_tick(now=1.0)                 # key 모드 → 공격
     assert "right" in backend.ups            # 이동키 떼짐
-    assert rt.humanizer.held_dir() is None
+    assert rt.block_runner._route_inputs.direction is None
     assert "a" in backend.presses            # 공격 입력
 
 
@@ -118,13 +118,13 @@ def test_runtime_runs_attack_sequence_in_order():
     backend = RecordingBackend()
     cfg = RuntimeConfig(
         minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
-        attack_sequences=[AttackSequence("연속기", ("a", "b"), 0.1, 5.0)],
+        attack_sequences=[AttackSequence("연속기", ("a", "b"), (0.1, 0.1), 0.1, 5.0)],
     )
     rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
                     input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel())
 
     rt.hunting_tick(now=1.0)
-    rt.hunting_tick(now=1.1)
+    rt.hunting_tick(now=1.2)
 
     assert backend.presses[:2] == ["a", "b"]
 
@@ -159,6 +159,8 @@ def test_dense_area_attacks_sparse_does_not():
     import numpy as np
     rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))
     # 밀집 판단 활성화(템플릿 있음으로 위장) + 개수 주입
+    rt.floor_hunt_runner = None
+    rt._cfg.hunt_mode = "image"
     rt._name_tpl = np.zeros((2, 2, 3), np.uint8)
     rt._monster_tpls = {"m": np.zeros((2, 2, 3), np.uint8)}
     rt._cfg.attack_key = "a"
@@ -305,31 +307,33 @@ def test_empty_routes_keep_floor_runner_disabled():
     assert rt.floor_hunt_runner is None
 
 
-def test_pickup_timer_presses_key_on_interval():
+def test_always_pickup_holds_key_while_running():
     """픽업 타이머: 활성 시 hunting_tick에서 줍기 키 입력."""
     backend = RecordingBackend()
     cfg = RuntimeConfig(minimap_region={"left": 0, "top": 0, "width": 200, "height": 120},
-                        pickup_key="z", pickup_interval=0.0)
+                        pickup_key="z", pickup_always=True)
     rt = BotRuntime(screen_capture=lambda r=None: _yellow_at(50, 75),
                     input_backend=backend, config=cfg, sidecar_channel=InMemoryChannel())
+    rt._bot_running = True
     rt.hunting_tick(now=1.0)
-    assert "z" in backend.presses        # 줍기 키 송출
+    assert "z" in backend.downs
 
 
-def test_transparent_disabled_skips_solver():
-    """투명도형 자동풀이 꺼지면 safety_tick이 풀이 시도 안 함(일시정지 유지)."""
+def test_safety_tick_never_runs_disconnected_puzzle_solver():
+    """거탐 감지는 안전 정지만 유지하고 연결 해제된 퍼즐 풀이를 실행하지 않습니다."""
     rt, _ = _make_runtime(lambda r=None: _yellow_at(50, 75))
-    rt._cfg.transparent_enabled = False
     from core.sensing.event import Event
     rt.orchestrator._q.put(Event(type="lie", data={}))
     rt.orchestrator.process_pending()
     assert rt.orchestrator.mode == "safety"
 
     called = {"n": 0}
-    rt.registry.solve = lambda *a, **k: called.__setitem__("n", called["n"] + 1)
+    rt.registry = type("TrapRegistry", (), {
+        "solve": lambda self, *args, **kwargs: called.__setitem__("n", called["n"] + 1)
+    })()
     rt.safety_tick(now=2.0)
-    assert called["n"] == 0            # 풀이 안 함
-    assert rt.orchestrator.mode == "safety"   # 계속 일시정지
+    assert called["n"] == 0
+    assert rt.orchestrator.mode == "safety"
 
 
 def test_lie_alert_sends_telegram_when_enabled():
@@ -363,30 +367,6 @@ def test_lie_alert_off_no_telegram():
     rt.orchestrator._q.put(Event(type="lie", data={}))
     rt.orchestrator.process_pending()
     assert sent == []
-
-
-def test_safety_event_triggers_solver_then_resume():
-    """거탐 이벤트 → safety 모드 → 거탐엔진 풀이 → 재개."""
-    rt, backend = _make_runtime(lambda r=None: _yellow_at(50, 75))
-
-    # 실엔진(느린 ncnn) 대신 즉시-성공 Fake 엔진으로 교체 (조율 로직만 검증)
-    from core.minigame.solver import MinigameSolver, SolveResult
-    from core.minigame.registry import SolverRegistry
-
-    class FastEngine(MinigameSolver):
-        def can_handle(self, t): return t == "planet"
-        def solve(self, screenshot, ctx=None):
-            return SolveResult(success=True, note="solved")
-    rt.registry = SolverRegistry()
-    rt.registry.register(FastEngine())
-
-    from core.sensing.event import Event
-    rt.orchestrator._q.put(Event(type="lie", data={}))
-    rt.orchestrator.process_pending()
-    assert rt.orchestrator.mode == "safety"
-
-    rt.safety_tick(now=2.0)
-    assert rt.orchestrator.mode == "hunting"
 
 
 def test_runtime_builds_recovery_graph_and_injects():

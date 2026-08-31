@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import time
 
-from core.humanize.priority_input_executor import PriorityInputExecutor
+from core.navigation.priority_input_executor import PriorityInputExecutor
 from core.navigation.ladder_trace import LadderTraceBuffer
 
 

@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Callable
 
-from core.humanize.timing import down_5
+from core.input_timing import randomize_hold
 from core.internal_trace import trace_event
 
 
@@ -477,7 +477,7 @@ class RedNose2RouteRunner:
             return
         h = self._route_inputs()
         h.hold_action(attack_key)
-        self._sleep(down_5(seconds))
+        self._sleep(randomize_hold(seconds))
         h.release_action(attack_key)
 
     def _release_attack_key(self) -> None:
@@ -612,7 +612,7 @@ class RedNose2RouteRunner:
             if teleport_hold_sec is None
             else teleport_hold_sec
         )
-        attack_hold = down_5(float(attack_hold_value))
+        attack_hold = randomize_hold(float(attack_hold_value))
         started_at = time.monotonic()
         h.hold_direction(direction)
         h.hold_action(attack_key)

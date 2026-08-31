@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
-from core.humanize.timing import down_5
+from core.input_timing import randomize_hold
 from core.navigation.block import Block
 from core.navigation.block_runner import TELEPORT_MIN_DIST
 from core.navigation.route_recovery import RouteRecoveryResolver
@@ -114,7 +114,7 @@ class RouteStateRunner:
             if not key:
                 return True
             self._input.hold_action(key)
-            time.sleep(down_5(max(0.0, float(step.parameters.get("hold_sec", 0.1)))))
+            time.sleep(randomize_hold(max(0.0, float(step.parameters.get("hold_sec", 0.1)))))
             self._input.release_action(key)
             return True
         return self._execute_complex(step)

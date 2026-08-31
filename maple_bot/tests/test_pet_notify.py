@@ -4,34 +4,37 @@ from core.acting.pet import PetFeeder
 from core.notify.telegram import TelegramNotifier
 
 
-class FakeHumanizer:
-    def __init__(self): self.intents = []
-    def perform(self, i): self.intents.append(i)
+class RecordingBackend:
+    def __init__(self): self.presses = []
+    def press(self, key, hold_sec=0.05): self.presses.append((key, hold_sec))
 
 
 # ── PetFeeder ─────────────────────────────────────────────────
-def test_pet_feeds_on_interval():
-    h = FakeHumanizer()
-    pet = PetFeeder(h, key="=", interval=600)   # 10분
+def test_pet_feeds_on_interval(monkeypatch):
+    monkeypatch.setattr("core.acting.pet.randomize_interval", lambda value: value)
+    backend = RecordingBackend()
+    pet = PetFeeder(backend, key="=", interval=600)
     pet.tick(now=1000.0)                          # 최초
-    assert any(i.key == "=" for i in h.intents)
+    assert backend.presses == [("=", 0.05)]
 
 
-def test_pet_respects_interval():
-    h = FakeHumanizer()
-    pet = PetFeeder(h, key="=", interval=600)
-    pet.tick(1000.0); n = len(h.intents)
+def test_pet_respects_interval(monkeypatch):
+    monkeypatch.setattr("core.acting.pet.randomize_interval", lambda value: value)
+    backend = RecordingBackend()
+    pet = PetFeeder(backend, key="=", interval=600)
+    pet.tick(1000.0); n = len(backend.presses)
     pet.tick(1300.0)                              # 5분 → 아직
-    assert len(h.intents) == n
+    assert len(backend.presses) == n
     pet.tick(1601.0)                              # 10분 경과
-    assert len(h.intents) > n
+    assert len(backend.presses) > n
 
 
-def test_pet_disabled_when_no_key():
-    h = FakeHumanizer()
-    pet = PetFeeder(h, key="", interval=600)
+def test_pet_disabled_when_no_key(monkeypatch):
+    monkeypatch.setattr("core.acting.pet.randomize_interval", lambda value: value)
+    backend = RecordingBackend()
+    pet = PetFeeder(backend, key="", interval=600)
     pet.tick(1000.0)
-    assert len(h.intents) == 0
+    assert backend.presses == []
 
 
 # ── TelegramNotifier ──────────────────────────────────────────

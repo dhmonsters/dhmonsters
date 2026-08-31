@@ -750,7 +750,6 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         hp_rule=hp_rule,
         mp_rule=mp_rule,
         buffs=_buffs(attack),
-        minigame_type="planet",
         patrol_left_x=patrol_left,
         patrol_right_x=patrol_right,
         patrol_margin=patrol_margin,
@@ -804,9 +803,6 @@ def to_runtime_config(d: dict) -> RuntimeConfig:
         lie_title_template=str(lie.get("template_path") or "templates/lie_detector/title.png"),
         lie_threshold=float(lie.get("threshold", 0.65)),
         lie_detect_region=lie_detect_region,
-        board_roi=lie.get("board_roi"),
-        transparent_enabled=bool(
-            d.get("settings1", {}).get("transparent_shape", {}).get("enabled", True)),
         tg_enabled=bool(lie.get("tg_enabled", False)),
         tg_token=lie.get("tg_token", ""),
         tg_chat_id=lie.get("tg_chat_id", ""),

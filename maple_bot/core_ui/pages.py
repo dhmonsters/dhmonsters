@@ -952,7 +952,6 @@ def build_pages(config) -> list[QWidget]:
         CheckField("거탐 알림 (소리+텔레그램)", c, ("settings1", "lie_detector", "alert_enabled")),
         TextField("텔레그램 토큰", c, ("settings1", "lie_detector", "tg_token")),
         TextField("텔레그램 챗ID", c, ("settings1", "lie_detector", "tg_chat_id")),
-        CheckField("투명도형 자동탐지", c, ("settings1", "transparent_shape", "enabled")),
         CheckField("다른 유저 감지", c, ("settings1", "user_detected", "enabled")),
         CheckField("방지몹 해제", c, ("anti_mob", "enabled")),
     ], extras=[anti_mob_widget] if anti_mob_widget is not None else None))
@@ -1006,7 +1005,6 @@ def build_pages(config) -> list[QWidget]:
         CheckField("이동 모듈", c, ("modules", "move"), default=True),
         CheckField("물약 모듈", c, ("modules", "potion"), default=True),
         CheckField("거탐 알림 모듈", c, ("modules", "lie_notify"), default=True),
-        CheckField("거탐 풀이 모듈", c, ("modules", "lie_solve"), default=True),
         TextField("게임창 제목", c, ("settings2", "game_window_title"), default="MapleStory Worlds"),
     ]))
 

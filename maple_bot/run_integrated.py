@@ -146,7 +146,7 @@ def build_runtime():
     ??????熬곣뫖利당춯??쎾퐲??????????? (runtime, RuntimeConfig, ConfigManager)."""
     from core.screen_reader import ScreenReader
     from core.config_manager import ConfigManager
-    from core.humanize.backend import select_backend
+    from core.input_backend import select_backend
     from core.config_adapter import to_runtime_config
     BotRuntime = _load_core_runtime_attr("BotRuntime")
 

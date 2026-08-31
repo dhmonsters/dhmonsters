@@ -29,10 +29,9 @@ class RecordingBackend:
         self.press(key, hold_sec)
 
 
-def test_combat_passes_raw_holds_and_uses_fixed_intervals(monkeypatch):
+def test_combat_passes_raw_holds_and_randomizes_attack_interval_once(monkeypatch):
     backend = RecordingBackend()
-    monkeypatch.setattr("core.acting.combat.down_5", lambda value: value * 0.95, raising=False)
-    monkeypatch.setattr("core.acting.combat.plus_minus_5", lambda value: value * 1.05, raising=False)
+    monkeypatch.setattr("core.acting.combat.randomize_interval", lambda value: value * 1.05, raising=False)
     combat = Combat(
         backend,
         hp_rule=PotionRule(enabled=True, key="9", threshold=0.7, cooldown=2.0),
@@ -42,16 +41,15 @@ def test_combat_passes_raw_holds_and_uses_fixed_intervals(monkeypatch):
     combat.check_potions(hp_ratio=0.5, mp_ratio=1.0, now=10.0)
 
     assert backend.presses == [("end", 0.9), ("9", 0.05)]
-    assert combat._cur_interval == 0.4
+    assert combat._cur_interval == pytest.approx(0.42)
     assert combat._potion_next_allowed["HP"] == 12.0
 
 
-def test_buff_and_pet_pass_raw_holds_and_keep_fixed_waits(monkeypatch):
+def test_buff_and_pet_pass_raw_holds_and_randomize_schedules_once(monkeypatch):
     backend = RecordingBackend()
     sleeps = []
-    monkeypatch.setattr("core.acting.buff.down_5", lambda value: value * 0.95, raising=False)
-    monkeypatch.setattr("core.acting.buff.plus_minus_5", lambda value: value * 1.05, raising=False)
-    monkeypatch.setattr("core.acting.pet.plus_minus_5", lambda value: value * 1.05, raising=False)
+    monkeypatch.setattr("core.acting.buff.randomize_interval", lambda value: value * 1.05, raising=False)
+    monkeypatch.setattr("core.acting.pet.randomize_interval", lambda value: value * 1.05, raising=False)
 
     buffs = BuffManager(backend, [Buff(key="f", interval=100.0, hold_sec=0.8)], gap=2.5)
     buffs.tick(1000.0)
@@ -59,16 +57,15 @@ def test_buff_and_pet_pass_raw_holds_and_keep_fixed_waits(monkeypatch):
     pet.tick(1000.0)
 
     assert backend.presses == [("f", 0.8), ("=", 0.05), ("=", 0.05)]
-    assert buffs._iv[0] == 100.0
-    assert buffs._next_allowed == 1002.5
-    assert pet._iv == 600.0
-    assert sleeps == [0.4]
+    assert buffs._iv[0] == 105.0
+    assert buffs._next_allowed == 1002.625
+    assert pet._iv == 630.0
+    assert sleeps == [pytest.approx(0.42)]
 
 
 def test_charlie_passes_raw_holds_and_keeps_fixed_waits(monkeypatch):
     backend = RecordingBackend()
     sleeps = []
-    monkeypatch.setattr("core.acting.charlie.plus_minus_5", lambda value: value * 1.05, raising=False)
     exchange = CharlieExchange(backend, sleep_fn=sleeps.append)
 
     exchange._npc_talk()
@@ -78,9 +75,9 @@ def test_charlie_passes_raw_holds_and_keeps_fixed_waits(monkeypatch):
     assert sleeps == [0.5, 0.1]
 
 
-def test_attack_sequence_uses_fixed_key_and_repeat_intervals(monkeypatch):
+def test_attack_sequence_randomizes_key_and_repeat_intervals_once(monkeypatch):
     presses = []
-    monkeypatch.setattr("core.acting.attack_sequence.plus_minus_5", lambda value: value * 1.05, raising=False)
+    monkeypatch.setattr("core.acting.attack_sequence.randomize_interval", lambda value: value * 1.05, raising=False)
     runner = AttackSequenceRunner(
         [AttackSequence("연속기", ("a", "b"), (0.1, 0.2), 0.3, 1.0)],
         lambda key, hold: presses.append((key, hold)),
@@ -89,8 +86,8 @@ def test_attack_sequence_uses_fixed_key_and_repeat_intervals(monkeypatch):
     runner.tick(10.0, True)
 
     assert presses == [("a", 0.1)]
-    assert runner._states[0]["next_run"] == 11.0
-    assert runner._states[0]["next_key"] == 10.3
+    assert runner._states[0]["next_run"] == 11.05
+    assert runner._states[0]["next_key"] == 10.315
 
 
 def test_world_action_passes_raw_hold():
@@ -120,12 +117,6 @@ def test_rednose3_passes_raw_attack_hold_and_keeps_fixed_gap(monkeypatch):
         profile={"attack_key": "end", "attack_hold_sec": 0.9, "attack_gap_sec": 0.05},
         sleep_fn=sleeps.append,
     )
-    monkeypatch.setattr(
-        "core.navigation.rednose3_runner.down_5",
-        lambda value: value * 0.95,
-        raising=False,
-    )
-
     runner._tap_attack(2)
 
     assert backend.presses == [("end", 0.9), ("end", 0.9)]
@@ -166,7 +157,7 @@ def test_map_navigator_passes_fixed_nominal_attack_holds():
     assert backend.presses == [("space", 0.0533), ("end", 0.0533)]
 
 
-def test_key_hunter_manual_hold_applies_down_five_once(monkeypatch):
+def test_key_hunter_manual_hold_randomizes_once(monkeypatch):
     events = []
     hunter = KeyHunter.__new__(KeyHunter)
     hunter._input = SimpleNamespace(
@@ -177,14 +168,14 @@ def test_key_hunter_manual_hold_applies_down_five_once(monkeypatch):
     hunter._status = lambda message: None
     step = SimpleNamespace(action=ACTION_HOLD, key="ctrl", min_sec=1.0, max_sec=1.0)
     monkeypatch.setattr("core.key_hunter.random.uniform", lambda low, high: 1.0)
-    monkeypatch.setattr("core.key_hunter.down_5", lambda value: 0.95, raising=False)
+    monkeypatch.setattr("core.key_hunter.randomize_hold", lambda value: 0.95)
 
     hunter._execute(step)
 
     assert events == [("down", "ctrl"), ("sleep", 0.95), ("up", "ctrl")]
 
 
-def test_route_state_manual_action_applies_down_five_once(monkeypatch):
+def test_route_state_manual_action_randomizes_hold_once(monkeypatch):
     events = []
     input_owner = SimpleNamespace(
         hold_action=lambda key: events.append(("down", key)),
@@ -196,7 +187,7 @@ def test_route_state_manual_action_applies_down_five_once(monkeypatch):
         type=RouteStepType.ACTION,
         parameters={"skill_key": "home", "hold_sec": 0.1},
     )
-    monkeypatch.setattr("core.navigation.route_state_runner.down_5", lambda value: 0.095, raising=False)
+    monkeypatch.setattr("core.navigation.route_state_runner.randomize_hold", lambda value: 0.095)
     monkeypatch.setattr("core.navigation.route_state_runner.time.sleep", lambda value: events.append(("sleep", value)))
 
     assert runner._execute(step, [step])

@@ -21,11 +21,10 @@ from core.acting.combat import Combat, PotionRule
 from core.acting.attack_sequence import AttackSequence, AttackSequenceRunner
 from core.acting.buff import BuffManager, Buff
 from core.acting.pet import PetFeeder
-from core.humanize.timing import down_5
+from core.input_timing import randomize_hold
 from core.sensing.user_scanner import UserScanner
 from core.sensing import monster_vision
 from core.notify.telegram import TelegramNotifier
-from core.minigame.registry import SolverRegistry
 
 
 def _app_path(path: str) -> str:
@@ -37,8 +36,6 @@ def _app_path(path: str) -> str:
         return str(candidate)
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
     return str(base / candidate)
-from core.minigame.self_transparent_engine import SelfTransparentEngine
-from core.minigame.sidecar import InMemoryChannel, SidecarChannel
 from core.navigation.viewport_tracker import ViewportTracker
 from core.navigation.image_trigger import ImageTrigger
 from core.navigation.world_map import WorldMapModel
@@ -73,13 +70,6 @@ class RuntimeConfig:
     antimob_templates: dict = field(default_factory=dict)
     antimob_enabled: dict = field(default_factory=dict)
     anti_mob_profile: dict = field(default_factory=dict)
-    minigame_type: str = "planet"
-    # 嫄고깘 (?먯껜 ncnn ?붿쭊)
-    transparent_models_dir: str = "models/transparent"
-    board_region: dict | None = None          # 嫄고깘 寃뚯엫???붾㈃?곸뿭 (None=board_roi 鍮꾩쑉 ?ъ슜)
-    board_roi: dict | None = None              # A 怨좎젙 ?곷?醫뚰몴 {x_ratio,y_ratio,w_ratio,h_ratio}
-    transparent_use_gpu: bool = False
-    transparent_enabled: bool = True           # ?щ챸?꾪삎 ?먮룞???on/off (泥댄겕諛뺤뒪 寃뚯씠??
     # 嫄고깘 媛먯? (LieScanner)
     lie_enabled: bool = True
     lie_alert: bool = False                     # 嫄고깘 ?뚮┝(?뚮━+?붾젅洹몃옩) ?듯빀 ?좉?
@@ -170,7 +160,7 @@ class BotRuntime:
     """
 
     def __init__(self, screen_capture, input_backend, config: RuntimeConfig,
-                 sidecar_channel: SidecarChannel | None = None,
+                 sidecar_channel=None,
                  hp_mp_reader=None):
         self._capture = screen_capture
         self._cfg = config
@@ -179,7 +169,6 @@ class BotRuntime:
         self._anti_mob_failed = False
         self._anti_mob_last = -1e9
         self._anti_mob_last_diag = -1e9
-        self._sidecar = sidecar_channel or InMemoryChannel()
         # HP/MP 鍮꾩쑉???쎌뼱 (hp, mp) 諛섑솚?섎뒗 肄쒕갚(run_integrated媛 Detector濡?二쇱엯).
         # ?듯빀 ?ы똿 ???ъ뀡 諛곗꽑??鍮좎졇 ?덉뿀??????由щ뜑 + check_potions濡?蹂듦뎄.
         self._hp_mp_reader = hp_mp_reader
@@ -301,7 +290,7 @@ class BotRuntime:
         self.hunt_director = HuntDirector(
             config.hunt_stay_threshold, config.hunt_leave_threshold,
             config.hunt_max_dwell_sec,
-            jitter_fn=down_5)
+            jitter_fn=randomize_hold)
         self._area_count = 0
         self._area_count_ts = -1e9
         self._movement_lock = threading.RLock()
@@ -481,16 +470,6 @@ class BotRuntime:
                 is_active=self._route_can_run,
             )
 
-        # 嫄고깘 怨꾩링 (寃⑸━) ???먯껜 ncnn ?붿쭊 (secure_loader/?쒕쾭 ?섏〈 ?놁쓬)
-        self.registry = SolverRegistry()
-        self.registry.register(SelfTransparentEngine(
-            models_dir=config.transparent_models_dir,
-            board_capture_fn=self._capture_board,
-            move_cursor_fn=self._move_cursor,
-            use_gpu=config.transparent_use_gpu,
-        ))
-
-        self._frame_id = 0
         self._reply_idx = 0
 
         # ?ㅻⅨ ?좎? 媛먯? ???먮룞?묐떟(梨꾪똿) + ?붾젅洹몃옩 ?뚮┝
@@ -772,6 +751,7 @@ class BotRuntime:
         if self._junk_selling:
             return
         self._check_potions(now)
+        self.pickup_tick(now)
         self.buffs.tick(now)
         if not self._ladder_motion_active:
             self.pet.tick(now)
@@ -1291,6 +1271,7 @@ class BotRuntime:
 
         # HP/MP 臾쇱빟 ??留??щ깷 ???뺤씤(?꾧퀎 誘몃쭔?대㈃ Combat?????낅젰). ?대뒓 遺꾧린??癒쇱? ?ㅽ뻾.
         self._check_potions(now)
+        self.pickup_tick(now)
 
         # 諛吏??먮떒 ??紐ъ뒪???쒗뵆由우씠 ?덉쓣 ?뚮쭔(image/route). ?щ깷?곸뿭 ?꾩껜 紐?媛쒖닔濡?
         # 硫덉떠?щ깷(dwelling)?붿씠??寃곗젙. ?ъ냼(?ㅼ씠?덉엫怨?硫???硫덉텛怨??대룞, 諛吏??μ쭊?낆엫怨??대㈃ 硫덉떠 泥섏튂.
@@ -1305,7 +1286,6 @@ class BotRuntime:
         if self.floor_hunt_runner is not None:
             self.buffs.tick(now)
             self.pet.tick(now)
-            self.pickup.tick(now)
             if getattr(self.floor_hunt_runner, "controls_attack", False):
                 return
             allowed = self._floor_runner_attack_allowed(density_on, dwelling)
@@ -1560,19 +1540,8 @@ class BotRuntime:
         return [(x + w // 2 - nx, y + h // 2 - ny) for (x, y, w, h) in boxes]
 
     def safety_tick(self, now: float | None = None) -> None:
-        """?덉쟾 紐⑤뱶 1?? (?먮룞???耳쒖죱???뚮쭔) 嫄고깘 ????쒕룄 ???깃났 ???щ깷 ?ш컻."""
-        if self.orchestrator.mode != "safety":
-            return
-        if not self._cfg.transparent_enabled:
-            return   # ?щ챸?꾪삎 ?먮룞???爰쇱쭚 ???쇱떆?뺤? ?좎?(?ъ슜???섎룞 泥섎━)
-        self._frame_id += 1
-        # SelfTransparentEngine.solve 媛 寃뚯엫?먯쓣 異붿쟻???꾪삎 ?щ씪吏덈븣源뚯? ?쇰떎(釉붾줈??
-        result = self.registry.solve(
-            self._cfg.minigame_type, screenshot=None,
-            ctx={"frame_id": self._frame_id},
-        )
-        if result is not None and result.success:
-            self._clear_lie_safety()
+        """거탐 안전 상태에서는 자동 풀이 없이 사용자 확인을 기다립니다."""
+        return
 
     def _clear_lie_safety(self) -> None:
         """거탐 안전 상태를 해제하고 수동 재개 상태도 초기화한다."""
@@ -1644,36 +1613,6 @@ class BotRuntime:
         _th.Thread(target=_beep, daemon=True).start()
         try:
             self.telegram.send("거탐 감지: 즉시 확인이 필요합니다.")
-        except Exception:
-            pass
-
-    def _capture_board(self):
-        """嫄고깘 寃뚯엫???곸뿭 罹≪쿂. board_region ?곗꽑, ?놁쑝硫?board_roi 鍮꾩쑉(A 怨좎젙媛?濡??섏궛, ?????놁쑝硫??꾩껜."""
-        region = self._cfg.board_region
-        if region is None and self._cfg.board_roi:
-            region = self._board_roi_to_region(self._cfg.board_roi)
-        return self._capture(region) if region else self._capture()
-
-    def _board_roi_to_region(self, roi: dict):
-        """A 怨좎젙 ?곷?醫뚰몴(x/y/w/h_ratio)瑜?二쇰え?덊꽣 湲곗? ?쎌? ?곸뿭?쇰줈 ?섏궛."""
-        try:
-            import mss as _mss
-            with _mss.mss() as sct:
-                mon = sct.monitors[1]
-            return {
-                "left": mon["left"] + int(roi["x_ratio"] * mon["width"]),
-                "top": mon["top"] + int(roi["y_ratio"] * mon["height"]),
-                "width": max(1, int(roi["w_ratio"] * mon["width"])),
-                "height": max(1, int(roi["h_ratio"] * mon["height"])),
-            }
-        except Exception:
-            return None
-
-    def _move_cursor(self, cx: int, cy: int) -> None:
-        """嫄고깘 ?꾪삎 異붿쟻??而ㅼ꽌 ?대룞. planet_live_solver? ?숈씪?섍쾶 SetCursorPos ?ъ슜."""
-        try:
-            import win32api
-            win32api.SetCursorPos((int(cx), int(cy)))
         except Exception:
             pass
 

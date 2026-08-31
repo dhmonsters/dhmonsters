@@ -4,48 +4,41 @@ from types import SimpleNamespace
 from core.navigation.ladder_controller import LadderController, LadderControllerConfig
 
 
-class FakeHumanizer:
+class FakeInput:
     def __init__(self):
         self.direction = None
         self.held = set()
         self.jumps = 0
 
-    def humanize(self, value):
-        return value
-
-    def held_dir(self):
-        return self.direction
-
-    def hold_dir(self, direction):
+    def hold_direction(self, direction):
         self.direction = direction
 
-    def release_dir(self):
+    def release_direction(self):
         self.direction = None
 
-    def hold(self, key):
+    def hold_action(self, key):
         self.held.add(key)
 
-    def release(self, key):
+    def release_action(self, key):
         self.held.discard(key)
 
-    def perform_ladder_jump(self, jump_key, jump_hold_sec, up_delay_sec, trace_fn=None):
-        import time
-        self.jumps += 1
-        started = time.monotonic()
-        self.release_dir()
-        self.hold("up")
-        return {
-            "jump_down_at": started,
-            "jump_up_at": started + jump_hold_sec,
-            "direction_up_at": started + jump_hold_sec,
-            "up_requested_at": started + up_delay_sec,
-            "up_down_at": started + up_delay_sec,
-            "jump_hold_sec": jump_hold_sec,
-        }
+    def key_down(self, key):
+        self.held.add(key)
+        if key == "alt":
+            self.jumps += 1
+
+    def key_up(self, key):
+        self.held.discard(key)
+
+    def begin_priority(self):
+        pass
+
+    def end_priority(self):
+        pass
 
 
 def test_jump_grab_uses_two_new_aligned_rising_samples():
-    humanizer = FakeHumanizer()
+    inputs = FakeInput()
     samples = iter([
         ((54, 69), 1.0),
         ((59, 66), 2.0),
@@ -62,7 +55,8 @@ def test_jump_grab_uses_two_new_aligned_rising_samples():
 
     finished = []
     controller = LadderController(
-        humanizer=humanizer,
+        input_backend=inputs,
+        direction_owner=inputs,
         position_sample_fn=sample,
         position_fn=lambda: latest[0][0],
         finish_climb_fn=lambda ladder_x, y_top, max_steps, direction: finished.append(direction) or True,
@@ -76,5 +70,5 @@ def test_jump_grab_uses_two_new_aligned_rising_samples():
     block = SimpleNamespace(ladder_x=60, y_top=46, y_bot=68)
 
     assert controller.run(block, max_steps=20) is True
-    assert humanizer.jumps == 1
+    assert inputs.jumps == 1
     assert finished == ["right"]

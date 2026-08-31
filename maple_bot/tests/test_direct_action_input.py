@@ -48,7 +48,9 @@ def test_pet_feeder_uses_backend_and_only_feature_gap():
     feeder.tick(1000.0)
 
     assert backend.presses == [("=", 0.05)] * 3
-    assert sleeps == [0.4, 0.4]
+    assert len(sleeps) == 2
+    assert all(0.38 <= value <= 0.42 for value in sleeps)
+    assert all(value == round(value, 4) for value in sleeps)
     assert not hasattr(feeder, "_h")
 
 

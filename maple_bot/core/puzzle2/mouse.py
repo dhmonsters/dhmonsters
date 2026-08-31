@@ -162,7 +162,7 @@ class InterceptionMouseController:
 
 
 def _load_interception_driver() -> Any:
-    from core.humanize.backend import select_backend
+    from core.input_backend import select_backend
 
     selected = select_backend()
     kernel = getattr(selected, "_ic", None)

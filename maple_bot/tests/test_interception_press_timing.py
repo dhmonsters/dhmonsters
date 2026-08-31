@@ -7,11 +7,11 @@ def test_press_randomizes_hold_once_without_twenty_ms_floor(monkeypatch):
     events = []
     randomized = []
 
-    def fake_down_5(value):
+    def fake_randomize_hold(value):
         randomized.append(value)
         return 0.0097
 
-    monkeypatch.setattr(interception_backend, "down_5", fake_down_5, raising=False)
+    monkeypatch.setattr(interception_backend, "randomize_hold", fake_randomize_hold, raising=False)
     monkeypatch.setattr(interception_backend.time, "sleep", sleeps.append)
     monkeypatch.setattr(
         interception_backend,

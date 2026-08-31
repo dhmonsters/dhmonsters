@@ -8,12 +8,12 @@ from core.navigation.world_map import (
 from core.navigation.world_runner import ActionExecutor, WorldRouteRunner
 
 
-class FakeHumanizer:
+class FakeInputBackend:
     def __init__(self):
-        self.intents = []
+        self.presses = []
 
-    def perform(self, intent):
-        self.intents.append(intent)
+    def press(self, key, hold_sec):
+        self.presses.append((key, hold_sec))
 
 
 class FakeBlockRunner:
@@ -33,14 +33,14 @@ class FakeActionExecutor:
         self.specs.append(spec)
 
 
-def test_action_executor_repeats_through_humanizer():
-    humanizer = FakeHumanizer()
+def test_action_executor_repeats_through_input_backend():
+    input_backend = FakeInputBackend()
     sleeps = []
-    executor = ActionExecutor(humanizer, sleep_fn=sleeps.append)
+    executor = ActionExecutor(input_backend, sleep_fn=sleeps.append)
 
     executor.execute(ActionSpec("up", 0.2, 2, 0.3, 1.0))
 
-    assert [intent.key for intent in humanizer.intents] == ["up", "up"]
+    assert input_backend.presses == [("up", 0.2), ("up", 0.2)]
     assert sleeps == [0.3, 1.0]
 
 

@@ -59,7 +59,7 @@ class AttackSequenceEditor(QFrame):
 
         guide = QLabel(
             "가로 키는 순서대로 실행되고, 아래 각 줄은 자기 반복 주기로 독립 실행됩니다. "
-            "모든 초 단위 입력은 실행 시 기준값에서 최대 5% 범위로 랜덤 보정됩니다."
+            "키 유지시간은 최대 -5%, 키 간격과 반복 주기는 ±5% 범위로 랜덤 보정됩니다."
         )
         guide.setObjectName("presetDescription")
         guide.setWordWrap(True)

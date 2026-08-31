@@ -6,7 +6,7 @@ import threading
 import logging
 from typing import Callable
 
-from core.humanize.timing import down_5
+from core.input_timing import randomize_hold
 from core.pattern import KeyPattern, KeyStep, ACTION_HOLD, ACTION_TAP, ACTION_COMBO
 from core.input_controller import InputController
 
@@ -96,7 +96,7 @@ class KeyHunter:
             self._status(f"누름 [{step.key}] {duration:.3f}초")
             # hold 구간에도 방향키 유지 (press_key 내부 sleep 대신 직접 제어)
             self._input.key_down(step.key)
-            self._sleep_with_move(down_5(duration))
+            self._sleep_with_move(randomize_hold(duration))
             self._input.key_up(step.key)
 
         elif step.action == ACTION_TAP:

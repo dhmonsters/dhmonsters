@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.input_timing import randomize_interval
+
 @dataclass
 class Buff:
     key: str = ""
@@ -33,7 +35,7 @@ class BuffManager:
             if now - last >= interval:
                 self._input.press(buff.key, buff.hold_sec)
                 self._last[index] = now
-                self._iv[index] = buff.interval
-                self._next_allowed = now + self._gap
+                self._iv[index] = randomize_interval(buff.interval)
+                self._next_allowed = now + randomize_interval(self._gap)
                 self._log(f"버프 [{buff.key}]")
                 return

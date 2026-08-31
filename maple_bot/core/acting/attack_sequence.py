@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from core.input_timing import randomize_interval
+
 @dataclass(frozen=True)
 class AttackSequence:
     name: str
@@ -78,4 +80,4 @@ class AttackSequenceRunner:
 
     @staticmethod
     def _jitter(value: float) -> float:
-        return max(0.0, float(value))
+        return randomize_interval(value)

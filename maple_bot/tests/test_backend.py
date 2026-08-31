@@ -1,6 +1,6 @@
 # InputBackend 인터페이스와 자동 선택 로직을 테스트 (실제 키 송출 없이 Fake로)
 import pytest
-from core.humanize.backend import InputBackend, select_backend
+from core.input_backend import InputBackend, select_backend
 
 
 class FakeBackend(InputBackend):

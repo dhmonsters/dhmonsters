@@ -9,8 +9,7 @@ from typing import Callable
 
 from core.navigation.block import Block
 from core.navigation.route_input_owner import RouteInputOwner
-from core.humanize.intent import Intent
-from core.humanize.priority_input_executor import PriorityInputExecutor
+from core.navigation.priority_input_executor import PriorityInputExecutor
 
 # C CoordScriptRunner/routine_runner 검증 상수
 TOLERANCE = 3           # 도착 판정 픽셀 (이 이내면 도달)
@@ -46,7 +45,7 @@ class BlockRunner:
     """Block 시퀀스를 순차 실행한다.
 
     pos_fn: callable() -> (x, y)  현재 캐릭터 위치(공유 위치상태, CharScanner가 갱신)
-    humanizer: Intent 를 받아 사람같은 입력으로 송출 (M1)
+    input_backend: 키 입력을 송출하는 백엔드
     stop_fn:  callable() -> bool  True면 무한왕복/등반 루프 중단(정지/안전)
     """
 

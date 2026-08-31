@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.input_timing import randomize_interval
+
 @dataclass
 class PotionRule:
     enabled: bool = False
@@ -48,7 +50,7 @@ class Combat:
             if now - self._atk_last < current_interval:
                 return
             self._atk_last = now
-            self._cur_interval = interval
+            self._cur_interval = randomize_interval(interval)
         count = int(value) if mode == "count" else 1
         for _ in range(max(0, count)):
             self._input.press(skill_key, hold)

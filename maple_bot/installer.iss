@@ -2,14 +2,14 @@
 ; Build with ISCC.exe installer.iss
 
 #define AppName    "Claude"
-#define AppVersion "2.4.7"
+#define AppVersion "2.4.8"
 #define AppExe     "Claude.exe"
 #define AppPublisher "Claude"
 #define SourceDir  "dist\Claude_" + AppVersion
-#define PreviousVersion "2.4.6"
-#define PreviousSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.6/Claude_v2.4.6_Setup.exe"
-#define PreviousSetupSha "7a7e066479b273fb22fa74ef42cfe5c959925b34b38c02cb9c68baf18fa63b8a"
-#define CurrentSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.7/Claude_v2.4.7_Setup.exe"
+#define PreviousVersion "2.4.7"
+#define PreviousSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.7/Claude_v2.4.7_Setup.exe"
+#define PreviousSetupSha "2e0ec42a25cc088f18ce29963938fee2fabab8da5997b94e15494c4d7ad83a70"
+#define CurrentSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.8/Claude_v2.4.8_Setup.exe"
 
 [Setup]
 AppId={{7C8A5E21-4B6D-49F3-A2C1-9E7D5B4A603F}

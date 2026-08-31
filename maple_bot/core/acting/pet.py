@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import time
 
+from core.input_timing import randomize_interval
+
 class PetFeeder:
     def __init__(self, input_backend, key: str = "", interval: float = 600.0,
                  log_fn=None, label: str = "펫먹이", count: int = 1, gap: float = 0.4,
@@ -28,8 +30,8 @@ class PetFeeder:
         for index in range(self._count):
             self._input.press(self._key, 0.05)
             if index < self._count - 1:
-                self._sleep(self._gap)
+                self._sleep(randomize_interval(self._gap))
         self._last = now
-        self._iv = self._interval
+        self._iv = randomize_interval(self._interval)
         suffix = f" {self._count}회" if self._count > 1 else ""
         self._log(f"{self._label}{suffix} [{self._key}]")

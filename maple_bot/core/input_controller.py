@@ -5,7 +5,7 @@ import ctypes
 import time
 
 from core import interception_backend as _ic
-from core.humanize.timing import down_5
+from core.input_timing import randomize_hold
 
 
 # ── Win32 SendInput 상수 ────────────────────────────────────────────────
@@ -175,7 +175,7 @@ class InputController:
         if not vk:
             return
         _send_key(vk)
-        time.sleep(down_5(hold_sec))
+        time.sleep(randomize_hold(hold_sec))
         _send_key(vk, KEYEVENTF_KEYUP)
 
     def key_down(self, key: str) -> None:

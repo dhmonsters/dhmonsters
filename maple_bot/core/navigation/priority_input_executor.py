@@ -1,9 +1,9 @@
-# 사다리 점프 입력을 별도 큐 없이 즉시 순서대로 전송한다.
+# 사다리 점프 입력을 별도 큐 없이 즉시 순서대로 전송합니다.
 from __future__ import annotations
 
 import time
 
-from core.humanize.timing import down_5
+from core.input_timing import randomize_hold
 
 
 class PriorityInputExecutor:
@@ -25,7 +25,7 @@ class PriorityInputExecutor:
         trace_fn=None,
     ) -> dict[str, float]:
         self._ladder_critical = True
-        jump_hold = down_5(jump_hold_sec)
+        jump_hold = randomize_hold(jump_hold_sec)
         up_delay = max(0.0, float(up_delay_sec))
         started_at = time.monotonic()
         try:
