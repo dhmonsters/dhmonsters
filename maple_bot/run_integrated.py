@@ -10,13 +10,33 @@ import time
 import traceback
 from pathlib import Path
 
-from core import recovery_protocol
+
+def _runtime_import_paths(
+    root: Path,
+    *,
+    frozen: bool,
+    bundle_root: Path | None = None,
+) -> tuple[Path, ...]:
+    """배포본은 내장 모듈만, 소스 실행은 프로젝트 경로만 사용한다."""
+    if frozen:
+        return (Path(bundle_root) if bundle_root is not None else root,)
+    return (root, root.parent)
+
 
 ROOT = Path(__file__).resolve().parent
-for _extra_path in (ROOT, ROOT / "_internal", ROOT.parent):
+_FROZEN = bool(getattr(sys, "frozen", False))
+_BUNDLE_ROOT = Path(getattr(sys, "_MEIPASS", ROOT))
+for _extra_path in reversed(
+    _runtime_import_paths(ROOT, frozen=_FROZEN, bundle_root=_BUNDLE_ROOT)
+):
     _path_text = str(_extra_path)
-    if _extra_path.exists() and _path_text not in sys.path:
+    while _path_text in sys.path:
+        sys.path.remove(_path_text)
+    if _extra_path.exists():
         sys.path.insert(0, _path_text)
+
+from core import recovery_protocol
+
 _CRASH_LOG_HANDLE = None
 
 

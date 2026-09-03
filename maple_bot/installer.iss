@@ -48,6 +48,7 @@ Name: "interceptiondriver"; Description: "Install Interception driver (optional;
 Type: filesandordirs; Name: "{app}\core"
 Type: filesandordirs; Name: "{app}\core_ui"
 Type: filesandordirs; Name: "{app}\ui"
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
