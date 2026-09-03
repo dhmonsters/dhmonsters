@@ -2,14 +2,14 @@
 ; Build with ISCC.exe installer.iss
 
 #define AppName    "Claude"
-#define AppVersion "2.4.8"
+#define AppVersion "2.4.9"
 #define AppExe     "Claude.exe"
 #define AppPublisher "Claude"
 #define SourceDir  "dist\Claude_" + AppVersion
 #define PreviousVersion "2.4.7"
 #define PreviousSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.7/Claude_v2.4.7_Setup.exe"
 #define PreviousSetupSha "2e0ec42a25cc088f18ce29963938fee2fabab8da5997b94e15494c4d7ad83a70"
-#define CurrentSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.8/Claude_v2.4.8_Setup.exe"
+#define CurrentSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.9/Claude_v2.4.9_Setup.exe"
 
 [Setup]
 AppId={{7C8A5E21-4B6D-49F3-A2C1-9E7D5B4A603F}
@@ -87,16 +87,18 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   RecoveryDirectory: String;
+  InstalledVersion: String;
   DownloadedSetup: String;
   NewSetup: String;
   NewMetadata: String;
 begin
   Result := '';
-  if CompareText(ReadInstalledVersion(), '{#PreviousVersion}') <> 0 then
-    Exit;
-
   RecoveryDirectory := ExpandConstant('{commonappdata}\Claude\Recovery');
-  if RecoveryCacheMatches(RecoveryDirectory, '{#PreviousSetupSha}') then
+  InstalledVersion := ReadInstalledVersion();
+  if not ShouldPrepareStableRecovery(
+    InstalledVersion,
+    RecoveryCacheMatches(RecoveryDirectory, '{#PreviousSetupSha}')
+  ) then
     Exit;
 
   try
@@ -136,7 +138,7 @@ begin
     if not RenameFile(NewMetadata, AddBackslash(RecoveryDirectory) + 'recovery.json') then
       RaiseException('복구 메타데이터를 확정하지 못했습니다.');
   except
-    Result := '2.4.6 복구본을 안전하게 보관하지 못해 업데이트를 중단했습니다.' + #13#10 +
+    Result := '{#PreviousVersion} 복구본을 안전하게 보관하지 못해 업데이트를 중단했습니다.' + #13#10 +
       GetExceptionMessage;
   end;
 end;

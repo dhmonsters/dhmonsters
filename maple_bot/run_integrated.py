@@ -47,6 +47,27 @@ def _finalize_event_loop(exit_code: int) -> int:
     return code
 
 
+def _run_release_startup_check() -> int:
+    """게임 실행 없이 배포본의 필수 모듈과 실제 Qt 셸 생성을 확인한다."""
+    from PyQt6.QtWidgets import QApplication
+    from core import update_recovery, updater
+    from core.config_manager import ConfigManager
+    from core_ui.shell import MainShell
+    from core_ui.theme import apply_font
+    from ui.dialog_update import UpdateDialog
+
+    _ = (update_recovery, updater, UpdateDialog)
+    app = QApplication.instance() or QApplication([])
+    apply_font(app)
+    shell = MainShell(config=ConfigManager())
+    shell.show()
+    app.processEvents()
+    recovery_protocol.write_ready()
+    shell.close()
+    app.processEvents()
+    return 0
+
+
 def _load_core_runtime_attr(name: str):
     try:
         import core.runtime as runtime_module
@@ -493,6 +514,8 @@ def _start_with_fresh_config(controller, runtime, config_manager, shell) -> None
 
 
 def main():
+    if "--release-startup-check" in sys.argv:
+        sys.exit(_run_release_startup_check())
     _install_runtime_logging()
     _write_runtime_log("BOOT", "main: before ensure_admin")
     _ensure_admin_if_unmanaged()

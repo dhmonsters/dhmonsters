@@ -138,3 +138,14 @@ def test_nonzero_event_loop_exit_does_not_write_normal_marker(
     assert run_integrated._finalize_event_loop(5) == 5
 
     assert not target.exists()
+
+
+def test_release_startup_check_builds_real_qt_shell_and_writes_ready(
+    tmp_path: Path, monkeypatch
+) -> None:
+    ready = tmp_path / "ready.json"
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    monkeypatch.setenv("CLAUDE_RECOVERY_READY_FILE", str(ready))
+
+    assert run_integrated._run_release_startup_check() == 0
+    assert ready.is_file()

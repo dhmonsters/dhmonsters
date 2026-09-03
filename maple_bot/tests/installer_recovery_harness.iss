@@ -20,9 +20,22 @@ Compression=zip
 [Code]
 #include "..\installer_recovery.iss"
 
+procedure VerifyStableRecoveryPolicy();
+begin
+  if not ShouldPrepareStableRecovery('2.4.6', False) then
+    RaiseException('skipped version must prepare stable recovery');
+  if not ShouldPrepareStableRecovery('2.4.8', False) then
+    RaiseException('current broken version must prepare stable recovery');
+  if ShouldPrepareStableRecovery('', False) then
+    RaiseException('fresh install must not create previous-version recovery');
+  if ShouldPrepareStableRecovery('2.4.8', True) then
+    RaiseException('valid stable recovery must not be downloaded again');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+    VerifyStableRecoveryPolicy();
     WriteReleaseMetadata(
       ExpandConstant('{srcexe}'),
       ExpandConstant('{app}'),

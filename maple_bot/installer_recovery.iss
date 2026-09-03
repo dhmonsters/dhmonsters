@@ -28,6 +28,13 @@ begin
   end;
 end;
 
+function ShouldPrepareStableRecovery(
+  const InstalledVersion: String;
+  const StableCacheMatches: Boolean): Boolean;
+begin
+  Result := (Trim(InstalledVersion) <> '') and not StableCacheMatches;
+end;
+
 procedure WriteReleaseMetadata(
   const SourceSetup, AppDirectory, Version, DownloadUrl: String);
 var
