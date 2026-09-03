@@ -5,6 +5,9 @@
 #ifndef TestPayloadSha
   #error TestPayloadSha is required
 #endif
+#ifndef TestPayload
+  #error TestPayload is required
+#endif
 
 [Setup]
 AppId={{A09348D8-C878-4F57-A98C-92EB564C96E1}
@@ -20,50 +23,56 @@ Compression=zip
 [Code]
 #include "..\installer_recovery.iss"
 
-procedure VerifyStableRecoveryPolicy();
+procedure VerifyCurrentVersionRecoveryPolicy();
 begin
-  if not ShouldPrepareStableRecovery('2.4.6', False) then
-    RaiseException('skipped version must prepare stable recovery');
-  if not ShouldPrepareStableRecovery('2.4.8', False) then
-    RaiseException('current broken version must prepare stable recovery');
-  if ShouldPrepareStableRecovery('', False) then
+  if not ShouldPrepareCurrentVersionRecovery('2.4.1', '2.4.9') then
+    RaiseException('2.4.1 must be preserved before update');
+  if not ShouldPrepareCurrentVersionRecovery('2.4.5', '2.4.9') then
+    RaiseException('2.4.5 must be preserved before update');
+  if not ShouldPrepareCurrentVersionRecovery('2.4.8', '2.4.9') then
+    RaiseException('2.4.8 must be preserved before update');
+  if ShouldPrepareCurrentVersionRecovery('', '2.4.9') then
     RaiseException('fresh install must not create previous-version recovery');
-  if ShouldPrepareStableRecovery('2.4.8', True) then
-    RaiseException('valid stable recovery must not be downloaded again');
+  if ShouldPrepareCurrentVersionRecovery('2.4.9', '2.4.9') then
+    RaiseException('same-version reinstall must not replace recovery');
+
+  if CompareText(
+    BuildReleaseSetupFileName('2.4.1'),
+    'Claude_v2.4.1_Setup.exe'
+  ) <> 0 then
+    RaiseException('2.4.1 recovery file name is wrong');
+  if CompareText(
+    BuildReleaseSetupUrl('2.4.5'),
+    'https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.5/Claude_v2.4.5_Setup.exe'
+  ) <> 0 then
+    RaiseException('2.4.5 recovery URL is wrong');
+  if CompareText(
+    BuildReleaseSetupUrl('2.4.8'),
+    'https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.8/Claude_v2.4.8_Setup.exe'
+  ) <> 0 then
+    RaiseException('2.4.8 recovery URL is wrong');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  RecoveryDirectory: String;
 begin
   if CurStep = ssPostInstall then
-    VerifyStableRecoveryPolicy();
+  begin
+    VerifyCurrentVersionRecoveryPolicy();
     WriteReleaseMetadata(
       ExpandConstant('{srcexe}'),
       ExpandConstant('{app}'),
       '9.9.9',
       'https://github.com/dhmonsters/dhmonsters/releases/download/v9.9.9/Claude_v9.9.9_Setup.exe'
     );
-    WriteRecoveryMetadata(
-      AddBackslash(ExpandConstant('{app}')) + 'Recovery',
-      '9.9.8',
-      '9.9.9',
-      ExpandConstant('{app}'),
-      'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+    RecoveryDirectory := AddBackslash(ExpandConstant('{app}')) + 'Recovery';
+    StoreRecoverySetup(
+      '{#TestPayload}',
+      RecoveryDirectory,
+      '2.4.5',
+      '2.4.9',
+      ExpandConstant('{app}')
     );
-    ForceDirectories(AddBackslash(ExpandConstant('{app}')) + 'Recovery');
-    if not SaveStringToFile(
-      AddBackslash(ExpandConstant('{app}')) + 'Recovery\previous_setup.exe',
-      'payload',
-      False
-    ) then
-      RaiseException('recovery cache fixture creation failed');
-    if not RecoveryCacheMatches(
-      AddBackslash(ExpandConstant('{app}')) + 'Recovery',
-      '{#TestPayloadSha}'
-    ) then
-      RaiseException('valid recovery cache was rejected');
-    if RecoveryCacheMatches(
-      AddBackslash(ExpandConstant('{app}')) + 'Recovery',
-      '0000000000000000000000000000000000000000000000000000000000000000'
-    ) then
-      RaiseException('invalid recovery cache was accepted');
+  end;
 end;

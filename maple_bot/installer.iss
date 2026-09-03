@@ -6,9 +6,6 @@
 #define AppExe     "Claude.exe"
 #define AppPublisher "Claude"
 #define SourceDir  "dist\Claude_" + AppVersion
-#define PreviousVersion "2.4.7"
-#define PreviousSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.7/Claude_v2.4.7_Setup.exe"
-#define PreviousSetupSha "2e0ec42a25cc088f18ce29963938fee2fabab8da5997b94e15494c4d7ad83a70"
 #define CurrentSetupUrl "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.9/Claude_v2.4.9_Setup.exe"
 
 [Setup]
@@ -88,57 +85,39 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   RecoveryDirectory: String;
   InstalledVersion: String;
+  RecoveryFileName: String;
+  RecoveryUrl: String;
   DownloadedSetup: String;
-  NewSetup: String;
-  NewMetadata: String;
 begin
   Result := '';
   RecoveryDirectory := ExpandConstant('{commonappdata}\Claude\Recovery');
   InstalledVersion := ReadInstalledVersion();
-  if not ShouldPrepareStableRecovery(
+  if not ShouldPrepareCurrentVersionRecovery(
     InstalledVersion,
-    RecoveryCacheMatches(RecoveryDirectory, '{#PreviousSetupSha}')
+    '{#AppVersion}'
   ) then
     Exit;
 
   try
+    RecoveryFileName := BuildReleaseSetupFileName(InstalledVersion);
+    RecoveryUrl := BuildReleaseSetupUrl(InstalledVersion);
     DownloadTemporaryFile(
-      '{#PreviousSetupUrl}',
-      'Claude_v{#PreviousVersion}_Setup.exe',
-      '{#PreviousSetupSha}',
+      RecoveryUrl,
+      RecoveryFileName,
+      '',
       @OnDownloadProgress
     );
     DownloadedSetup := AddBackslash(ExpandConstant('{tmp}')) +
-      'Claude_v{#PreviousVersion}_Setup.exe';
-    if CompareText(GetSHA256OfFile(DownloadedSetup), '{#PreviousSetupSha}') <> 0 then
-      RaiseException('이전 버전 설치 파일의 무결성 검증에 실패했습니다.');
-    if not ForceDirectories(RecoveryDirectory) then
-      RaiseException('복구 폴더를 만들지 못했습니다: ' + RecoveryDirectory);
-
-    NewSetup := AddBackslash(RecoveryDirectory) + 'previous_setup.new';
-    NewMetadata := AddBackslash(RecoveryDirectory) + 'recovery.json.new';
-    DeleteFile(NewSetup);
-    DeleteFile(NewMetadata);
-    if not FileCopy(DownloadedSetup, NewSetup, False) then
-      RaiseException('이전 버전 설치 파일을 복구 폴더에 복사하지 못했습니다.');
-    if CompareText(GetSHA256OfFile(NewSetup), '{#PreviousSetupSha}') <> 0 then
-      RaiseException('복구 폴더에 복사한 설치 파일의 무결성 검증에 실패했습니다.');
-    WriteRecoveryMetadataFile(
-      NewMetadata,
-      '{#PreviousVersion}',
+      RecoveryFileName;
+    StoreRecoverySetup(
+      DownloadedSetup,
+      RecoveryDirectory,
+      InstalledVersion,
       '{#AppVersion}',
-      ExpandConstant('{app}'),
-      '{#PreviousSetupSha}'
+      ExpandConstant('{app}')
     );
-
-    DeleteFile(AddBackslash(RecoveryDirectory) + 'previous_setup.exe');
-    if not RenameFile(NewSetup, AddBackslash(RecoveryDirectory) + 'previous_setup.exe') then
-      RaiseException('복구 설치 파일을 확정하지 못했습니다.');
-    DeleteFile(AddBackslash(RecoveryDirectory) + 'recovery.json');
-    if not RenameFile(NewMetadata, AddBackslash(RecoveryDirectory) + 'recovery.json') then
-      RaiseException('복구 메타데이터를 확정하지 못했습니다.');
   except
-    Result := '{#PreviousVersion} 복구본을 안전하게 보관하지 못해 업데이트를 중단했습니다.' + #13#10 +
+    Result := InstalledVersion + ' 복구본을 안전하게 보관하지 못해 업데이트를 중단했습니다.' + #13#10 +
       GetExceptionMessage;
   end;
 end;
@@ -158,17 +137,6 @@ begin
       '{#AppVersion}',
       '{#CurrentSetupUrl}'
     );
-    if RecoveryCacheMatches(
-      ExpandConstant('{commonappdata}\Claude\Recovery'),
-      '{#PreviousSetupSha}'
-    ) then
-      WriteRecoveryMetadata(
-        ExpandConstant('{commonappdata}\Claude\Recovery'),
-        '{#PreviousVersion}',
-        '{#AppVersion}',
-        ExpandConstant('{app}'),
-        '{#PreviousSetupSha}'
-      );
   end;
   if (CurStep = ssPostInstall) and WizardIsTaskSelected('interceptiondriver') then
     MsgBox(

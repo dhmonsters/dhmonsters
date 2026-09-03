@@ -67,8 +67,9 @@ def test_installer_writes_self_hash_release_metadata(tmp_path: Path) -> None:
     recovery = json.loads(
         (install / "Recovery" / "recovery.json").read_text(encoding="utf-8-sig")
     )
-    assert recovery["previous_version"] == "9.9.8"
-    assert recovery["current_version"] == "9.9.9"
+    assert recovery["previous_version"] == "2.4.5"
+    assert recovery["current_version"] == "2.4.9"
     assert recovery["installation_path"] == str(install)
-    assert recovery["previous_sha256"] == "c" * 64
+    assert recovery["previous_sha256"] == hashlib.sha256(payload.read_bytes()).hexdigest()
     assert "T" in recovery["created_at"]
+    assert (install / "Recovery" / "previous_setup.exe").read_bytes() == payload.read_bytes()
