@@ -1,6 +1,6 @@
 {
-  "version": "2.4.9",
-  "notes": "2.4.8 시작 모듈 누락 오류를 수정하고, 실제 UI 준비 신호로 배포본을 검증합니다. 건너뛴 업데이트에서도 안정된 2.4.7 복구 설치본을 로컬에 보관합니다.",
-  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.9/Claude_v2.4.9_Setup.exe",
-  "sha256": "4a8bca3098633610b485e690e9a1a6c2be96dfb567ee7eed014d440c7da3c1f2"
+  "version": "2.4.10",
+  "notes": "업데이트 직전 PC에 설치되어 있던 버전의 설치파일을 그대로 복구본으로 보관합니다. 특정 버전으로 강제 변경하지 않으며 복구 파일은 SHA-256 검증 후 저장합니다.",
+  "download_url": "https://github.com/dhmonsters/dhmonsters/releases/download/v2.4.10/Claude_v2.4.10_Setup.exe",
+  "sha256": "f0d7af0a76a83ef7c42cee754ee5cf9b62cf31aa6bf55adcfbb67930ba7cd42a"
 }
