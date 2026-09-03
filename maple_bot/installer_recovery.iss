@@ -92,7 +92,7 @@ begin
   NewMetadata := AddBackslash(RecoveryDirectory) + 'recovery.json.new';
   DeleteFile(NewSetup);
   DeleteFile(NewMetadata);
-  if not FileCopy(SourceSetup, NewSetup, False) then
+  if not CopyFile(SourceSetup, NewSetup, False) then
     RaiseException('현재 버전 설치 파일을 복구 폴더에 복사하지 못했습니다.');
   if CompareText(GetSHA256OfFile(NewSetup), RecoverySha) <> 0 then
     RaiseException('복구 폴더에 복사한 설치 파일의 무결성 검증에 실패했습니다.');
