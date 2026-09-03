@@ -44,6 +44,11 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional tasks"
 Name: "interceptiondriver"; Description: "Install Interception driver (optional; restart required)"; GroupDescription: "Optional components"; Flags: unchecked
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\core"
+Type: filesandordirs; Name: "{app}\core_ui"
+Type: filesandordirs; Name: "{app}\ui"
+
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "third_party\Interception-v1.0.1\Interception\command line installer\install-interception.exe"; DestDir: "{app}\drivers\Interception"; Flags: ignoreversion

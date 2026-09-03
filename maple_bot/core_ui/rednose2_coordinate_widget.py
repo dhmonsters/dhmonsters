@@ -234,6 +234,9 @@ class Rednose2CoordinateWidget(QFrame):
 
         versioned = saved.get("timing_version") == REDNOSE2_TIMING_VERSION
         for key, default in REDNOSE2_TIMING_DEFAULTS.items():
+            spin = self.timing_inputs.get(key)
+            if spin is None:
+                continue
             value = saved.get(key, default) if versioned else default
             valid = (
                 isinstance(value, (int, float))
@@ -241,7 +244,7 @@ class Rednose2CoordinateWidget(QFrame):
                 and math.isfinite(float(value))
                 and 0.0 <= float(value) <= 10.0
             )
-            self.timing_inputs[key].setValue(float(value) if valid else default)
+            spin.setValue(float(value) if valid else default)
 
     def restore_defaults(self) -> None:
         for key, value in REDNOSE2_X_DEFAULTS.items():
@@ -252,7 +255,9 @@ class Rednose2CoordinateWidget(QFrame):
 
     def restore_timing_defaults(self) -> None:
         for key, value in REDNOSE2_TIMING_DEFAULTS.items():
-            self.timing_inputs[key].setValue(value)
+            spin = self.timing_inputs.get(key)
+            if spin is not None:
+                spin.setValue(value)
         self.timing_status.setText("공격 기본값을 불러왔습니다. 저장을 눌러야 반영됩니다.")
 
     def save_values(self) -> None:

@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication
 
-from core.config_adapter import REDNOSE2_X_DEFAULTS
+from core.config_adapter import REDNOSE2_TIMING_DEFAULTS, REDNOSE2_X_DEFAULTS
 from core_ui.rednose2_coordinate_widget import Rednose2CoordinateWidget
 
 
@@ -58,6 +58,15 @@ def test_loads_defaults_for_bool_and_out_of_range_saved_values(app):
 
     for key in ("floor2_left_x", "floor2_right_x", "stair7_x", "platform24_x"):
         assert widget.inputs[key].value() == REDNOSE2_X_DEFAULTS[key]
+
+
+def test_future_timing_default_without_ui_field_does_not_crash(app, monkeypatch):
+    monkeypatch.setitem(REDNOSE2_TIMING_DEFAULTS, "future_timing_key", 0.42)
+
+    widget = Rednose2CoordinateWidget(FakeConfig({"timing_version": 2}))
+    widget.restore_timing_defaults()
+
+    assert "future_timing_key" not in widget.timing_inputs
 
 
 def test_restore_defaults_changes_fields_without_saving(app):
